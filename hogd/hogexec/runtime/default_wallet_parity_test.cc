@@ -238,6 +238,20 @@ protected:
     EXPECT_EQ(native, wasm);
   }
 
+  // expect_parity, plus an absolute success check on the native record so a
+  // shared-failure regression cannot pass vacuously (both backends faulting
+  // identically would otherwise still satisfy EXPECT_EQ).
+  void expect_parity_success(wallet_calls_t const &calls)
+  {
+    auto native =
+        run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
+    auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
+    EXPECT_EQ(native, wasm);
+    ASSERT_GE(native.size(), 2U);
+    EXPECT_EQ(native[0], 1);
+    EXPECT_EQ(native[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+  }
+
   // Builds a native "driver" contract whose method 0 invokes `target`'s
   // `execute` entrypoint with `calls`, then records (tag, frame_status,
   // literal return bytes) into `result_key`. Adapted from erc20_parity_test.cc.
@@ -473,7 +487,7 @@ TEST_F(DefaultWalletParityTest, MaxCallsSucceeds)
     // item_len = 1 + 11 = 12; 16 calls: 1 + 16*12 = 193 bytes < kMaxReturnDataBytes
     calls.push_back(echo_call(10));
   }
-  expect_parity(calls);
+  expect_parity_success(calls);
 }
 
 TEST_F(DefaultWalletParityTest, MultiCallHappyPathReturnsEchoedBytes)
@@ -490,10 +504,8 @@ TEST_F(DefaultWalletParityTest, MultiCallHappyPathReturnsEchoedBytes)
   auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
   EXPECT_EQ(native, wasm);
 
-  // Absolute check against the reference encoding: success (root_success=1,
-  // commit=ExecResultOK) and the returned buffer decodes as the CXS encoding
-  // of Vec<WalletBytes> where item i is the callee's literal return bytes
-  // (echo's own CXS-encoded Vec<u8>: prefix || payload).
+  // Absolute check: byte parity + root success (root_success=1,
+  // commit=ExecResultOK).
   ASSERT_GE(native.size(), 2U);
   EXPECT_EQ(native[0], 1);
   EXPECT_EQ(native[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
@@ -535,7 +547,7 @@ TEST_F(DefaultWalletParityTest, ReturnDataExactFitSucceeds)
   make_ctx();
   wallet_calls_t calls;
   calls.push_back(echo_call(1017)); // total = exactly 1024
-  expect_parity(calls);
+  expect_parity_success(calls);
 }
 
 TEST_F(DefaultWalletParityTest, ReturnDataOneOverFails)
@@ -544,7 +556,15 @@ TEST_F(DefaultWalletParityTest, ReturnDataOneOverFails)
   make_ctx();
   wallet_calls_t calls;
   calls.push_back(echo_call(1018)); // total = 1025 -> ReturnDataTooLarge
-  expect_parity(calls);
+  auto native = run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
+  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
+  EXPECT_EQ(native, wasm);
+  // root_success=1 for Abort (only Fault yields 0); the revert is signalled
+  // by the commit result: ExecResultTxRootFrameReverted confirms the wallet
+  // aborted and no state was committed.
+  ASSERT_GE(native.size(), 2U);
+  EXPECT_EQ(native[1],
+            static_cast<uint8_t>(ExecResult::ExecResultTxRootFrameReverted));
 }
 
 TEST_F(DefaultWalletParityTest, ReturnDataMaxSingleCalleeReturnFails)

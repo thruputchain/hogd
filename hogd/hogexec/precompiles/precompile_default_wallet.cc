@@ -233,6 +233,11 @@ make_native_default_wallet_contract()
             return NativeContractBuilder::host_fn_error_conversion(
                 get.error());
           }
+          // Unreachable with a correct host: after frame_status == Return a
+          // return buffer exists and the syscall succeeds (the out-params are
+          // trusted the same way). The wasm sdk would map a failure here to
+          // CallFaulted; this path is a host-contract violation, so fault the
+          // frame instead.
           if (*get != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
