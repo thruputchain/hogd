@@ -21,17 +21,20 @@ trade-off: it is a *system* with a weak classifier, where ramdb is a correct
 | Classifier | `uint16_t count` in `struct item`, bumped under the bucket lock on GET | `HeatSketch`, off-header, fed above the block lock cache |
 | Threshold | adaptive: 100 bucket samples/ms, 80th percentile, EWMA α=0.01 | adaptive: exact percentile of the sketch's own histogram (was a fixed `--hot-hits`; see P1.2) |
 | Victim selection | `\|1 − 2·hot_ratio\|`, min-rank, gated `< 0.6`, **one segment per pass** | `min(hot_frac, 1−hot_frac)`, **every** loglet over threshold, batch |
-| Relocator | `ialloc_alloc(…, cold)` → per-worker `cold`/`cur` segments | `compact_one(src, &is_hot)` → `thread_local CompactDests` |
-| Policy manager | maintenance thread, 1 ms, incremental cleanup queue | **none** — called by hand from a bench |
+| Relocator | `ialloc_alloc(…, cold)` → per-worker `cold`/`cur` segments | `compact_one(src, &is_hot, dests)` → allocator-owned `CompactDests` |
+| Policy manager | maintenance thread, 1 ms, incremental cleanup queue | `consolidate_incremental()` at a quiescent point, bounded (see P2.1); production call site still open |
+| Aging | counts reset on relocation and on update only — non-uniform, and a bug | `halve()` on a caller-chosen epoch; required, see P1.1 |
 | Tier-aware alloc | none; external placement (`numactl -m1`/`-m2`) | none (C1) |
 | Metric | throughput + p50…p99.99, plus 2 MB-page hit rate from an access trace | fast-tier hit rate from allocator introspection, modelled AMAT |
 
 **What flexkvs has that this plan wants.** Three of the items below stopped
 being speculative because there is a working reference for each: an adaptive
-percentile threshold (1.2, now done here), a trigger with incremental bounded
-relocation (2.1/2.3 — the bounding is done, the trigger is not), and a moving hot
-set (`workload_init_dyn`, `BENCHMARK_DYN_HOTSET`) for 1.1. It also runs on real
-tiered hardware, which is Phase 3.
+percentile threshold (1.2), a trigger with incremental bounded relocation
+(2.1/2.3), and a moving hot set (`workload_init_dyn`, `BENCHMARK_DYN_HOTSET`) for
+1.1. All three are now done here, and each one turned up something the reference
+does not show: the threshold optimizes at the fast tier's own size, the trigger
+converges and then terminates, and un-aged tracking fails *silently* rather than
+gradually. What remains from that list is real tiered hardware, which is Phase 3.
 
 **What ramdb has that flexkvs does not, and should keep.**
 
@@ -108,7 +111,16 @@ untested in the only regime where aging exists.
 - **Done when:** there is a curve showing un-aged tracking degrading as the hot set
   moves, and an epoch that recovers it. If aging turns out not to matter even
   under a moving hot set, delete `halve()` rather than ship dead code.
-- **Effort:** small. The permutation and the sketch both exist.
+- **Status: done, see P1.1 in `TODO.md`.** `halve()` stays. Un-aged tracking does
+  not degrade gracefully -- four blocks after the hot set moves the trigger
+  selects nothing and the layout freezes at a hit rate within half a point of the
+  scattered baseline, reporting no work to do. Halving every 2 blocks recovers the
+  full 0.9045 in ~11 blocks. `hogdb_bench -E K` moves the hot set, `-G K` ages.
+- **Now the open question is the epoch, not whether to age.** A fixed period makes
+  the trigger relocate on every block forever, even while it is only holding a
+  layout it already reached. The epoch wants to be driven by detected drift so a
+  static hot set costs nothing; that is unimplemented and is the natural successor
+  to this item.
 
 ### 1.2 Threshold — the oracle was never the ceiling
 

@@ -42,6 +42,8 @@ and cold objects primarily under a single index").
 | P2.0 | Quiescence budget: cost per loglet vs. the available window | **done** |
 | P2.1 | Trigger policy — bounded pass at every block boundary | **done** (ramdb + bench; production call site open) |
 | P2.2 | Steady state — does the layout converge? | **done — converges in 13 closes, then stops** |
+| P1.1 | Aging under a moving hot set | **done — un-aged tracking fails silently; halve() stays** |
+| BUG-4 | Trigger default overridden by a DAO wrapper's own default | **fixed** |
 
 ### What landed
 
@@ -671,6 +673,30 @@ that a threshold which is merely a cost/benefit knob for a single pass becomes
 the termination condition for a repeating one** — the same parameter changes role
 entirely once the mechanism runs more than once.
 
+#### BUG-4 — the shipped default did not deliver the measured result
+
+The convergence above was measured with `-m 0.10` passed explicitly. When 0.1 was
+then made the policy *default*, `Database::enable_auto_consolidation` got the new
+default but the `RAMDB` wrapper in `hogdb_dao.h` kept its own `= 0.0F` — and a
+wrapper's default wins, because it forwards an explicit argument. So every caller
+using the default silently got the broken configuration, and the trigger stopped
+converging: 0.7557 at block 15 instead of 0.9045.
+
+Found only because the aging experiment's control run disagreed with a result
+measured an hour earlier. Nothing failed; the number was just quietly worse.
+
+**This is BUG-2 again** — that bug was `reserved_count_` and `estimate_heap_size`
+drifting apart, fixed by naming one constant both used. The same fix applies:
+`kAutoConsolidateMinMixedness` now lives in `constants.h` and both the Database
+method and the DAO wrapper default to it. A defaulted argument duplicated across
+a forwarding layer is the same hazard as a duplicated constant, and it is less
+visible.
+
+**Process note:** re-run the control after changing a default, not just the
+tests. The tests passed throughout — `ConsolidateIncremental` passes
+`min_mixedness` explicitly, precisely so it can check the budget, so it could
+never have caught this.
+
 #### Why not `set_active()`, and what production still needs
 
 `set_active(false)` looked like the natural hook and is not, for two reasons.
@@ -688,6 +714,57 @@ holding a reference means the store is not quiescent and the precondition fails.
 That is a change in the consensus RPC path and needs an owner's review rather
 than a guess from here. What is proven is the mechanism, the policy, and the
 convergence; what is missing is one call site and its emptiness check.
+
+### P1.1 — without aging the trigger goes silent and the layout stays broken
+
+The convergence result above was measured against a hot set that never moves,
+which is exactly the case where "was ever hot" and "is hot" are the same thing.
+`hogdb_bench -E K` re-draws the rank → payee permutation every K blocks, so the
+hot accounts change identity while the skew stays identical; `-G K` halves the
+sketch every K blocks. 500 K accounts, θ=0.99, `-A 2 -F 0.20`, 40 blocks, hot set
+re-drawn at blocks 15 and 30.
+
+| block | 13 | 14 | 15 | 18 | 19–29 | 30 | 32–39 |
+|---|---|---|---|---|---|---|---|
+| **no aging** | 0.9046 | 0.9046 | 0.6718 | 0.7055 | **0.7055, moved=0** | 0.6868 | **0.6868, moved=0** |
+| **halve /5** | 0.9044 | 0.9044 | 0.6797 | 0.7076 | 0.73–0.74 | 0.6977 | rising to 0.8813 |
+| **halve /2** | 0.9045 | 0.9045 | 0.6788 | 0.7183 | rising to **0.9044** | 0.6789 | rising to 0.8962 |
+
+**Un-aged tracking does not degrade gracefully — it stops.** Four blocks after the
+hot set moves, the trigger selects nothing (`moved=0`) and the layout sits at
+0.7055 for eleven consecutive blocks. After the second move it ends at 0.6868,
+which is within half a point of the 0.6824 scattered baseline: **the entire
+benefit is gone and the system is reporting that there is nothing to do.**
+
+The mechanism is that the sketch never forgets. It still says the *old* hot
+accounts are hot, so the loglets consolidation built for them still look
+homogeneous, no loglet crosses `min_mixedness`, and the pass terminates. The stop
+condition that made the static result so clean — "nothing is mixed any more" — is
+indistinguishable from "my classifier is looking at the wrong accounts". That is
+the worst available failure mode: silent, and it looks exactly like success.
+
+**Aging fixes it, and the epoch matters.** Halving every 2 blocks recovers the
+full 0.9044 within 11 blocks of the move — the same order as the initial
+convergence — and recovers again after the second move. Halving every 5 blocks
+recovers slowly and had not finished within 9 blocks. So `halve()` stays; the
+question was whether it was dead code, and it is not.
+
+**The trade-off is that aging never lets the trigger go quiet.** Under `-G 2` the
+pass relocates 2 loglets on every block indefinitely, including blocks 24–29 where
+the hit rate is already ~0.90 and it is only holding position — ~60 ms of every
+block, forever. Un-aged does no work and holds a bad layout; aged holds a good
+layout and never stops paying. Neither is the right answer: the epoch wants to be
+driven by *detected* drift rather than a fixed period, so a static hot set costs
+nothing and a moving one is tracked. That is the obvious next design step and is
+not implemented.
+
+All three arms converge identically to 0.9045 by block 13 before the first move,
+so aging costs nothing while the hot set is stable.
+
+**Caveats.** Two moves observed, two epochs tested, one skew. A full re-shuffle is
+also the most violent possible drift — every hot account goes cold at once —
+where real traffic drifts partially. Both make this a demonstration that aging is
+load-bearing, not a calibration of the epoch.
 
 ### BUG-3 — `consolidate()` freed loglets through a dangling allocator
 

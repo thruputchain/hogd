@@ -97,6 +97,18 @@ double bench_hot_fraction = 0.0;
 // pass is what makes it interleavable with serving rather than a barrier.
 size_t bench_max_victims = 0;
 
+// When positive, re-draw the rank -> payee permutation every this many blocks,
+// so the hot accounts change identity mid-run. Without it every workload here
+// has a static hot set, which is exactly the case where "was ever hot" and "is
+// hot" are the same thing -- so the classifier is untested in the only regime
+// where aging exists.
+int bench_hotset_epoch = 0;
+
+// When positive, halve every sketch counter every this many blocks. This is the
+// aging epoch: the counter the classifier reads is a decaying average rather
+// than a lifetime total.
+int bench_age_epoch = 0;
+
 // When positive, run a bounded consolidation pass at every block boundary,
 // relocating at most this many loglets, instead of one pass at the end. This is
 // the trigger policy under test: the layout is meant to converge over successive
@@ -218,6 +230,12 @@ public:
   // command; a uniform one has no hot set to consolidate.
   void report_layout(std::string_view label);
 
+  // redraw_hot_set re-draws the rank -> payee permutation, so the accounts that
+  // are hot change identity while the skew stays the same. Everything the
+  // classifier has learned up to that point is now about the wrong accounts,
+  // which is the only regime in which aging the sketch can matter at all.
+  void redraw_hot_set(int round);
+
 private:
   HogDBDAO db_;
   WorkerPool workers_;
@@ -241,6 +259,12 @@ private:
   // faults depend on access *order*, not just multiplicity).
   std::vector<uint32_t> payee_slot_;
   size_t payee_space_{0};
+  // The Zipf rank each payment drew, kept so redraw_hot_set() can repoint every
+  // payment when the rank -> payee permutation changes. Storing ranks rather
+  // than regenerating them keeps the skew and the per-rank access counts
+  // byte-identical across epochs, so the only thing that moves is which account
+  // holds each rank.
+  std::vector<uint32_t> op_rank_;
   AuthChangeSubscriptionManager subscription_manager_;
   bool compute_db_hash_;
 
@@ -414,9 +438,13 @@ Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
     std::mt19937_64 shuffle_rng(kBenchSeed ^ 0xA5A5A5ULL);
     std::ranges::shuffle(slot, shuffle_rng);
   }
+  std::vector<uint32_t> op_rank;
+  op_rank.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
-    uint32_t payee = slot[zipf(rng)];
+    uint32_t rank = static_cast<uint32_t>(zipf(rng));
+    uint32_t payee = slot[rank];
     hits[payee]++;
+    op_rank.push_back(rank);
     ops.emplace_back(make_key(i, 0), make_key(0, payee), 1,
                      maybe_uniquifier(1, i, nonces));
   }
@@ -430,6 +458,7 @@ Benchmark::make_zipf_payments_benchmark(size_t n, int workers, bool nonces,
 
   bench->payee_slot_ = slot;
   bench->payee_space_ = n;
+  bench->op_rank_ = std::move(op_rank);
 
   // An independent draw of the same size from the same distribution, for
   // scoring. Different seed, identical slot mapping, so it covers the same keys.
@@ -574,6 +603,13 @@ Benchmark::run()
   // items, and therefore the thing that determines steady-state layout --
   // never runs.
   for (int round = 0; round < bench_rounds; ++round) {
+    // Move the hot set, and age the sketch, before the block that will be
+    // measured against the new distribution.
+    if (bench_hotset_epoch > 0 && round > 0 && round % bench_hotset_epoch == 0)
+      redraw_hot_set(round);
+    if (bench_age_epoch > 0 && round > 0 && round % bench_age_epoch == 0)
+      db_.get_ramdb().age_heat();
+
     // Time each block. A consolidation pass triggered between ledger closes can
     // only use the gap between blocks, and that gap is the close interval minus
     // this -- so this is one of the two numbers that decides how much work a
@@ -654,7 +690,7 @@ Benchmark::run()
 
     std::println("block,{},{},{:.4f},{},{:.4f}", round, ops_.size(),
                  block_seconds, moved, consolidate_seconds);
-    if (bench_auto_victims > 0)
+    if (bench_auto_victims > 0 || bench_hotset_epoch > 0)
       report_layout(std::format("auto{}", round));
   }
 }
@@ -724,6 +760,56 @@ Benchmark::consolidate()
   // victims a triggered pass can afford.
   std::println("consolidated,{},{:.2f},{},{:.4f}", moved, bench_min_mixedness,
                sketch_thresh, seconds);
+}
+
+void
+Benchmark::redraw_hot_set(int round)
+{
+  if (payee_slot_.empty() || op_rank_.empty())
+    return;
+
+  std::mt19937_64 shuffle_rng(kBenchSeed ^ 0xA5A5A5ULL ^
+                              (0x9E3779B97F4A7C15ULL *
+                               static_cast<uint64_t>(round)));
+  std::ranges::shuffle(payee_slot_, shuffle_rng);
+
+  // Repoint every payment at the payee its rank now maps to. Rebuilt rather than
+  // assigned in place because ItemKey holds const members and is not assignable.
+  // Payer j is key (j+1, 0), exactly as the builder assigned it.
+  std::vector<uint32_t> hits(payee_space_, 0);
+  std::vector<Payment> ops;
+  ops.reserve(ops_.size());
+  for (size_t j = 0; j < ops_.size(); ++j) {
+    uint32_t payee = payee_slot_[op_rank_[j]];
+    hits[payee]++;
+    ops.emplace_back(make_key(j + 1, 0), make_key(0, payee), ops_[j].amount,
+                     ops_[j].uniquifier);
+  }
+  ops_ = std::move(ops);
+
+  // Rescore against the new hot set. Scoring against the old one would measure
+  // how well the layout matches accounts nobody reads any more, which would
+  // report a collapse whether or not the classifier had noticed.
+  std::vector<uint32_t> score_hits(payee_space_, 0);
+  {
+    Zipf zipf(payee_space_, bench_theta);
+    uint64_t score_rng = kBenchSeed ^ 0x5C0DE5ULL;
+    for (size_t i = 1; i < payee_space_; i++)
+      score_hits[payee_slot_[zipf(score_rng)]]++;
+  }
+
+  payee_hits_.clear();
+  payee_score_hits_.clear();
+  for (size_t i = 0; i < payee_space_; i++) {
+    if (hits[i] == 0 && score_hits[i] == 0)
+      continue;
+    auto db_key = make_contract_data_key(make_key(0, i));
+    auto key_str = key_bytes_string(std::as_bytes(std::span(db_key)));
+    if (hits[i] > 0)
+      payee_hits_.emplace(key_str, hits[i]);
+    if (score_hits[i] > 0)
+      payee_score_hits_.emplace(std::move(key_str), score_hits[i]);
+  }
 }
 
 void
@@ -1379,6 +1465,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                  "pass relocates (default: 0 = all)");
     std::println("  -A, --auto-consolidate <N>  relocate up to N loglets at "
                  "every block boundary (trigger policy)");
+    std::println("  -E, --hotset-epoch <N>  re-draw the rank->payee "
+                 "permutation every N blocks (moving hot set)");
+    std::println("  -G, --age-epoch <N>    halve the sketch counters every N "
+                 "blocks (classifier aging)");
     std::println("  -h, --help             show this help");
     std::println("");
     std::println("commands:");
@@ -1418,6 +1508,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       {"hot-fraction", required_argument, nullptr, 'F'},
       {"max-victims",  required_argument, nullptr, 'V'},
       {"auto-consolidate", required_argument, nullptr, 'A'},
+      {"hotset-epoch", required_argument, nullptr, 'E'},
+      {"age-epoch",    required_argument, nullptr, 'G'},
       {"help",      no_argument,       nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -1433,7 +1525,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Skip past the two positional args before parsing opts.
   optind = 3;
   int opt;
-  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:F:V:A:", long_opts, nullptr)) !=
+  while ((opt = getopt_long(argc, argv, "n:w:q:p:Ndht:H:Sr:Ck:m:KW:F:V:A:E:G:", long_opts, nullptr)) !=
          -1) {
     switch (opt) {
     case 'n':
@@ -1492,6 +1584,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'A':
       hogd::bench_auto_victims = std::stoul(optarg, nullptr, 0);
       // The trigger classifies with the sketch, so it needs the sketch fed.
+      hogd::bench_sketch_classifier = true;
+      break;
+    case 'E':
+      hogd::bench_hotset_epoch = std::stoi(optarg);
+      hogd::bench_sketch_classifier = true;
+      break;
+    case 'G':
+      hogd::bench_age_epoch = std::stoi(optarg);
       hogd::bench_sketch_classifier = true;
       break;
     case 'h':
