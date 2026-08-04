@@ -61,9 +61,8 @@ namespace hogd {
 // Routing
 // ---------------------------------------------------------------------------
 
-// Shard 0, the default owner for everything shard_of_address does not route:
-// content-addressed wasm code, and the requests that carry no address (db tip,
-// viewing snapshots).
+// Shard 0. Holds the wasm code, and answers the requests that carry no address
+// (db tip, viewing snapshots).
 inline constexpr size_t kDefaultShard = 0;
 
 // Identifies shard_of_address; persisted/declared per shard, mismatch is

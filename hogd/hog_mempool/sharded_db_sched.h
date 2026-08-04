@@ -25,34 +25,31 @@ DbBlockResult combine_block_results(std::vector<DbBlockResult> const &results);
 
 // The mempool's sole handle to the sharded db: one client per shard, exposing
 // only the operations the mempool uses, each fixing that RPC's sharding policy.
-// Adding an RPC means adding a method here, and classifying it below.
+// Adding an RPC means adding a method here, routed to match the key layout in
+// sharding.h.
 //
-// Every db RPC is one of four kinds. A read must route the way the write that
-// produced its data routed, so pick the kind before writing the method.
+// Keys with an address field scatter to shard_of_address(address); reads gather
+// back into input order. Only 'A' hog ages here; hogexec owns the rest.
+// (write_hog_ages, read_hog_ages)
 //
-//   1. Keyed state -- contract data, balances, auth data, RCQ entries, hog
-//      ages. Scattered to the owning shard, shard_of_address(address), and
-//      gathered back into input order. (write_hog_ages, read_hog_ages)
+// 'C' code keys carry a content hash instead, so they live on shard 0 alone --
+// nothing here; hogexec's DatabaseProxy owns them.
 //
-//   2. Content-addressed state -- wasm code, keyed by hash, not address.
-//      Shard 0 only. Nothing here yet; hogexec's DatabaseProxy owns it.
+// '<' keys are not sharded: every shard keeps its own globals and runs the
+// whole block lifecycle, validating create_snapshot(prev) against its own
+// chain. Writes go to every shard; reads require agreement, which turns a shard
+// that diverged (a crash mid-commit-fan-out) into a loud startup failure
+// instead of a livelock. (create/abandon/close/commit_snapshot, load_genesis,
+// get_tip)
 //
-//   3. Replicated control state -- the block lifecycle and genesis. Written to
-//      every shard; each shard runs its own copy of the chain and validates
-//      create_snapshot(prev) against it, so the shards must advance in
-//      lockstep. Reads consult every shard and require agreement, which turns
-//      a shard that diverged (a crash mid-commit-fan-out) into a loud startup
-//      failure instead of a livelock. (create/abandon/close/commit_snapshot,
-//      load_genesis, get_tip)
+// db_hash is the exception, legitimately per-shard: a shard hashes only the
+// items it owns, and those are LtHash16 multiset values, so this class sums the
+// partials and hands out the whole-db hash. Only the DbTip each shard persists
+// holds that shard's partial.
 //
-//   4. Per-shard-minted state -- viewing snapshot ids, which each hogdb
-//      generates locally, so a cross-shard operation holds one id per shard.
-//      Nothing here yet.
-//
-// The one value that is legitimately per-shard is the db hash: a shard hashes
-// only the items it owns. Those are LtHash16 multiset values, so this class
-// sums the partials and hands out the whole-db hash; only the DbTip each shard
-// persists holds that shard's partial.
+// Viewing snapshot ids are not keys, so they have no layout to follow: each
+// hogdb mints its own, and a cross-shard operation holds one id per shard.
+// Nothing here yet.
 class ShardedDbSched {
 public:
   explicit ShardedDbSched(
