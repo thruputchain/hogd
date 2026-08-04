@@ -310,12 +310,13 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
             mempool_tx_size_limit);
 }
 
-// A gateway lookup returns one entry per input hash, but a matched transaction
-// can be much larger than the 32-byte hash used to request it.  To keep an
-// unauthenticated caller from amplifying a small request (e.g. one live
-// transaction's hash repeated many times) into an unbounded response, the
-// coordinator caps the total serialized size of the transactions it returns.
-TEST(Mempool, GatewayLookupResponseByteBudget)
+// A lookup returns one entry per input hash, but a matched transaction can be
+// much larger than the 32-byte hash used to request it.  The public gateway
+// caps the total serialized size of the transactions it returns so an
+// unauthenticated caller cannot amplify a small request (e.g. one live
+// transaction's hash repeated many times) into an unbounded response.  The
+// trusted coordinator RPC applies no such cap.
+TEST(Mempool, LookupResponseByteBudget)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -330,24 +331,26 @@ TEST(Mempool, GatewayLookupResponseByteBudget)
       server.mempool_coord_rpc().scheduler()->find_tx(hash);
   ASSERT_TRUE(tx);
 
-  // Budget for exactly one returned transaction.
-  server.mempool_coord_rpc().set_lookup_response_byte_limit_test_hook(
-      x23::xdr_size(*tx));
-
-  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
-
   SignedTransactionHashBatch lookup;
   lookup.push_back(hash);
   lookup.push_back(hash);
 
-  x23::XdrVec<x23::Ptr<SignedTransaction>> result =
-      gateway.schedgateway_lookup_tx(std::move(lookup))();
-  ASSERT_EQ(result.size(), 2UL);
-  // The first hash fits within the budget and returns the transaction; the
-  // duplicate exceeds it and is not materialized.
-  ASSERT_NE(result[0].get(), nullptr);
-  EXPECT_EQ(sha256(result[0]->tx), hash);
-  EXPECT_EQ(result[1].get(), nullptr);
+  // With a budget for exactly one transaction, the first hash returns the
+  // transaction and the over-budget duplicate returns the not-found sentinel.
+  const x23::XdrVec<x23::Ptr<SignedTransaction>> capped =
+      server.mempool_coord_rpc().lookup_transactions(lookup,
+                                                     x23::xdr_size(*tx));
+  ASSERT_EQ(capped.size(), 2UL);
+  ASSERT_NE(capped[0].get(), nullptr);
+  EXPECT_EQ(sha256(capped[0]->tx), hash);
+  EXPECT_EQ(capped[1].get(), nullptr);
+
+  // The trusted coordinator RPC is uncapped: both duplicates are returned.
+  const x23::XdrVec<x23::Ptr<SignedTransaction>> uncapped =
+      server.mempool_coord_rpc().schedcoord_lookup_transactions(lookup)();
+  ASSERT_EQ(uncapped.size(), 2UL);
+  ASSERT_NE(uncapped[0].get(), nullptr);
+  ASSERT_NE(uncapped[1].get(), nullptr);
 }
 
 TEST(Mempool, SubmitVetted)

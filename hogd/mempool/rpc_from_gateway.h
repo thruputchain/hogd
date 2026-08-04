@@ -70,10 +70,22 @@ public:
     co_return ExpectedDBTip(RPCError::kRPCNotFound);
   }
 
+  // Upper bound on the total serialized size of the transactions returned from
+  // a single public-gateway lookup.  A lookup request carries one 32-byte hash
+  // per transaction, but a matched transaction can be far larger, so without a
+  // cap an unauthenticated caller could force an unbounded response -- and an
+  // unbounded number of heap-backed transaction copies -- from a small request,
+  // e.g. by repeating a single live transaction's hash many times.  A
+  // legitimate wallet only looks up a handful of its own in-flight transactions
+  // and never approaches this bound.  The trusted coordinator RPC
+  // ([MempoolCoordinatorRpc::schedcoord_lookup_transactions]) is not subject to
+  // this cap.
+  static constexpr size_t kMaxLookupResponseBytes = 16UZ * 1024 * 1024;
+
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
   schedgateway_lookup_tx(SignedTransactionHashBatch tx_hashes)
   {
-    co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
+    co_return coord_->lookup_transactions(tx_hashes, kMaxLookupResponseBytes);
   }
 
   x23::Async<PendingTxCount> schedgateway_pending_tx_count()
