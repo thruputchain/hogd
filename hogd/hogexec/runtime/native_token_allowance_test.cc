@@ -1168,14 +1168,15 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   // Owner commits Tx1 (allowance grant) and needs replay-cache token.  After
   // Tx1 the owner's residual balance is kOwnerResidualBalance, which is
   // strictly less than kTransferAmount.
-  setup_grant_storage_token(kOwnerAddr,
-                            replay_cache_cost_charged(1) + kOwnerResidualBalance);
+  setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1) +
+                                            kOwnerResidualBalance);
   // Spender commits Tx2 (transfer_from attempt) and needs replay-cache token.
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   // Native token contract pays for the new allowance NNInt entry created in
   // Tx1; Tx2's staged debit reverts with the aborted frame so no extra cost.
-  setup_grant_storage_token(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                            get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(
+      GenesisConfigurationLoader::kPresetNativeTokenAddress,
+      get_default_cost_model()->get_nnint_cost());
 
   // Owner method 0: grant the spender an allowance of kGrantAllowance.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
@@ -1225,8 +1226,9 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
                            "child frame but it returned Ok";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Result::Err confirmed -- child frame Aborted with ERC20Error::TooLarge.
-        // Return {} so the spender's root frame completes normally.
+        // Result::Err confirmed -- child frame Aborted with
+        // ERC20Error::TooLarge. Return {} so the spender's root frame completes
+        // normally.
         return {};
       });
   auto spender_contract =
@@ -1295,7 +1297,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   // The staged allowance debit from the aborted transfer_from child frame
   // reverted with that frame and must not appear in the committed state.
   auto allowance_key_data =
-      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr, kSpenderAddr);
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr,
+                                                       kSpenderAddr);
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);

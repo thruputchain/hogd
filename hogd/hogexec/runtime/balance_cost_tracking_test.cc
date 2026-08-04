@@ -499,9 +499,8 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
       ADD_FAILURE() << "staging the direct overspend debit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
-    auto r_credit =
-        ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                  kTransferAmount);
+    auto r_credit = ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                              kTransferAmount);
     if (!r_credit.has_value() || !r_credit.value().has_value()) {
       ADD_FAILURE() << "staging the direct overspend credit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -602,9 +601,8 @@ TEST_F(BalanceCostTrackingTest,
       ADD_FAILURE() << "staging the direct overspend debit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
-    auto r_credit =
-        ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                  kTransferAmount);
+    auto r_credit = ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                              kTransferAmount);
     if (!r_credit.has_value() || !r_credit.value().has_value()) {
       ADD_FAILURE() << "staging the direct overspend credit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -802,15 +800,17 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
                             kInitialBalance + replay_cache_cost_charged(1));
 
   // Receiver contract: method 0 transfers 50 tokens back to kSenderAddr.
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t> receiver_fns;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      receiver_fns;
   receiver_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto native_token_addr =
             GenesisConfigurationLoader::kPresetNativeTokenAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-        auto calldata_back = erc20_meta::make_calldata<"transfer">(
-            kSenderAddr, make_amount(uint128_t{50}));
+        auto calldata_back =
+            erc20_meta::make_calldata<"transfer">(kSenderAddr,
+                                                  make_amount(uint128_t{50}));
         CopyableInvokeOutputs back_outputs{};
         auto r_back = [&]() {
           CopyableInvokeInputs inputs{
@@ -819,7 +819,8 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_back,
+          return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
+                                                 calldata_back,
                                                  std::span<const std::byte>{},
                                                  inputs, back_outputs);
         }();
@@ -855,7 +856,8 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(native_token_addr, calldata_fwd,
+          return ctx.syscall<SyscallNo::kInvoke>(native_token_addr,
+                                                 calldata_fwd,
                                                  std::span<const std::byte>{},
                                                  inputs, fwd_outputs);
         }();

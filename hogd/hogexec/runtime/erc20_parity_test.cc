@@ -153,12 +153,12 @@ protected:
   {
     std::array<uint8_t, 39> preimage{};
     // "balance" in ASCII/UTF-8
-    static constexpr std::array<uint8_t, 7> kTag = {
-        0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65};
+    static constexpr std::array<uint8_t, 7> kTag = {0x62, 0x61, 0x6c, 0x61,
+                                                    0x6e, 0x63, 0x65};
     std::ranges::copy(kTag, preimage.begin());
     std::ranges::copy(addr, preimage.begin() + 7);
-    return StorageKeyContractData{sha256(
-        std::span<const uint8_t>(preimage.data(), preimage.size()))};
+    return StorageKeyContractData{
+        sha256(std::span<const uint8_t>(preimage.data(), preimage.size()))};
   }
 
   // Builds a native "driver" contract whose method 0 invokes `target`'s ERC20
@@ -420,12 +420,11 @@ protected:
       StorageKey wasm_balance_skey(StorageKeyType::ContractData);
       wasm_balance_skey.contract_data_key() =
           itc_erc20_balance_key(wasm_receiver);
-      write_item(
-          AddressAndKey{.address = kWasmTokenAddr,
-                        .key = std::move(wasm_balance_skey)},
-          std::make_shared<const StorageItemWrapper>(
-              static_cast<int128_t>(recipient_start_balance),
-              get_default_cost_model()));
+      write_item(AddressAndKey{.address = kWasmTokenAddr,
+                               .key = std::move(wasm_balance_skey)},
+                 std::make_shared<const StorageItemWrapper>(
+                     static_cast<int128_t>(recipient_start_balance),
+                     get_default_cost_model()));
     }
 
     run_tx(kWasmAdminAddr, 0, ctx);
@@ -775,8 +774,7 @@ TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientParity)
       << "native precompile and WASM itc_erc20 diverged on over-balance "
          "transfer to a distinct recipient";
   ASSERT_GE(native_record.size(), 3U);
-  EXPECT_EQ(static_cast<ExecResult>(native_record[0]),
-            ExecResult::ExecResultOK)
+  EXPECT_EQ(static_cast<ExecResult>(native_record[0]), ExecResult::ExecResultOK)
       << "the transaction must commit (nothing staged by the aborted child)";
   EXPECT_EQ(native_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
@@ -823,8 +821,8 @@ TEST_F(Erc20ParityTest, CreditOverflowTransferParity)
   auto [native_record, wasm_record] = run_transfer_parity(
       /*start_balance=*/100, /*transfer_amount=*/1, kNativeRecipientAddr,
       kWasmRecipientAddr,
-      /*recipient_start_balance=*/uint128_t{
-          std::numeric_limits<int128_t>::max()});
+      /*recipient_start_balance=*/
+      uint128_t{std::numeric_limits<int128_t>::max()});
   EXPECT_EQ(native_record, wasm_record)
       << "native precompile and WASM itc_erc20 diverged on credit-side "
          "balance overflow";
