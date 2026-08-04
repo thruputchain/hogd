@@ -166,6 +166,21 @@ protected:
     return call;
   }
 
+  // A call that manually aborts: test_error_type_revert(1) throws
+  // ManualRevertTestError -> child frame Abort -> WalletError::CallAborted.
+  WalletCall abort_call()
+  {
+    auto calldata = mrt_meta::make_calldata<u8"test_error_type_revert">(
+        static_cast<uint32_t>(1));
+    WalletCall call{};
+    call.target = kAbortAddr;
+    call.entrypoint = entrypoint_from_method_id(
+        mrt_meta::method_id<u8"test_error_type_revert">());
+    call.gas_limit = UINT64_MAX;
+    call.calldata = calldata;
+    return call;
+  }
+
   // Root-invokes `wallet` with the given invocation + auth claim and
   // captures [root_success, commit, buffer bytes | 0xFF]. Invocations are
   // built with ContractTraitClient<...>::make_invocation.
@@ -471,6 +486,36 @@ TEST_F(DefaultWalletParityTest, MultiCallHappyPathReturnsEchoedBytes)
   ASSERT_GE(native.size(), 2U);
   EXPECT_EQ(native[0], 1);
   EXPECT_EQ(native[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+}
+
+TEST_F(DefaultWalletParityTest, CalleeAborts)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(4)); // one success first: abort discards it
+  calls.push_back(abort_call());
+  expect_parity(calls);
+}
+
+TEST_F(DefaultWalletParityTest, CalleeFaultsOutOfGas)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  calls.push_back(echo_call(4, /*gas_limit=*/1)); // child OOG -> Fault
+  expect_parity(calls);
+}
+
+TEST_F(DefaultWalletParityTest, PreFrameRejectMissingTarget)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  wallet_calls_t calls;
+  WalletCall missing = echo_call(4);
+  missing.target = kMissingAddr; // no deployment -> Invoke rejected pre-frame
+  calls.push_back(missing);
+  expect_parity(calls);
 }
 
 // NOLINTEND(bugprone-exception-escape)
