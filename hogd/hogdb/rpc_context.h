@@ -69,6 +69,7 @@ public:
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db.
       *tip_.take() = *ret;
+      current_committed_id_ = ret->id;
       current_committed_height_ = ret->value.proposal_header.block_height;
     }
     else if (ret.error().code() != HogDBCode::kNotFound) {
@@ -86,7 +87,13 @@ public:
     return tip.value.proposal_header.block_height >= 0;
   }
   bool has_committed_tip() { return has_committed_tip(get_tip()); }
-  void set_tip(DbTip new_tip) { *tip_.take() = std::move(new_tip); }
+  void set_tip(DbTip new_tip)
+  {
+    const BlockTXID id = new_tip.id;
+    auto tip = tip_.take();
+    *tip = std::move(new_tip);
+    current_committed_id_.store(id, std::memory_order_release);
+  }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
   {
     return auth_change_subscription_manager_;
@@ -240,6 +247,12 @@ private:
                  .storage_long_hash = {},
                  .value = std::move(value)};
   }()};
+  // Scalar mirror of tip_.id for the per-RPC snapshot staleness check. DbTip
+  // contains the 2 KiB storage hash and a non-trivial ConsensusValue, so
+  // copying it here would serialize hot executor traffic on tip_'s lock.
+  // UINT64_MAX is already the persisted sentinel for "no committed tip".
+  std::atomic<BlockTXID> current_committed_id_{
+      std::numeric_limits<BlockTXID>::max()};
   std::atomic<BlockHeight> current_committed_height_{-1};
   // the storage cost model for computing storage costs at the current block
   // height.
@@ -294,8 +307,10 @@ private:
 inline bool
 RPCContext::is_snapshot_read_stale(BlockTXID bid)
 {
-  DbTip tip = get_tip();
-  if (has_committed_tip(tip) && tip.id == bid) {
+  const BlockTXID committed_id =
+      current_committed_id_.load(std::memory_order_acquire);
+  if (committed_id != std::numeric_limits<BlockTXID>::max() &&
+      committed_id == bid) {
     return false;
   }
 

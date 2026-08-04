@@ -92,6 +92,46 @@ TEST(RecoveryTests, RPCContextRejectsNonNotFoundDbTipError)
   EXPECT_THROW((void)RPCContext(std::move(dao), nullptr), std::system_error);
 }
 
+TEST(RecoveryTests, SnapshotStalenessTracksScalarCommittedTip)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), 1024 * 1024 * 1024, 0);
+  ASSERT_TRUE(db.has_value());
+
+  RPCContext ctx(HogDBDAO(RAMDB(std::move(*db))), nullptr);
+  constexpr BlockTXID kInstalledBlock = 16;
+  constexpr BlockTXID kFirstBlock = 17;
+  constexpr BlockTXID kSecondBlock = 18;
+
+  EXPECT_TRUE(ctx.is_snapshot_read_stale(kFirstBlock));
+
+  ConsensusValue installed_value{};
+  installed_value.proposal_header.block_height = 0;
+  ctx.set_tip(DbTip{.id = kInstalledBlock,
+                    .storage_long_hash = {},
+                    .value = std::move(installed_value)});
+  EXPECT_FALSE(ctx.is_snapshot_read_stale(kInstalledBlock));
+  EXPECT_TRUE(ctx.is_snapshot_read_stale(kFirstBlock));
+
+  ConsensusValue first_value{};
+  first_value.proposal_header.block_height = 1;
+  ASSERT_TRUE(ctx.update_dbtip(kFirstBlock, std::move(first_value),
+                              StorageLongHash{})
+                  .has_value());
+  EXPECT_FALSE(ctx.is_snapshot_read_stale(kFirstBlock));
+
+  ConsensusValue second_value{};
+  second_value.proposal_header.block_height = 2;
+  ASSERT_TRUE(ctx.update_dbtip(kSecondBlock, std::move(second_value),
+                              StorageLongHash{})
+                  .has_value());
+  EXPECT_TRUE(ctx.is_snapshot_read_stale(kFirstBlock));
+  EXPECT_FALSE(ctx.is_snapshot_read_stale(kSecondBlock));
+}
+
 TEST(RecoveryTests, RecoveryVaryingItems)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
