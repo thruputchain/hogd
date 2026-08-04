@@ -118,16 +118,16 @@ TEST(RecoveryTests, SnapshotStalenessTracksScalarCommittedTip)
 
   ConsensusValue first_value{};
   first_value.proposal_header.block_height = 1;
-  ASSERT_TRUE(ctx.update_dbtip(kFirstBlock, std::move(first_value),
-                              StorageLongHash{})
-                  .has_value());
+  ASSERT_TRUE(
+      ctx.update_dbtip(kFirstBlock, std::move(first_value), StorageLongHash{})
+          .has_value());
   EXPECT_FALSE(ctx.is_snapshot_read_stale(kFirstBlock));
 
   ConsensusValue second_value{};
   second_value.proposal_header.block_height = 2;
-  ASSERT_TRUE(ctx.update_dbtip(kSecondBlock, std::move(second_value),
-                              StorageLongHash{})
-                  .has_value());
+  ASSERT_TRUE(
+      ctx.update_dbtip(kSecondBlock, std::move(second_value), StorageLongHash{})
+          .has_value());
   EXPECT_TRUE(ctx.is_snapshot_read_stale(kFirstBlock));
   EXPECT_FALSE(ctx.is_snapshot_read_stale(kSecondBlock));
 }
