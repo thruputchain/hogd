@@ -1012,9 +1012,10 @@ TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
 
         EventFilterList filters;
         filters.push_back(filter_with_contracts_no_topics({addr_c}));
-        auto page = db->get_events(make_query(
-            std::move(filters), IterationOrder::IterationOrderAscending,
-            anchor_at_height(10)));
+        auto page =
+            db->get_events(make_query(std::move(filters),
+                                      IterationOrder::IterationOrderAscending,
+                                      anchor_at_height(10)));
         (void)page;
       },
       "CHECK FAILED");
