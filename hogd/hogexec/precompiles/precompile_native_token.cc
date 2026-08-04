@@ -453,9 +453,10 @@ native_token_unchecked_transfer(SystemCallHandler &handler,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount)
 {
-  if (amount < 0) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
+  // Callers are privileged system code (the strict trait methods and the
+  // genesis claim); a negative amount is a precondition violation, not a
+  // recoverable input.
+  CHECK(amount >= 0);
   auto r1 = handler.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {
     return r1.error().to_invoke_error();
