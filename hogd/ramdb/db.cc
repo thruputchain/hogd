@@ -101,6 +101,29 @@ Database::check(std::string_view path, size_t heap_size)
 }
 
 void
+configure_objectier_from_env(Database &db)
+{
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  const char *victims = std::getenv("HOGD_OBJECTIER");
+  if (victims == nullptr)
+    return;
+
+  size_t max_victims = std::strtoul(victims, nullptr, 0);
+  if (max_victims == 0)
+    return;
+
+  double fraction = 0.20;
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  if (const char *frac = std::getenv("HOGD_OBJECTIER_FRACTION"))
+    fraction = std::strtod(frac, nullptr);
+
+  db.enable_heat_tracking();
+  db.enable_auto_consolidation(fraction, max_victims);
+  info("objectier: up to {} loglets per block, hot fraction {:.2f}, sketch {}",
+       max_victims, fraction, print_iec_bytes(db.heat_bytes()));
+}
+
+void
 Database::set_active(bool yes)
 {
   // update active state and notify bg worker.
@@ -163,18 +186,20 @@ Database::background_worker(const std::stop_token &stoken)
 
   while (true) {
     bool expand = false;
-    bool compact, disk_cleanup;
+    bool compact, disk_cleanup, consolidate;
     {
       // wait for change in status or timeout.
       std::scoped_lock g(lock_);
       using namespace std::chrono_literals;
       // NOLINTNEXTLINE(misc-include-cleaner)
-      cv_.wait_for(lock_, stoken, 1s,
-                   [this] { return run_expand_ || run_compact_; });
+      cv_.wait_for(lock_, stoken, 1s, [this] {
+        return run_expand_ || run_compact_ || run_consolidate_;
+      });
       if (stoken.stop_requested())
         break;
 
       compact = std::exchange(run_compact_, false);
+      consolidate = std::exchange(run_consolidate_, false);
       run_expand_ = false;
 
       // check if the buckets need to be expanded.
@@ -198,6 +223,13 @@ Database::background_worker(const std::stop_token &stoken)
       bool not_oom = freed_bytes > 0 || disk_writer_.bytes_buffered() > 0;
       loglet_allocator_->low_mem_done(not_oom);
     }
+
+    // Relocate by temperature if a block boundary asked for it. After
+    // compaction, not before: compaction is the one with memory pressure behind
+    // it, and a pass that ran first would hand its destinations to the
+    // compactable list only for compaction to consider them again.
+    if (consolidate)
+      consolidate_incremental();
 
     // run bucket expansion if needed.
     if (expand)

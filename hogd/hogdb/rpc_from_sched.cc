@@ -199,6 +199,17 @@ HogDBSchedRpc::commit_block(BlockID id, ConsensusValue value,
        encode_base64(std::as_bytes(std::span(committed_tip.storage_long_hash))),
        committed_tip.value.proposal_header.block_height, *lsn);
   CHECK_NE(committed_tip.value.proposal_header.block_height, -1);
+
+  // Ask for a popularity-driven relocation pass, if one is configured. A block
+  // boundary is the cadence: the store has just finished a batch of writes, and
+  // unlike compaction's low-memory trigger it arrives whether or not anything is
+  // fragmented -- which matters because fixed-width balance updates never
+  // fragment the log, so compaction never visits them and their layout is
+  // otherwise frozen for the lifetime of the store.
+  //
+  // Only sets a flag; ramdb's background worker does the relocating, so none of
+  // its cost lands on this path.
+  ctx_.get_db().get_ramdb().notify_block_committed();
   return {};
 }
 

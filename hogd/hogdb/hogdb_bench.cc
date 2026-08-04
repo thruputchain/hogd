@@ -751,6 +751,9 @@ Benchmark::consolidate()
     std::span<const std::byte> key = item->get_key();
     return bench_sketch_classifier ? sketch_hot(key) : oracle_hot(key);
   };
+  // A one-shot pass at the end of the workload, with nothing else running, so
+  // the partly filled write heads can be made candidates too.
+  db_.get_ramdb().roll_over_write_heads();
   ElapsedTimer timer;
   size_t moved = db_.get_ramdb().consolidate(
       is_hot, static_cast<float>(bench_min_mixedness), bench_max_victims);

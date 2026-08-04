@@ -960,6 +960,8 @@ HogDevnodeNode::open_db_backend() const
       Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
   CHECK(ramdb.has_value());
 
+  configure_objectier_from_env(**ramdb);
+
   HogDBDAO db(RAMDB(std::move(*ramdb)));
   HogDBStatus<DbTip> recovered_tip = db.read_dbtip();
   if (!recovered_tip && recovered_tip.error().code() != HogDBCode::kNotFound) {

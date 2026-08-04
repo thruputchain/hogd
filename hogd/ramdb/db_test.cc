@@ -431,12 +431,17 @@ TEST_F(DatabaseTest, ConsolidateAllCold)
 // A write head reaches the compactable set only when it fills, so writes spread
 // across every core leave one partly filled head per writing thread that
 // consolidation could never select -- and that is where the newest items are.
-// consolidate() rolls the heads over first, so a parallel insert is reachable.
+// roll_over_write_heads() is what makes them reachable.
 TEST_F(DatabaseTest, ConsolidateWriteHeads)
 {
   insert_n(kInsertions);
   check_integrity();
 
+  // Without the rollover the parallel insert is invisible: every head is partly
+  // filled, so nothing has reached the compactable set.
+  EXPECT_EQ(db_->consolidate([](ItemHeader *) { return true; }, 0.0F), 0U);
+
+  db_->roll_over_write_heads();
   size_t moved = db_->consolidate([](ItemHeader *) { return true; }, 0.0F);
   EXPECT_GT(moved, 0U) << "write heads were not reachable by consolidation";
   check_integrity();

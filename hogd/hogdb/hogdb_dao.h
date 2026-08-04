@@ -154,6 +154,8 @@ public:
     db_->enable_auto_consolidation(hot_fraction, max_victims, min_mixedness);
   }
   size_t consolidate_incremental() { return db_->consolidate_incremental(); }
+  void roll_over_write_heads() { db_->roll_over_write_heads(); }
+  void notify_block_committed() { db_->notify_block_committed(); }
   uint64_t consolidation_passes() const { return db_->consolidation_passes(); }
   uint64_t consolidation_loglets() const
   {

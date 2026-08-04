@@ -235,14 +235,34 @@ only by measuring: consolidation abandoned its relocation destinations between
 passes, and `min_mixedness = 0` made every pass re-consolidate the output of the
 last one.
 
-`set_active()` turned out to be the wrong hook — it resizes the worker pool, and
-an asynchronous notification cannot hold the no-concurrent-write promise. The
-trigger is synchronous on the committing thread instead.
+**Wired in production and verified.** `HogDBSchedRpc::commit_block` calls
+`notify_block_committed()`, ramdb's `background_worker` runs the pass, and
+`configure_objectier_from_env` turns it on from `HOGD_OBJECTIER`. Confirmed on a
+real `hog-devnode`: the enable line appears and a pass runs off a committed block.
 
-**What remains is one call site.** `HogDBSchedRpc::commit_block`, after the block
-tx shuts down, gated on `RPCContext::block_txes_` being empty — a sibling or
-viewing block still holding a reference means the store is not quiescent. That is
-a consensus-path change and wants an owner's review rather than a guess.
+**The quiescence problem dissolved once the parts were separated.** The earlier
+plan was a synchronous pass on the committing thread gated on
+`RPCContext::block_txes_` being empty, because `consolidate()` was documented as
+needing no concurrent writes. Re-reading why: only `roll_over_heads()` actually
+does. Relocation re-checks the item pointer under the bucket lock, and the hotness
+walk touches immutable key bytes plus an atomically read storage byte, on a loglet
+whose bump pointer is frozen because it is no longer a write head — the same
+guarantees `compact()` already relies on while running alongside writes.
+
+So `roll_over_write_heads()` is now a separate call with the precondition on it,
+and `consolidate_incremental()` does not use it. That buys three things at once:
+no consensus-path invariant to reason about, no ~23 ms/loglet on the commit path,
+and no need for `set_active()` (which was doubly wrong here — it resizes the
+worker pool, so per-block use would thrash it). Cost is that the newest items are
+not candidates until their head fills on its own; measured convergence is
+unchanged at 0.9046 by block 13, because a ledger's items sit in full loglets
+almost immediately.
+
+**What is not yet shown is an interesting result through the production path.** A
+devnode with no traffic has nothing mixed, and the shipped loadgen is uniform
+(θ=0) — the one regime where consolidation is pointless, per 4.1. Driving skew
+through the full stack still needs either the protocol change 4.1 describes or the
+argument that `hogdb_bench` suffices.
 
 ### 2.2 Steady state, not one shot
 
@@ -272,19 +292,32 @@ is currently serial and unbounded. Both are p99 hazards.
 **This is the highest-value phase and the only one that is blocked.** Everything
 above refines projections; this replaces them with measurements.
 
-### 3.1 Get a suitable machine
+### 3.1 There is no other hardware — the SSD is the tier
 
-This host is a single-socket EPYC 9554: one NUMA node, no CXL, no Optane, no dax.
-There is no slow tier to measure against. Needed, in preference order:
+**Settled, and it removes an option rather than adding one.** No CXL, no Optane,
+no second socket is coming. This host is a single-socket EPYC 9554 with one NUMA
+node, and that is the machine. So the paper's 70/300 ns model cannot be validated
+directly at all, and the two candidates this section used to list are dead.
 
-1. **Real CXL or Optane.** Ideal, matches the paper's 70/300 model directly.
-2. **Two-socket box** — remote-socket DRAM as the slow tier. ~1.6–2× latency, not
-   the 4× of Optane, but it is *measured* rather than modelled, and HeMem, TPP and
-   MEMTIS all validate this way, so it is defensible.
+What remains is **paging against NVMe**, which `run_ssd_tier.sh` already
+implements: the loglet heap is a file-backed mapping, the process runs under a
+`MemoryMax` cap, resident pages are the fast tier and evicted ones come back on a
+major fault. Linux LRU reclaim is the page-based tiering system underneath, which
+is the arrangement ObjecTier is designed to sit on top of rather than replace.
 
-**Action: ask what the group has.** This is a procurement question, not an
-engineering one, and it gates the strongest result. It should be asked now rather
-than after Phase 1, because lead time may be long.
+**This changes what can be claimed.** An SSD is ~10⁴× slower than DRAM, not the
+~4× of Optane, so a fault count cannot be converted into the paper's AMAT model
+and should not be. What it *can* support is the assumption-free statement: the same
+workload, the same capacity, a different layout, and this many fewer accesses fell
+to the device. Report the fault ratio, not nanoseconds. The 70/300 AMAT figures
+stay explicitly labelled as a model throughout.
+
+**First run was null and the cause is in the harness, not the idea** — see P3a in
+`TODO.md`. The working set was eight times smaller than the cap, so nothing was
+ever evicted, and the bench's per-account anonymous state grows fast enough that
+simply scaling up trades paging for OOM kills. Fixing the harness's footprint is
+now the highest-value item on this plan, because it is the only route to any
+unmodelled number.
 
 ### 3.2 Tier the allocator (C1)
 
@@ -350,19 +383,22 @@ assumed.
 
 ## Recommended order, and what to cut
 
-1. **Ask about hardware now** (3.1) — long lead time, gates the best result. Note
-   flexkvs runs on a box with a real NVM node (`numactl -m2`); if that machine is
-   reachable, Phase 3 is a scheduling question rather than a procurement one.
-2. **Phase 1.4** — bounded claiming and write-head rollover. Moved to the front:
-   everything else here either triggers consolidation or measures it, and both
-   are unsound while a pass empties the compactable list. ← *in progress*
-3. **Phase 1.2** — the adaptive threshold, as a histogram over the sketch rather
-   than a sweep. Cheap, and it deletes an assumed constant. ← *in progress*
-4. **Phase 1.1** — aging under a moving hot set.
-5. **Phase 2.1 and 2.2** — the trigger and steady state. This is what makes it a
-   system rather than a demo.
-6. **Phase 3** as soon as hardware exists; it displaces everything else.
-7. **Phase 4.2** — cheap, and it decides whether the deployed system cares.
+1. **Fix the SSD harness's memory footprint** (3.1 / P3a). There is no other
+   hardware, so paging against NVMe is the only unmodelled measurement available,
+   and it currently returns zero faults because the working set is far smaller
+   than the cap. This is now the top item: everything else on this list refines
+   numbers that are all modelled.
+2. **Drift-driven aging** (successor to 1.1). A fixed epoch makes the trigger
+   relocate on every block forever; without any aging it goes silent and the
+   layout rots. Neither is shippable, and neither implementation has the middle.
+3. **Phase 4.2** — cheap, and it decides whether the deployed system cares.
+4. **Phase 1.2's residual** — the unexplained gap from 0.897 to the 0.9574
+   rank-sorted ceiling.
+
+**Done since this plan was written:** 1.4, 1.2 (the threshold), 1.1, 2.1, 2.2, and
+the production wiring. 1.3's parallel consolidation is **cut**: 23 ms per loglet
+and ~28 loglets to converge means the serial cost is already affordable, and
+parallelising would reopen BUG-2's reserve drain for nothing.
 
 The file-backed heap now on the branch (`evict_region()`, `ru_majflt` in
 `report_faults`) is a third option for 3.1 that needs no hardware: it prices the
@@ -381,7 +417,9 @@ item on this list.
 
 ## Standing risks
 
-- **Everything is modelled** until Phase 3. Lead with hit rate, not nanoseconds.
+- **Everything is modelled**, and with no tiered hardware coming it will stay that
+  way except for SSD fault counts. Lead with hit rate. Never quote a nanosecond
+  figure without saying it is `hit x 70 + (1 - hit) x 300`.
 - **The oracle is not a ceiling.** It is optimal only for its own threshold; the
   rank-sorted prefill is the real bound.
 - **Three assumed constants** — fast latency, slow latency, tier capacity. Capacity

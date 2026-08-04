@@ -43,6 +43,18 @@ using GetEachCallback = std::function<void(std::span<const std::byte>, uint8_t,
 using LayoutCallback =
     std::function<void(std::span<const std::byte>, size_t, size_t)>;
 
+class Database;
+
+// configure_objectier_from_env turns on popularity-driven consolidation if
+// HOGD_OBJECTIER names the number of loglets one pass may relocate, and
+// optionally reads the hot-set share from HOGD_OBJECTIER_FRACTION.
+//
+// Off by default, and an environment variable rather than a config field for the
+// same reason RAMDB_HEAP_FILE is: it costs background CPU and adds a counter to
+// the read path, so no deployment should get it without asking. Shared by every
+// entry point that opens a Database so they cannot drift.
+void configure_objectier_from_env(Database &db);
+
 // Database provides the interface for using ramdb. Normally, you should only
 // interact with this class.
 class Database {
@@ -213,19 +225,32 @@ public:
   }
 
   // consolidate reorganizes loglets so each holds items of a single
-  // temperature. See ItemAllocator::consolidate. Must not overlap put()/
-  // remove(): it relocates items, and does so outside the compactor's
-  // memory-pressure trigger.
+  // temperature. See ItemAllocator::consolidate.
   //
-  // The write heads are rolled over first, so the newest items -- which sit in
-  // partly filled heads that have never reached the compactable set -- are
-  // candidates like any others.
+  // Safe to run concurrently with put()/remove(), on the same grounds compact()
+  // is: relocation re-checks the item pointer under the bucket lock, and the
+  // hotness walk touches only immutable key bytes plus the storage byte, which
+  // it reads atomically. A loglet on the compactable list is no longer a write
+  // head, so its bump pointer is frozen while the walk runs.
+  //
+  // What is *not* safe concurrently is reaching the newest items, which sit in
+  // partly filled write heads -- see roll_over_write_heads().
   size_t consolidate(const std::function<bool(ItemHeader *)> &is_hot,
                      float min_mixedness, size_t max_victims = 0)
   {
-    item_allocator_.roll_over_heads();
     return item_allocator_.consolidate(is_hot, min_mixedness, max_victims);
   }
+
+  // roll_over_write_heads makes the newest items reachable by consolidate() and
+  // compact(). A per-thread write head joins the compactable set only when it
+  // fills, so without this up to one loglet per writing thread of the most
+  // recently written data can never be selected.
+  //
+  // PRECONDITION: no put() or remove() may overlap this call -- it moves the
+  // heads those paths allocate from. That makes it the one part of a
+  // consolidation pass that needs quiescence, which is why it is separate: a
+  // caller that cannot stop writes can still consolidate everything else.
+  void roll_over_write_heads() { item_allocator_.roll_over_heads(); }
 
   // enable_auto_consolidation sets the policy consolidate_incremental() uses.
   // hot_fraction sizes the hot set (see heat_threshold), max_victims bounds a
@@ -247,24 +272,27 @@ public:
   }
 
   // consolidate_incremental runs one bounded consolidation pass classified by
-  // the heat sketch, for a caller that has just reached a quiescent point and
-  // wants to spend it. Returns the loglets relocated, 0 if unconfigured.
+  // the heat sketch. Returns the loglets relocated, 0 if unconfigured or if
+  // another pass is already running.
   //
-  // Deliberately synchronous rather than a wake-up for background_worker. The
-  // no-concurrent-write precondition holds only for as long as the caller keeps
-  // it holding, and a notified background thread would start relocating at some
-  // later moment when writes may have resumed. The caller's own thread is the
-  // only place the promise is still true.
+  // Bounded because the cost is ~23 ms per loglet: reaching a good layout is a
+  // matter of accumulating passes over successive blocks rather than finishing
+  // one, and a bounded pass never monopolizes the background thread.
   //
-  // Bounded because the cost is ~23 ms per loglet: a caller spending the gap
-  // between ledger closes can afford one or two, and reaching a good layout is a
-  // matter of accumulating passes over successive closes rather than finishing
-  // one.
-  //
-  // PRECONDITION: as consolidate() -- no put()/remove() may overlap.
+  // Does not roll the write heads over, so it inherits consolidate()'s
+  // concurrency: safe alongside put()/remove(), which is what lets it run on
+  // background_worker rather than on a committing thread. The newest items are
+  // therefore not candidates until their head fills on its own.
   size_t consolidate_incremental()
   {
     if (auto_max_victims_ == 0 || !heat_)
+      return 0;
+
+    // Skip rather than queue when a pass is in flight. Passes are
+    // opportunistic, and two overlapping ones would race on the single pair of
+    // relocation destinations the allocator keeps for consolidation.
+    std::unique_lock pass(consolidate_lock_, std::try_to_lock);
+    if (!pass.owns_lock())
       return 0;
 
     uint8_t thresh = heat_threshold(auto_hot_fraction_);
@@ -275,6 +303,23 @@ public:
     consolidation_passes_.fetch_add(1, std::memory_order_relaxed);
     consolidation_loglets_.fetch_add(moved, std::memory_order_relaxed);
     return moved;
+  }
+
+  // notify_block_committed asks for a consolidation pass at the next
+  // opportunity. Cheap by design -- a flag and a notify -- because it is called
+  // from the commit path, where ~23 ms per loglet of relocation must not land.
+  // background_worker does the work.
+  //
+  // A block boundary is the natural cadence: it is when the store has just
+  // finished a batch of writes, and it arrives whether or not anything is
+  // fragmented, which demand-driven compaction does not.
+  void notify_block_committed()
+  {
+    if (auto_max_victims_ == 0)
+      return;
+    std::scoped_lock g(lock_);
+    run_consolidate_ = true;
+    cv_.notify_one();
   }
 
   uint64_t consolidation_passes() const
@@ -368,6 +413,7 @@ private:
   bool run_expand_{false};
   bool run_compact_{false};
   bool run_disk_cleanup_{false};
+  bool run_consolidate_{false};
 
   // the modules of the database. Each has a shared lifetime with this object.
   std::unique_ptr<LogletAllocator> loglet_allocator_;
@@ -398,6 +444,10 @@ private:
   double auto_hot_fraction_{0.2};
   size_t auto_max_victims_{0};
   float auto_min_mixedness_{0.0F};
+  // serializes consolidation passes; separate from lock_, which guards the
+  // background_worker wake-up state and must not be held for the duration of a
+  // pass.
+  std::mutex consolidate_lock_;
   std::atomic<uint64_t> consolidation_passes_{0};
   std::atomic<uint64_t> consolidation_loglets_{0};
 

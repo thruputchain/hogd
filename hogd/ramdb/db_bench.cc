@@ -397,6 +397,8 @@ Benchmark::consolidate_by_access()
     return rank < access_counts_.size() &&
            access_counts_[rank].load(std::memory_order_relaxed) >= 2;
   };
+  // Nothing else is running here, so the newest items can be made candidates.
+  db_->roll_over_write_heads();
   size_t moved = db_->consolidate(is_hot, 0.0F);
   std::println("consolidated,{}", moved);
 }

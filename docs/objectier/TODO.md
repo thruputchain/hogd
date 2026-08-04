@@ -44,6 +44,8 @@ and cold objects primarily under a single index").
 | P2.2 | Steady state — does the layout converge? | **done — converges in 13 closes, then stops** |
 | P1.1 | Aging under a moving hot set | **done — un-aged tracking fails silently; halve() stays** |
 | BUG-4 | Trigger default overridden by a DAO wrapper's own default | **fixed** |
+| P2.3 | Trigger wired into the production commit path | **done — verified on hog-devnode** |
+| P3a | SSD-backed slow tier, measured by major faults | **null — cap never bound, see below** |
 
 ### What landed
 
@@ -765,6 +767,50 @@ so aging costs nothing while the hot set is stable.
 also the most violent possible drift — every hot account goes cold at once —
 where real traffic drifts partially. Both make this a demonstration that aging is
 load-bearing, not a calibration of the epoch.
+
+### P3a — the SSD tier ran and measured nothing, and the reason is structural
+
+`run_ssd_tier.sh` backs the loglet heap with a file on NVMe and caps the process
+with `systemd-run -p MemoryMax`, so resident pages are the fast tier and evicted
+ones return from the device on a major fault. That is the only tiering measurement
+available without CXL or NVM hardware, and there will not be any.
+
+First run, 500 K accounts, θ=0.99, cap 1200M, `data/ssd_tier.csv`:
+
+| arm | cap | major faults | hit rate |
+|---|---|---|---|
+| scattered | uncapped | 0 | 0.6824 |
+| consolidated | uncapped | 0 | 0.8932 |
+| scattered | 1200M | **0** | 0.6824 |
+| consolidated | 1200M | **0** | 0.8932 |
+
+**Zero major faults in every arm: the cap never bound.** 500 K accounts occupy 73
+loglets, i.e. 146 MB of live data against a 1200 MB cap — the working set is
+eight times smaller than the fast tier, so nothing is ever evicted and there is no
+slow tier to be on the wrong side of. The 3 GB heap *file* is misleading; it is
+provisioned space, almost all untouched.
+
+**Why raising the account count does not fix it by itself.** The bench holds
+per-account state that is not reclaimable: one `Payment` in `ops_` for every
+account, and two `unordered_map<std::string, uint32_t>` hit tables keyed by the
+32-byte ramdb key. That grows at roughly the same rate as the live heap, so
+scaling up to exceed the cap raises the anonymous floor too, and the cap starts
+OOM-killing the process instead of paging the heap — which is the failure the
+script's own `CAP` comment warns about.
+
+**What it needs.** Make the heap dominate the footprint at measurement time:
+
+- Replace the two string-keyed hit maps with vectors indexed by payee id. They are
+  the largest per-account cost and the id is already dense.
+- Free `ops_` and the hit tables before `replay_reads()`. The fault measurement
+  only needs `payee_slot_` (4 bytes per account) and the Zipf generator, so the
+  workload state can be released before the arm that is being measured.
+- Then scale the account count until live heap is several times the cap.
+
+Until that lands, every tiering number in this document remains modelled. The
+layout results do not depend on it — they are hit rates from allocator
+introspection — but the fault count was supposed to be the one unmodelled figure,
+and it is not yet a figure at all.
 
 ### BUG-3 — `consolidate()` freed loglets through a dangling allocator
 

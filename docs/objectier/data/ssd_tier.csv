@@ -1,0 +1,5 @@
+arm,cap,heap_bytes,major_faults,minor_faults,seconds,hit_rate
+zipf_payments,uncapped,3007315968,0,1,0.245,0.6824
+zipf_payments+consolidated,uncapped,3007315968,0,0,0.244,0.8932
+zipf_payments,1200M,3007315968,0,0,0.241,0.6824
+zipf_payments+consolidated,1200M,3007315968,0,0,0.241,0.8932

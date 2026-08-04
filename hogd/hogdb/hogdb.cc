@@ -96,6 +96,8 @@ hogdb_init(std::string_view path, size_t ram_bytes,
     return EXIT_FAILURE;
   }
 
+  configure_objectier_from_env(**ramdb);
+
   // create the RPC context.
   HogDBDAO db_tmp(RAMDB(std::move(*ramdb)));
   StorageLongHash db_hash = db_tmp.compute_full_db_hash();
