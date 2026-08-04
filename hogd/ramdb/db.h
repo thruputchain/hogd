@@ -232,17 +232,14 @@ public:
   // single pass, and min_mixedness is the selection threshold. Requires the heat
   // sketch: without it there is no classifier and nothing to route by.
   //
-  // min_mixedness must be above zero for a repeating trigger, which is why the
-  // default is not the 0 that a one-shot pass uses. A loglet consolidation has
-  // already made homogeneous has mixedness 0 and would still satisfy `0 >= 0`,
-  // so each pass spends its budget relocating the output of earlier passes and
-  // the layout stops improving. Measured over 20 block boundaries at 2 loglets
-  // each: 0 reaches hit 0.7534, 0.05 reaches 0.8979, 0.10 reaches 0.9045 and
-  // then selects nothing further. A positive threshold is also what lets the
-  // trigger terminate, since "no loglet is mixed any more" is the stop
-  // condition.
-  void enable_auto_consolidation(double hot_fraction, size_t max_victims,
-                                 float min_mixedness = 0.1F)
+  // min_mixedness must be above zero for a repeating trigger, and defaults to
+  // kAutoConsolidateMinMixedness rather than the 0 a one-shot pass uses -- see
+  // that constant for why, and for why the default lives there. Measured over 20
+  // block boundaries at 2 loglets each: 0 reaches hit 0.7534, 0.05 reaches
+  // 0.8979, 0.10 reaches 0.9045 and then selects nothing further.
+  void enable_auto_consolidation(
+      double hot_fraction, size_t max_victims,
+      float min_mixedness = kAutoConsolidateMinMixedness)
   {
     auto_hot_fraction_ = hot_fraction;
     auto_max_victims_ = max_victims;

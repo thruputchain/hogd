@@ -147,8 +147,9 @@ public:
   {
     return db_->consolidate(is_hot, min_mixedness, max_victims);
   }
-  void enable_auto_consolidation(double hot_fraction, size_t max_victims,
-                                 float min_mixedness = 0.0F)
+  void enable_auto_consolidation(
+      double hot_fraction, size_t max_victims,
+      float min_mixedness = kAutoConsolidateMinMixedness)
   {
     db_->enable_auto_consolidation(hot_fraction, max_victims, min_mixedness);
   }

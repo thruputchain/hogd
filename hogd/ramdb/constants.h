@@ -29,6 +29,18 @@ inline constexpr float kMinCompactUtilization = 0.8F;
 // Database::estimate_heap_size provisions against this same figure; the two
 // must agree or the heap is sized for a reserve the allocator does not keep.
 inline constexpr size_t kCompactionLogletsPerThread = 2;
+// the minimum Loglet::mixedness a repeatedly triggered consolidation pass will
+// relocate. Must be above zero: a loglet consolidation has already made
+// homogeneous has mixedness 0 and would still satisfy `0 >= 0`, so each pass
+// would spend its budget relocating the output of earlier passes and the layout
+// would never converge. It is also the trigger's stop condition, since "nothing
+// is mixed any more" is what makes a pass select nothing.
+//
+// Named here rather than left as a default argument because it has to be the
+// same on Database::enable_auto_consolidation and every wrapper that forwards
+// to it. A wrapper carrying its own default silently overrides this one -- which
+// happened, and cost the trigger its convergence.
+inline constexpr float kAutoConsolidateMinMixedness = 0.1F;
 // the fraction of available cores that can be used for BG activity when active.
 inline constexpr int kActiveBGCoreFraction = 4;
 // the number of locks per core for the ScalableMap.
