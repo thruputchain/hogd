@@ -69,6 +69,7 @@ public:
       // There is an existing dbtip, meaning that blocks have already been
       // committed to the db.
       *tip_.take() = *ret;
+      current_committed_id_ = ret->id;
       current_committed_height_ = ret->value.proposal_header.block_height;
     }
     else if (ret.error().code() != HogDBCode::kNotFound) {
@@ -86,7 +87,15 @@ public:
     return tip.value.proposal_header.block_height >= 0;
   }
   bool has_committed_tip() { return has_committed_tip(get_tip()); }
-  void set_tip(DbTip new_tip) { *tip_.take() = std::move(new_tip); }
+  void set_tip(DbTip new_tip)
+  {
+    const BlockTXID id = new_tip.id;
+    const BlockHeight height = new_tip.value.proposal_header.block_height;
+    auto tip = tip_.take();
+    *tip = std::move(new_tip);
+    current_committed_height_.store(height, std::memory_order_relaxed);
+    current_committed_id_.store(id, std::memory_order_release);
+  }
   AuthChangeSubscriptionManager &get_auth_change_subscription_manager()
   {
     return auth_change_subscription_manager_;
@@ -185,19 +194,22 @@ public:
   // during the read, so the snapshot's height label can no longer be
   // trusted. Mirrors is_snapshot_read_stale() for the no-BlockTX path.
   //
-  // The commit_publishing_ load is sequenced before get_tip() on purpose:
+  // The commit_publishing_ load is sequenced before the tip loads on purpose:
   // the committer clears commit_publishing_ (release) only after
   // update_dbtip, so observing it false here guarantees the subsequent
-  // get_tip() reflects the post-commit tip.
+  // loads reflect the post-commit tip. The ID's release/acquire pairing also
+  // publishes the corresponding height before readers compare either field.
   bool is_committed_read_stale(DbTip const &snapshot)
   {
     if (commit_publishing_.load(std::memory_order_acquire)) {
       return true;
     }
-    DbTip tip = get_tip();
-    return tip.id != snapshot.id ||
-           tip.value.proposal_header.block_height !=
-               snapshot.value.proposal_header.block_height;
+    const BlockTXID committed_id =
+        current_committed_id_.load(std::memory_order_acquire);
+    const BlockHeight committed_height =
+        current_committed_height_.load(std::memory_order_relaxed);
+    return committed_id != snapshot.id ||
+           committed_height != snapshot.value.proposal_header.block_height;
   }
 
   // Block until no commit is mid-publication, so a committed-tip reader can
@@ -240,6 +252,12 @@ private:
                  .storage_long_hash = {},
                  .value = std::move(value)};
   }()};
+  // Scalar mirror of tip_.id for the per-RPC snapshot staleness check. DbTip
+  // contains the 2 KiB storage hash and a non-trivial ConsensusValue, so
+  // copying it here would serialize hot executor traffic on tip_'s lock.
+  // UINT64_MAX is already the persisted sentinel for "no committed tip".
+  std::atomic<BlockTXID> current_committed_id_{
+      std::numeric_limits<BlockTXID>::max()};
   std::atomic<BlockHeight> current_committed_height_{-1};
   // the storage cost model for computing storage costs at the current block
   // height.
@@ -294,8 +312,10 @@ private:
 inline bool
 RPCContext::is_snapshot_read_stale(BlockTXID bid)
 {
-  DbTip tip = get_tip();
-  if (has_committed_tip(tip) && tip.id == bid) {
+  const BlockTXID committed_id =
+      current_committed_id_.load(std::memory_order_acquire);
+  if (committed_id != std::numeric_limits<BlockTXID>::max() &&
+      committed_id == bid) {
     return false;
   }
 

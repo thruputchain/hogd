@@ -228,9 +228,11 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
     tip.value = std::move(value);
     tip.storage_long_hash = db_hash;
     tip.id = bid;
+    current_committed_height_.store(tip.value.proposal_header.block_height,
+                                    std::memory_order_relaxed);
+    current_committed_id_.store(bid, std::memory_order_release);
     new_tip = tip;
   });
-  current_committed_height_.store(new_tip.value.proposal_header.block_height);
   return get_db().write_dbtip(new_tip);
 }
 
