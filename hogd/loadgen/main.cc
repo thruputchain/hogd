@@ -74,9 +74,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Parse command line arguments
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--help" || arg == "-h") {
-      usage(progname, EXIT_SUCCESS);
-    }
     if (arg == "--bind-ip" && i + 1 < argc) {
       bind_ip = argv[++i];
       continue;
