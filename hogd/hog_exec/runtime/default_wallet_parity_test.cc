@@ -120,10 +120,12 @@ protected:
   {
     native_preimage_ = make_preimage(1);
     wasm_preimage_ = make_preimage(2);
-    // .value() rather than ASSERT + deref: it throws on the (unreachable)
-    // empty case, and clang-tidy's optional-access check accepts it.
-    native_wallet_ = pubkey_auth_address(native_preimage_).value();
-    wasm_wallet_ = pubkey_auth_address(wasm_preimage_).value();
+    // .value() throws on the (unreachable) empty case: pubkey_auth_address
+    // only fails if the preimage cannot be serialized.
+    native_wallet_ = pubkey_auth_address(native_preimage_)
+                         .value(); // NOLINT(bugprone-unchecked-optional-access)
+    wasm_wallet_ = pubkey_auth_address(wasm_preimage_)
+                       .value(); // NOLINT(bugprone-unchecked-optional-access)
 
     auto native_obj = make_native_contract(kNativeWalletId);
     write_contract(native_obj);
