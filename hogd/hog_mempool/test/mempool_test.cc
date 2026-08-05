@@ -163,8 +163,22 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
         throw std::runtime_error("later executor cleanup failure");
       });
 
-  auto cleanup = std::async(std::launch::async, [&] {
-    server.mempool_coord_rpc().test_finish_all_executors(kBlock)();
+  // Run the cleanup on an explicit thread rather than std::async: libc++
+  // detaches the std::async worker, so future::get() can return while the
+  // worker is still tearing down coroutine frames that hold references to the
+  // rethrown exception. That teardown frees the exception's what() buffer via
+  // libc++abi's (TSAN-uninstrumented) refcounting, which TSAN reports as a
+  // race against the EXPECT_STREQ below. Joining the thread before inspecting
+  // the exception makes the ordering explicit.
+  std::promise<void> cleanup_result;
+  std::future<void> cleanup = cleanup_result.get_future();
+  std::thread cleanup_thread([&] {
+    try {
+      server.mempool_coord_rpc().test_finish_all_executors(kBlock)();
+      cleanup_result.set_value();
+    } catch (...) {
+      cleanup_result.set_exception(std::current_exception());
+    }
   });
   failure_started.wait();
   blocked_started.wait();
@@ -172,6 +186,7 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
             std::future_status::timeout);
 
   allow_blocked_cleanup.count_down();
+  cleanup_thread.join();
   bool caught_first_exception = false;
   try {
     cleanup.get();
