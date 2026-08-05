@@ -171,6 +171,23 @@ TEST_F(ReplayCacheLockTest, DisallowConsumeInThePast)
   EXPECT_EQ(r2.error(), HogDbError(HogDbCode::kConflict));
 }
 
+// Regression for #3188: a uniquifier that packs to a reserved ConcurrentSet
+// sentinel must be rejected as a replay conflict, not reach the
+// ConcurrentSet::try_insert reserved-value panic. The all-zero
+// {expiry=0, nonce=0} packs to kEmpty and is reachable at executing height 0
+// (the first block, whose tip starts at -1).
+TEST_F(ReplayCacheLockTest, ReservedSentinelUniquifierRejectedNotPanic)
+{
+  ReplayCacheLock lock;
+  ReplayCacheLockTestHelper::set_empty_bases(lock, 0, 0);
+  auto ctx = make_dummy_context(0);
+
+  PointerItem<ReplayCacheIt> item(u(0, 0));
+  auto r = lock.try_atomic_change_lock(nullptr, &item, ctx);
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error(), HogDbError(HogDbCode::kConflict));
+}
+
 TEST_F(ReplayCacheLockTest, MergeConflict)
 {
   ReplayCacheLock lock;
