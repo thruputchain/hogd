@@ -163,9 +163,7 @@ protected:
                               uint64_t gas_limit = UINT64_MAX)
   {
     x23::Vec<uint8_t, 4294967295> payload;
-    for (size_t i = 0; i < payload_len; ++i) {
-      payload.push_back(0xAB);
-    }
+    payload.resize(payload_len, 0xAB);
     auto calldata = echo_meta::make_calldata<u8"echo">(payload);
     WalletCall call{};
     call.target = kEchoAddr;
@@ -210,15 +208,17 @@ protected:
     rec.push_back(static_cast<uint8_t>(commit));
     switch (frame_output.status_code()) {
     case InvocationFrameStatusCode::Return:
-      for (auto b : frame_output.return_buffer()) {
-        rec.push_back(static_cast<uint8_t>(b));
-      }
+    {
+      auto const &buf = frame_output.return_buffer();
+      rec.insert(rec.end(), buf.begin(), buf.end());
       break;
+    }
     case InvocationFrameStatusCode::Abort:
-      for (auto b : frame_output.abort_buffer()) {
-        rec.push_back(static_cast<uint8_t>(b));
-      }
+    {
+      auto const &buf = frame_output.abort_buffer();
+      rec.insert(rec.end(), buf.begin(), buf.end());
       break;
+    }
     case InvocationFrameStatusCode::Fault:
       rec.push_back(0xFF);
       break;
@@ -302,9 +302,7 @@ protected:
         auto rb = ctx.handler().get_return_buffer();
         if (rb.has_value() && rb.value().has_value()) {
           auto const *buf = rb.value().value();
-          for (auto byte_val : *buf) {
-            record.push_back(static_cast<uint8_t>(byte_val));
-          }
+          record.insert(record.end(), buf->begin(), buf->end());
         }
         else {
           record.push_back(0xFF);
@@ -430,36 +428,25 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
   auto native_result_key = make_storage_key("native_result");
   auto wasm_result_key = make_storage_key("wasm_result");
 
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-      native_driver_fns;
-  native_driver_fns.emplace(0, make_wallet_capture_driver(native_wallet_,
-                                                          native_result_key,
-                                                          calls));
-  auto native_driver =
-      std::make_unique<NativeContract>(std::move(native_driver_fns));
-
-  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-      wasm_driver_fns;
-  wasm_driver_fns.emplace(0,
-                          make_wallet_capture_driver(wasm_wallet_,
-                                                     wasm_result_key, calls));
-  auto wasm_driver =
-      std::make_unique<NativeContract>(std::move(wasm_driver_fns));
-
+  auto make_driver = [&](ContractAddress const &wallet,
+                         StorageKeyContractData const &result_key) {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0, make_wallet_capture_driver(wallet, result_key, calls));
+    return std::make_unique<NativeContract>(std::move(fns));
+  };
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
-  extra.emplace(kDriverBaseId, std::move(native_driver));
-  extra.emplace(kDriverBaseId + 1, std::move(wasm_driver));
+  extra.emplace(kDriverBaseId, make_driver(native_wallet_, native_result_key));
+  extra.emplace(kDriverBaseId + 1, make_driver(wasm_wallet_, wasm_result_key));
   make_ctx(std::move(extra));
 
-  auto native_driver_obj = make_native_contract(kDriverBaseId);
-  write_contract(native_driver_obj);
-  write_deployment(kNativeDriverAddr, native_driver_obj);
-  setup_grant_storage_token(kNativeDriverAddr, 1'000'000'000);
-
-  auto wasm_driver_obj = make_native_contract(kDriverBaseId + 1);
-  write_contract(wasm_driver_obj);
-  write_deployment(kWasmDriverAddr, wasm_driver_obj);
-  setup_grant_storage_token(kWasmDriverAddr, 1'000'000'000);
+  auto deploy_driver = [&](int32_t id, ContractAddress const &addr) {
+    auto obj = make_native_contract(id);
+    write_contract(obj);
+    write_deployment(addr, obj);
+    setup_grant_storage_token(addr, 1'000'000'000);
+  };
+  deploy_driver(kDriverBaseId, kNativeDriverAddr);
+  deploy_driver(kDriverBaseId + 1, kWasmDriverAddr);
 
   auto native_record =
       run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_);
@@ -507,16 +494,7 @@ TEST_F(DefaultWalletParityTest, MultiCallHappyPathReturnsEchoedBytes)
   calls.push_back(echo_call(1));
   calls.push_back(echo_call(30));
   calls.push_back(echo_call(0)); // zero-length echo: item is prefix-only
-
-  auto native = run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
-  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
-  EXPECT_EQ(native, wasm);
-
-  // Absolute check: byte parity + root success (root_success=1,
-  // commit=ExecResultOK).
-  ASSERT_GE(native.size(), 2U);
-  EXPECT_EQ(native[0], 1);
-  EXPECT_EQ(native[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+  expect_parity_success(calls);
 }
 
 TEST_F(DefaultWalletParityTest, CalleeAborts)

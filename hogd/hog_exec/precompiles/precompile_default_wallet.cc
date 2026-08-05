@@ -193,25 +193,31 @@ make_native_default_wallet_contract()
                 WalletException{WalletError::CallFaulted});
           }
 
-          // Fetch the child's return bytes (the sdk fetches — and drops —
-          // returned auth-token ids too; mirror the fetch).
-          std::vector<std::byte> return_buf(outputs.return_buffer_len);
+          // Fetch the child's return bytes. The wallet forwards no auth
+          // tokens and drops any returned ids, so pass an empty auth span
+          // (the host accepts zero-length spans).
+          std::vector<uint8_t> return_buf(outputs.return_buffer_len);
           RuntimeMemoryLength return_written = 0;
-          std::vector<std::byte> auth_buf(outputs.returned_auth_token_len);
           RuntimeMemoryLength auth_written = 0;
           auto get = ctx.syscall<SyscallNo::kGetReturnedBuffer>(
-              std::span<std::byte>(return_buf), return_written,
-              std::span<std::byte>(auth_buf), auth_written);
+              std::as_writable_bytes(std::span(return_buf)), return_written,
+              std::span<std::byte>{}, auth_written);
           if (!get.has_value()) {
             return NativeContractBuilder::host_fn_error_conversion(get.error());
           }
           // Unreachable with a correct host: after frame_status == Return a
-          // return buffer exists and the syscall succeeds (the out-params are
-          // trusted the same way). The wasm sdk would map a failure here to
-          // CallFaulted; this path is a host-contract violation, so fault the
-          // frame instead.
+          // return buffer exists and the syscall succeeds. The wasm sdk would
+          // map a failure here to CallFaulted; this path is a host-contract
+          // violation, so fault the frame instead.
           if (*get != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // The sdk's checked_returned_len guard: a host that reported one
+          // length at Invoke but wrote another here broke its contract; the
+          // wasm wallet surfaces that as CallFaulted, so mirror it.
+          if (return_written != return_buf.size()) {
+            return execute_result_t::make_err(
+                WalletException{WalletError::CallFaulted});
           }
 
           encoded_return_data_len +=
@@ -223,10 +229,7 @@ make_native_default_wallet_contract()
           }
 
           wallet_bytes_t item;
-          item.reserve(return_buf.size());
-          for (auto b : return_buf) {
-            item.push_back(static_cast<uint8_t>(b));
-          }
+          item.append_range(return_buf);
           returns.push_back(std::move(item));
         }
 
