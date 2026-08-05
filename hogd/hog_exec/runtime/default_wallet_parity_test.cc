@@ -120,12 +120,10 @@ protected:
   {
     native_preimage_ = make_preimage(1);
     wasm_preimage_ = make_preimage(2);
-    auto native_addr = pubkey_auth_address(native_preimage_);
-    auto wasm_addr = pubkey_auth_address(wasm_preimage_);
-    ASSERT_TRUE(native_addr.has_value());
-    ASSERT_TRUE(wasm_addr.has_value());
-    native_wallet_ = *native_addr;
-    wasm_wallet_ = *wasm_addr;
+    // .value() rather than ASSERT + deref: it throws on the (unreachable)
+    // empty case, and clang-tidy's optional-access check accepts it.
+    native_wallet_ = pubkey_auth_address(native_preimage_).value();
+    wasm_wallet_ = pubkey_auth_address(wasm_preimage_).value();
 
     auto native_obj = make_native_contract(kNativeWalletId);
     write_contract(native_obj);
