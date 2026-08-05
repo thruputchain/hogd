@@ -37,13 +37,13 @@ join_blocks() {
   paste - - < <(grep -aE '^(block,|layout,auto)' ) |
     awk -F'\t' -v pfx="$1" '{
       split($1, b, ","); split($2, l, ",");
-      print pfx b[2] "," b[5] "," b[6] "," l[6] "," l[7];
+      print pfx b[2] "," b[5] "," b[6] "," l[5] "," l[6] "," l[7];
     }'
 }
 
 echo "=== p2: convergence and termination ===" >&2
 {
-  echo "block,loglets_moved,consolidate_seconds,hit_rate,amat_ns"
+  echo "block,loglets_moved,consolidate_seconds,fast_hot_bytes,hit_rate,amat_ns"
   # 24 blocks, not 16: the trigger converges by 13, and the point of the figure
   # is the stretch afterwards where it keeps selecting nothing.
   run -r 24 | join_blocks ""
@@ -52,7 +52,7 @@ column -t -s, "$OUT/p2_convergence.csv" >&2
 
 echo "=== p1: aging epoch sweep, hot set re-drawn every 15 blocks ===" >&2
 {
-  echo "age_epoch,block,loglets_moved,consolidate_seconds,hit_rate,amat_ns"
+  echo "age_epoch,block,loglets_moved,consolidate_seconds,fast_hot_bytes,hit_rate,amat_ns"
   # 0 = never aged. The sketch then records "was ever hot", which is the case
   # every other workload here exercises by accident.
   run -r 40 -E 15            | join_blocks "0,"
