@@ -37,6 +37,7 @@ public:
   IndexerPullController &operator=(const IndexerPullController &) = delete;
 
   void wait_until_caught_up();
+  bool wait_until_caught_up_for(std::chrono::milliseconds timeout);
 
 private:
   void run(const std::stop_token &stop);

@@ -102,10 +102,14 @@ Each durable envelope records the `hogp/<commit>` that defines its payload.
 The first committed record in each protocol epoch also publishes an immutable
 per-protocol origin containing its first height and parent consensus hash.
 Startup enumerates stable envelope metadata before decoding payloads. Records
-from older protocol commits remain immutable archival files and are not decoded
-with current generated types. They are accepted only as one ordered prefix below
-an unbroken current-protocol suffix that starts at its durable epoch origin and
-whose tip exactly matches the scheduler's canonical `ConsensusValue`.
+from older protocol commits remain immutable archival files and are accepted
+only as one ordered prefix below an unbroken current-protocol suffix that starts
+at its durable epoch origin and whose tip exactly matches the scheduler's
+canonical `ConsensusValue`. Pulling an archival record currently decodes it with
+the current generated payload type after checking the envelope's recorded
+protocol. Replay across epochs therefore requires that the committed payload XDR
+remain wire-compatible; an incompatible payload change requires either a
+retained versioned decoder or a clean-chain migration.
 An archival record after the current suffix, an unknown envelope version, a
 current-protocol gap, an origin mismatch, or archival records without enough
 current-protocol state to prove the boundary leaves the event service unhealthy.
@@ -180,6 +184,31 @@ separate work.
 8. Candidate publication precedes consensus persistence, and committed replay
    includes only records reconciled with canonical consensus identity.
 9. Outbox and indexer origins prove that no retained prefix is missing.
+
+## Verification Map
+
+The focused tests below map the recovery contract to executable coverage. Test
+names are stable reviewer entry points rather than a substitute for the broader
+event, indexer, and devnode suites.
+
+| Invariant or failure mode | Primary coverage |
+| --- | --- |
+| Real event publication is recoverable without a connected indexer, and event/body pairs survive replay | `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart`; `HogDevnode.MultiHeightIndexerGapReplaysThroughPull` |
+| Empty blocks and protocol epochs advance the same strict sequence | `EventRpcTest.PullAdvancesThroughConsecutiveEmptyEpochs`; `StrictIndexerTest.ConsecutiveEmptyEpochsRequireAdjacentSequenceAndCanonicalBoundary` |
+| A fresh indexer starts at the oldest retained origin and traverses into the current epoch | `EventRpcTest.FreshPullStartsAtOldestRetainedEpoch`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
+| Durable progress and indexed rows reopen atomically, then resume from the exact next height | `StrictIndexerTest.SuccessfulStrictApplyReopensAllRowsAndProgressTogether`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
+| A lost reply repeats the same immutable block and duplicate application is idempotent | `EventRpcTest.ExactProgressReturnsNextAndUnchangedProgressRepeatsIt`; `StrictIndexerTest.DuplicateLedgerAndFutureGapWriteNothing` |
+| Scheduler confirmation gates pull eligibility | `EventRpcTest.CommittedRecordBecomesPullableOnlyAfterConfirmation` |
+| A dropped event connection is retried and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
+| A blocked pull is bounded by its RPC deadline and reconnects | `IndexerPullController.RpcTimeoutReconnectsAfterBlockedPull` |
+| Initial catch-up has a bounded wait, and shutdown cancels an in-flight pull before joining | `IndexerPullController.StartupTimeoutAndDestructionCancelBlockedPull` |
+| Origin, identity, corruption, and gap conflicts fail closed | `EventRpcTest.ForgedAndUnknownProgressConflict`; `EventRpcTest.ReconciliationRejectsDisconnectedArchivalPrefix`; `StrictIndexerTest.RejectsPrevProposalBodyEventRootAndDigestConflicts` |
+
+The archived-to-current integration fixture rewrites current-format test records
+under an archival protocol identity. It proves origin ordering, RPC traversal,
+durable application, and restart behavior, but does not prove decoding of an
+incompatible historical payload schema. That limitation is the wire-compatibility
+requirement stated in the protocol epoch policy above.
 
 ## Hosted Validation
 

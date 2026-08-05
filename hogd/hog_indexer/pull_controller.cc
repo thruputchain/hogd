@@ -88,11 +88,17 @@ IndexerPullController::~IndexerPullController()
 void
 IndexerPullController::wait_until_caught_up()
 {
-  std::unique_lock lock(wait_mutex_);
-  if (!wake_.wait_for(lock, options_.startup_timeout,
-                      [this] { return caught_up_; })) {
+  if (!wait_until_caught_up_for(options_.startup_timeout)) {
     panic("indexer startup pull timed out");
   }
+}
+
+bool
+IndexerPullController::wait_until_caught_up_for(
+    std::chrono::milliseconds timeout)
+{
+  std::unique_lock lock(wait_mutex_);
+  return wake_.wait_for(lock, timeout, [this] { return caught_up_; });
 }
 
 bool
