@@ -28,7 +28,7 @@ mkdir -p "$OUT"
 run() {
   rm -rf "$DB"; mkdir -p "$DB"
   timeout 3600 "$BIN" "$DB" zipf_payments \
-    -n "$NUM" -t "$THETA" -W "$W" -F "$FRAC" -A "$VICTIMS" "$@" 2>/dev/null
+    -n "$NUM" -t "$THETA" -W "$W" -F "$FRAC" -A "${VICTIMS}" "$@" 2>/dev/null
 }
 
 # join_blocks pairs each "block," line with the "layout,auto<n>," that follows
@@ -43,10 +43,16 @@ join_blocks() {
 
 echo "=== p2: convergence and termination ===" >&2
 {
-  echo "block,loglets_moved,consolidate_seconds,fast_hot_bytes,hit_rate,amat_ns"
+  echo "trigger,block,loglets_moved,consolidate_seconds,fast_hot_bytes,hit_rate,amat_ns"
   # 24 blocks, not 16: the trigger converges by 13, and the point of the figure
   # is the stretch afterwards where it keeps selecting nothing.
-  run -r 24 | join_blocks ""
+  run -r 24 | join_blocks "on,"
+  # Control: identical workload, trigger off. Without it the rise could be the
+  # workload reorganising itself over 24 blocks rather than the trigger doing it.
+  # -E larger than the run length keeps the per-block layout report on (it is
+  # gated on a hot-set epoch being set) while never actually re-drawing the hot
+  # set, so the two arms differ in exactly one thing.
+  VICTIMS=0 run -r 24 -E 1000 | join_blocks "off,"
 } > "$OUT/p2_convergence.csv"
 column -t -s, "$OUT/p2_convergence.csv" >&2
 

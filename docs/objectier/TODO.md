@@ -633,13 +633,25 @@ the share of accesses it serves rises 0.205 while the share of its bytes that
 anyone touches rises 0.037. Consolidation is not filling the tier, it is putting
 the right things in it.*
 
-**The byte metric barely moves, and that is worth stating.** Hot-byte utilization
-is the paper's own Figure 2a measure, and on this workload it under-reports the
-benefit almost entirely: 0.214 -> 0.251 against 0.700 -> 0.905 for accesses. Both
-are fractions in [0, 1] of the same tier, so the comparison needs no scaling. The
-earlier V1 note saw the same thing at a single point (`fast_hot` 0.204 -> 0.245
-while the hit rate went 0.699 -> 0.928); the figure shows it holds over the whole
-convergence. Report the access share; treat hot-byte utilization as a diagnostic.
+**A trigger-off control runs beside it, and it is perfectly flat**: 0.6824 at
+block 0 and 0.6824 at block 23, unchanged to four decimals over 24 blocks. So the
+rise is the trigger's doing and not the workload reorganising itself -- which is
+D2's "the layout is frozen at creation" claim, previously argued from the
+in-place-update code path and now shown directly.
+
+**The byte metric moves much less than the access metric, but its ceiling is not
+1.0 and the figure now says so.** Hot-byte utilization goes 0.214 -> 0.251 against
+0.700 -> 0.905 for accesses. That looks near-flat on a shared axis, and an earlier
+version of this note called it "under-reports the benefit almost entirely", which
+overstated it. The workload only ever touches 11.5 MiB in total (measured at
+`-P 1.0`: mean touched-byte fraction 0.0788 over all 73 occupied loglets), against
+a 30 MiB fast tier -- so the byte share cannot exceed **0.383**. Against that
+ceiling it went 56% -> 66% of achievable, which is real movement. The figure draws
+the ceiling rather than leaving the two series looking comparably scaled.
+
+The honest statement is the narrower one: the access share is what drives AMAT and
+what should be reported; hot-byte utilization is a diagnostic whose range depends
+on how much of the store the workload touches at all. Both are in the CSV.
 
 **That is the answer to 2.2, and it is the one §6 predicted.** The layout
 converges rather than consolidation fighting new writes, and the trigger goes
