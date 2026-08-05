@@ -5,7 +5,6 @@
 #include <future>
 #include <print>
 #include <string>
-#include <string_view>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
@@ -119,8 +118,7 @@ usage(char *argv[])
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  if (argc == 2 && (std::string_view(argv[1]) == "--help" ||
-                    std::string_view(argv[1]) == "-h")) {
+  if (hogd::help_requested(argc, argv)) {
     print_usage(argv);
     return EXIT_SUCCESS;
   }
