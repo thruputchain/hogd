@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -8,8 +9,10 @@
 #include <utility>
 #include <vector>
 
+#include "auth_claim.hh"
 #include "built_contracts/calldata_wrapper.h"
 #include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
 #include "built_contracts/manual_revert_test.h"
 #include "contract.hh"
 #include "exec_result.hh"
@@ -17,6 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -28,6 +32,8 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -97,8 +103,7 @@ protected:
       std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra = {})
   {
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
-    native_map.emplace(kNativeWalletId,
-                       make_native_default_wallet_contract());
+    native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
     for (auto &[id, c] : extra) {
       native_map.emplace(id, std::move(c));
     }
@@ -115,8 +120,12 @@ protected:
   {
     native_preimage_ = make_preimage(1);
     wasm_preimage_ = make_preimage(2);
-    native_wallet_ = *pubkey_auth_address(native_preimage_);
-    wasm_wallet_ = *pubkey_auth_address(wasm_preimage_);
+    auto native_addr = pubkey_auth_address(native_preimage_);
+    auto wasm_addr = pubkey_auth_address(wasm_preimage_);
+    ASSERT_TRUE(native_addr.has_value());
+    ASSERT_TRUE(wasm_addr.has_value());
+    native_wallet_ = *native_addr;
+    wasm_wallet_ = *wasm_addr;
 
     auto native_obj = make_native_contract(kNativeWalletId);
     write_contract(native_obj);
@@ -142,7 +151,7 @@ protected:
     setup_grant_storage_token(kAbortAddr, 1'000'000'000);
   }
 
-  AuthClaim make_pubkey_claim(PubkeyAccountPreimage const &preimage)
+  static AuthClaim make_pubkey_claim(PubkeyAccountPreimage const &preimage)
   {
     AuthClaim claim{};
     claim.claim_type(AuthClaimType::kPubkeySignature);
@@ -150,7 +159,8 @@ protected:
     return claim;
   }
 
-  WalletCall echo_call(size_t payload_len, uint64_t gas_limit = UINT64_MAX)
+  static WalletCall echo_call(size_t payload_len,
+                              uint64_t gas_limit = UINT64_MAX)
   {
     x23::Vec<uint8_t, 4294967295> payload;
     for (size_t i = 0; i < payload_len; ++i) {
@@ -168,7 +178,7 @@ protected:
 
   // A call that manually aborts: test_error_type_revert(1) throws
   // ManualRevertTestError -> child frame Abort -> WalletError::CallAborted.
-  WalletCall abort_call()
+  static WalletCall abort_call()
   {
     auto calldata = mrt_meta::make_calldata<u8"test_error_type_revert">(
         static_cast<uint32_t>(1));
@@ -224,9 +234,10 @@ protected:
                         std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"execute">(UINT64_MAX, calls),
-        claim_override ? *claim_override : make_pubkey_claim(preimage));
+    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
+                                                                  calls),
+                              claim_override ? *claim_override
+                                             : make_pubkey_claim(preimage));
   }
 
   // Runs the same call list through both wallets and byte-compares.
@@ -255,15 +266,14 @@ protected:
   // Builds a native "driver" contract whose method 0 invokes `target`'s
   // `execute` entrypoint with `calls`, then records (tag, frame_status,
   // literal return bytes) into `result_key`. Adapted from erc20_parity_test.cc.
-  NativeContract::function_t
+  static NativeContract::function_t
   make_wallet_capture_driver(ContractAddress target,
                              StorageKeyContractData result_key,
                              wallet_calls_t const &calls)
   {
     auto calldata = wallet_meta::make_calldata<u8"execute">(calls);
     Runtime::MethodID method_id = wallet_meta::method_id<u8"execute">();
-    return [target, result_key, method_id,
-            calldata = std::move(calldata)](
+    return [target, result_key, method_id, calldata = std::move(calldata)](
                NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
       CopyableInvokeOutputs outputs{};
       CopyableInvokeInputs inputs{
@@ -272,8 +282,7 @@ protected:
           .flags = std::to_underlying(InvokeFlag::None),
       };
       auto r = ctx.syscall<SyscallNo::kInvoke>(
-          target,
-          std::as_bytes(std::span(calldata.data(), calldata.size())),
+          target, std::as_bytes(std::span(calldata.data(), calldata.size())),
           std::span<uint32_t>{}, inputs, outputs);
 
       std::vector<uint8_t> record;
@@ -303,8 +312,7 @@ protected:
       }
 
       auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
-          result_key,
-          std::as_bytes(std::span(record.data(), record.size())),
+          result_key, std::as_bytes(std::span(record.data(), record.size())),
           std::to_underlying(StorageDeltaFlags::None));
       if (!set_r.has_value() ||
           set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -338,9 +346,9 @@ protected:
                                       SHA256Hash const &hash)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"deploy">(UINT64_MAX, nonce, hash),
-        make_pubkey_claim(preimage));
+    return run_wallet_root_tx(client.make_invocation<u8"deploy">(UINT64_MAX,
+                                                                 nonce, hash),
+                              make_pubkey_claim(preimage));
   }
 
   // Runs `addr`'s method-0 capture driver and returns a single byte-comparable
@@ -386,8 +394,8 @@ TEST_F(DefaultWalletParityTest, WrongClaimTypeInvalidAuthClaim)
   calls.push_back(echo_call(4));
   auto native = run_wallet_execute_tx(native_wallet_, native_preimage_, calls,
                                       AuthClaim{});
-  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls,
-                                    AuthClaim{});
+  auto wasm =
+      run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls, AuthClaim{});
   EXPECT_EQ(native, wasm);
 }
 
@@ -401,8 +409,7 @@ TEST_F(DefaultWalletParityTest, MismatchedPreimageInvalidAuthClaim)
   auto other = make_pubkey_claim(make_preimage(3));
   auto native =
       run_wallet_execute_tx(native_wallet_, native_preimage_, calls, other);
-  auto wasm =
-      run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls, other);
+  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls, other);
   EXPECT_EQ(native, wasm);
 }
 
@@ -416,7 +423,8 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
   wallet_calls_t calls;
   calls.push_back(echo_call(4));
 
-  static constexpr ContractAddress kNativeDriverAddr = make_contract_address(230);
+  static constexpr ContractAddress kNativeDriverAddr =
+      make_contract_address(230);
   static constexpr ContractAddress kWasmDriverAddr = make_contract_address(231);
 
   auto native_result_key = make_storage_key("native_result");
@@ -424,16 +432,17 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       native_driver_fns;
-  native_driver_fns.emplace(
-      0,
-      make_wallet_capture_driver(native_wallet_, native_result_key, calls));
+  native_driver_fns.emplace(0, make_wallet_capture_driver(native_wallet_,
+                                                          native_result_key,
+                                                          calls));
   auto native_driver =
       std::make_unique<NativeContract>(std::move(native_driver_fns));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       wasm_driver_fns;
-  wasm_driver_fns.emplace(
-      0, make_wallet_capture_driver(wasm_wallet_, wasm_result_key, calls));
+  wasm_driver_fns.emplace(0,
+                          make_wallet_capture_driver(wasm_wallet_,
+                                                     wasm_result_key, calls));
   auto wasm_driver =
       std::make_unique<NativeContract>(std::move(wasm_driver_fns));
 
@@ -454,8 +463,7 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
 
   auto native_record =
       run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_);
-  auto wasm_record =
-      run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
+  auto wasm_record = run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
   EXPECT_EQ(native_record, wasm_record);
 }
 
@@ -484,7 +492,8 @@ TEST_F(DefaultWalletParityTest, MaxCallsSucceeds)
   wallet_calls_t calls;
   for (int i = 0; i < 16; ++i) {
     // echo returns 11 bytes per call (CXS Vec<u8>: 1-byte prefix + 10 payload);
-    // item_len = 1 + 11 = 12; 16 calls: 1 + 16*12 = 193 bytes < kMaxReturnDataBytes
+    // item_len = 1 + 11 = 12; 16 calls: 1 + 16*12 = 193 bytes <
+    // kMaxReturnDataBytes
     calls.push_back(echo_call(10));
   }
   expect_parity_success(calls);
@@ -499,8 +508,7 @@ TEST_F(DefaultWalletParityTest, MultiCallHappyPathReturnsEchoedBytes)
   calls.push_back(echo_call(30));
   calls.push_back(echo_call(0)); // zero-length echo: item is prefix-only
 
-  auto native =
-      run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
+  auto native = run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
   auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
   EXPECT_EQ(native, wasm);
 
@@ -613,8 +621,8 @@ TEST_F(DefaultWalletParityTest, DeployHappyPath)
   SHA256Hash nonce{};
   nonce.fill(9);
 
-  auto native = run_wallet_deploy_tx(native_wallet_, native_preimage_,
-                                     nonce, target_hash);
+  auto native = run_wallet_deploy_tx(native_wallet_, native_preimage_, nonce,
+                                     target_hash);
   auto wasm =
       run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, target_hash);
 
@@ -627,14 +635,17 @@ TEST_F(DefaultWalletParityTest, DeployHappyPath)
 
   // Each backend's returned bytes are its own expected deploy address
   // (CXS of a fixed 32-byte array: the raw bytes, no prefix).
-  auto expect_addr = [](CapturedRecord const &rec, ContractAddress const &want) {
+  auto expect_addr = [](CapturedRecord const &rec,
+                        ContractAddress const &want) {
     ASSERT_EQ(rec.size(), 2U + 32U);
     EXPECT_TRUE(std::equal(want.begin(), want.end(), rec.begin() + 2));
   };
-  expect_addr(native, SystemCallHandler::static_get_deploy_address(
-                          native_wallet_, nonce, target_hash));
-  expect_addr(wasm, SystemCallHandler::static_get_deploy_address(
-                        wasm_wallet_, nonce, target_hash));
+  expect_addr(native,
+              SystemCallHandler::static_get_deploy_address(native_wallet_,
+                                                           nonce, target_hash));
+  expect_addr(wasm,
+              SystemCallHandler::static_get_deploy_address(wasm_wallet_, nonce,
+                                                           target_hash));
 }
 
 TEST_F(DefaultWalletParityTest, DeployUnknownHashFaults)
@@ -647,8 +658,7 @@ TEST_F(DefaultWalletParityTest, DeployUnknownHashFaults)
   nonce.fill(10);
   auto native =
       run_wallet_deploy_tx(native_wallet_, native_preimage_, nonce, bogus);
-  auto wasm =
-      run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, bogus);
+  auto wasm = run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, bogus);
   // Address-independent outcome: full byte comparison applies.
   EXPECT_EQ(native, wasm);
 }

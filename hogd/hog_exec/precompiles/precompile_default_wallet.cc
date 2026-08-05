@@ -1,6 +1,7 @@
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -9,15 +10,16 @@
 #include <vector>
 
 #include "built_contracts/default_wallet.h"
+#include "built_contracts/default_wallet.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -163,8 +165,11 @@ make_native_default_wallet_contract()
   NativeContractBuilder builder;
 
   builder.add<default_wallet::DefaultWallet, u8"execute">(
-      [](NativeSyscallContext &ctx,
-         x23::Vec<WalletCall, 4294967295> calls)
+      // The builder decays this lambda to a function pointer and deduces the
+      // deserialized argument tuple from its parameter types, so `calls` must
+      // be taken by value (a reference would not satisfy serializes_like).
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      [](NativeSyscallContext &ctx, x23::Vec<WalletCall, 4294967295> calls)
           -> InvokeStatus<execute_result_t> {
         auto auth_err = check_root_pubkey_auth(ctx);
         if (!auth_err.has_value()) {
@@ -202,8 +207,7 @@ make_native_default_wallet_contract()
               call.target, std::as_bytes(std::span(call.calldata)),
               /*auth tokens*/ std::span<uint32_t>{}, inputs, outputs);
           if (!inv.has_value()) {
-            return NativeContractBuilder::host_fn_error_conversion(
-                inv.error());
+            return NativeContractBuilder::host_fn_error_conversion(inv.error());
           }
           if (*inv != SyscallErrorCode::kSyscallErrorCodeNone) {
             // Rejected before a child frame ran: sdk contract_call Err(_).
@@ -230,8 +234,7 @@ make_native_default_wallet_contract()
               std::span<std::byte>(return_buf), return_written,
               std::span<std::byte>(auth_buf), auth_written);
           if (!get.has_value()) {
-            return NativeContractBuilder::host_fn_error_conversion(
-                get.error());
+            return NativeContractBuilder::host_fn_error_conversion(get.error());
           }
           // Unreachable with a correct host: after frame_status == Return a
           // return buffer exists and the syscall succeeds (the out-params are
@@ -243,8 +246,7 @@ make_native_default_wallet_contract()
           }
 
           auto item_len = encoded_return_item_len(return_buf.size());
-          if (!item_len ||
-              *item_len > SIZE_MAX - encoded_return_data_len) {
+          if (!item_len || *item_len > SIZE_MAX - encoded_return_data_len) {
             return execute_result_t::make_err(
                 WalletException{WalletError::ReturnDataTooLarge});
           }
