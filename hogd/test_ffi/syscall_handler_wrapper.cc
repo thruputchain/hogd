@@ -291,9 +291,19 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags,
                                                    std::span<uint32_t const>{});
-  if (stashed_parent_trace) {
-    invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
-  }
+  // Push exactly one slot per mock frame so this stack stays in lockstep with
+  // the handler's invocation-frame depth, and finish_mock_invocation_frame()
+  // restores only the trace the finishing frame actually stashed. The slot may
+  // be null: the root frame has no parent trace to stash, and a best-effort
+  // trace drop (start_syscall_trace()/start_frame() clearing the active trace
+  // after an allocation failure, #2644/#2473) leaves start_frame() with nothing
+  // to hand back. Pushing conditionally would let a deeper untraced frame's
+  // finish pop and restore an ancestor's saved trace one frame too early, so a
+  // later finish re-finalizes the same Invoke syscall record and aborts on the
+  // gas_remaining_at_end guard in finish_syscall_trace() (#2948). The null
+  // placeholder is harmless — finish_frame() already tolerates a null stashed
+  // parent trace.
+  invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
 
   // Capacity was reserved above, so this push_back cannot reallocate or throw.
   push_mock_runtime(mock_runtime.release());
@@ -366,6 +376,12 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   auto result =
       InvokeResult{.result_ = status_code, .gas_consumed_ = consumed_gas};
 
+  // start_mock_invocation_frame() pushes one slot per mock frame, so this stack
+  // is in lockstep with the frames the harness still owes a finish (the same
+  // frames mock_runtime_stack_ tracks, already checked non-empty above).
+  // Popping exactly one slot here restores the trace this frame stashed — never
+  // an ancestor's (#2948). The empty check stays as defensive
+  // belt-and-suspenders.
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (!invocation_frame_trace_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_stack_.back());
