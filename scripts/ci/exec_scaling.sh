@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# The benchmark control servers build concurrently on remote hosts, and a slow
+# checkout (for example, cloning the RocksDB submodule) can delay one well past
+# the shared harness's 60-second default. Allow that setup to finish while
+# preserving an explicit timeout supplied by the caller.
+CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-1000}
+
 . "$(dirname "$0")/bench_harness.sh"
 
 echo 'set port env vars'
