@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <future>
 #include <gtest/gtest.h>
 #include <latch>
