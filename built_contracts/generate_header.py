@@ -204,7 +204,7 @@ def generate_header(
 #include "x23/vec.h"
 #include "x23/x23.h"
 #include "types.hh"
-#include "hogd/hogexec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_result.h"
 
 // Auto-generated from contract spec
 // DO NOT EDIT

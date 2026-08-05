@@ -359,8 +359,8 @@ def gen_syscall_meta_h(spec_full: dict) -> str:
 #include <string_view>
 #include <array>
 
-#include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/hogexec/runtime/syscall_meta_concept.h"
+#include "hogd/hog_exec/runtime/syscall_inner.h"
+#include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 
@@ -396,9 +396,9 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
 #include "event.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/syscall_types.h"
-#include "hogd/hogexec/components/ffi_types.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/syscall_types.h"
+#include "hogd/hog_exec/components/ffi_types.h"
 #include "invoke_flag.hh"
 #include "invoke_args.hh"
 #include "storage_item.hh"
@@ -461,14 +461,14 @@ def gen_syscall_frame(spec: list[dict], args: list[int]) -> str:
 
     joined = "".join(req_calls)
 
-    return f"""#include "hogd/hogexec/runtime/syscall_inner.h"
+    return f"""#include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cstddef>
 #include <span>
 #include <utility>
 
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"
 

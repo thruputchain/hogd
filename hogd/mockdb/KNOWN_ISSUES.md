@@ -1,7 +1,7 @@
 # MockDB Known Issues
 
 MockDB is a simplified in-memory database used as a comparison point against
-HogDB for correctness testing. It will eventually be removed. The following
+HogDb for correctness testing. It will eventually be removed. The following
 issues exist but will not be fixed.
 
 ## Partial batch failure leaks locks
@@ -12,7 +12,7 @@ subtransaction stack but does not release the `StorageItemDeltaManager` lock
 acquired by the first (successful) delta. This blocks concurrent transactions
 from using the same key for the rest of the block.
 
-HogDB handles this correctly via `rollback_to_savepoint`.
+HogDb handles this correctly via `rollback_to_savepoint`.
 
 - **File**: `hogd/db_interface/transaction_state.cc` (pop_subtransactions)
 - **Test**: `BugHuntPartialBatchFailureLocksNotReverted` (skipped on MockDB)
@@ -20,7 +20,7 @@ HogDB handles this correctly via `rollback_to_savepoint`.
 ## `get_db_tip` returns kRPCUnimplemented
 
 `DbExecutorRpc::get_db_tip` returns `RPCError::kRPCUnimplemented` with a TODO.
-HogDB returns actual `DbTip` data. The executor's `DatabaseProxy` maps
+HogDb returns actual `DbTip` data. The executor's `DatabaseProxy` maps
 `kRPCUnimplemented` to `kSystemUnrecoverable`, causing a fatal error if any
 contract calls `get_db_tip` on MockDB.
 
@@ -35,7 +35,7 @@ a later subtransaction are independent deltas that need to be combined, but
 `extract_results` silently drops the earlier one. This means storage costs locked
 at one depth are lost if a balance transfer occurs at a deeper depth.
 
-HogDB handles this correctly via `InvokeTX::balance_deltas_`, which tracks
+HogDb handles this correctly via `InvokeTX::balance_deltas_`, which tracks
 `manual_transfer_amount` and `total_locked_storage_amount` separately and
 combines them at commit time.
 

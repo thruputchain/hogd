@@ -60,13 +60,15 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/event/indexer_outbox.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/status.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_event/indexer_outbox.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/status.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -839,9 +841,9 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("artifactHint", "./dev-wallet.rv32a");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+              entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
       w.field("doActionEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+              entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
     });
     w.object_field("bootstrapAccounts", [&](json::Writer &w) {
       w.field("count", static_cast<std::int64_t>(count));
@@ -891,20 +893,20 @@ make_test_data_dir()
              std::chrono::steady_clock::now().time_since_epoch().count());
 }
 
-HogDBDAO
-open_persistent_hogdb(std::filesystem::path const &data_dir)
+HogDbDAO
+open_persistent_hog_db(std::filesystem::path const &data_dir)
 {
   const std::string db_path = (data_dir / "ramdb").string();
   DBStatus<std::uint64_t> lsn = Database::check(db_path, kTestRamDbBytes);
   if (!lsn.has_value()) {
-    lsn.error().raise("failed to check test hogdb");
+    lsn.error().raise("failed to check test hog_db");
   }
   DBStatus<std::unique_ptr<Database>> db =
       Database::open_lsn(db_path, *lsn, kTestRamDbBytes);
   if (!db.has_value()) {
-    db.error().raise("failed to open test hogdb");
+    db.error().raise("failed to open test hog_db");
   }
-  return HogDBDAO(RAMDB(std::move(*db)));
+  return HogDbDAO(RAMDB(std::move(*db)));
 }
 
 void
@@ -932,8 +934,8 @@ TEST(HogDevnode, FreshDataDirOutboxOriginLinksCommittedGenesis)
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   initialize_persistent_data_dir(data_dir, 0);
 
-  HogDBDAO db = open_persistent_hogdb(data_dir);
-  HogDBStatus<DbTip> tip = db.read_dbtip();
+  HogDbDAO db = open_persistent_hog_db(data_dir);
+  HogDbStatus<DbTip> tip = db.read_dbtip();
   ASSERT_TRUE(tip.has_value()) << tip.error();
   ASSERT_EQ(tip->value.proposal_header.block_height, 0);
   auto store = IndexerOutboxStore::open(
@@ -1155,11 +1157,11 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
             "contracts/dev_wallet.rv32a");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "createWalletEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);
@@ -1988,7 +1990,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                 .gas_limit = GasAmount{10'000'000},
                 .calldata = Calldata{},
             },
@@ -2075,9 +2077,9 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
                     make_nonce(11), sha256(*fibonacci_contract)),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
@@ -2197,9 +2199,9 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
                     make_nonce(17), sha256(*fibonacci_contract)),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
@@ -2365,8 +2367,8 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
 
   start_and_check("fresh");
   {
-    HogDBDAO db = open_persistent_hogdb(data_dir);
-    HogDBStatus<DbTip> tip = db.read_dbtip();
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
     ASSERT_TRUE(tip.has_value()) << tip.error();
     tip->value.proposal_header.network_hash = {};
     ASSERT_TRUE(db.write_dbtip(*tip).has_value());
@@ -2571,7 +2573,7 @@ TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
   initialize_persistent_data_dir(data_dir);
 
   {
-    HogDBDAO db = open_persistent_hogdb(data_dir);
+    HogDbDAO db = open_persistent_hog_db(data_dir);
     constexpr std::string_view kDbTipKey = "<DBTIP";
     constexpr uint8_t kWrongType = 1;
     std::array<std::byte, 1> value{};
@@ -2604,8 +2606,8 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
   initialize_persistent_data_dir(data_dir);
 
   {
-    HogDBDAO db = open_persistent_hogdb(data_dir);
-    HogDBStatus<DbTip> tip = db.read_dbtip();
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
     ASSERT_TRUE(tip.has_value());
     tip->storage_long_hash[0] ^= 1;
     ASSERT_TRUE(db.write_dbtip(*tip).has_value());
@@ -2902,10 +2904,11 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(deploy_nonce,
-                                                                 contract_hash),
+                .calldata =
+                    wallet_meta::make_calldata<u8"deploy">(deploy_nonce,
+                                                           contract_hash),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -3022,17 +3025,17 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
         x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                       erc20_meta::entrypoint<"transfer">(),
+                       erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{10'000'000},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            created_wallet_address,
                            make_erc20_amount(uint128_t{200'000'000})));
     Transaction prefund_wallet_tx{
         .invocation =
             Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                       .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                        .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"do_action">(
+                       .calldata = wallet_meta::make_calldata<u8"do_action">(
                            transfer_calldata)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -3060,11 +3063,12 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     Transaction create_wallet_tx{
         .invocation =
-            Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"create_wallet">(),
-                       .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"create_wallet">(
-                           create_wallet_nonce, wallet_hash, owner_public_key)},
+            Invocation{
+                .invoked_address = sponsor_wallet_address,
+                .entrypoint = wallet_meta::entrypoint<u8"create_wallet">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<u8"create_wallet">(
+                    create_wallet_nonce, wallet_hash, owner_public_key)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 31},

@@ -22,7 +22,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 #include "transaction.hh"
@@ -151,7 +151,7 @@ GenesisConfigurationBuilder::make_unfurl_genesis_transactions() const
 
     SignedTransaction tx{
         .tx = Transaction{
-            .invocation = client.make_invocation<"claim_initial_tokens">(
+            .invocation = client.make_invocation<u8"claim_initial_tokens">(
                 kClaimGas, config.contract_hash, config.initial_nonce,
                 config.entrypoint, config.calldata),
             .uniquifier = {.block_expiry_height =

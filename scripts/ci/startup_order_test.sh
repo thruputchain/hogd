@@ -30,23 +30,23 @@ fi
 # Resolve the launch order (space-separated component keys) for the scenario.
 case "$SCENARIO" in
 mempool-first)
-  ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
+  ORDER=(mempool loadgen hog-exec event indexer hog-db auth chuckd)
   ;;
 mempool-last)
-  ORDER=(loadgen hogexec event indexer hogdb auth mempool chuckd)
+  ORDER=(loadgen hog-exec event indexer hog-db auth mempool chuckd)
   ;;
 mempool-middle)
-  ORDER=(loadgen hogexec event mempool indexer hogdb auth chuckd)
+  ORDER=(loadgen hog-exec event mempool indexer hog-db auth chuckd)
   ;;
 indexer-before-event)
-  ORDER=(mempool loadgen hogexec indexer event hogdb auth chuckd)
+  ORDER=(mempool loadgen hog-exec indexer event hog-db auth chuckd)
   ;;
 event-before-indexer)
-  ORDER=(mempool loadgen hogexec event indexer hogdb auth chuckd)
+  ORDER=(mempool loadgen hog-exec event indexer hog-db auth chuckd)
   ;;
 coordinator-first)
   # Reproduction attempt: bring up the mempool hub + loadgen + coordinator
-  # early, but defer the mempool's downstream services (hogexec, hogdb, auth)
+  # early, but defer the mempool's downstream services (hog-exec, hog-db, auth)
   # to the end. The coordinator can then start driving transactions into the
   # mempool before auth/executor/db have connected, so the mempool's
   # schedulercoord_submit_unvetted path forwards an RPC onto a not-yet-ready
@@ -55,7 +55,7 @@ coordinator-first)
   # If that is the order-dependent crash, this scenario fails (mempool aborts
   # with "RPC call on failed file descriptor"). auth is launched last to widen
   # the window.
-  ORDER=(mempool loadgen chuckd event indexer hogexec hogdb auth)
+  ORDER=(mempool loadgen chuckd event indexer hog-exec hog-db auth)
   ;;
 starve-auth)
   # Aggressive reproduction: NEVER start auth. Everything else comes up and the
@@ -67,7 +67,7 @@ starve-auth)
   # the missing auth is fine; a mempool that aborts here is the reproduction.
   # (If the mempool instead blocks until auth registers, every launched proc
   # stays alive and this passes -- telling us the hub gates on downstreams.)
-  ORDER=(mempool loadgen hogexec hogdb event indexer chuckd)
+  ORDER=(mempool loadgen hog-exec hog-db event indexer chuckd)
   ;;
 *)
   echo "unknown scenario: $SCENARIO" >&2
@@ -88,7 +88,7 @@ SETTLE_SECS="${SETTLE_SECS:-25}"
 # Stagger launches by a few seconds so a service genuinely starts before the
 # next one — the launch order is then the actual wall-clock order, which is
 # what these scenarios are predicated on (e.g. coordinator-first needs the
-# coordinator to truly precede auth/hogexec/hogdb).
+# coordinator to truly precede auth/hog-exec/hog-db).
 STAGGER_SECS="${STAGGER_SECS:-3}"
 IP=127.0.0.1
 
@@ -123,12 +123,12 @@ EVENT_HTTP_PORT=8093
 
 # Binary paths.
 LOADGEN_BIN="$BUILD_DIR/hogd/loadgen/loadgen_server"
-MEMPOOL_BIN="$BUILD_DIR/hogd/mempool/mempool_exec"
-HOGEXEC_BIN="$BUILD_DIR/hogd/hogexec/hogexec"
-EVENT_BIN="$BUILD_DIR/hogd/event/event_exec"
-INDEXER_BIN="$BUILD_DIR/hogd/indexer/indexer_exec"
-HOGDB_BIN="$BUILD_DIR/hogd/hogdb/hogdb"
-AUTH_BIN="$BUILD_DIR/hogd/auth/auth_exec"
+MEMPOOL_BIN="$BUILD_DIR/hogd/hog_mempool/hog-mempool"
+HOG_EXEC_BIN="$BUILD_DIR/hogd/hog_exec/hog-exec"
+EVENT_BIN="$BUILD_DIR/hogd/hog_event/hog-event"
+INDEXER_BIN="$BUILD_DIR/hogd/hog_indexer/hog-indexer"
+HOG_DB_BIN="$BUILD_DIR/hogd/hog_db/hog-db"
+AUTH_BIN="$BUILD_DIR/hogd/hog_auth/hog-auth"
 CHUCKD_CONFIG="$REPO_ROOT/scripts/config-chuckd.json"
 
 WORK_DIR="$(mktemp -d /tmp/startup_order.XXXXXX)"
@@ -186,8 +186,8 @@ launch() {
       --executor-port "$MEMPOOL_EXECUTOR_PORT" --auth-port "$MEMPOOL_AUTH_PORT" \
       --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
     ;;
-  hogexec)
-    spawn hogexec "$HOGEXEC_BIN" --coordinator-addr "$IP:$MEMPOOL_EXECUTOR_PORT" \
+  hog-exec)
+    spawn hog-exec "$HOG_EXEC_BIN" --coordinator-addr "$IP:$MEMPOOL_EXECUTOR_PORT" \
       --bind-ip "$IP" --nthreads 64 --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
       --metrics-port "$EXECUTOR_HTTP_PORT"
     ;;
@@ -203,8 +203,8 @@ launch() {
       --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" \
       --metrics-port "$INDEXER_HTTP_PORT"
     ;;
-  hogdb)
-    spawn hogdb "$HOGDB_BIN" --db-path "$WORK_DIR/hogdb.data" --ram-bytes 2000000000 \
+  hog-db)
+    spawn hog-db "$HOG_DB_BIN" --db-path "$WORK_DIR/hog-db.data" --ram-bytes 2000000000 \
       --bind-ip "$IP" --coordinator-addr "$IP:$MEMPOOL_DB_PORT" \
       --executor-port "$DB_EXECUTOR_PORT" --mempool-port "$DB_MEMPOOL_PORT" \
       --auth-port "$DB_AUTH_PORT" --metrics-port "$DB_HTTP_PORT"

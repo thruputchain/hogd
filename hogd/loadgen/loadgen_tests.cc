@@ -6,7 +6,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -22,7 +22,7 @@ public:
   LoadgenTests()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, false)
+          TestDB::kHogDb, false)
   {}
 
   static AddressAuthData preset_deployer_auth_data()

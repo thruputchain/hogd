@@ -11,17 +11,17 @@ add_library(
 )
 target_link_libraries(
   hog_devnode
-  auth
+  hog_auth
   base
   contract_loader
   crypto
-  event
+  hog_event
   exec_interface
   genesis
   hogd
-  hogdb
-  indexer
-  mempool
+  hog_db
+  hog_indexer
+  hog_mempool
   protocol
   ramdb
   runtime

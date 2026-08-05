@@ -34,7 +34,7 @@
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/hogexec/shared.h"
+#include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "types.hh"
 
@@ -123,7 +123,7 @@ hog_devnode_init(std::string listen_host,
                  std::size_t ramdb_bytes)
 {
   install_signal_handler();
-  // Block SIGTERM before spawning any worker threads (init_hogexec_metrics and
+  // Block SIGTERM before spawning any worker threads (init_hog_exec_metrics and
   // the HogDevnodeNode constructor start well over a hundred of them). Threads
   // inherit the signal mask of their creator, so blocking here means SIGTERM is
   // blocked in every worker. A process-directed SIGTERM is then delivered only
@@ -133,7 +133,7 @@ hog_devnode_init(std::string listen_host,
   // itself, so shutdown would hang until the test escalates to SIGKILL.
   ShutdownSignals shutdown_signals = block_shutdown_signal();
 
-  init_hogexec_metrics();
+  init_hog_exec_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
                       bootstrap_config, data_dir, runtime_network_hash,

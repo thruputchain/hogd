@@ -13,13 +13,13 @@
 #include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hogd/auth/auth_server.h"
-#include "hogd/auth/dbauth_client.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
-#include "hogd/hogexec/runtime/event_server_proxy.h"
-#include "hogd/hogexec/runtime/item/database_proxy.h"
-#include "hogd/hogexec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_auth/auth_server.h"
+#include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
@@ -46,15 +46,15 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
   : db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
-      LocalMockDB{.read_port_number_ = hogdb_wrapper_.exec_port()});
+      LocalMockDB{.read_port_number_ = hog_db_wrapper_.exec_port()});
   event_server_proxy_ = std::make_unique<EventServerProxy>(
       x23::HostPort{"localhost", event_exec_server_.start_server(0)},
       *x23::single_bucket_map);
 
   db_sched_client_ = make_srpc_client<DbSched1>(
-      x23::HostPort{"localhost", hogdb_wrapper_.coord_port()}, false);
+      x23::HostPort{"localhost", hog_db_wrapper_.coord_port()}, false);
 
-  x23::HostPort auth_port{"localhost", hogdb_wrapper_.auth_port()};
+  x23::HostPort auth_port{"localhost", hog_db_wrapper_.auth_port()};
   auth_server_ =
       std::make_unique<AuthServer>(make_dbauth_client(auth_port), 16);
   auth_db_server_->max_message_size_ = hogd::kBulkRpcMaxMessageSize;

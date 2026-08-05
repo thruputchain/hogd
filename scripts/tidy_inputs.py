@@ -18,7 +18,7 @@ EE_EXEMPT_RE = re.compile(
     r"|/bench/"
     r"|/loadgen/"
     r"|test_framework"
-    r"|/hogdb/hogdb\.cc$"
+    r"|/hog_db/hog_db\.cc$"
 )
 
 PROXY_SYSTEM_INCLUDE_DIRS = (

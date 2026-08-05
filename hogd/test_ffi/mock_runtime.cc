@@ -1,5 +1,5 @@
 #include "hogd/test_ffi/mock_runtime.h"
-#include "hogd/hogexec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
 #include <memory>
@@ -10,8 +10,8 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"

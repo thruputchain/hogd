@@ -144,7 +144,7 @@ jobs:
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
 
       - name: Build GCC Debug
         run: |
@@ -155,26 +155,26 @@ jobs:
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
 
       - name: Check Linux binaries for unexpected AVX-512
         if: matrix.architecture == 'x86_64'
         run: |
           ./scripts/check-no-unexpected-avx512.sh \
-            build/release/hogd/hogdb/hogdb \
-            build/release/hogd/hogexec/hogexec \
-            build/release/hogd/mempool/mempool_exec \
-            build/release/hogd/auth/auth_exec \
-            build/release/hogd/event/event_exec \
-            build/release/hogd/indexer/indexer_exec \
+            build/release/hogd/hog_db/hog-db \
+            build/release/hogd/hog_exec/hog-exec \
+            build/release/hogd/hog_mempool/hog-mempool \
+            build/release/hogd/hog_auth/hog-auth \
+            build/release/hogd/hog_event/hog-event \
+            build/release/hogd/hog_indexer/hog-indexer \
             build/release/hogd/devnode/hog-devnode \
             build/release/hogd/devnode/hog-hosted-bootstrap \
-            build/debug/hogd/hogdb/hogdb \
-            build/debug/hogd/hogexec/hogexec \
-            build/debug/hogd/mempool/mempool_exec \
-            build/debug/hogd/auth/auth_exec \
-            build/debug/hogd/event/event_exec \
-            build/debug/hogd/indexer/indexer_exec \
+            build/debug/hogd/hog_db/hog-db \
+            build/debug/hogd/hog_exec/hog-exec \
+            build/debug/hogd/hog_mempool/hog-mempool \
+            build/debug/hogd/hog_auth/hog-auth \
+            build/debug/hogd/hog_event/hog-event \
+            build/debug/hogd/hog_indexer/hog-indexer \
             build/debug/hogd/devnode/hog-devnode \
             build/debug/hogd/devnode/hog-hosted-bootstrap
 
@@ -200,7 +200,6 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   hog-devnode-macos-arm64:
-    needs: release
     runs-on: namespace-profile-hogd-arm64-macos
     permissions:
       contents: read

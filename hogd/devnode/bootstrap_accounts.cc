@@ -18,7 +18,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 
@@ -107,8 +107,8 @@ append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
             wallet_contract_hash, nonce);
 
     builder.add_initial_config(wallet_contract, nonce,
-                               wallet_meta::entrypoint<"initialize">(),
-                               wallet_meta::make_calldata<"initialize">(
+                               wallet_meta::entrypoint<u8"initialize">(),
+                               wallet_meta::make_calldata<u8"initialize">(
                                    public_key),
                                static_cast<int128_t>(config.storage_tokens));
     accounts.push_back(BootstrapAccountMetadata{

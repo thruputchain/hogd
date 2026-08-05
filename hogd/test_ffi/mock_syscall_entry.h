@@ -4,8 +4,8 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/syscall_fallback.h"
-#include "hogd/hogexec/runtime/syscall_meta.h"
+#include "hogd/hog_exec/runtime/syscall_fallback.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "syscall.hh"

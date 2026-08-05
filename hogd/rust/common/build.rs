@@ -6,7 +6,7 @@ fn main() {
 
     // Generate Rust bindings from the C header file
     let bindings = bindgen::Builder::default()
-        .header("../../hogexec/runtime/runtime_exports.h")
+        .header("../../hog_exec/runtime/runtime_exports.h")
         .generate()
         .expect("Unable to generate bindings");
 
@@ -16,5 +16,5 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
-    println!("cargo:rerun-if-changed=../../hogexec/runtime/runtime_exports.h");
+    println!("cargo:rerun-if-changed=../../hog_exec/runtime/runtime_exports.h");
 }

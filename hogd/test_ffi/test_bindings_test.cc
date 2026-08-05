@@ -23,9 +23,9 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/wasm/test_load_wasm.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
@@ -3357,7 +3357,7 @@ append_name_custom_section(auto &wasm, uint32_t custom_bytes)
 
 } // namespace
 
-// Since #2569 hogdb chunks large code rows across multiple RAMDB items, so an
+// Since #2569 hog_db chunks large code rows across multiple RAMDB items, so an
 // honest verifier-accepted contract whose serialized bytes exceed RAMDB's
 // single-item limit now stores successfully through the setup path.  This
 // supersedes the #2462 regression concern (the write no longer fails; the
@@ -3905,7 +3905,7 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
   DbConflictResult conflict;
   x23::deserialize(&conflict, x23::BufView{c2.serialized_conflict.data,
                                            c2.serialized_conflict.len});
-  // Proposal mode: hogdb selects All in debug builds, First in release
+  // Proposal mode: hog_db selects All in debug builds, First in release
   // builds.
   if constexpr (is_debug_build()) {
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticAll);
@@ -3918,7 +3918,7 @@ TEST(TestBindingsTest, TryCommitSurfacesReplayConflictDiagnostic)
     ASSERT_TRUE(found_replay);
   }
   else {
-    // First mode reports whichever conflicting delta hogdb hit first, which
+    // First mode reports whichever conflicting delta hog_db hit first, which
     // is not deterministic when the batch can conflict more than once, so
     // don't assert a specific code.
     ASSERT_EQ(conflict.level(), DbDiagnosticLevel::kDbDiagnosticFirst);

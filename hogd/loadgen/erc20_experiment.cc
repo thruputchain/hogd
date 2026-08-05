@@ -18,7 +18,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/loadgen/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
@@ -111,8 +111,8 @@ ERC20ExperimentState::generate_experiment()
       kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(erc20_contract, make_nonce(0),
-                             erc20_meta::entrypoint<"initialize">(),
-                             erc20_meta::make_calldata<"initialize">(
+                             erc20_meta::entrypoint<u8"initialize">(),
+                             erc20_meta::make_calldata<u8"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
                              wallet_initial_hogs);
@@ -126,8 +126,8 @@ ERC20ExperimentState::generate_experiment()
     // in the future, with whatever initialization procedures we use, but it
     // works for now.
     builder.add_initial_config(wallet_contract, wallet.initial_nonce,
-                               wallet_meta::entrypoint<"initialize">(),
-                               wallet_meta::make_calldata<"initialize">(
+                               wallet_meta::entrypoint<u8"initialize">(),
+                               wallet_meta::make_calldata<u8"initialize">(
                                    wallet.public_key),
                                wallet_initial_hogs);
   }
@@ -143,14 +143,14 @@ ERC20ExperimentState::generate_experiment()
 
     // has to match the deserialized objects in simple_wallet::do_action
     Calldata internal_calldata =
-        x23::serialize(erc20_address_, erc20_meta::entrypoint<"mint">(),
+        x23::serialize(erc20_address_, erc20_meta::entrypoint<u8"mint">(),
                        GasAmount{1'000'000},
-                       erc20_meta::make_calldata<"mint">(wallets_[i].address,
-                                                         make_amount(uint128_t{
-                                                             1'000'000'000})));
+                       erc20_meta::make_calldata<u8"mint">(
+                           wallets_[i].address,
+                           make_amount(uint128_t{1'000'000'000})));
 
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    auto calldata = wallet_meta::make_calldata<"do_action">(
+    auto calldata = wallet_meta::make_calldata<u8"do_action">(
         ed25519_sign(wallets_[0].secret_key, internal_calldata).value(),
         internal_calldata);
     // NOLINTEND(bugprone-unchecked-optional-access)
@@ -161,7 +161,7 @@ ERC20ExperimentState::generate_experiment()
                 .invocation =
                     Invocation{
                         .invoked_address = owner_address,
-                        .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                        .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                         .gas_limit = work_gas_limit(),
                         .calldata = std::move(calldata),
                     },
@@ -253,22 +253,22 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
 
             // has to match the deserialized objects in simple_wallet::do_action
             static auto entrypoint_transfer =
-                erc20_meta::entrypoint<"transfer">();
+                erc20_meta::entrypoint<u8"transfer">();
             Calldata internal_calldata =
                 x23::serialize(erc20_address_, entrypoint_transfer,
                                GasAmount{1'000'000},
-                               erc20_meta::make_calldata<"transfer">(
+                               erc20_meta::make_calldata<u8"transfer">(
                                    wallets_[receiver].address,
                                    make_amount(amount)));
 
             static auto entrypoint_do_action =
-                wallet_meta::entrypoint<"do_action">();
+                wallet_meta::entrypoint<u8"do_action">();
             // NOLINTBEGIN(bugprone-unchecked-optional-access)
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
                 .gas_limit = work_gas_limit(),
-                .calldata = wallet_meta::make_calldata<"do_action">(
+                .calldata = wallet_meta::make_calldata<u8"do_action">(
                     ed25519_sign(wallets_[sender].secret_key, internal_calldata)
                         .value(),
                     internal_calldata),

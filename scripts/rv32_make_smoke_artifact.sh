@@ -9,7 +9,7 @@
 set -eu
 
 # Bump this together with docs/rv32/rv32-author-toolchain.md.
-LOWERER_VERSION="0.5.12"
+LOWERER_VERSION="0.6.2"
 EXPECTED_VERSION="rv32-lower ${LOWERER_VERSION}"
 INSTALL_HINT="CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ cargo install --registry groundhog groundhog-rv32-lower@${LOWERER_VERSION}"
 

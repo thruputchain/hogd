@@ -26,7 +26,7 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_hex.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "types.hh"
@@ -184,11 +184,11 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
         w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
         w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
         w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
       });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
