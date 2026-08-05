@@ -102,6 +102,33 @@ cp ${BUILD_DIR}/hogd/hog_mempool/hog-mempool ${PKG_DIR}/hog-mempool
 cp ${BUILD_DIR}/hogd/hog_auth/hog-auth ${PKG_DIR}/hog-auth
 cp ${BUILD_DIR}/hogd/loadgen/loadgen_server ${PKG_DIR}/loadgen_server
 
+echo "validating packaged executable help"
+set +x
+for executable in "${PKG_DIR}"/*; do
+  if [[ ! -f "${executable}" || ! -x "${executable}" ]]; then
+    continue
+  fi
+  for help_flag in --help -h; do
+    if ! expected_help=$("${executable}" "${help_flag}" 2>&1); then
+      echo "${executable} ${help_flag} failed" >&2
+      exit 1
+    fi
+    if [[ -z "${expected_help}" ]]; then
+      echo "${executable} ${help_flag} produced no help output" >&2
+      exit 1
+    fi
+    if ! mixed_help=$("${executable}" --invalid "${help_flag}" 2>&1); then
+      echo "${executable} did not prioritize ${help_flag}" >&2
+      exit 1
+    fi
+    if [[ "${mixed_help}" != "${expected_help}" ]]; then
+      echo "${executable} displayed non-help output with ${help_flag}" >&2
+      exit 1
+    fi
+  done
+done
+set -x
+
 # compute package name
 
 cd ${SCRIPT_DIR}

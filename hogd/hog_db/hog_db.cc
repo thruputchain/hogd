@@ -214,15 +214,21 @@ hog_db_init(std::string_view path, size_t ram_bytes,
 
 namespace {
 
-[[noreturn]] void
-usage(char *argv[])
+void
+print_usage(char *argv[])
 {
   std::println("usage: {} --db-path <path> --ram-bytes <bytes> "
                "--bind-ip <ip> [--coordinator-addr <host:port>] "
                "[--executor-port <port>] [--mempool-port <port>] "
                "[--auth-port <port>] [--gateway-port <port>] "
-               "[--metrics-port <port>] [--version]",
+               "[--metrics-port <port>] [-h|--help] [--version]",
                argv[0]);
+}
+
+[[noreturn]] void
+usage(char *argv[])
+{
+  print_usage(argv);
   exit(EXIT_FAILURE);
 }
 
@@ -231,6 +237,10 @@ usage(char *argv[])
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (hogd::help_requested(argc, argv)) {
+    print_usage(argv);
+    return EXIT_SUCCESS;
+  }
   if (hogd::print_version_and_exit_if_requested(argc, argv)) {
     return EXIT_SUCCESS;
   }

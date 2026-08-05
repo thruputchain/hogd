@@ -112,16 +112,22 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
 
 namespace {
 
-[[noreturn]] void
-usage(char *argv[])
+void
+print_usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
                "[--nthreads <nthreads>] [--mempool-port <port>] "
                "[--metrics-port <port>] "
                "[--db-executor-addr <host:port> "
                "--event-executor-addr <host:port> "
-               "--view-gateway-port <port>] [--version]",
+               "--view-gateway-port <port>] [-h|--help] [--version]",
                argv[0]);
+}
+
+[[noreturn]] void
+usage(char *argv[])
+{
+  print_usage(argv);
   exit(EXIT_FAILURE);
 }
 
@@ -141,6 +147,10 @@ parse_nthreads(char *argv[], const std::string &value)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (hogd::help_requested(argc, argv)) {
+    print_usage(argv);
+    return EXIT_SUCCESS;
+  }
   if (hogd::print_version_and_exit_if_requested(argc, argv)) {
     return EXIT_SUCCESS;
   }
