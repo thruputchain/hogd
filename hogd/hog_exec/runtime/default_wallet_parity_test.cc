@@ -122,10 +122,10 @@ protected:
     wasm_preimage_ = make_preimage(2);
     // .value() throws on the (unreachable) empty case: pubkey_auth_address
     // only fails if the preimage cannot be serialized.
-    native_wallet_ = pubkey_auth_address(native_preimage_)
-                         .value(); // NOLINT(bugprone-unchecked-optional-access)
-    wasm_wallet_ = pubkey_auth_address(wasm_preimage_)
-                       .value(); // NOLINT(bugprone-unchecked-optional-access)
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    native_wallet_ = pubkey_auth_address(native_preimage_).value();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    wasm_wallet_ = pubkey_auth_address(wasm_preimage_).value();
 
     auto native_obj = make_native_contract(kNativeWalletId);
     write_contract(native_obj);
