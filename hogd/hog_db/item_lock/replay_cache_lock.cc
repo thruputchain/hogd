@@ -246,6 +246,16 @@ ReplayCacheLock::try_atomic_change_lock(
 
   auto addition_key = UniquifierHelper::to_uint128(addition);
 
+  // conflicts_ reserves two uint128_t sentinels (kEmpty and kTombstone) that
+  // cannot be stored. A uniquifier that packs to one of them -- e.g. the
+  // all-zero {expiry=0, nonce=0} reachable at executing height 0 -- is invalid
+  // replay input; reject it as a replay conflict rather than passing the
+  // reserved value to ConcurrentSet, which would panic.
+  if (addition_key == ReplayConflictSetTraits::kEmpty ||
+      addition_key == ReplayConflictSetTraits::kTombstone) {
+    return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
+  }
+
   // Check if this nonce already exists in the base data for this height.
   auto r = get_base(ctx, addition.block_expiry_height);
   if (!r) {

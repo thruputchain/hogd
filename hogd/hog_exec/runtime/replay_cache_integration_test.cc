@@ -172,6 +172,32 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejected)
             ExecResult::ExecResultTxValidationFailure);
 }
 
+// Future-proofing for #3188: the two uniquifiers that pack to a reserved
+// ConcurrentSet sentinel -- all-zero {expiry=0, nonce=0} (kEmpty) and all-ones
+// {expiry=-1, nonce=UINT64_MAX} (kTombstone) -- are wire-supplied inputs. At
+// any user-reachable executing height they are caught by the expiry check
+// (block_expiry_height < executing height) before the replay-cache reservation,
+// so they are rejected end to end as ExecResultTxValidationFailure and never
+// reach the sentinel path. This locks that rejection in even if the packing or
+// expiry logic changes later; the reservation-side guard for the height-0
+// boundary is covered by ReplayCacheLockTest.ReservedSentinelUniquifier*.
+TEST_F(ReplayCacheIntegrationTest,
+       ReservedSentinelUniquifiersRejectedOverTheWire)
+{
+  // Advance so any expiry <= 0 is strictly in the past regardless of the
+  // initial executing height.
+  advance_block();
+  advance_block();
+
+  // All-zero uniquifier packs to kEmpty.
+  EXPECT_EQ(run_and_commit(make_tx(0, /*nonce=*/0, /*expiry=*/0)),
+            ExecResult::ExecResultTxValidationFailure);
+
+  // All-ones uniquifier packs to kTombstone.
+  EXPECT_EQ(run_and_commit(make_tx(0, /*nonce=*/UINT64_MAX, /*expiry=*/-1)),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
 // An expired uniquifier is rejected during initial validation, before the root
 // contract body can run (#2568). Previously the body executed and the tx was
 // only rejected by the late replay-cache reservation. (Proposal mode.)
