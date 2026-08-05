@@ -31,6 +31,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -40,40 +41,35 @@ namespace {
 using default_wallet::WalletCall;
 using default_wallet::WalletError;
 
-// Selector for WalletError exceptions; must match the generated
-// export_types in built_contracts/default_wallet.h.
-constexpr uint64_t kWalletErrorSelector = 0x931d3297d37d1bdfULL;
-using WalletException = ContractException<WalletError, kWalletErrorSelector>;
+// Result types (and the WalletError exception selector inside them) come
+// straight from the generated trait in built_contracts/default_wallet.h.
+using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
+using execute_result_t = wallet_meta::return_t<u8"execute">;
+using deploy_result_t = wallet_meta::return_t<u8"deploy">;
 
-// Mirror the trait's generated types exactly (the builder static_asserts
-// the lambda signatures against export_types, so a drift fails to compile).
-using wallet_bytes_t = x23::Vec<uint8_t, 4294967295>;
-using wallet_bytes_vec_t = x23::Vec<wallet_bytes_t, 4294967295>;
-using execute_result_t = Result<wallet_bytes_vec_t, WalletException>;
-using deploy_result_t = Result<ContractAddress, WalletException>;
+template<typename> struct result_exception;
+template<typename T, typename E> struct result_exception<Result<T, E>> {
+  using type = E;
+};
+using WalletException = result_exception<execute_result_t>::type;
+
+using wallet_bytes_vec_t = execute_result_t::ok_type;
+using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 
 // Reference constants (implementation.rs).
 constexpr size_t kMaxCalls = 16;
 constexpr size_t kMaxReturnDataBytes = kMaxReturnBufferLen; // 1024
 
-// Reference cxs_u32_len: the CXS length-prefix width for a u32 value.
-// None (nullopt) mirrors the Rust u32::try_from failure.
+// Reference cxs_u32_len: the CXS length-prefix width for a u32 value. The
+// width itself comes from the encoder (x23::cxs_size); nullopt mirrors the
+// Rust u32::try_from failure.
 std::optional<size_t>
 cxs_u32_len(size_t value)
 {
   if (value > UINT32_MAX) {
     return std::nullopt;
   }
-  if (value <= 62) {
-    return 1;
-  }
-  if (value <= 255) {
-    return 2;
-  }
-  if (value <= 65535) {
-    return 3;
-  }
-  return 5;
+  return x23::cxs_size(static_cast<uint32_t>(value));
 }
 
 std::optional<size_t>
