@@ -35,6 +35,60 @@ public:
     }
     return count;
   }
+
+  // Add a second level to the set without inserting any real elements.
+  static void publish_second_level(ConcurrentSet<uint128_t> &s)
+  {
+    constexpr size_t kInsertsUntilResize = kInitialCapacity * kResizeLoadFactor;
+    s.inserts_.store(kInsertsUntilResize, std::memory_order_relaxed);
+    s.try_resize();
+    s.inserts_.store(0, std::memory_order_relaxed);
+    s.erases_.store(0, std::memory_order_relaxed);
+  }
+
+  // Index of the first empty slot in `value`'s probe sequence at `level`.
+  static size_t first_probe_index(ConcurrentSet<uint128_t> &s, uint128_t value,
+                                  size_t level)
+  {
+    const size_t hash = ConcurrentSet<uint128_t>::Traits::hash(value);
+    const size_t level_capacity =
+        ConcurrentSet<uint128_t>::entries_for_level(level);
+    for (size_t i = 0; i < level_capacity; ++i) {
+      size_t index = (hash + i) & (level_capacity - 1);
+      if (s.get_level(level)[index].load(std::memory_order_acquire) == kEmpty) {
+        return index;
+      }
+    }
+    ADD_FAILURE() << "no empty slot found at level " << level;
+    return 0;
+  }
+
+  // Directly CAS an empty slot to `value`, mimicking a raw insert into a
+  // specific level (used to construct a cross-level duplicate).
+  static void insert_into_level(ConcurrentSet<uint128_t> &s, uint128_t value,
+                                size_t level, size_t index)
+  {
+    uint128_t expected = kEmpty;
+    ASSERT_TRUE(s.get_level(level)[index].compare_exchange_strong(
+        expected, value, std::memory_order_release, std::memory_order_relaxed));
+    s.inserts_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  // Number of live (non-tombstone) copies of `value` across all levels.
+  static size_t count_value(ConcurrentSet<uint128_t> &s, uint128_t value)
+  {
+    size_t count = 0;
+    for (size_t level = 0; level < s.levels(); ++level) {
+      const size_t level_capacity =
+          ConcurrentSet<uint128_t>::entries_for_level(level);
+      for (size_t i = 0; i < level_capacity; ++i) {
+        if (s.get_level(level)[i].load(std::memory_order_acquire) == value) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  }
 };
 
 TEST(ConcurrentSet, Basic)
@@ -316,6 +370,40 @@ TEST(ConcurrentSet, ParallelInsertSameKeys)
     ASSERT_FALSE(s.contains(j))
         << "key " << j << " still present after erase (duplicate existed)";
   }
+}
+
+// A value can transiently exist in two levels at once (a stale copy in an
+// older level plus the authoritative copy in a newer level) while try_insert
+// is undoing a slot it published just before a resize. erase() must remove
+// every copy: if it stopped at the first (older-level) match it would report
+// success while the deeper copy stayed live, which for the replay-cache set
+// would leave an aborted reservation serialized into consensus state.
+TEST(ConcurrentSet, EraseRemovesCrossLevelDuplicate)
+{
+  ConcurrentSet<uint128_t> s;
+  const uint128_t value = (uint128_t{10} << 64) | uint128_t{12345};
+
+  ConcurrentSetHelper::publish_second_level(s);
+  ASSERT_EQ(2, ConcurrentSetHelper::levels(s));
+
+  // Authoritative copy in the newer level, stale copy in the older level.
+  const size_t new_level_index =
+      ConcurrentSetHelper::first_probe_index(s, value, 1);
+  ConcurrentSetHelper::insert_into_level(s, value, 1, new_level_index);
+  const size_t old_level_index =
+      ConcurrentSetHelper::first_probe_index(s, value, 0);
+  ConcurrentSetHelper::insert_into_level(s, value, 0, old_level_index);
+  ASSERT_EQ(2, ConcurrentSetHelper::count_value(s, value));
+
+  // A single erase must clear the value entirely, both copies included.
+  ASSERT_TRUE(s.erase(value));
+  EXPECT_EQ(0, ConcurrentSetHelper::count_value(s, value));
+  EXPECT_FALSE(s.contains(value));
+  EXPECT_EQ(0, s.size());
+
+  // The value can be inserted again and is not seen as a lingering duplicate.
+  EXPECT_TRUE(s.try_insert(value));
+  EXPECT_TRUE(s.contains(value));
 }
 
 } // namespace hogd

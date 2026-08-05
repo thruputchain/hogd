@@ -268,6 +268,16 @@ private:
 
     size_t hash = Traits::hash(value);
 
+    // A transient duplicate of `value` can exist across levels: try_insert may
+    // CAS the value into an older level just as a concurrently published deeper
+    // level appears, then undo that stale copy. If an erase runs during that
+    // window, `erase()` (scanning old-to-new) can tombstone the stale older
+    // copy while the authoritative deeper copy survives, so `erase()` would
+    // report success even though the value is still live. To keep erase
+    // linearizable we do not stop at the first match: we scan every level and
+    // tombstone every copy of the value.
+    bool erased_any = false;
+
     size_t level = -1;
     while (true) {
     outer:
@@ -280,30 +290,33 @@ private:
 
         T v = l[index].load(std::memory_order_acquire);
         if (v == value) {
-          bool r = true;
-          if (erase) {
-            // This is subtle. Note here the only overwrites allowed on an entry
-            // are for ones that are non-empty and non-tombstone. Hence, if we
-            // see CAS failure, it must be because another thread erased the
-            // entry, so there is no need to retry.
-            r = l[index].compare_exchange_strong(v, Traits::kTombstone,
-                                                 std::memory_order_release,
-                                                 std::memory_order_relaxed);
-            if (r) {
-              erases_.fetch_add(1, std::memory_order_relaxed);
-            }
+          if (!erase) {
+            return true;
           }
-          return r;
+          // Note here the only overwrites allowed on an entry are for ones that
+          // are non-empty and non-tombstone. Hence, if we see CAS failure, it
+          // must be because another thread erased the entry, so there is no
+          // need to retry this slot. Keep scanning deeper levels in case a
+          // duplicate copy is present there.
+          if (l[index].compare_exchange_strong(v, Traits::kTombstone,
+                                               std::memory_order_release,
+                                               std::memory_order_relaxed)) {
+            erases_.fetch_add(1, std::memory_order_relaxed);
+            erased_any = true;
+          }
+          continue;
         }
         if (v != Traits::kEmpty) {
           continue;
         }
 
+        // Empty slot ends this level's probe sequence. Move to the next level
+        // if one exists, since a (duplicate) copy may live there.
         if (level < levels() - 1) {
           goto outer;
         }
 
-        return false;
+        return erased_any;
       }
 
       // in case a level was added since we started looking for a value in the
@@ -312,7 +325,7 @@ private:
         goto outer;
       }
 
-      return false;
+      return erased_any;
     }
 
     // Shouldn't happen: the hash table should always resize before there
