@@ -60,33 +60,6 @@ using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 constexpr size_t kMaxCalls = 16;
 constexpr size_t kMaxReturnDataBytes = kMaxReturnBufferLen; // 1024
 
-// Reference cxs_u32_len: the CXS length-prefix width for a u32 value. The
-// width itself comes from the encoder (x23::cxs_size); nullopt mirrors the
-// Rust u32::try_from failure.
-std::optional<size_t>
-cxs_u32_len(size_t value)
-{
-  if (value > UINT32_MAX) {
-    return std::nullopt;
-  }
-  return x23::cxs_size(static_cast<uint32_t>(value));
-}
-
-std::optional<size_t>
-encoded_return_item_len(size_t return_data_len)
-{
-  auto prefix = cxs_u32_len(return_data_len);
-  if (!prefix) {
-    return std::nullopt;
-  }
-  // Cannot overflow size_t at these magnitudes, but mirror the reference's
-  // checked_add anyway.
-  if (*prefix > SIZE_MAX - return_data_len) {
-    return std::nullopt;
-  }
-  return *prefix + return_data_len;
-}
-
 // Mirrors require_root_invocation(): GetMsgSender must fail with exactly
 // IsRootTransaction. Returns whether this is a root invocation; host-level
 // errors propagate.
@@ -184,13 +157,14 @@ make_native_default_wallet_contract()
               WalletException{WalletError::TooManyCalls});
         }
 
+        // Running CXS size of the eventual Vec<WalletBytes> return: the
+        // outer length prefix now, each item's prefix + bytes as it lands.
+        // All operands are bounded (<= 16 calls, <= 1024-byte returns), so
+        // the reference's u32/checked_add overflow guards are unreachable
+        // here and elided.
         wallet_bytes_vec_t returns;
-        auto total_len = cxs_u32_len(calls.size());
-        if (!total_len) {
-          return execute_result_t::make_err(
-              WalletException{WalletError::ReturnDataTooLarge});
-        }
-        size_t encoded_return_data_len = *total_len;
+        size_t encoded_return_data_len =
+            x23::cxs_size(static_cast<uint32_t>(calls.size()));
 
         for (auto const &call : calls) {
           CopyableInvokeInputs inputs{
@@ -241,12 +215,9 @@ make_native_default_wallet_contract()
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto item_len = encoded_return_item_len(return_buf.size());
-          if (!item_len || *item_len > SIZE_MAX - encoded_return_data_len) {
-            return execute_result_t::make_err(
-                WalletException{WalletError::ReturnDataTooLarge});
-          }
-          encoded_return_data_len += *item_len;
+          encoded_return_data_len +=
+              x23::cxs_size(static_cast<uint32_t>(return_buf.size())) +
+              return_buf.size();
           if (encoded_return_data_len > kMaxReturnDataBytes) {
             return execute_result_t::make_err(
                 WalletException{WalletError::ReturnDataTooLarge});
