@@ -4,6 +4,7 @@
 #include <future>
 #include <print>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "auth_card.hh"
@@ -107,13 +108,19 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 
 namespace {
 
-[[noreturn]] void
-usage(char *argv[])
+void
+print_usage(char *argv[])
 {
   std::println("usage: {} --mempool-addr <host:port> --bind-ip <ip> "
                "[--db-port <port>] [--mempool-port <port>] "
-               "[--metrics-port <port>] [--version]",
+               "[--metrics-port <port>] [-h|--help] [--version]",
                argv[0]);
+}
+
+[[noreturn]] void
+usage(char *argv[])
+{
+  print_usage(argv);
   exit(EXIT_FAILURE);
 }
 
@@ -122,6 +129,11 @@ usage(char *argv[])
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (argc == 2 && (std::string_view(argv[1]) == "--help" ||
+                    std::string_view(argv[1]) == "-h")) {
+    print_usage(argv);
+    return EXIT_SUCCESS;
+  }
   if (hogd::print_version_and_exit_if_requested(argc, argv)) {
     return EXIT_SUCCESS;
   }

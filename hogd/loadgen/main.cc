@@ -4,6 +4,7 @@
 #include <future>
 #include <print>
 #include <string>
+#include <string_view>
 
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
@@ -22,7 +23,7 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
 {
   std::println(stderr,
                "Usage: {} --bind-ip <ip> [--port <port>] "
-               "[--metrics-port <port>] [--help]",
+               "[--metrics-port <port>] [-h|--help] [--version]",
                progname);
   std::println(stderr, "Options:");
   std::println(stderr, "  --bind-ip <ip>  IP address to bind metrics on");
@@ -31,7 +32,8 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
                kDefaultLoadgenPort);
   std::println(stderr, "  --metrics-port <port>  Health/metrics HTTP port "
                        "(default: 0)");
-  std::println(stderr, "  --help         Show this help message");
+  std::println(stderr, "  -h, --help     Show this help message");
+  std::println(stderr, "  --version      Show version information");
   exit(exit_code);
 }
 
@@ -51,6 +53,14 @@ parse_port(const std::string &value)
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
+  if (argc == 2 && (std::string_view(argv[1]) == "--help" ||
+                    std::string_view(argv[1]) == "-h")) {
+    usage(argv[0], EXIT_SUCCESS);
+  }
+  if (hogd::print_version_and_exit_if_requested(argc, argv)) {
+    return EXIT_SUCCESS;
+  }
+
   // Initialize hogd
   auto ret = hogd::hogd_init(argc, argv);
   if (ret) {
@@ -65,7 +75,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   // Parse command line arguments
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--help") {
+    if (arg == "--help" || arg == "-h") {
       usage(progname, EXIT_SUCCESS);
     }
     if (arg == "--bind-ip" && i + 1 < argc) {

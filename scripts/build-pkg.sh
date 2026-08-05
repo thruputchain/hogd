@@ -102,6 +102,15 @@ cp ${BUILD_DIR}/hogd/hog_mempool/hog-mempool ${PKG_DIR}/hog-mempool
 cp ${BUILD_DIR}/hogd/hog_auth/hog-auth ${PKG_DIR}/hog-auth
 cp ${BUILD_DIR}/hogd/loadgen/loadgen_server ${PKG_DIR}/loadgen_server
 
+echo "validating packaged executable help"
+for executable in "${PKG_DIR}"/*; do
+  if [[ ! -f "${executable}" || ! -x "${executable}" ]]; then
+    continue
+  fi
+  "${executable}" --help >/dev/null 2>&1
+  "${executable}" -h >/dev/null 2>&1
+done
+
 # compute package name
 
 cd ${SCRIPT_DIR}
