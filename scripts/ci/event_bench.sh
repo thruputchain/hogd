@@ -40,7 +40,7 @@ ci_wait_port hog11 $EVENT_EXECUTOR_PORT
 ci_wait_port hog11 $EVENT_MEMPOOL_PORT
 
 echo 'run event server benchmark'
-./$BUILD_DIR/hogd/hog_event/event_server_bench -e "$(hog_ip hog11)":$EVENT_EXECUTOR_PORT -s "$(hog_ip hog11)":$EVENT_MEMPOOL_PORT -n 1000000 -c 40 -o 100 >event_server_bench_log
+./$BUILD_DIR/hogd/hog_event/hog_event_server_bench -e "$(hog_ip hog11)":$EVENT_EXECUTOR_PORT -s "$(hog_ip hog11)":$EVENT_MEMPOOL_PORT -n 1000000 -c 40 -o 100 >event_server_bench_log
 
 echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh
