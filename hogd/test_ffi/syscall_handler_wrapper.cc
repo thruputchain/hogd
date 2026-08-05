@@ -378,9 +378,10 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // start_mock_invocation_frame() pushes one slot per mock frame, so this stack
   // is in lockstep with the frames the harness still owes a finish (the same
-  // frames mock_runtime_stack_ tracks, already checked non-empty above). Popping
-  // exactly one slot here restores the trace this frame stashed — never an
-  // ancestor's (#2948). The empty check stays as defensive belt-and-suspenders.
+  // frames mock_runtime_stack_ tracks, already checked non-empty above).
+  // Popping exactly one slot here restores the trace this frame stashed — never
+  // an ancestor's (#2948). The empty check stays as defensive
+  // belt-and-suspenders.
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (!invocation_frame_trace_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_stack_.back());

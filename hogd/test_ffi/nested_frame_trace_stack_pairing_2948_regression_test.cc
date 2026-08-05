@@ -58,8 +58,9 @@ make_invocation(ContractAddress address, uint64_t method, GasAmount gas_limit)
 ForeignTracedInvokeResult
 finish_frame_ok(void *handler)
 {
-  auto finish = finish_mock_invocation_frame(
-      handler, std::to_underlying(InvokeErrorCode::None));
+  auto finish =
+      finish_mock_invocation_frame(handler,
+                                   std::to_underlying(InvokeErrorCode::None));
   EXPECT_EQ(finish.ffi_error_code, kTestFFIErrorCodeNone);
   return finish;
 }
