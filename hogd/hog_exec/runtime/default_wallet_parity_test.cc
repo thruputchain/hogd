@@ -66,7 +66,7 @@ public:
   DefaultWalletParityTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB)
+          TestDB::kHogDb)
   {}
 
 protected:
@@ -103,7 +103,7 @@ protected:
       native_map.emplace(id, std::move(c));
     }
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
+    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
     ctx_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kWasmi, {wasm_ctx.release(), true}},
