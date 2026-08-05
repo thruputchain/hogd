@@ -38,7 +38,7 @@ runs:
         ./scripts/wait-port.sh hog11 ${{ env.EVENT_MEMPOOL_PORT }}
       shell: bash
     - name: run event server benchmark
-      run: ./${{ inputs.build-dir }}/hogd/hog_event/event_server_bench -e hog11:${{ env.EVENT_EXECUTOR_PORT }} -s hog11:${{ env.EVENT_MEMPOOL_PORT }} -n 1000000 -c 40 -o 100 > event_server_bench_log
+      run: ./${{ inputs.build-dir }}/hogd/hog_event/hog_event_server_bench -e hog11:${{ env.EVENT_EXECUTOR_PORT }} -s hog11:${{ env.EVENT_MEMPOOL_PORT }} -n 1000000 -c 40 -o 100 > event_server_bench_log
       shell: bash
     - name: clone metrics history # This is idempotent
       run: ./scripts/clone_metrics_history.sh
