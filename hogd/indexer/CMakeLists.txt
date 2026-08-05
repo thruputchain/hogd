@@ -2,7 +2,7 @@ add_library(indexer STATIC
     db.cc
     event_cursor.cc
     key_format.cc
-    registration_controller.cc
+    pull_controller.cc
     status.cc
     topic_layout.cc
 )
@@ -21,7 +21,7 @@ add_executable(indexer_test
     db_test.cc
     event_cursor_test.cc
     key_format_test.cc
-    registration_controller_test.cc
+    pull_controller_test.cc
     strict_ingest_test.cc
     topic_layout_test.cc
 )

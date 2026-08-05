@@ -2057,6 +2057,12 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
+    AddressTransactionQuery startup_query{};
+    startup_query.order = IterationOrder::IterationOrderAscending;
+    startup_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    EXPECT_EQ(reader.get_transactions_by_address(startup_query)().latest_block,
+              1);
+
     auto fibonacci_contract = load_contract("fibonacci.wasm");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
@@ -2115,7 +2121,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, Slice3bMultiHeightIndexerGapReplaysThroughStrictIndexerRpc)
+TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2168,7 +2174,7 @@ TEST(HogDevnode, Slice3bMultiHeightIndexerGapReplaysThroughStrictIndexerRpc)
             "--dev-account-tokens",
             "1000000000",
         },
-        {{"HOG_DEVNODE_TEST_WITHHOLD_INDEXER_REGISTRATION", "1"}});
+        {{"HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL", "1"}});
     Readiness readiness = process.wait_for_readiness();
     ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
     EXPECT_EQ(readiness.chain_state, "fresh");
@@ -2493,7 +2499,7 @@ TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
       "chain tip 1");
 }
 
-TEST(HogDevnode, DataDirAcceptsOutboxOneAheadWithoutReplayingIt)
+TEST(HogDevnode, DataDirPullDoesNotReplayOutboxOneAheadOfHogDb)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });

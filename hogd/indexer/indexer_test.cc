@@ -15,9 +15,9 @@
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
-#include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
 #include "hogd/init.h"
+#include "hogd/metrics/health.h"
 #include "indexer.hh"
 #include "pagination.hh"
 #include "transaction.hh"
@@ -29,7 +29,6 @@ namespace hogd {
 class IndexerTest : public ::testing::Test {
 public:
   IndexDB &db() { return *db_; }
-  IndexerEventRpc &event() { return *event_; }
   IndexerBlockExplorerRpc &block_explorer() { return *block_explorer_; }
   RecentTxFailureCache &failure_cache() { return failure_cache_; }
 
@@ -62,14 +61,12 @@ protected:
     }
     CHECK(db_->is_open());
 
-    event_ = std::make_unique<IndexerEventRpc>(*db_, failure_cache_);
     block_explorer_ =
         std::make_unique<IndexerBlockExplorerRpc>(*db_, failure_cache_);
   }
 
   TmpDir tmp_dir_;
   std::unique_ptr<IndexDB> db_;
-  std::unique_ptr<IndexerEventRpc> event_;
   std::unique_ptr<IndexerBlockExplorerRpc> block_explorer_;
   RecentTxFailureCache failure_cache_;
 };
@@ -497,7 +494,7 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
   const SignedTransactionHash tx_hash = events[0].proposed_tx_hash;
 
   // Report a failure for a tx with no committed record.
-  event_->indexer_event_report_tx_failure(tx_hash, make_failure_diag(100))();
+  failure_cache_.report(tx_hash, make_failure_diag(100), db_->latest_block());
 
   TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoRecentFailure);
@@ -516,8 +513,8 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
 {
   SignedTransactionHash failed_hash;
   std::ranges::fill(failed_hash, 0x7F);
-  event_->indexer_event_report_tx_failure(failed_hash,
-                                          make_failure_diag(100))();
+  failure_cache_.report(failed_hash, make_failure_diag(100),
+                        db_->latest_block());
 
   // Ingest committed blocks 100..105; each ingest prunes against the new
   // watermark. Give each block one distinct committed tx.

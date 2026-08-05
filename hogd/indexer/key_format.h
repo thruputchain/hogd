@@ -60,9 +60,6 @@ public:
       "meta:indexer_durable:block:";
   static constexpr std::string_view kEpochHistoryMetaKeyPrefix =
       "meta:indexer_durable:epoch:";
-  static constexpr const char *kRegistrationLineageMetaKey =
-      "meta:indexer_registration:lineage";
-
   static std::string make_block_identity_meta_key(BlockHeight block_height);
   static std::string
   make_epoch_history_meta_key(const ProtocolCommit &protocol);

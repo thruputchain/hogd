@@ -26,9 +26,9 @@
 #include "hogd/hogexec/interface/executor.h"
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/pull_controller.h"
 #include "hogd/indexer/recent_tx_failure_cache.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
-#include "hogd/indexer/rpc_from_event.h"
 #include "hogd/mempool/rpc_from_auth.h"
 #include "hogd/mempool/rpc_from_coord.h"
 #include "hogd/mempool/rpc_from_db.h"
@@ -103,7 +103,7 @@ private:
   void reconcile_event_outbox_with_recovered_tip();
   void validate_event_outbox_against_recovered_tip() const;
   void reconcile_indexer_with_recovered_tip();
-  void register_indexer_with_event_service();
+  void start_indexer_pull();
   void register_db_with_mempool();
   void register_event_with_mempool();
   void register_auth_with_mempool();
@@ -142,13 +142,10 @@ private:
   // DbTip must not unwind partially constructed RPC/executor lifetimes.
   std::optional<HogDBDAO> opened_db_;
   std::unique_ptr<IndexDB> indexer_db_;
-  // Declaration order matters: the indexer RPC servers below borrow
+  // Declaration order matters: the indexer services below borrow
   // indexer_failure_cache_ by reference, so it must be declared before (and
   // thus outlive) them.
   RecentTxFailureCache indexer_failure_cache_;
-  // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
-  // exposed by the event service.
-  std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
   std::unique_ptr<RpcServer<IndexerBlockExplorerRpc>>
       indexer_block_explorer_server_;
   std::unique_ptr<RPCContext> ctx_;
@@ -162,8 +159,10 @@ private:
 
   EventMempoolServer event_sched_server_;
   EventExecServer event_exec_server_;
-  // EventIndexerServer feeds indexer_event_server_ through the event service.
+  // Declaration order keeps the pull endpoint and its borrowed state alive
+  // until the controller has stopped and joined.
   EventIndexerServer event_indexer_server_;
+  std::unique_ptr<IndexerPullController> indexer_pull_controller_;
 
   Executor executor_;
 

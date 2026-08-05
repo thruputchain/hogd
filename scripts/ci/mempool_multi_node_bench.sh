@@ -57,7 +57,6 @@ export LOADGEN_HTTP_PORT=11223
 export AUTH_DB_PORT=8050
 export AUTH_MEMPOOL_PORT=8051
 export AUTH_HTTP_PORT=8052
-export INDEXER_EVENT_PORT=8060
 export INDEXER_BLOCK_EXPLORER_PORT=8061
 export INDEXER_HTTP_PORT=8062
 export MEMPOOL_COORDINATOR_PORT=8070
@@ -358,7 +357,7 @@ for node in "${NODE_IDS[@]}"; do
     --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
   control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
     "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
-    --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --event-port "$INDEXER_EVENT_PORT" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
+    --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
 done
 
 echo 'launch hogdb and auth'
@@ -479,7 +478,6 @@ for node in "${NODE_IDS[@]}"; do
   "$WAIT_PORT" "$event_ip" "$EVENT_HTTP_PORT"
 
   indexer_ip="$(hog_ip "${INDEXER_HOSTS[$node]}")"
-  "$WAIT_PORT" "$indexer_ip" "$INDEXER_EVENT_PORT"
   "$WAIT_PORT" "$indexer_ip" "$INDEXER_BLOCK_EXPLORER_PORT"
   "$WAIT_PORT" "$indexer_ip" "$INDEXER_HTTP_PORT"
 

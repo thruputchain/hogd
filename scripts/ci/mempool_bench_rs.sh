@@ -39,7 +39,6 @@ export AUTH_DB_PORT=8050
 export AUTH_MEMPOOL_PORT=8051
 export AUTH_HTTP_PORT=8052
 
-export INDEXER_EVENT_PORT=8060
 export INDEXER_BLOCK_EXPLORER_PORT=8061
 export INDEXER_HTTP_PORT=8062
 
@@ -95,7 +94,7 @@ echo 'launch event'
 $CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/event/event_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
 echo 'launch indexer'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/indexer/indexer_exec --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
+$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/indexer/indexer_exec --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
 echo 'launch hogdb'
 $CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT

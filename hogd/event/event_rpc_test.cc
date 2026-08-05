@@ -12,9 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -38,7 +36,6 @@
 #include "hogd/event/rpc_from_indexer.h"
 #include "hogd/event/rpc_from_sched.h"
 #include "hogd/event/status.h"
-#include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/rpc_from_event.h"
 #include "hogd/version.h"
@@ -312,775 +309,241 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
   ASSERT_TRUE(file->close().has_value());
 }
 
-// Minimal IndexerEvent1 fake capturing failure reports and strict committed
-// block applications.
-struct FailureCapturingIndexerRpc {
-  using rpc_service = IndexerEvent1;
-
-  x23::Async<IndexerProgress> indexer_event_get_progress()
-  {
-    co_return progress;
-  }
-
-  x23::Async<IndexerEpochResult>
-  indexer_event_initialize_epoch(const IndexerOutboxOrigin &origin)
-  {
-    IndexerInitializedProgress initialized{
-        .origin = origin,
-        .contiguous_height = origin.first_height - 1,
-        .last_consensus_hash = origin.first_prev_hash,
-        .last_payload_digest = {},
-    };
-    if (progress.state() == IndexerProgressState::IndexerProgressInitialized) {
-      initialized.contiguous_height = progress.initialized().contiguous_height;
-      initialized.last_consensus_hash =
-          progress.initialized().last_consensus_hash;
-      initialized.last_payload_digest =
-          progress.initialized().last_payload_digest;
-    }
-    progress.state(IndexerProgressState::IndexerProgressInitialized);
-    progress.initialized() = initialized;
-    IndexerEpochResult result(IndexerEpochOutcome::IndexerEpochInitialized);
-    result.progress() = initialized;
-    co_return result;
-  }
-
-  x23::Async<IndexerBlockApplyResult>
-  indexer_event_apply_committed_block(const IndexerOutboxOrigin &origin,
-                                      const IndexerCommittedBlock &block)
-  {
-    const BlockHeight block_height =
-        block.payload.consensus_value.proposal_header.block_height;
-    event_batches.emplace_back(block_height, block.payload.event_logs.size());
-    IndexerInitializedProgress initialized{
-        .origin = origin,
-        .contiguous_height = block_height,
-        .last_consensus_hash = block.identity.consensus_hash,
-        .last_payload_digest = block.identity.payload_digest,
-    };
-    progress.state(IndexerProgressState::IndexerProgressInitialized);
-    progress.initialized() = initialized;
-    IndexerBlockApplyResult result(
-        IndexerBlockApplyOutcome::IndexerBlockApplied);
-    result.progress() = initialized;
-    co_return result;
-  }
-
-  x23::Async<void>
-  indexer_event_report_tx_failure(const SignedTransactionHash &tx_hash,
-                                  const TxFailureDiagnostic &diag)
-  {
-    reports.emplace_back(tx_hash, diag);
-    co_return;
-  }
-
-  std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>> reports;
-  std::vector<std::pair<BlockHeight, size_t>> event_batches;
-  IndexerProgress progress{IndexerProgressState::IndexerProgressUninitialized};
-};
-static_assert(is_IndexerEvent1<FailureCapturingIndexerRpc *, x23::Async>);
-
-// IndexerEvent1 fake that only counts received messages, via atomics so the
-// test thread can poll them without racing the RPC reader thread.
-struct CountingIndexerRpc {
-  using rpc_service = IndexerEvent1;
-
-  static x23::Async<IndexerProgress> indexer_event_get_progress()
-  {
-    co_return IndexerProgress(
-        IndexerProgressState::IndexerProgressUninitialized);
-  }
-
-  static x23::Async<IndexerEpochResult>
-  indexer_event_initialize_epoch(const IndexerOutboxOrigin &origin)
-  {
-    IndexerEpochResult result(IndexerEpochOutcome::IndexerEpochInitialized);
-    result.progress() = {
-        .origin = origin,
-        .contiguous_height = origin.first_height - 1,
-        .last_consensus_hash = origin.first_prev_hash,
-        .last_payload_digest = {},
-    };
-    co_return result;
-  }
-
-  x23::Async<IndexerBlockApplyResult>
-  indexer_event_apply_committed_block(const IndexerOutboxOrigin &origin,
-                                      const IndexerCommittedBlock &block)
-  {
-    events.fetch_add(1, std::memory_order_relaxed);
-    IndexerBlockApplyResult result(
-        IndexerBlockApplyOutcome::IndexerBlockApplied);
-    result.progress() = {
-        .origin = origin,
-        .contiguous_height =
-            block.payload.consensus_value.proposal_header.block_height,
-        .last_consensus_hash = block.identity.consensus_hash,
-        .last_payload_digest = block.identity.payload_digest,
-    };
-    co_return result;
-  }
-
-  x23::Async<void>
-  indexer_event_report_tx_failure(const SignedTransactionHash & /*tx_hash*/,
-                                  const TxFailureDiagnostic & /*diag*/)
-  {
-    reports.fetch_add(1, std::memory_order_relaxed);
-    co_return;
-  }
-
-  std::atomic<size_t> events = 0;
-  std::atomic<size_t> reports = 0;
-};
-static_assert(is_IndexerEvent1<CountingIndexerRpc *, x23::Async>);
-
-struct BlockingIndexerRpc : FailureCapturingIndexerRpc {
-  x23::Async<IndexerBlockApplyResult>
-  indexer_event_apply_committed_block(const IndexerOutboxOrigin &origin,
-                                      const IndexerCommittedBlock &block)
-  {
-    if (!apply_started_signaled.exchange(true, std::memory_order_relaxed)) {
-      apply_started.count_down();
-    }
-    release_apply.wait();
-    co_return co_await FailureCapturingIndexerRpc::
-        indexer_event_apply_committed_block(origin, block);
-  }
-
-  std::atomic<bool> apply_started_signaled = false;
-  std::latch apply_started{1};
-  std::latch release_apply{1};
-};
-static_assert(is_IndexerEvent1<BlockingIndexerRpc *, x23::Async>);
-
-struct ForgedEpochProgressIndexerRpc : FailureCapturingIndexerRpc {
-  static x23::Async<IndexerEpochResult>
-  indexer_event_initialize_epoch(const IndexerOutboxOrigin &origin)
-  {
-    IndexerEpochResult result(IndexerEpochOutcome::IndexerEpochInitialized);
-    result.progress() = {
-        .origin = origin,
-        .contiguous_height = origin.first_height + 100,
-        .last_consensus_hash = {},
-        .last_payload_digest = {},
-    };
-    co_return result;
-  }
-};
-static_assert(is_IndexerEvent1<ForgedEpochProgressIndexerRpc *, x23::Async>);
-
-// Reads exactly [n] bytes from [fd]; false on EOF/error.
-bool
-read_exact(int fd, void *buf, size_t n)
+EventIndexerPullRequest
+pull_request(IndexerProgress progress = IndexerProgress(
+                 IndexerProgressState::IndexerProgressUninitialized))
 {
-  auto *p = static_cast<uint8_t *>(buf);
-  size_t got = 0;
-  while (got < n) {
-    ssize_t r = ::read(fd, p + got, n - got);
-    if (r <= 0) {
-      return false;
-    }
-    got += static_cast<size_t>(r);
-  }
-  return true;
+  return {.protocol = version::kHogdProtocol(),
+          .progress = std::move(progress)};
 }
 
-// Drains and counts complete RPC records off [fd] without ever replying, so
-// every relayed report stays pending at the client. Returns (closing [fd])
-// once the socket is shut down or closed.
-void
-count_rpc_records(int fd, std::atomic<size_t> &records_read)
+IndexerProgress
+progress_at(const EventIndexerPulledBlock &pulled)
 {
-  for (;;) {
-    uint8_t hdr[4];
-    if (!read_exact(fd, hdr, sizeof(hdr))) {
-      break;
-    }
-    const uint32_t raw = (static_cast<uint32_t>(hdr[0]) << 24) |
-                         (static_cast<uint32_t>(hdr[1]) << 16) |
-                         (static_cast<uint32_t>(hdr[2]) << 8) |
-                         static_cast<uint32_t>(hdr[3]);
-    const bool last = (raw & 0x80000000U) != 0;
-    const uint32_t len = raw & 0x7fffffffU;
-    uint8_t body[4096];
-    if (len > sizeof(body) || (len != 0 && !read_exact(fd, body, len))) {
-      break;
-    }
-    if (last) {
-      records_read.fetch_add(1, std::memory_order_release);
-    }
+  IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
+  progress.initialized() = {
+      .origin = pulled.origin,
+      .contiguous_height =
+          pulled.block.payload.consensus_value.proposal_header.block_height,
+      .last_consensus_hash = pulled.block.identity.consensus_hash,
+      .last_payload_digest = pulled.block.identity.payload_digest,
+  };
+  return progress;
+}
+
+ConsensusValue
+commit_empty_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
+                   ConsensusValueHash prev_hash, bool confirm = true)
+{
+  EventMempoolRpc rpc(ctx);
+  CHECK_EQ(rpc.eventsched_open_block(block_id)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      rpc.eventsched_close_block(block_id, height, ProposalTxs{})();
+  CHECK_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(height, closed.root_hash(), ProposalTxs{});
+  value.prev_hash = std::move(prev_hash);
+  CHECK_EQ(rpc.eventsched_commit_block(block_id, value)(), RPCError::kRPCNone);
+  if (confirm) {
+    CHECK_EQ(rpc.eventsched_confirm_committed_block(value)(),
+             RPCError::kRPCNone);
   }
-  ::close(fd);
+  return value;
 }
 
 } // namespace
 
-// Regression for #2923: an indexer peer that sends an IndexerCard whose
-// protocol string does not match the local hogd protocol must be rejected
-// gracefully. The protocol string is remote RPC input, not an internal
-// invariant, so a mismatch must not abort the event server. The mismatch is
-// also detected before any network dial, so the (deliberately unreachable)
-// address is never touched.
-TEST_F(EventRpcTest, IndexerIntroProtocolMismatchIsRejectedNotAborted)
+TEST_F(EventRpcTest, PullRejectsMismatchedProtocol)
 {
   EventRPCContext ctx(temp_dir());
   EventIndexerRpc indexer_rpc(ctx);
-  const IndexerCard card{
-      .protocol = "definitely-not-the-hogd-protocol",
-      .generation = {},
-      .address_for_event = "127.0.0.1:1",
-      .progress =
-          IndexerProgress(IndexerProgressState::IndexerProgressUninitialized)};
+  EventIndexerPullRequest request = pull_request();
+  request.protocol = "definitely-not-the-hogd-protocol";
 
-  const EventIndexerRegistrationOutcome outcome =
-      indexer_rpc.event_indexer_register(card)();
-  EXPECT_EQ(
-      outcome,
-      EventIndexerRegistrationOutcome::EventRegistrationMismatchedProtocol);
+  EXPECT_EQ(indexer_rpc.event_indexer_pull_next(std::move(request))().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol);
 }
 
-TEST_F(EventRpcTest, IndexerRegistrationWaitsForOutboxReconciliation)
+TEST_F(EventRpcTest, PullIsNotReadyBeforeReconciliation)
 {
   EventRPCContext ctx(temp_dir());
-  FailureCapturingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-
-  EXPECT_EQ(
-      ctx.register_indexer(make_socketpair_indexer_client(&indexer), card)(),
-      EventIndexerRegistrationOutcome::EventRegistrationOriginUnavailable);
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullNotReady);
 }
 
-TEST_F(EventRpcTest, IndexerRegistrationInitializesFreshEpoch)
+TEST_F(EventRpcTest, FreshPullReturnsCurrentOriginOrFirstBlock)
 {
   EventRPCContext ctx(temp_dir());
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
   ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
 
-  FailureCapturingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  EXPECT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-  ASSERT_EQ(indexer.progress.state(),
-            IndexerProgressState::IndexerProgressInitialized);
-  EXPECT_EQ(indexer.progress.initialized().contiguous_height, 0);
-  EXPECT_EQ(indexer.progress.initialized().last_consensus_hash,
-            sha256(genesis));
-}
+  EventIndexerPullResult empty = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(empty.outcome(), EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_EQ(empty.origin().first_height, 1);
+  EXPECT_EQ(empty.origin().first_prev_hash, sha256(genesis));
 
-TEST_F(EventRpcTest, IndexerRegistrationUsesCurrentCallbackProgress)
-{
-  EventRPCContext ctx(temp_dir());
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
-  ASSERT_TRUE(origin.has_value());
-  ASSERT_TRUE(origin->has_value());
-  const auto &origin_value = origin.value();
-  const auto *current_origin =
-      origin_value.has_value() ? &origin_value.value() : nullptr;
-  ASSERT_NE(current_origin, nullptr);
-
-  FailureCapturingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  indexer.progress.state(IndexerProgressState::IndexerProgressInitialized);
-  indexer.progress.initialized() = {
-      .origin = current_origin->origin,
+  IndexerProgress initialized(IndexerProgressState::IndexerProgressInitialized);
+  initialized.initialized() = {
+      .origin = empty.origin(),
       .contiguous_height = 0,
       .last_consensus_hash = sha256(genesis),
       .last_payload_digest = {},
   };
+  EventIndexerPullResult initialized_empty =
+      ctx.pull_indexer_next(pull_request(initialized))();
+  ASSERT_EQ(initialized_empty.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+      << std::string_view(initialized_empty.diagnostic());
 
-  EXPECT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
+  ConsensusValue block_one = commit_empty_block(ctx, 81, 1, sha256(genesis));
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(first.pulled_block().origin, empty.origin());
+  EXPECT_EQ(first.pulled_block().block.payload.consensus_value, block_one);
 }
 
-TEST_F(EventRpcTest, IndexerRegistrationRejectsBoundaryIdentityMismatch)
+TEST_F(EventRpcTest, ExactProgressReturnsNextAndUnchangedProgressRepeatsIt)
 {
   EventRPCContext ctx(temp_dir());
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.indexer_outbox_store()
+                  .initialize_current_epoch_origin(1, sha256(genesis))()
+                  .has_value());
   ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
-  ASSERT_TRUE(origin.has_value());
-  ASSERT_TRUE(origin->has_value());
-  const auto &origin_value = origin.value();
-  const auto *current_origin =
-      origin_value.has_value() ? &origin_value.value() : nullptr;
-  ASSERT_NE(current_origin, nullptr);
+  ConsensusValue one = commit_empty_block(ctx, 82, 1, sha256(genesis));
 
-  FailureCapturingIndexerRpc indexer;
-  indexer.progress.state(IndexerProgressState::IndexerProgressInitialized);
-  indexer.progress.initialized() = {
-      .origin = current_origin->origin,
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  auto record = ctx.indexer_outbox_store().load_committed_record_info_raw(1);
+  ASSERT_TRUE(record.has_value()) << record.error();
+  IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
+  progress.initialized() = {
+      .origin = first.pulled_block().origin,
+      .contiguous_height = 1,
+      .last_consensus_hash = record->consensus_hash,
+      .last_payload_digest = record->payload_digest,
+  };
+  EventIndexerPullResult caught_up =
+      ctx.pull_indexer_next(pull_request(progress))();
+  ASSERT_EQ(caught_up.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+      << std::string_view(caught_up.diagnostic());
+
+  ConsensusValue two = commit_empty_block(ctx, 83, 2, sha256(one));
+  EventIndexerPullResult next = ctx.pull_indexer_next(pull_request(progress))();
+  EventIndexerPullResult repeated =
+      ctx.pull_indexer_next(pull_request(progress))();
+
+  ASSERT_EQ(next.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
+      << std::string_view(next.diagnostic());
+  ASSERT_EQ(repeated.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(next.pulled_block().block.payload.consensus_value, two);
+  EXPECT_EQ(x23::serialize(next.pulled_block()),
+            x23::serialize(repeated.pulled_block()));
+}
+
+TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.indexer_outbox_store()
+                  .initialize_current_epoch_origin(1, sha256(genesis))()
+                  .has_value());
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  EventIndexerPullResult caught_up = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(caught_up.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+  IndexerProgress boundary(IndexerProgressState::IndexerProgressInitialized);
+  boundary.initialized() = {
+      .origin = caught_up.origin(),
       .contiguous_height = 0,
-      .last_consensus_hash = ConsensusValueHash{},
+      .last_consensus_hash = sha256(genesis),
       .last_payload_digest = {},
   };
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  EXPECT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationProgressConflict);
+  IndexerProgress unknown = boundary;
+  unknown.initialized().origin.protocol = "hogp/unknown";
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request(unknown))().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullProgressConflict);
+
+  commit_empty_block(ctx, 821, 1, sha256(genesis));
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  IndexerProgress forged = progress_at(first.pulled_block());
+  forged.initialized().last_payload_digest[0] ^= 1;
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request(forged))().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullProgressConflict);
 }
 
-TEST_F(EventRpcTest,
-       EventRestartBeforeFirstNewEpochAcceptsPriorPayloadDigestBoundary)
+TEST_F(EventRpcTest, CommittedRecordBecomesPullableOnlyAfterConfirmation)
 {
-  auto archival = make_empty_committed(80, 20, ConsensusValueHash{});
-  SHA256Hash archival_digest;
-  {
-    EventRPCContext previous(temp_dir());
-    initialize_test_origin(previous, archival.consensus_value);
-    ASSERT_TRUE(previous.indexer_outbox_store()
-                    .publish_committed(archival)()
-                    .has_value());
-    auto records =
-        previous.indexer_outbox_store().enumerate_committed_records_raw();
-    ASSERT_TRUE(records.has_value()) << records.error();
-    ASSERT_EQ(records->size(), 1UL);
-    archival_digest = records->front().payload_digest;
-  }
-  rewrite_outbox_protocol(temp_dir(),
-                          IndexerOutboxStore::committed_filename(20),
-                          "hogp/archival");
-  ASSERT_TRUE(std::filesystem::remove(
-      std::filesystem::path(temp_dir()) / "indexer-outbox" /
-      IndexerOutboxStore::current_epoch_origin_filename()));
-  write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
-                            archival.consensus_value.prev_hash);
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  ConsensusValue block =
+      commit_empty_block(ctx, 861, 1, sha256(genesis), /*confirm=*/false);
 
-  EventRPCContext restarted(temp_dir());
-  ASSERT_TRUE(restarted.reconcile_outbox_tip(80, archival.consensus_value)()
-                  .has_value());
-  auto origins = restarted.indexer_outbox_store().enumerate_epoch_origins_raw();
-  ASSERT_TRUE(origins.has_value()) << origins.error();
-  ASSERT_EQ(origins->size(), 2UL);
-
-  FailureCapturingIndexerRpc indexer;
-  indexer.progress.state(IndexerProgressState::IndexerProgressInitialized);
-  indexer.progress.initialized() = {
-      .origin =
-          IndexerOutboxOrigin{
-              .protocol = "hogp/archival",
-              .epoch_sequence = 0,
-              .first_height = 20,
-              .first_prev_hash = archival.consensus_value.prev_hash,
-          },
-      .contiguous_height = 20,
-      .last_consensus_hash = sha256(archival.consensus_value),
-      .last_payload_digest = archival_digest,
-  };
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  EXPECT_EQ(restarted.register_indexer(make_socketpair_indexer_client(&indexer),
-                                       card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-  EXPECT_EQ(indexer.progress.initialized().contiguous_height, 20);
-  EXPECT_EQ(indexer.progress.initialized().last_payload_digest,
-            archival_digest);
-  EXPECT_TRUE(indexer.event_batches.empty());
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value_or(false));
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  ASSERT_TRUE(ctx.confirm_committed_block(block)().has_value());
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullBlock);
 }
 
-TEST_F(EventRpcTest, DurableGenerationAllowsIdempotentRetryButNoLiveReplacement)
+TEST_F(EventRpcTest, ConfirmationRaceCannotLeaveAStaleCaughtUpOmission)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  ConsensusValue block =
+      commit_empty_block(ctx, 841, 1, sha256(genesis), /*confirm=*/false);
+  std::latch start{1};
+  auto pull = std::async(std::launch::async, [&] {
+    start.wait();
+    return ctx.pull_indexer_next(pull_request())();
+  });
+  auto confirm = std::async(std::launch::async, [&] {
+    start.wait();
+    return ctx.confirm_committed_block(block)();
+  });
+  start.count_down();
+  EventIndexerPullResult raced = pull.get();
+  ASSERT_TRUE(confirm.get().has_value());
+  EXPECT_TRUE(
+      raced.outcome() == EventIndexerPullOutcome::EventIndexerPullBlock ||
+      raced.outcome() == EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullBlock);
+}
+
+TEST_F(EventRpcTest, ReconciledOneAheadRecordRemainsInvisible)
 {
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
-  FailureCapturingIndexerRpc indexer_a;
-  FailureCapturingIndexerRpc indexer_b;
-  FailureCapturingIndexerRpc retry_indexer;
-  FailureCapturingIndexerRpc fresh_indexer;
-  IndexerCard card_a{.protocol = version::kHogdProtocol(),
-                     .generation = {},
-                     .address_for_event = {},
-                     .progress = indexer_a.progress};
-  card_a.generation[0] = 0xa1;
-
+  ConsensusValue block;
   {
     EventRPCContext first(temp_dir());
     ASSERT_TRUE(first.reconcile_outbox_tip(0, genesis)().has_value());
-    ASSERT_EQ(first.register_indexer(make_socketpair_indexer_client(&indexer_a),
-                                     card_a)(),
-              EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-  }
-
-  IndexerCard fresh_card{.protocol = version::kHogdProtocol(),
-                         .generation = {},
-                         .address_for_event = {},
-                         .progress = fresh_indexer.progress};
-  fresh_card.generation[0] = 0xc3;
-  IndexerCard card_b{.protocol = version::kHogdProtocol(),
-                     .generation = {},
-                     .address_for_event = {},
-                     .progress = indexer_b.progress};
-  card_b.generation[0] = 0xb2;
-  card_b.predecessor_generation = card_a.generation;
-  {
-    EventRPCContext restarted(temp_dir());
-    ASSERT_TRUE(restarted.reconcile_outbox_tip(0, genesis)().has_value());
-    EXPECT_EQ(
-        restarted.register_indexer(
-            make_socketpair_indexer_client(&fresh_indexer), fresh_card)(),
-        EventIndexerRegistrationOutcome::EventRegistrationStaleGeneration);
-    ASSERT_EQ(restarted.register_indexer(
-                  make_socketpair_indexer_client(&indexer_b), card_b)(),
-              EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-    card_b.progress = retry_indexer.progress;
-    EXPECT_EQ(restarted.register_indexer(
-                  make_socketpair_indexer_client(&retry_indexer), card_b)(),
-              EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-    EXPECT_EQ(
-        restarted.register_indexer(
-            make_socketpair_indexer_client(&fresh_indexer), fresh_card)(),
-        EventIndexerRegistrationOutcome::EventRegistrationStaleGeneration);
-    SignedTransactionHash tx_hash{};
-    tx_hash[0] = 0x77;
-    TxFailureDiagnostic diagnostic;
-    diagnostic.attempt_height = 1;
-    restarted.report_tx_failure_to_indexers(tx_hash, diagnostic)();
-    EXPECT_TRUE(indexer_a.reports.empty());
-    EXPECT_TRUE(indexer_b.reports.empty());
-    EXPECT_TRUE(fresh_indexer.reports.empty());
-    ASSERT_EQ(retry_indexer.reports.size(), 1UL);
-  }
-
-  EventRPCContext restarted_again(temp_dir());
-  ASSERT_TRUE(restarted_again.reconcile_outbox_tip(0, genesis)().has_value());
-  card_a.progress = indexer_a.progress;
-  EXPECT_EQ(restarted_again.register_indexer(
-                make_socketpair_indexer_client(&indexer_a), card_a)(),
-            EventIndexerRegistrationOutcome::EventRegistrationStaleGeneration);
-  EXPECT_EQ(restarted_again.register_indexer(
-                make_socketpair_indexer_client(&indexer_b), card_b)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-}
-
-TEST_F(EventRpcTest, RegistrationRejectsForgedInitializedEpochProgress)
-{
-  EventRPCContext ctx(temp_dir());
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-
-  ForgedEpochProgressIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  EXPECT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationProgressConflict);
-}
-
-TEST_F(EventRpcTest, RegistrationDrainsConfirmationThatRacesInitialReplay)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc event_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(82)(), RPCError::kRPCNone);
-  EventBlockResult first_closed =
-      event_rpc.eventsched_close_block(82, 1, ProposalTxs{})();
-  ASSERT_EQ(first_closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, first_closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(82, block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-
-  BlockingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  auto registration = std::async(std::launch::async, [&] {
-    return ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                card)();
-  });
-  indexer.apply_started.wait();
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(83)(), RPCError::kRPCNone);
-  EventBlockResult second_closed =
-      event_rpc.eventsched_close_block(83, 2, ProposalTxs{})();
-  ASSERT_EQ(second_closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_two =
-      make_consensus_value(2, second_closed.root_hash(), ProposalTxs{});
-  block_two.prev_hash = sha256(block_one);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(83, block_two)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_two)(),
-            RPCError::kRPCNone);
-
-  EXPECT_EQ(registration.wait_for(std::chrono::milliseconds(50)),
-            std::future_status::timeout);
-  indexer.release_apply.count_down();
-  ASSERT_EQ(registration.wait_for(std::chrono::seconds(5)),
-            std::future_status::ready);
-  EXPECT_EQ(registration.get(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-  ASSERT_EQ(indexer.event_batches.size(), 2UL);
-  EXPECT_EQ(indexer.event_batches[0].first, 1);
-  EXPECT_EQ(indexer.event_batches[1].first, 2);
-}
-
-TEST_F(EventRpcTest, LivenessProbeDoesNotWaitForDeliveryLane)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc event_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  BlockingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  card.generation[0] = 0x51;
-  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(821)(), RPCError::kRPCNone);
-  EventBlockResult closed =
-      event_rpc.eventsched_close_block(821, 1, ProposalTxs{})();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(821, block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-  indexer.apply_started.wait();
-
-  auto probe = std::async(std::launch::async,
-                          [&] { return ctx.probe_indexer(card.generation); });
-  ASSERT_EQ(probe.wait_for(std::chrono::milliseconds(50)),
-            std::future_status::ready);
-  EXPECT_EQ(probe.get(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-  UPID stale_generation = card.generation;
-  stale_generation[0] ^= 1;
-  EXPECT_EQ(ctx.probe_indexer(stale_generation),
-            EventIndexerRegistrationOutcome::EventRegistrationStaleGeneration);
-  indexer.release_apply.count_down();
-}
-
-TEST_F(EventRpcTest, EnqueueAtWorkerEmptyExitStartsAReplacementWorker)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc event_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  FailureCapturingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  card.generation[0] = 0x61;
-  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(861)(), RPCError::kRPCNone);
-  EventBlockResult first_closed =
-      event_rpc.eventsched_close_block(861, 1, ProposalTxs{})();
-  ASSERT_EQ(first_closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, first_closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(862)(), RPCError::kRPCNone);
-  EventBlockResult second_closed =
-      event_rpc.eventsched_close_block(862, 2, ProposalTxs{})();
-  ASSERT_EQ(second_closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_two =
-      make_consensus_value(2, second_closed.root_hash(), ProposalTxs{});
-  block_two.prev_hash = sha256(block_one);
-
-  std::latch worker_at_empty_exit{1};
-  std::latch release_worker{1};
-  ctx.set_delivery_worker_empty_test_hook([&] {
-    worker_at_empty_exit.count_down();
-    release_worker.wait();
-  });
-  ASSERT_EQ(event_rpc.eventsched_commit_block(861, block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-  worker_at_empty_exit.wait();
-
-  ASSERT_EQ(event_rpc.eventsched_commit_block(862, block_two)(),
-            RPCError::kRPCNone);
-  auto second_confirmation = std::async(std::launch::async, [&] {
-    return event_rpc.eventsched_confirm_committed_block(block_two)();
-  });
-  EXPECT_EQ(second_confirmation.wait_for(std::chrono::milliseconds(50)),
-            std::future_status::timeout);
-  release_worker.count_down();
-  ASSERT_EQ(second_confirmation.wait_for(std::chrono::seconds(5)),
-            std::future_status::ready);
-  EXPECT_EQ(second_confirmation.get(), RPCError::kRPCNone);
-
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (indexer.event_batches.size() != 2) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  EXPECT_EQ(indexer.event_batches[0].first, 1);
-  EXPECT_EQ(indexer.event_batches[1].first, 2);
-}
-
-TEST_F(EventRpcTest,
-       OneAheadRecordIsWithheldUntilExactSchedulerCatchupConfirmsIdentity)
-{
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ConsensusValue block_one;
-  {
-    EventRPCContext first(temp_dir());
-    EventMempoolRpc event_rpc(first);
-    ASSERT_TRUE(first.reconcile_outbox_tip(0, genesis)().has_value());
-    ASSERT_EQ(event_rpc.eventsched_open_block(84)(), RPCError::kRPCNone);
-    EventBlockResult closed =
-        event_rpc.eventsched_close_block(84, 1, ProposalTxs{})();
-    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    block_one = make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-    block_one.prev_hash = sha256(genesis);
-    ASSERT_EQ(event_rpc.eventsched_commit_block(84, block_one)(),
-              RPCError::kRPCNone);
+    block =
+        commit_empty_block(first, 842, 1, sha256(genesis), /*confirm=*/false);
   }
 
   EventRPCContext restarted(temp_dir());
   ASSERT_TRUE(restarted.reconcile_outbox_tip(0, genesis)().has_value());
-  FailureCapturingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = indexer.progress};
-  ASSERT_EQ(restarted.register_indexer(make_socketpair_indexer_client(&indexer),
-                                       card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-  EXPECT_TRUE(indexer.event_batches.empty());
-
-  ConsensusValue conflicting = block_one;
-  conflicting.prev_hash[0] ^= 1;
-  auto rejected = restarted.commit_block(84, conflicting)();
-  ASSERT_FALSE(rejected.has_value());
-  EXPECT_EQ(rejected.error().code(), EventErrorCode::kBadBlockID);
-  EXPECT_TRUE(indexer.event_batches.empty());
-
-  ASSERT_TRUE(restarted.commit_block(84, block_one)().has_value());
-  EXPECT_TRUE(indexer.event_batches.empty());
-  ASSERT_TRUE(restarted.confirm_committed_block(block_one)().has_value());
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (indexer.event_batches.empty()) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  ASSERT_EQ(indexer.event_batches.size(), 1UL);
-  EXPECT_EQ(indexer.event_batches.front().first, 1);
-}
-
-TEST_F(EventRpcTest, CommitPublishesWithoutIndexerDeliveryUntilConfirmed)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc event_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  CountingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = {}};
-  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(841)(), RPCError::kRPCNone);
-  EventBlockResult closed =
-      event_rpc.eventsched_close_block(841, 1, ProposalTxs{})();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(841, block_one)(),
-            RPCError::kRPCNone);
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value_or(false));
-  EXPECT_EQ(indexer.events.load(std::memory_order_relaxed), 0UL);
-
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (indexer.events.load(std::memory_order_relaxed) != 1) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-}
-
-TEST_F(EventRpcTest, ExactConfirmationIsIdempotentAndEnqueuesOnce)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc event_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  CountingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = {}};
-  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(842)(), RPCError::kRPCNone);
-  EventBlockResult closed =
-      event_rpc.eventsched_close_block(842, 1, ProposalTxs{})();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(842, block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (indexer.events.load(std::memory_order_relaxed) != 1) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_EQ(indexer.events.load(std::memory_order_relaxed), 1UL);
+  EXPECT_EQ(restarted.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  ASSERT_TRUE(restarted.commit_block(842, block)().has_value());
+  EXPECT_EQ(restarted.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  ASSERT_TRUE(restarted.confirm_committed_block(block)().has_value());
+  EXPECT_EQ(restarted.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullBlock);
 }
 
 TEST_F(EventRpcTest, ConfirmationRejectsConflictingAndOutOfOrderValues)
@@ -1090,14 +553,6 @@ TEST_F(EventRpcTest, ConfirmationRejectsConflictingAndOutOfOrderValues)
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
   ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  CountingIndexerRpc indexer;
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = {},
-                   .address_for_event = {},
-                   .progress = {}};
-  ASSERT_EQ(ctx.register_indexer(make_socketpair_indexer_client(&indexer),
-                                 card)(),
-            EventIndexerRegistrationOutcome::EventRegistrationAccepted);
 
   ASSERT_EQ(event_rpc.eventsched_open_block(843)(), RPCError::kRPCNone);
   EventBlockResult first_closed =
@@ -1133,295 +588,204 @@ TEST_F(EventRpcTest, ConfirmationRejectsConflictingAndOutOfOrderValues)
             RPCError::kRPCNone);
   EXPECT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
             RPCError::kRPCUnrecoverable);
-
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (indexer.events.load(std::memory_order_relaxed) != 2) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
 }
 
-TEST_F(EventRpcTest, TxFailureReportRelaysToAllIndexers)
+TEST_F(EventRpcTest, TxFailureMailboxDrainsIsBoundedAndDoesNotBlockIngress)
 {
   EventRPCContext ctx(temp_dir());
-
-  FailureCapturingIndexerRpc indexer_a;
-  FailureCapturingIndexerRpc indexer_b;
-  ctx.add_indexer(make_socketpair_indexer_client(&indexer_a));
-  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b));
-
-  SignedTransactionHash tx_hash;
-  std::ranges::fill(tx_hash, 0x5A);
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
   TxFailureDiagnostic diag;
   diag.attempt_height = 42;
   diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
-
-  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
-
-  for (const auto *indexer : {&indexer_a, &indexer_b}) {
-    ASSERT_EQ(indexer->reports.size(), 1);
-    EXPECT_EQ(indexer->reports[0].first, tx_hash);
-    EXPECT_EQ(indexer->reports[0].second.attempt_height, 42);
-    EXPECT_EQ(indexer->reports[0].second.conflict.code,
-              DbConflictCode::kDbConflictReplayProtection);
-  }
-}
-
-TEST_F(EventRpcTest, TxFailureReportWithNoIndexersIsNoop)
-{
-  EventRPCContext ctx(temp_dir());
-  const SignedTransactionHash tx_hash{};
-  const TxFailureDiagnostic diag{};
-  // Must complete without error or hang.
-  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
-}
-
-TEST_F(EventRpcTest, DeadIndexerDoesNotBlockRelayToOthers)
-{
-  EventRPCContext ctx(temp_dir());
-
-  // First "indexer": a client whose peer is closed immediately, so the send
-  // to it fails at the RPC layer.
-  int fds[2];
-  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  CHECK_EQ(close(fds[1]), 0);
-  auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  ctx.add_indexer(dead_stream->client<IndexerEvent1>());
-
-  FailureCapturingIndexerRpc live_indexer;
-  ctx.add_indexer(make_socketpair_indexer_client(&live_indexer));
-
-  SignedTransactionHash tx_hash;
-  std::ranges::fill(tx_hash, 0x11);
-  TxFailureDiagnostic diag;
-  diag.attempt_height = 7;
-  diag.conflict.code = DbConflictCode::kDbConflictExclusiveLock;
-
-  // Must complete (dead indexer's error swallowed) and still reach the
-  // live indexer.
-  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
-
-  ASSERT_EQ(live_indexer.reports.size(), 1);
-  EXPECT_EQ(live_indexer.reports[0].first, tx_hash);
-  EXPECT_EQ(live_indexer.reports[0].second.attempt_height, 7);
-}
-
-// Regression for #3124 (and its review): the fire-and-forget tx-failure relay
-// path (eventexecutor_report_tx_failure -> spawn_tx_failure_relay) has no
-// natural backpressure -- each relay registers one pending RPC XID per indexer
-// that clears only when the indexer replies or its stream fails. A contract
-// can drive an unbounded number of these reports, so a configured indexer that
-// stays connected but withholds replies would otherwise let that per-report
-// RPC state accumulate without bound. relay_tx_failure caps in-flight relays
-// PER INDEXER: the unresponsive indexer is bounded at its own cap, while a
-// healthy indexer keeps receiving every report (no cross-indexer starvation).
-TEST_F(EventRpcTest, TxFailureRelayCapIsPerIndexer)
-{
-  EventRPCContext ctx(temp_dir());
-  constexpr size_t kCap =
-      EventRPCContext::kMaxInFlightTxFailureRelaysPerIndexer;
-
-  // Stuck indexer: drains records but never replies, so its relays stay
-  // pending and never free their per-indexer slots. The peer counts the
-  // records that actually reach its wire.
-  int fds[2];
-  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  std::atomic<size_t> stuck_records = 0;
-  std::jthread peer(
-      [fd = fds[1], &stuck_records] { count_rpc_records(fd, stuck_records); });
-  auto stuck_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  ctx.add_indexer(stuck_stream->client<IndexerEvent1>());
-
-  // Healthy indexer: replies immediately.
-  CountingIndexerRpc healthy;
-  ctx.add_indexer(make_socketpair_indexer_client(&healthy));
-
-  SignedTransactionHash tx_hash;
-  std::ranges::fill(tx_hash, 0x23);
-  TxFailureDiagnostic diag;
-  diag.attempt_height = 2522;
-  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
-
-  // Fire one report at a time, waiting for the healthy indexer to receive each
-  // before firing the next. Pacing keeps the healthy indexer's own in-flight
-  // count near zero (so it never hits the cap), while the stuck indexer's
-  // count only climbs -- isolating the two. Fire well past the cap.
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(60);
-  constexpr size_t kReports = kCap + 16;
-  for (size_t i = 0; i < kReports; ++i) {
+  for (size_t i = 0; i < EventRPCContext::kMaxTxFailureNotices + 32; ++i) {
+    SignedTransactionHash tx_hash{};
     tx_hash[0] = static_cast<uint8_t>(i);
-    ctx.spawn_tx_failure_relay(tx_hash, diag);
-    const size_t want = i + 1;
-    while (healthy.reports.load(std::memory_order_relaxed) < want) {
-      ASSERT_LT(std::chrono::steady_clock::now(), deadline)
-          << "healthy indexer received "
-          << healthy.reports.load(std::memory_order_relaxed) << " of " << want;
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    ASSERT_EQ(exec_rpc.eventexecutor_report_tx_failure(tx_hash, diag)(),
+              RPCError::kRPCNone);
+  }
+
+  ASSERT_EQ(mempool_rpc.eventsched_open_block(91)(), RPCError::kRPCNone);
+  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(91)(), RPCError::kRPCNone);
+  EventIndexerRpc indexer_rpc(ctx);
+  IndexerTxFailureNoticeBatch notices =
+      indexer_rpc.event_indexer_pull_tx_failures();
+  ASSERT_EQ(notices.size(), EventRPCContext::kMaxTxFailureNotices);
+  EXPECT_EQ(notices.front().diagnostic.attempt_height, 42);
+  EXPECT_TRUE(indexer_rpc.event_indexer_pull_tx_failures().empty());
+}
+
+TEST_F(EventRpcTest, MissingOrCorruptPullableRecordIsInternalFailure)
+{
+  for (const bool corrupt : {false, true}) {
+    TmpDir dir;
+    EventRPCContext ctx(dir.directory());
+    ConsensusValue genesis{};
+    genesis.proposal_header.block_height = 0;
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    commit_empty_block(ctx, corrupt ? 92 : 93, 1, sha256(genesis));
+    const std::filesystem::path record =
+        std::filesystem::path(dir.directory()) / "indexer-outbox" /
+        IndexerOutboxStore::committed_filename(1);
+    if (corrupt) {
+      corrupt_outbox_payload(dir.directory(),
+                             IndexerOutboxStore::committed_filename(1));
     }
-  }
-
-  // The healthy indexer received every report -- never starved by the stuck
-  // one -- and the stuck indexer is bounded at its own per-indexer cap.
-  EXPECT_EQ(healthy.reports.load(std::memory_order_relaxed), kReports);
-  while (stuck_records.load(std::memory_order_acquire) < kCap) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
-        << "stuck indexer received "
-        << stuck_records.load(std::memory_order_acquire) << " of " << kCap;
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_EQ(stuck_records.load(std::memory_order_acquire), kCap);
-
-  // Teardown: failing the stuck stream completes its pending relays (releasing
-  // the indexer snapshot), and the shutdown wakes the peer thread so its
-  // jthread join cannot deadlock on a socket the client side would only close
-  // once ctx is destroyed.
-  stuck_stream->fail();
-  ::shutdown(fds[1], SHUT_RDWR);
-}
-
-TEST_F(EventRpcTest, UnresponsiveIndexerDoesNotBlockCommitOrConfirmation)
-{
-  auto ctx = std::make_unique<EventRPCContext>(temp_dir());
-  EventExecRpc exec_rpc(*ctx);
-  EventMempoolRpc mempool_rpc(*ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx->reconcile_outbox_tip(0, genesis)().has_value());
-
-  // Durable commit and scheduler confirmation must not wait for indexer
-  // delivery.
-  int fds[2];
-  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  auto dead_stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  ctx->add_indexer(dead_stream->client<IndexerEvent1>());
-
-  ProposedTransaction body = make_body(7);
-  TxEventLog event = make_event(body, 0x07);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
-
-  EXPECT_EQ(mempool_rpc.eventsched_open_block(7)(), RPCError::kRPCNone);
-  EXPECT_EQ(exec_rpc.eventexecutor_open_block(7)(), RPCError::kRPCNone);
-  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(7, 1, event, body)(),
-            RPCError::kRPCNone);
-  EXPECT_EQ(exec_rpc.eventexecutor_close_block(7)(), RPCError::kRPCNone);
-  EventBlockResult close_result =
-      mempool_rpc.eventsched_close_block(7, 1, proposal_txs)();
-  ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
-
-  ConsensusValue value =
-      make_consensus_value(1, close_result.root_hash(), proposal_txs);
-  value.prev_hash = sha256(genesis);
-  EXPECT_EQ(mempool_rpc.eventsched_commit_block(7, value)(),
-            RPCError::kRPCNone);
-  EXPECT_EQ(mempool_rpc.eventsched_confirm_committed_block(value)(),
-            RPCError::kRPCNone);
-
-  // Commit releases the block id, but removal of the context from the map
-  // ("last reference out does the GC") may be deferred to close_block's
-  // detached file-write coroutine, so an immediate reopen can transiently
-  // see kExists. Retry with a deadline; any other error is a real failure.
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(30);
-  while (true) {
-    auto reopen = ctx->open_block(7)();
-    if (reopen.has_value()) {
-      break;
+    else {
+      ASSERT_TRUE(std::filesystem::remove(record));
     }
-    ASSERT_EQ(reopen.error().code(), EventErrorCode::kExists);
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
-        << "block id 7 still not reusable long after commit";
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+              EventIndexerPullOutcome::EventIndexerPullInternalFailure);
   }
-  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(7)(), RPCError::kRPCNone);
-  auto shutdown = std::async(std::launch::async, [&ctx] { ctx.reset(); });
-  ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(5)),
-            std::future_status::ready);
-  shutdown.get();
-  CHECK_EQ(close(fds[1]), 0);
 }
 
-TEST_F(EventRpcTest, ContextShutdownCancelsPendingDeliveryAndDrainsWorker)
+TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
 {
-  auto ctx = std::make_unique<EventRPCContext>(temp_dir());
-  EventMempoolRpc event_rpc(*ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx->reconcile_outbox_tip(0, genesis)().has_value());
-
-  int fds[2];
-  CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  std::atomic<size_t> records_read = 0;
-  std::jthread peer(
-      [fd = fds[1], &records_read] { count_rpc_records(fd, records_read); });
-  auto stream = x23::rpc_stream_logged(default_coropoll(), fds[0], -1);
-  ctx->add_indexer(stream->client<IndexerEvent1>());
-
-  ASSERT_EQ(event_rpc.eventsched_open_block(85)(), RPCError::kRPCNone);
-  EventBlockResult closed =
-      event_rpc.eventsched_close_block(85, 1, ProposalTxs{})();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(85, block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (records_read.load(std::memory_order_acquire) == 0) {
-    ASSERT_LT(std::chrono::steady_clock::now(), deadline);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  auto archival = make_empty_committed(94, 20, ConsensusValueHash{});
+  SHA256Hash archival_digest;
+  {
+    EventRPCContext previous(temp_dir());
+    initialize_test_origin(previous, archival.consensus_value);
+    ASSERT_TRUE(previous.indexer_outbox_store()
+                    .publish_committed(archival)()
+                    .has_value());
+    auto records =
+        previous.indexer_outbox_store().enumerate_committed_records_raw();
+    ASSERT_TRUE(records.has_value()) << records.error();
+    ASSERT_EQ(records->size(), 1UL);
+    archival_digest = records->front().payload_digest;
   }
-  auto shutdown = std::async(std::launch::async, [&ctx] { ctx.reset(); });
-  ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(5)),
-            std::future_status::ready);
-  shutdown.get();
+  rewrite_outbox_protocol(temp_dir(),
+                          IndexerOutboxStore::committed_filename(20),
+                          "hogp/archival");
+  ASSERT_TRUE(std::filesystem::remove(
+      std::filesystem::path(temp_dir()) / "indexer-outbox" /
+      IndexerOutboxStore::current_epoch_origin_filename()));
+  write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
+                            archival.consensus_value.prev_hash);
+
+  EventRPCContext current(temp_dir());
+  ASSERT_TRUE(
+      current.reconcile_outbox_tip(94, archival.consensus_value)().has_value());
+  IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
+  progress.initialized() = {
+      .origin =
+          IndexerOutboxOrigin{
+              .protocol = "hogp/archival",
+              .epoch_sequence = 0,
+              .first_height = 20,
+              .first_prev_hash = archival.consensus_value.prev_hash,
+          },
+      .contiguous_height = 20,
+      .last_consensus_hash = sha256(archival.consensus_value),
+      .last_payload_digest = archival_digest,
+  };
+  IndexerProgress bad_boundary = progress;
+  bad_boundary.initialized().last_consensus_hash[0] ^= 1;
+  EXPECT_EQ(current.pull_indexer_next(pull_request(bad_boundary))().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullProgressConflict);
+  EventIndexerPullResult at_boundary =
+      current.pull_indexer_next(pull_request(progress))();
+  ASSERT_EQ(at_boundary.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_EQ(at_boundary.origin().epoch_sequence, 1UL);
+
+  ConsensusValue block =
+      commit_empty_block(current, 95, 21, sha256(archival.consensus_value));
+  EventIndexerPullResult transitioned =
+      current.pull_indexer_next(pull_request(progress))();
+  ASSERT_EQ(transitioned.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(transitioned.pulled_block().origin, at_boundary.origin());
+  EXPECT_EQ(transitioned.pulled_block().block.payload.consensus_value, block);
 }
 
-TEST_F(EventRpcTest, ContextShutdownToleratesSuccessfulDeliveryReply)
+TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
 {
-  auto ctx = std::make_unique<EventRPCContext>(temp_dir());
-  EventMempoolRpc event_rpc(*ctx);
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
-  ASSERT_TRUE(ctx->reconcile_outbox_tip(0, genesis)().has_value());
-  BlockingIndexerRpc indexer;
-  ctx->add_indexer(make_socketpair_indexer_client(&indexer));
+  const ConsensusValueHash boundary = sha256(genesis);
+  auto archival = make_empty_committed(96, 1, boundary);
+  {
+    EventRPCContext previous(temp_dir());
+    initialize_test_origin(previous, archival.consensus_value);
+    ASSERT_TRUE(previous.indexer_outbox_store()
+                    .publish_committed(archival)()
+                    .has_value());
+  }
+  rewrite_outbox_protocol(temp_dir(), IndexerOutboxStore::committed_filename(1),
+                          "hogp/archival");
+  ASSERT_TRUE(std::filesystem::remove(
+      std::filesystem::path(temp_dir()) / "indexer-outbox" /
+      IndexerOutboxStore::current_epoch_origin_filename()));
+  write_epoch_origin_header(temp_dir(), "hogp/archival", 1, boundary);
 
-  std::latch delivery_succeeded{1};
-  std::latch release_delivery{1};
-  ctx->set_delivery_succeeded_test_hook([&] {
-    delivery_succeeded.count_down();
-    release_delivery.wait();
-  });
+  EventRPCContext current(temp_dir());
+  ASSERT_TRUE(
+      current.reconcile_outbox_tip(96, archival.consensus_value)().has_value());
+  EventIndexerPullResult first = current.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
+      << std::string_view(first.diagnostic());
+  EXPECT_EQ(std::string_view(first.pulled_block().origin.protocol),
+            "hogp/archival");
+  EXPECT_EQ(first.pulled_block().block.payload.consensus_value,
+            archival.consensus_value);
 
-  ASSERT_EQ(event_rpc.eventsched_open_block(86)(), RPCError::kRPCNone);
-  EventBlockResult closed =
-      event_rpc.eventsched_close_block(86, 1, ProposalTxs{})();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_one =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-  block_one.prev_hash = sha256(genesis);
-  ASSERT_EQ(event_rpc.eventsched_commit_block(86, block_one)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
-            RPCError::kRPCNone);
-  indexer.apply_started.wait();
-  indexer.release_apply.count_down();
-  delivery_succeeded.wait();
+  EventIndexerPullResult transitioned = current.pull_indexer_next(
+      pull_request(progress_at(first.pulled_block())))();
+  ASSERT_EQ(transitioned.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+      << std::string_view(transitioned.diagnostic());
+  EXPECT_EQ(transitioned.origin().epoch_sequence, 1UL);
+  EXPECT_EQ(std::string_view(transitioned.origin().protocol),
+            version::kHogdProtocol());
+}
 
-  auto shutdown = std::async(std::launch::async, [&ctx] { ctx.reset(); });
-  EXPECT_EQ(shutdown.wait_for(std::chrono::milliseconds(50)),
-            std::future_status::timeout);
-  release_delivery.count_down();
-  ASSERT_EQ(shutdown.wait_for(std::chrono::seconds(5)),
-            std::future_status::ready);
-  shutdown.get();
+TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  const ConsensusValueHash boundary = sha256(genesis);
+  {
+    EventRPCContext create_namespace(temp_dir());
+  }
+  write_epoch_origin_header(temp_dir(), "hogp/a", 1, boundary, 0);
+  write_epoch_origin_header(temp_dir(), "hogp/b", 1, boundary, 1);
+
+  EventRPCContext current(temp_dir());
+  ASSERT_TRUE(current.reconcile_outbox_tip(0, genesis)().has_value());
+  ConsensusValue block = commit_empty_block(current, 97, 1, boundary);
+  EventIndexerPullResult epoch_a = current.pull_indexer_next(pull_request())();
+  ASSERT_EQ(epoch_a.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_EQ(std::string_view(epoch_a.origin().protocol), "hogp/a");
+
+  const auto boundary_progress = [&](const IndexerOutboxOrigin &origin) {
+    IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
+    progress.initialized() = {
+        .origin = origin,
+        .contiguous_height = 0,
+        .last_consensus_hash = boundary,
+        .last_payload_digest = {},
+    };
+    return progress;
+  };
+  EventIndexerPullResult epoch_b = current.pull_indexer_next(
+      pull_request(boundary_progress(epoch_a.origin())))();
+  ASSERT_EQ(epoch_b.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp)
+      << std::string_view(epoch_b.diagnostic());
+  EXPECT_EQ(std::string_view(epoch_b.origin().protocol), "hogp/b");
+
+  EventIndexerPullResult first_block = current.pull_indexer_next(
+      pull_request(boundary_progress(epoch_b.origin())))();
+  ASSERT_EQ(first_block.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(first_block.pulled_block().origin.epoch_sequence, 2UL);
+  EXPECT_EQ(std::string_view(first_block.pulled_block().origin.protocol),
+            version::kHogdProtocol());
+  EXPECT_EQ(first_block.pulled_block().block.payload.consensus_value, block);
 }
 
 TEST_F(EventRpcTest, DuplicateOpenReturnsExists)
@@ -1438,49 +802,6 @@ TEST_F(EventRpcTest, DuplicateOpenReturnsExists)
   EXPECT_EQ(status.error().code(), EventErrorCode::kExists);
 
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(3)(), RPCError::kRPCNone);
-}
-
-TEST_F(EventRpcTest, RemovedIndexerStopsReceivingReports)
-{
-  EventRPCContext ctx(temp_dir());
-
-  FailureCapturingIndexerRpc indexer_a;
-  FailureCapturingIndexerRpc indexer_b;
-  uint64_t id_a = ctx.add_indexer(make_socketpair_indexer_client(&indexer_a));
-  ctx.add_indexer(make_socketpair_indexer_client(&indexer_b));
-
-  SignedTransactionHash tx_hash;
-  std::ranges::fill(tx_hash, 0x21);
-  TxFailureDiagnostic diag;
-  diag.attempt_height = 3;
-  diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
-
-  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
-  ASSERT_EQ(indexer_a.reports.size(), 1);
-  ASSERT_EQ(indexer_b.reports.size(), 1);
-
-  EXPECT_TRUE(ctx.remove_indexer(id_a));
-  // Removing an id that is already gone reports failure.
-  EXPECT_FALSE(ctx.remove_indexer(id_a));
-
-  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
-  EXPECT_EQ(indexer_a.reports.size(), 1);
-  ASSERT_EQ(indexer_b.reports.size(), 2);
-}
-
-TEST_F(EventRpcTest, RemoveLastIndexerMakesReportsNoop)
-{
-  EventRPCContext ctx(temp_dir());
-
-  FailureCapturingIndexerRpc indexer;
-  uint64_t id = ctx.add_indexer(make_socketpair_indexer_client(&indexer));
-  EXPECT_TRUE(ctx.remove_indexer(id));
-
-  const SignedTransactionHash tx_hash{};
-  const TxFailureDiagnostic diag{};
-  // Must complete without error or hang.
-  ctx.report_tx_failure_to_indexers(tx_hash, diag)();
-  EXPECT_TRUE(indexer.reports.empty());
 }
 
 TEST_F(EventRpcTest, BasicUsage)

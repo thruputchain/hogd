@@ -427,57 +427,6 @@ TEST_F(IndexerOutboxTest, OpenOrCreateMakesPrivateDurableStoreDirectory)
   EXPECT_EQ(stat_buf.st_mode & 07777, 0700);
 }
 
-TEST_F(IndexerOutboxTest, DurableIndexerSlotReplacesAtomicallyAndReopens)
-{
-  EventIndexerSlot second{.format_version = kEventIndexerSlotFormatVersion};
-  second.generation[0] = 0x52;
-  {
-    auto store = IndexerOutboxStore::open(dir_.directory());
-    ASSERT_TRUE(store.has_value()) << store.error();
-    auto empty = store->load_indexer_slot();
-    ASSERT_TRUE(empty.has_value()) << empty.error();
-    EXPECT_FALSE(*empty);
-
-    EventIndexerSlot first{.format_version = kEventIndexerSlotFormatVersion};
-    first.generation[0] = 0x41;
-    ASSERT_TRUE(store->store_indexer_slot(first).has_value());
-    ASSERT_TRUE(store->store_indexer_slot(second).has_value());
-  }
-
-  auto reopened = IndexerOutboxStore::open(dir_.directory());
-  ASSERT_TRUE(reopened.has_value()) << reopened.error();
-  auto loaded = reopened->load_indexer_slot();
-  ASSERT_TRUE(loaded.has_value()) << loaded.error();
-  ASSERT_TRUE(*loaded);
-  const auto &loaded_value = loaded.value();
-  const auto *loaded_slot =
-      loaded_value.has_value() ? &loaded_value.value() : nullptr;
-  ASSERT_NE(loaded_slot, nullptr);
-  EXPECT_EQ(loaded_slot->generation, second.generation);
-}
-
-TEST_F(IndexerOutboxTest, DurableIndexerSlotCorruptionFailsClosed)
-{
-  {
-    auto store = IndexerOutboxStore::open(dir_.directory());
-    ASSERT_TRUE(store.has_value()) << store.error();
-    EventIndexerSlot slot{.format_version = kEventIndexerSlotFormatVersion};
-    ASSERT_TRUE(store->store_indexer_slot(slot).has_value());
-  }
-
-  const std::array<uint8_t, 3> malformed{1, 2, 3};
-  write_bytes(dir_, IndexerOutboxStore::indexer_slot_filename(), malformed);
-  auto reopened = IndexerOutboxStore::open(dir_.directory());
-  ASSERT_TRUE(reopened.has_value()) << reopened.error();
-  EXPECT_FALSE(reopened->load_indexer_slot().has_value());
-
-  EventIndexerSlot unknown_version{.format_version =
-                                       kEventIndexerSlotFormatVersion + 1};
-  const x23::Buf encoded = x23::serialize(unknown_version);
-  write_bytes(dir_, IndexerOutboxStore::indexer_slot_filename(), encoded);
-  EXPECT_FALSE(reopened->load_indexer_slot().has_value());
-}
-
 TEST_F(IndexerOutboxTest, OpenOrCreateRetriesParentFsyncAfterExistingChild)
 {
   fail_next_indexer_outbox_operation_for_test(
@@ -1415,7 +1364,7 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
 }
 
 TEST_F(IndexerOutboxTest,
-       ApplyRpcSizePreflightCountsEveryPayloadPartAtExactBoundary)
+       PullRpcSizePreflightCountsEveryPayloadPartAtExactBoundary)
 {
   static_assert(kIndexerRpcMaxMessageSize == 0x7fffffff);
   static_assert(kEventSchedulerRpcMaxMessageSize == kIndexerRpcMaxMessageSize);
@@ -1425,10 +1374,15 @@ TEST_F(IndexerOutboxTest,
   IndexerCommittedBlock block = *make_indexer_committed_block(payload)();
   IndexerOutboxOrigin origin{.protocol = version::kHogdProtocol(),
                              .first_height = 1};
-  const x23::Buf actual_record =
-      x23::make_record(x23::call_msg<IndexerEvent1::proc_meta<12>>(), origin,
-                       block);
-  auto measured = indexer_event_apply_rpc_record_size_for_parts(
+  EventIndexerPullResult result(EventIndexerPullOutcome::EventIndexerPullBlock);
+  result.pulled_block() = {
+      .origin = std::move(origin),
+      .block = std::move(block),
+  };
+  x23::rpc_msg reply{};
+  x23::msg_set_reply_stat(&reply, x23::accept_stat::SUCCESS);
+  const x23::Buf actual_record = x23::make_record(reply, result);
+  auto measured = indexer_event_pull_rpc_record_size_for_parts(
       x23::xdr_size(payload.consensus_value),
       x23::xdr_size(payload.proposal_txs), x23::xdr_size(payload.event_logs),
       x23::xdr_size(payload.tx_bodies));
@@ -1436,22 +1390,22 @@ TEST_F(IndexerOutboxTest,
   EXPECT_EQ(*measured, actual_record.size());
 
   const size_t fixed =
-      *indexer_event_apply_rpc_record_size_for_parts(0, 0, 0, 0);
+      *indexer_event_pull_rpc_record_size_for_parts(0, 0, 0, 0);
   const size_t large_proposal_bytes =
-      kMaxIndexerEventApplyRpcRecordBytes - fixed;
+      kMaxIndexerEventPullRpcRecordBytes - fixed;
   auto max_minus_one =
-      indexer_event_apply_rpc_record_size_for_parts(0, large_proposal_bytes - 1,
-                                                    0, 0);
+      indexer_event_pull_rpc_record_size_for_parts(0, large_proposal_bytes - 1,
+                                                   0, 0);
   auto at_max =
-      indexer_event_apply_rpc_record_size_for_parts(0, large_proposal_bytes, 0,
-                                                    0);
+      indexer_event_pull_rpc_record_size_for_parts(0, large_proposal_bytes, 0,
+                                                   0);
   auto overflow =
-      indexer_event_apply_rpc_record_size_for_parts(0, large_proposal_bytes + 1,
-                                                    0, 0);
+      indexer_event_pull_rpc_record_size_for_parts(0, large_proposal_bytes + 1,
+                                                   0, 0);
   ASSERT_TRUE(max_minus_one.has_value()) << max_minus_one.error();
   ASSERT_TRUE(at_max.has_value()) << at_max.error();
-  EXPECT_EQ(*max_minus_one, kMaxIndexerEventApplyRpcRecordBytes - 1);
-  EXPECT_EQ(*at_max, kMaxIndexerEventApplyRpcRecordBytes);
+  EXPECT_EQ(*max_minus_one, kMaxIndexerEventPullRpcRecordBytes - 1);
+  EXPECT_EQ(*at_max, kMaxIndexerEventPullRpcRecordBytes);
   EXPECT_FALSE(overflow.has_value());
 
   auto at_limit =

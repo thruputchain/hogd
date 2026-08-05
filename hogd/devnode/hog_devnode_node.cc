@@ -57,8 +57,8 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/hogexec/interface/rpc_from_view_gateway.h"
 #include "hogd/indexer/db.h"
+#include "hogd/indexer/pull_controller.h"
 #include "hogd/indexer/rpc_from_block_explorer.h"
-#include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
 #include "hogd/mempool/registration.h"
 #include "hogd/mempool/scheduler.h"
@@ -111,10 +111,9 @@ maybe_inject_post_genesis_failure()
 }
 
 bool
-withhold_indexer_registration_for_test()
+withhold_indexer_pull_for_test()
 {
-  const char *value =
-      std::getenv("HOG_DEVNODE_TEST_WITHHOLD_INDEXER_REGISTRATION");
+  const char *value = std::getenv("HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL");
   return value != nullptr && std::string_view(value) == "1";
 }
 
@@ -596,10 +595,6 @@ HogDevnodeNode::HogDevnodeNode(
                                                                /*port=*/0));
 
     // Now have all of the subsystems register themselves with the mempool.
-    if (recovered_existing_chain_ &&
-        !withhold_indexer_registration_for_test()) {
-      register_indexer_with_event_service();
-    }
     register_db_with_mempool();
     const DbTip admission_tip = ctx_->get_tip();
     Registration::registration().publish_event_canonical_tip(
@@ -609,6 +604,7 @@ HogDevnodeNode::HogDevnodeNode(
     register_coordinator_with_mempool()();
     if (recovered_existing_chain_) {
       register_event_with_mempool();
+      start_indexer_pull();
       register_executor_with_mempool();
       maybe_inject_post_executor_failure();
       bootstrap_config_ = validate_recovered_data_dir(bootstrap_config);
@@ -631,6 +627,8 @@ HogDevnodeNode::HogDevnodeNode(
 HogDevnodeNode::~HogDevnodeNode()
 {
   try {
+    // The controller borrows the event endpoint, failure cache, and IndexDB.
+    indexer_pull_controller_.reset();
     // Shutdown is intentionally loud while this topology is still mirroring the
     // fragile MempoolTestInfra lifecycle; unexpected exceptions here are bugs.
     // Note: unlike prepare_for_failed_construction(), we do not need to drain
@@ -677,6 +675,7 @@ void
 HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
+    indexer_pull_controller_.reset();
     // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
     // (which broadcasts on the coordinator's [auth_data_height_]) via the
     // registered callback, and is destroyed after [mempool_coord_server_].
@@ -736,13 +735,6 @@ HogDevnodeNode::init_indexer_backend()
 void
 HogDevnodeNode::start_indexer_servers()
 {
-  indexer_event_server_ =
-      std::make_unique<RpcServer<IndexerEventRpc>>(*indexer_db_,
-                                                   indexer_failure_cache_);
-  indexer_event_server_->max_message_size_ = kDevRpcMaxMessageSize;
-  indexer_event_server_->start_server(make_bind_host_port(bind_host_,
-                                                          /*port=*/0));
-
   indexer_block_explorer_server_ =
       std::make_unique<RpcServer<IndexerBlockExplorerRpc>>(
           *indexer_db_, indexer_failure_cache_);
@@ -826,39 +818,15 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
 }
 
 void
-HogDevnodeNode::register_indexer_with_event_service()
+HogDevnodeNode::start_indexer_pull()
 {
-  auto client_res =
-      create_client<EventIndexer1>(bind_host_, event_indexer_server_.port())();
-  if (!client_res)
-    panic("devnode register_indexer_with_event_service connect failed: {}",
-          client_res.error().error_code().message());
-  auto client = std::move(*client_res);
-  std::string indexer_event_address =
-      format_advertised_address(bind_host_, indexer_event_server_->port());
-  UPID proposed_generation;
-  read_random(std::as_writable_bytes(std::span(proposed_generation)));
-  auto lineage = indexer_db_->prepare_registration_lineage(proposed_generation);
-  if (!lineage) {
-    panic("devnode: failed to prepare indexer registration lineage: {}",
-          lineage.error());
+  if (withhold_indexer_pull_for_test()) {
+    return;
   }
-  IndexerCard card{.protocol = version::kHogdProtocol(),
-                   .generation = lineage->generation,
-                   .address_for_event = indexer_event_address.c_str(),
-                   .progress = indexer_db_->durable_progress()};
-  if (lineage->predecessor_generation) {
-    card.predecessor_generation = *lineage->predecessor_generation;
-  }
-  const EventIndexerRegistrationOutcome intro_outcome =
-      client.event_indexer_register(card)();
-  if (intro_outcome !=
-      EventIndexerRegistrationOutcome::EventRegistrationAccepted)
-    panic("devnode: event server rejected/failed indexer registration: {}",
-          intro_outcome);
-  if (!indexer_db_->acknowledge_registration(lineage->generation)) {
-    panic("devnode: failed to acknowledge indexer registration lineage");
-  }
+  indexer_pull_controller_ = std::make_unique<IndexerPullController>(
+      format_advertised_address(bind_host_, event_indexer_server_.port()),
+      *indexer_db_, indexer_failure_cache_);
+  indexer_pull_controller_->wait_until_caught_up();
 }
 
 BootstrapAccountConfig
@@ -969,9 +937,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
              DbSchedResult::DbSchedResultOK);
     co_await initialize_fresh_event_outbox_origin();
     register_event_with_mempool();
-    if (!withhold_indexer_registration_for_test()) {
-      register_indexer_with_event_service();
-    }
+    start_indexer_pull();
     register_executor_with_mempool();
     maybe_inject_post_executor_failure();
     co_return;
@@ -984,9 +950,6 @@ HogDevnodeNode::materialize_bootstrap_accounts(
            DbSchedResult::DbSchedResultOK);
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
-  if (!withhold_indexer_registration_for_test()) {
-    register_indexer_with_event_service();
-  }
   register_executor_with_mempool();
   maybe_inject_post_executor_failure();
   maybe_inject_post_genesis_failure();
@@ -994,6 +957,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
   SignedTransactionBatch batch;
   batch.append_range(artifact.initialization_txs);
   commit_initialization_batch(batch);
+  start_indexer_pull();
 
   bootstrap_accounts_ = std::move(artifact.accounts);
   refresh_bootstrap_account_balances();

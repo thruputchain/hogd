@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -24,10 +23,9 @@
 namespace hogd {
 
 inline constexpr uint32_t kIndexerOutboxEnvelopeFormatVersion = 1;
-inline constexpr uint32_t kEventIndexerSlotFormatVersion = 1;
 inline constexpr size_t kMaxIndexerOutboxProtocolCommitBytes = 64;
 inline constexpr size_t kIndexerRpcRecordMarkerBytes = sizeof(uint32_t);
-inline constexpr size_t kMaxIndexerEventApplyRpcRecordBytes =
+inline constexpr size_t kMaxIndexerEventPullRpcRecordBytes =
     kIndexerRpcMaxMessageSize + kIndexerRpcRecordMarkerBytes;
 // A durable payload can never be larger than the RPC body that must replay it.
 // The actual committed limit is lower because the call header, origin, block
@@ -95,7 +93,7 @@ void fail_next_indexer_outbox_operation_for_test(IndexerOutboxFaultPoint point);
 IndexerOutboxStatus<size_t>
 indexer_outbox_file_size_for_payload(size_t payload_size);
 IndexerOutboxStatus<void> validate_indexer_outbox_file_size(size_t file_size);
-IndexerOutboxStatus<size_t> indexer_event_apply_rpc_record_size_for_parts(
+IndexerOutboxStatus<size_t> indexer_event_pull_rpc_record_size_for_parts(
     size_t consensus_value_xdr_size, size_t proposal_txs_xdr_size,
     size_t event_logs_xdr_size, size_t tx_bodies_xdr_size);
 
@@ -123,13 +121,6 @@ public:
   static std::string committed_filename(BlockHeight block_height);
   static std::string epoch_origin_filename(std::string_view protocol);
   static std::string current_epoch_origin_filename();
-  static std::string indexer_slot_filename();
-
-  IndexerOutboxStatus<std::optional<EventIndexerSlot>>
-  load_indexer_slot() const;
-  IndexerOutboxStatus<void>
-  store_indexer_slot(const EventIndexerSlot &slot) const;
-
   x23::Async<IndexerOutboxStatus<void>>
   publish_candidate(const IndexerOutboxCandidatePayload &payload) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
@@ -145,9 +136,14 @@ public:
   publish_committed(const IndexerOutboxCommittedPayload &payload) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
+  x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
+  load_committed(BlockHeight block_height,
+                 std::string_view expected_protocol) const;
   IndexerOutboxStatus<bool> has_committed(BlockHeight block_height) const;
   IndexerOutboxStatus<std::optional<IndexerOutboxCommittedRecordInfo>>
   latest_committed_record_raw() const;
+  IndexerOutboxStatus<IndexerOutboxCommittedRecordInfo>
+  load_committed_record_info_raw(BlockHeight block_height) const;
 
   // Raw filename enumeration only. It sorts recognized committed identities
   // but intentionally does not assert contiguity or canonical-chain semantics;
@@ -198,9 +194,6 @@ private:
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
                 std::span<const std::byte> bytes) const;
-  IndexerOutboxStatus<void>
-  replace_bytes(std::string_view filename,
-                std::span<const std::byte> bytes) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
@@ -230,8 +223,6 @@ private:
   // advances only after durable no-clobber publication.
   mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
       std::make_unique<x23::CoroLock>();
-  mutable std::unique_ptr<std::mutex> slot_publication_mutex_ =
-      std::make_unique<std::mutex>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;
   mutable size_t committed_history_scan_count_ = 0;
 };

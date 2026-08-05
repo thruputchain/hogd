@@ -49,7 +49,6 @@ export AUTH_DB_PORT=8050
 export AUTH_MEMPOOL_PORT=8051
 export AUTH_HTTP_PORT=8052
 
-export INDEXER_EVENT_PORT=8060
 export INDEXER_BLOCK_EXPLORER_PORT=8061
 export INDEXER_HTTP_PORT=8062
 
@@ -257,7 +256,7 @@ if $delete_db; then
   ssh "${COMMON_SSH_OPTS[@]}" "$indexer_server" "rm -rf $logdir/indexer"
 fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
-  --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
+  --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
 # Start hogdb.
 echo "Start hogdb..."
@@ -330,7 +329,6 @@ done
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$event_server")" $EVENT_HTTP_PORT
 
 # Wait for indexer.
-"$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_EVENT_PORT
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_BLOCK_EXPLORER_PORT
 "$HOGD_PROJECT_DIR/scripts/wait-port.sh" "$(hog_ip "$indexer_server")" $INDEXER_HTTP_PORT
 

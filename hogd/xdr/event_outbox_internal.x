@@ -65,18 +65,4 @@ struct IndexerOutboxCandidatePayload {
 
 typedef IndexerCommittedBlockPayload IndexerOutboxCommittedPayload;
 
-// Private crash-safe fencing state. The indexer record lives in RocksDB; the
-// event slot lives beside the outbox under its singleton directory lock.
-struct IndexerRegistrationLineage {
-  unsigned int format_version;
-  UPID generation;
-  UPID *predecessor_generation;
-  bool acknowledged;
-};
-
-struct EventIndexerSlot {
-  unsigned int format_version;
-  UPID generation;
-};
-
 } // namespace hogd

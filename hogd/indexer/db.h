@@ -33,8 +33,6 @@ class WriteBatch;
 
 namespace hogd {
 
-inline constexpr uint32_t kIndexerRegistrationLineageFormatVersion = 1;
-
 // Custom deleter for RocksDB (defined in .cc file)
 struct RocksDBDeleter {
   void operator()(rocksdb::DB *db) const;
@@ -100,13 +98,6 @@ public:
   // Durable strict ingestion. Epoch changes and committed blocks each have one
   // synchronous RocksDB WriteBatch durability point.
   IndexerProgress durable_progress() const;
-  // Reuse an unacknowledged session after a crash. Once its acceptance is
-  // durably acknowledged, the next startup advances to `new_generation` and
-  // names the prior session as its predecessor.
-  IndexerStatus<IndexerRegistrationLineage>
-  prepare_registration_lineage(UPID new_generation);
-  IndexerStatus<void> acknowledge_registration(const UPID &generation);
-  std::optional<IndexerRegistrationLineage> registration_lineage() const;
   IndexerEpochResult initialize_epoch(const IndexerOutboxOrigin &origin);
   x23::Async<IndexerBlockApplyResult>
   apply_committed_block(IndexerOutboxOrigin origin,
@@ -226,7 +217,6 @@ private:
                                   const IndexerCommittedBlock &block);
 
   IndexerStatus<void> initialize_progress_from_db();
-  IndexerStatus<void> initialize_registration_lineage_from_db();
 
   // True iff `h` is at or below the contiguous watermark or buffered
   // in pending_heights_.  The guard evidences ingest_mutex_ is held.
@@ -260,7 +250,6 @@ private:
 
   // Present only after durable epoch initialization. Guarded by ingest_mutex_.
   std::optional<IndexerInitializedProgress> durable_progress_;
-  std::optional<IndexerRegistrationLineage> registration_lineage_;
   // Set when a recognized legacy watermark is loaded or legacy ingestion first
   // runs. This is distinct from a fresh empty database: durable initialization
   // must fail with an explicit migration-required outcome while legacy storage

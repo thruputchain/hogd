@@ -104,7 +104,6 @@ EXECUTOR_HTTP_PORT=8041
 AUTH_DB_PORT=8050
 AUTH_MEMPOOL_PORT=8051
 AUTH_HTTP_PORT=8052
-INDEXER_EVENT_PORT=8060
 INDEXER_BLOCK_EXPLORER_PORT=8061
 INDEXER_HTTP_PORT=8062
 MEMPOOL_COORDINATOR_PORT=8070
@@ -201,7 +200,6 @@ launch() {
   indexer)
     spawn indexer "$INDEXER_BIN" --event-addr "$IP:$EVENT_INDEXER_PORT" \
       --db-path "$WORK_DIR/indexer" --bind-ip "$IP" \
-      --event-port "$INDEXER_EVENT_PORT" \
       --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" \
       --metrics-port "$INDEXER_HTTP_PORT"
     ;;

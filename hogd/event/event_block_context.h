@@ -30,13 +30,9 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
-#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
-
-using indexer_event_client_t =
-    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 namespace detail {
 struct EventContext {

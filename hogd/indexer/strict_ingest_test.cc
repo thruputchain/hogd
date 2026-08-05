@@ -25,11 +25,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/event/event_block_context.h"
-#include "hogd/event/test_util/socketpair_indexer_client.h"
 #include "hogd/indexer/db.h"
 #include "hogd/indexer/key_format.h"
-#include "hogd/indexer/recent_tx_failure_cache.h"
-#include "hogd/indexer/rpc_from_event.h"
 #include "hogd/indexer/status.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
@@ -202,56 +199,49 @@ protected:
     auto opened = IndexDB::make_new(path_);
     ASSERT_TRUE(opened.has_value());
     db_ = std::make_unique<IndexDB>(std::move(*opened));
-    rpc_ = std::make_unique<IndexerEventRpc>(*db_, failures_);
   }
 
   TmpDir dir_;
   std::filesystem::path path_;
   std::unique_ptr<IndexDB> db_;
-  RecentTxFailureCache failures_;
-  std::unique_ptr<IndexerEventRpc> rpc_;
 };
 
 TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
 {
-  EXPECT_EQ(rpc_->indexer_event_get_progress()().state(),
+  EXPECT_EQ(db_->durable_progress().state(),
             IndexerProgressState::IndexerProgressUninitialized);
   IndexerOutboxOrigin origin = make_origin();
-  IndexerEpochResult initialized =
-      rpc_->indexer_event_initialize_epoch(origin)();
+  IndexerEpochResult initialized = db_->initialize_epoch(origin);
   ASSERT_EQ(initialized.outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
   EXPECT_EQ(initialized.progress().contiguous_height, 0);
   EXPECT_EQ(initialized.progress().last_consensus_hash, origin.first_prev_hash);
 
-  EXPECT_EQ(rpc_->indexer_event_initialize_epoch(origin)().outcome(),
+  EXPECT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochUnchanged);
-  EXPECT_EQ(rpc_->indexer_event_initialize_epoch(
-                    make_origin("hogp/next", 2, origin.first_prev_hash))()
+  EXPECT_EQ(db_->initialize_epoch(
+                   make_origin("hogp/next", 2, origin.first_prev_hash))
                 .outcome(),
             IndexerEpochOutcome::IndexerEpochConflict);
 
   IndexerCommittedBlock first = make_block(1, origin.first_prev_hash);
-  ASSERT_EQ(
-      rpc_->indexer_event_apply_committed_block(origin, first)().outcome(),
-      IndexerBlockApplyOutcome::IndexerBlockApplied);
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
   IndexerOutboxOrigin next =
       make_origin("hogp/next", 2, first.identity.consensus_hash, 1);
-  IndexerEpochResult transitioned =
-      rpc_->indexer_event_initialize_epoch(next)();
+  IndexerEpochResult transitioned = db_->initialize_epoch(next);
   ASSERT_EQ(transitioned.outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
   EXPECT_EQ(transitioned.progress().contiguous_height, 1);
   EXPECT_EQ(transitioned.progress().last_payload_digest,
             first.identity.payload_digest);
 
-  EXPECT_EQ(
-      rpc_->indexer_event_apply_committed_block(origin, first)().outcome(),
-      IndexerBlockApplyOutcome::IndexerBlockOriginMismatch);
+  EXPECT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockOriginMismatch);
 
   IndexerOutboxOrigin reused =
       make_origin("hogp/test", 2, first.identity.consensus_hash, 2);
-  EXPECT_EQ(rpc_->indexer_event_initialize_epoch(reused)().outcome(),
+  EXPECT_EQ(db_->initialize_epoch(reused).outcome(),
             IndexerEpochOutcome::IndexerEpochConflict);
 }
 
@@ -270,22 +260,6 @@ TEST_F(StrictIndexerTest, CommittedValidationAwaitsBeforeIngestMutex)
 
   EXPECT_EQ(apply_from_pool()().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
-}
-
-TEST_F(StrictIndexerTest, RpcDispatcherOwnsCommittedArgumentsAcrossSuspension)
-{
-  IndexerOutboxOrigin origin = make_origin();
-  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
-            IndexerEpochOutcome::IndexerEpochInitialized);
-  ProposedTransaction body = make_body(102, 0xa2);
-  IndexerCommittedBlock block = make_block(1, origin.first_prev_hash, {body});
-  indexer_event_client_t client = make_socketpair_indexer_client(rpc_.get());
-
-  IndexerBlockApplyResult result =
-      client.indexer_event_apply_committed_block(origin, block)();
-
-  EXPECT_EQ(result.outcome(), IndexerBlockApplyOutcome::IndexerBlockApplied);
-  EXPECT_TRUE(db_->get_tx_record(sha256(body.signed_tx.tx)).has_value());
 }
 
 TEST_F(StrictIndexerTest, ConcurrentValidationSerializesDurableMutation)
@@ -317,54 +291,6 @@ TEST_F(StrictIndexerTest, ConcurrentValidationSerializesDurableMutation)
   EXPECT_TRUE(db_->get_tx_record(sha256(body.signed_tx.tx)).has_value());
 }
 
-TEST_F(StrictIndexerTest, RegistrationLineageReusesUnacknowledgedThenAdvances)
-{
-  UPID first_generation{};
-  first_generation[0] = 0x11;
-  auto first = db_->prepare_registration_lineage(first_generation);
-  ASSERT_TRUE(first.has_value()) << first.error();
-  EXPECT_EQ(first->generation, first_generation);
-  EXPECT_FALSE(first->predecessor_generation);
-  EXPECT_FALSE(first->acknowledged);
-
-  rpc_.reset();
-  db_.reset();
-  UPID second_generation{};
-  second_generation[0] = 0x22;
-  {
-    auto reopened = IndexDB::open(path_);
-    ASSERT_TRUE(reopened.has_value()) << reopened.error();
-    auto reused = reopened->prepare_registration_lineage(second_generation);
-    ASSERT_TRUE(reused.has_value()) << reused.error();
-    EXPECT_EQ(reused->generation, first_generation);
-    EXPECT_FALSE(reused->predecessor_generation);
-    ASSERT_TRUE(
-        reopened->acknowledge_registration(first_generation).has_value());
-  }
-
-  auto reopened = IndexDB::open(path_);
-  ASSERT_TRUE(reopened.has_value()) << reopened.error();
-  auto advanced = reopened->prepare_registration_lineage(second_generation);
-  ASSERT_TRUE(advanced.has_value()) << advanced.error();
-  EXPECT_EQ(advanced->generation, second_generation);
-  ASSERT_TRUE(advanced->predecessor_generation);
-  EXPECT_EQ(*advanced->predecessor_generation, first_generation);
-  EXPECT_FALSE(advanced->acknowledged);
-}
-
-TEST_F(StrictIndexerTest, RegistrationLineageCorruptionFailsClosed)
-{
-  UPID generation{};
-  generation[0] = 0x31;
-  ASSERT_TRUE(db_->prepare_registration_lineage(generation).has_value());
-  rpc_.reset();
-  db_.reset();
-  overwrite_default_metadata(path_,
-                             IndexerKeyFormat::kRegistrationLineageMetaKey,
-                             "bad");
-  EXPECT_FALSE(IndexDB::open(path_).has_value());
-}
-
 TEST_F(StrictIndexerTest, FreshOriginRejectsMidchainAndZeroGenesisBoundary)
 {
   EXPECT_EQ(db_->initialize_epoch(make_origin("hogp/test", 101)).outcome(),
@@ -388,7 +314,6 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
   ASSERT_EQ(db_->initialize_epoch(second_origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
 
-  rpc_.reset();
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
@@ -415,7 +340,6 @@ TEST_F(StrictIndexerTest, DifferentOriginCannotSupersedeUnusedEpochAcrossReopen)
   EXPECT_EQ(db_->initialize_epoch(different).outcome(),
             IndexerEpochOutcome::IndexerEpochConflict);
 
-  rpc_.reset();
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
@@ -460,7 +384,6 @@ TEST_F(StrictIndexerTest,
   EXPECT_EQ(db_->apply_committed_block(epoch_b, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockOriginMismatch);
 
-  rpc_.reset();
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
@@ -613,7 +536,6 @@ TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)
   const IndexerInitializedProgress before =
       db_->durable_progress().initialized();
 
-  rpc_.reset();
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
@@ -634,7 +556,6 @@ TEST_F(StrictIndexerTest, ReopenRejectsMalformedPerHeightIdentity)
   IndexerCommittedBlock first = make_block(1, origin.first_prev_hash);
   ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
-  rpc_.reset();
   db_.reset();
 
   overwrite_default_metadata(path_,
@@ -645,7 +566,6 @@ TEST_F(StrictIndexerTest, ReopenRejectsMalformedPerHeightIdentity)
 
 TEST_F(StrictIndexerTest, MissingMetadataWithAnyIndexRowsFailsClosed)
 {
-  rpc_.reset();
   db_.reset();
   for (unsigned int mask = 1; mask <= 3; ++mask) {
     const std::filesystem::path path =
@@ -680,7 +600,6 @@ TEST_F(StrictIndexerTest, MissingMetadataWithAnyIndexRowsFailsClosed)
 
 TEST_F(StrictIndexerTest, MalformedLegacyWatermarkFailsClosed)
 {
-  rpc_.reset();
   db_.reset();
   overwrite_default_metadata(path_,
                              IndexerKeyFormat::kHighestIndexedBlockMetaKey,
@@ -696,7 +615,6 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
   ASSERT_TRUE(db_->consume_events(1, TxEventLogBatch{first_log},
                                   ProposedTransactionBatch{first_body})
                   .has_value());
-  rpc_.reset();
   db_.reset();
 
   auto reopened = IndexDB::open(path_);
@@ -718,7 +636,6 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
 
 TEST_F(StrictIndexerTest, LegacyWatermarkWithStrictMetadataResidueFailsClosed)
 {
-  rpc_.reset();
   db_.reset();
   const std::vector<std::pair<std::string, std::string>> residue = {
       {"block identity", IndexerKeyFormat::make_block_identity_meta_key(1)},
@@ -830,7 +747,6 @@ TEST_F(StrictIndexerTest, HistoricalIdentitiesAreValidatedLazily)
       first = block;
     }
   }
-  rpc_.reset();
   db_.reset();
   overwrite_default_metadata(path_,
                              IndexerKeyFormat::make_block_identity_meta_key(1),
@@ -888,7 +804,6 @@ TEST_F(StrictIndexerTest,
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
   // Indexed rows and durable progress must reopen at the same committed height.
-  rpc_.reset();
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());

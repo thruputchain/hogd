@@ -21,13 +21,14 @@ opaque pagination cursors from rows arriving below a previously served cut.
 ### Pattern Context
 
 This design adapts the transactional outbox and store-and-forward patterns:
-committed producer records form a durable ordered log, delivery is at least
-once, and the consumer atomically persists its effects and checkpoint so replay
-is idempotent. Unlike a textbook transactional outbox, HogDB and event durability
-cannot share one database transaction. The scheduler confirmation barrier
-therefore controls delivery eligibility after both commits succeed, while
-canonical consensus identity and startup reconciliation repair the permitted
-crash windows. This is not distributed two-phase commit.
+committed producer records form a durable ordered log, the consumer pulls from
+its durable checkpoint, and the consumer atomically persists each record's
+effects and checkpoint so retries are idempotent. Unlike a textbook
+transactional outbox, HogDB and event durability cannot share one database
+transaction. The scheduler confirmation barrier therefore controls pull
+eligibility after both commits succeed, while canonical consensus identity and
+startup reconciliation repair the permitted crash windows. This is not
+distributed two-phase commit.
 
 Add a durable, event-side indexer outbox. Closing a candidate atomically writes
 the complete indexer payload before returning its event root to the scheduler.
@@ -40,15 +41,15 @@ promotes it to one immutable record per committed block. Each record contains:
 - the complete `TxEventLogBatch`; and
 - the index-aligned `ProposedTransactionBatch`.
 
-Records exist for empty blocks. They are atomically published before live
-delivery by syncing a unique temporary file, linking it to the final no-clobber
+Records exist for empty blocks. They are atomically published before becoming
+pullable by syncing a unique temporary file, linking it to the final no-clobber
 name, removing the temporary name, and syncing the directory. Commit is not
 acknowledged until publication and directory sync succeed. An existing
 byte-identical record is idempotent, while an identity or payload conflict is
 fatal.
 
 Before either candidate or committed publication, event computes the complete
-`IndexerEvent1.indexer_event_apply_committed_block` XDR record size: RPC call
+`EventIndexer1.event_indexer_pull_next` block-reply XDR record size: RPC reply
 header, origin, full `ConsensusValue`, every `ProposalTxs` segment and hash,
 event/body vectors, block identity, and record marker. Anything above x23's
 unchunked 31-bit record-body limit is rejected before a durable write.
@@ -72,19 +73,21 @@ same `ConsensusValue` and promote the matching candidate. If promotion succeeds
 before the scheduler database commit, the linked consensus identity remains
 authoritative and catchup completes the database side. Startup must reconcile
 both directions against recovered canonical chain identity before replay; an
-orphaned or conflicting record is never delivered.
+orphaned or conflicting record is never returned.
 
-Delivery is ordered and at least once. Indexer registration reports the
-receiver's outbox origin, durable contiguous watermark, and the consensus hash
-and full-payload digest at that boundary. The event service rejects a boundary
-identity mismatch, then replays every later record in ascending order before
-admitting that receiver to live delivery.
-Successful `indexer_event_apply_committed_block` completion acknowledges one
-record.
+Pulling is ordered and at least once. Each request reports the indexer's outbox
+origin, durable contiguous watermark, and the consensus hash and full-payload
+digest at that boundary. The event service rejects a boundary identity mismatch
+and returns only the exact next scheduler-admissible record. An uninitialized
+indexer receives either the first record or the current origin when the outbox is
+caught up. A request carrying progress advanced through a previous reply is its
+acknowledgement; a lost reply safely causes the same immutable block to be
+returned again.
+
 Indexer application uses one synchronous RocksDB `WriteBatch` spanning the
 transaction rows, address rows, per-height payload digest, and contiguous
-watermark, so acknowledgement has one crash-atomic durability point. Duplicate
-delivery of the same height and digest succeeds; a conflicting digest or a
+watermark, so progress has one crash-atomic durability point. Duplicate
+application of the same height and digest succeeds; a conflicting digest or a
 height other than the exact durable next height is rejected without writes.
 
 Outbox metadata defines its network identity, first height, and first previous
@@ -110,7 +113,7 @@ The implementation does not guess an origin.
 
 Reconciliation separately records the scheduler-admissible canonical tail. A
 durable H+1 record found while the scheduler reports H remains withheld from
-replay and live delivery. A later catchup commit must supply the exact retained
+pull requests. A later catchup commit must supply the exact retained
 `ConsensusValue` before H+1 becomes admissible.
 
 There is no legacy mid-chain migration. A recovered devnode chain without a
@@ -126,14 +129,12 @@ into `groundhog-go/protocol-go` and bindings are regenerated, but `hogp.go`
 advances only after the protocol commit exists.
 
 The first implementation supports the current topology of one event service and
-one indexer. The indexer registers once during a bounded startup window, with
-progress read from its database. Only connection failures and an event origin
-that is not yet available are retried. Protocol mismatch, progress or content
-conflict, corruption, replay failure, and stale generation are fatal. A later
-indexer generation may advance the durable slot only while a newly started event
-process performs its one startup registration. Once registration succeeds,
-exact-generation retries remain idempotent; a different generation is rejected
-for the process lifetime. There is no live indexer replacement workflow.
+one indexer. The indexer owns one pull loop and reads progress from its database
+for every request. Connection failures and an event origin that is not yet
+available are retried. Each RPC has a deadline, and initial catch-up must finish
+within a bounded startup window. Protocol mismatch, progress or content
+conflict, corruption, and durable apply failure are fatal. No reverse indexer
+listener, registration generation, or live-delivery worker is required.
 
 The validator node is fail-fast after startup. `SchedEvent1` prepare,
 reconciliation, and activation form a one-shot startup barrier. Once activated,
@@ -144,22 +145,12 @@ Any transport exception after a DB/event commit has been selected is ambiguous
 and terminates the process after already-launched coroutines have drained.
 
 An outbox publication coroutine lock serializes origin selection, durable
-promotion, scheduler-admissible-tail advancement, ordered queue insertion, and
-registration snapshots. Publication and its queue admission complete in that
-critical section, so registration's final resnapshot cannot miss an unresolved
-reservation or a newly deliverable record. The separate short state mutex only
-protects receiver ownership and queue bookkeeping.
-
-No state mutex is held during RPC. The installed connection has one serialized
-delivery lane. New scheduler confirmations notify the lane without waiting for
-network delivery, preserving the rule that indexer latency cannot block
-consensus commit. A live delivery rejection or transport failure is fatal and
-lets the validator supervisor restart the whole node. Registration repeatedly
-snapshots and drains the scheduler-admissible tail, then resnapshots under the
-publication lock and installs only when no later admissible record remains.
-There is no window in which a durable or in-flight record is omitted from
-admission. Shutdown closes active x23 streams and waits for the owned delivery
-worker to drain.
+promotion, scheduler-admissible-tail advancement, and pull snapshots. A pull
+copies the current origin and admissible boundary while holding that lock, then
+loads the immutable next record without holding it. New scheduler confirmations
+only advance the admissible tail; they perform no indexer network work, so
+indexer latency cannot block consensus commit. Shutdown fails the active client
+stream and joins the indexer's owned pull thread.
 
 The indexer stays in its startup state until initial replay succeeds. Missing
 origins, missing records, chain conflicts, and corrupt records are fatal, never
@@ -181,9 +172,9 @@ separate work.
    commit, even if no indexer was connected.
 2. Event logs and transaction bodies retain their positional association.
 3. Empty blocks advance the same contiguous sequence as non-empty blocks.
-4. Replay never runs concurrently with live delivery to the same indexer.
+4. One indexer pull loop applies records serially in exact height order.
 5. The indexer watermark advances only in strict height order.
-6. A restart after any successful delivery can safely replay that delivery.
+6. A restart after any successful apply can safely request that block again.
 7. Readiness is not healthy while scheduler-admissible durable outbox records
    remain unapplied.
 8. Candidate publication precedes consensus persistence, and committed replay

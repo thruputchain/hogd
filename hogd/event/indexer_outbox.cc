@@ -14,7 +14,6 @@
 #include <fcntl.h>
 #include <format>
 #include <limits>
-#include <mutex>
 #include <optional>
 #include <span>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -61,7 +60,6 @@ constexpr std::string_view kEpochOriginPrefix = "epoch-origin-";
 constexpr std::string_view kOutboxSuffix = ".outbox";
 constexpr std::string_view kTempMarker = ".tmp.";
 constexpr std::string_view kOutboxDirectory = "indexer-outbox";
-constexpr std::string_view kIndexerSlotFilename = "indexer-slot.outbox";
 constexpr size_t kIdentityDigits = 20;
 static_assert(x23::detail::xdr_size_bounds<ConsensusValue>().max_ <
               kIndexerRpcMaxMessageSize);
@@ -151,8 +149,7 @@ is_recognized_temp_filename(std::string_view filename)
 {
   const size_t marker = filename.find(kTempMarker);
   if (marker == std::string_view::npos ||
-      (!is_recognized_final_filename(filename.substr(0, marker)) &&
-       filename.substr(0, marker) != kIndexerSlotFilename)) {
+      !is_recognized_final_filename(filename.substr(0, marker))) {
     return false;
   }
   std::string_view identity = filename.substr(marker + kTempMarker.size());
@@ -186,11 +183,11 @@ validate_payload_sizes(const Payload &payload)
   else {
     consensus_value_size = x23::detail::xdr_size_bounds<ConsensusValue>().max_;
   }
-  auto delivery_size = indexer_event_apply_rpc_record_size_for_parts(
+  auto response_size = indexer_event_pull_rpc_record_size_for_parts(
       consensus_value_size, x23::xdr_size(payload.proposal_txs),
       x23::xdr_size(payload.event_logs), x23::xdr_size(payload.tx_bodies));
-  if (!delivery_size) {
-    return std::unexpected(delivery_size.error());
+  if (!response_size) {
+    return std::unexpected(response_size.error());
   }
   auto file_size = indexer_outbox_file_size_for_payload(x23::xdr_size(payload));
   if (!file_size) {
@@ -468,16 +465,18 @@ validate_indexer_outbox_file_size(size_t file_size)
 }
 
 IndexerOutboxStatus<size_t>
-indexer_event_apply_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
-                                              size_t proposal_txs_xdr_size,
-                                              size_t event_logs_xdr_size,
-                                              size_t tx_bodies_xdr_size)
+indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
+                                             size_t proposal_txs_xdr_size,
+                                             size_t event_logs_xdr_size,
+                                             size_t tx_bodies_xdr_size)
 {
-  const auto call = x23::call_msg<IndexerEvent1::proc_meta<12>>();
+  x23::rpc_msg reply{};
+  x23::msg_set_reply_stat(&reply, x23::accept_stat::SUCCESS);
   IndexerOutboxOrigin origin{.protocol = version::kHogdProtocol()};
-  // Record marker + RPC call header + apply arguments. The committed block is
-  // its payload fields followed by the two 32-byte identity hashes.
-  auto size = checked_add(kIndexerRpcRecordMarkerBytes, x23::xdr_size(call));
+  // Record marker + successful RPC reply + pull-result discriminant + origin.
+  // The committed block is its payload fields followed by its identity.
+  auto size = checked_add(kIndexerRpcRecordMarkerBytes, x23::xdr_size(reply));
+  size = size.and_then([&](size_t value) { return checked_add(value, 4); });
   size = size.and_then(
       [&](size_t value) { return checked_add(value, x23::xdr_size(origin)); });
   size = size.and_then([&](size_t value) { return checked_add(value, 4); });
@@ -493,9 +492,9 @@ indexer_event_apply_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
   size = size.and_then([&](size_t value) {
     return checked_add(value, x23::xdr_size(IndexerCommittedBlockIdentity{}));
   });
-  if (!size || *size > kMaxIndexerEventApplyRpcRecordBytes) {
+  if (!size || *size > kMaxIndexerEventPullRpcRecordBytes) {
     return std::unexpected(
-        "IndexerEvent1 apply RPC record exceeds x23 31-bit limit");
+        "EventIndexer1 pull reply record exceeds x23 31-bit limit");
   }
   return *size;
 }
@@ -611,51 +610,6 @@ std::string
 IndexerOutboxStore::current_epoch_origin_filename()
 {
   return epoch_origin_filename(version::kHogdProtocol());
-}
-
-std::string
-IndexerOutboxStore::indexer_slot_filename()
-{
-  return std::string(kIndexerSlotFilename);
-}
-
-IndexerOutboxStatus<std::optional<EventIndexerSlot>>
-IndexerOutboxStore::load_indexer_slot() const
-{
-  auto exists = has_regular_file(kIndexerSlotFilename);
-  if (!exists) {
-    return std::unexpected(exists.error());
-  }
-  if (!*exists) {
-    return std::optional<EventIndexerSlot>{};
-  }
-  auto bytes = load_bytes(kIndexerSlotFilename);
-  if (!bytes) {
-    return std::unexpected(bytes.error());
-  }
-  EventIndexerSlot slot;
-  try {
-    x23::deserialize(&slot, x23::BufView(*bytes));
-  } catch (const x23::XdrException &e) {
-    return std::unexpected(
-        std::format("malformed durable indexer slot: {}", e.what()));
-  }
-  if (slot.format_version != kEventIndexerSlotFormatVersion ||
-      x23::xdr_size(slot) != bytes->size()) {
-    return std::unexpected("invalid durable indexer slot metadata");
-  }
-  return std::optional(std::move(slot));
-}
-
-IndexerOutboxStatus<void>
-IndexerOutboxStore::store_indexer_slot(const EventIndexerSlot &slot) const
-{
-  if (slot.format_version != kEventIndexerSlotFormatVersion) {
-    return std::unexpected("invalid durable indexer slot version");
-  }
-  const x23::Buf bytes = x23::serialize(slot);
-  std::lock_guard lock(*slot_publication_mutex_);
-  return replace_bytes(kIndexerSlotFilename, std::as_bytes(std::span(bytes)));
 }
 
 x23::Async<IndexerOutboxStatus<void>>
@@ -929,6 +883,13 @@ IndexerOutboxStore::publish_committed(
 x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
 IndexerOutboxStore::load_committed(BlockHeight block_height) const
 {
+  co_return co_await load_committed(block_height, version::kHogdProtocol());
+}
+
+x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
+IndexerOutboxStore::load_committed(BlockHeight block_height,
+                                   std::string_view expected_protocol) const
+{
   if (block_height < 0) {
     co_return std::unexpected("committed outbox height is negative");
   }
@@ -937,8 +898,8 @@ IndexerOutboxStore::load_committed(BlockHeight block_height) const
   if (!header) {
     co_return std::unexpected(header.error());
   }
-  if (std::string_view(header->protocol) != version::kHogdProtocol()) {
-    co_return std::unexpected("outbox protocol does not match this binary");
+  if (std::string_view(header->protocol) != expected_protocol) {
+    co_return std::unexpected("outbox protocol does not match expected epoch");
   }
   if (header->record_identity.kind() !=
           IndexerOutboxRecordKind::IndexerOutboxCommitted ||
@@ -1295,6 +1256,36 @@ IndexerOutboxStore::latest_committed_record_raw() const
       std::move(records->back()));
 }
 
+IndexerOutboxStatus<IndexerOutboxCommittedRecordInfo>
+IndexerOutboxStore::load_committed_record_info_raw(
+    BlockHeight block_height) const
+{
+  if (block_height < 0) {
+    return std::unexpected("committed outbox height is negative");
+  }
+  const std::string filename = committed_filename(block_height);
+  auto header = load_header(filename);
+  if (!header) {
+    return std::unexpected(header.error());
+  }
+  if (header->record_identity.kind() !=
+          IndexerOutboxRecordKind::IndexerOutboxCommitted ||
+      header->block_height != block_height) {
+    return std::unexpected("committed outbox filename/header mismatch");
+  }
+  if (auto valid = validate_payload_digest(filename, *header); !valid) {
+    return std::unexpected(valid.error());
+  }
+  return IndexerOutboxCommittedRecordInfo{
+      .block_height = header->block_height,
+      .protocol = std::string(header->protocol),
+      .payload_byte_length = header->payload_byte_length,
+      .payload_digest = header->payload_digest,
+      .consensus_hash = header->consensus_hash,
+      .prev_hash = header->prev_hash,
+  };
+}
+
 IndexerOutboxStatus<std::vector<IndexerOutboxCommittedRecordInfo>>
 IndexerOutboxStore::enumerate_committed_records_raw() const
 {
@@ -1559,69 +1550,6 @@ IndexerOutboxStore::publish_bytes(std::string_view filename,
   if (fsync(directory_fd_.get()) != 0) {
     return std::unexpected(
         system_error("fsync indexer outbox directory", errno));
-  }
-  return {};
-}
-
-IndexerOutboxStatus<void>
-IndexerOutboxStore::replace_bytes(std::string_view filename,
-                                  std::span<const std::byte> bytes) const
-{
-  if (auto valid = validate_indexer_outbox_file_size(bytes.size()); !valid) {
-    return valid;
-  }
-
-  static std::atomic<uint64_t> sequence = 0;
-  std::string temp_filename;
-  UniqueFd temp_fd;
-  for (size_t attempt = 0; attempt < 100; ++attempt) {
-    temp_filename = std::format("{}{}.{}.{}", filename, kTempMarker, getpid(),
-                                sequence.fetch_add(1));
-    const int fd =
-        openat(directory_fd_.get(), temp_filename.c_str(),
-               O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
-    if (fd >= 0) {
-      temp_fd.reset(fd);
-      break;
-    }
-    if (errno != EEXIST) {
-      return std::unexpected(
-          system_error("create indexer slot temp file", errno));
-    }
-  }
-  if (!temp_fd) {
-    return std::unexpected("could not create unique indexer slot temp file");
-  }
-  Defer cleanup([&] {
-    std::ignore = unlinkat(directory_fd_.get(), temp_filename.c_str(), 0);
-  });
-
-  File temp_file(temp_fd.release());
-  if (auto written = write_full(temp_file, bytes); !written) {
-    return std::unexpected(
-        std::format("write indexer slot temp file: {}", written.error()));
-  }
-  if (auto synced = temp_file.sync(); !synced) {
-    return std::unexpected(
-        std::format("fsync indexer slot temp file: {}", synced.error()));
-  }
-  if (auto closed = temp_file.close(); !closed) {
-    return std::unexpected(
-        std::format("close indexer slot temp file: {}", closed.error()));
-  }
-
-  const std::string final_filename(filename);
-  if (renameat(directory_fd_.get(), temp_filename.c_str(), directory_fd_.get(),
-               final_filename.c_str()) != 0) {
-    return std::unexpected(system_error("replace durable indexer slot", errno));
-  }
-  std::ignore = cleanup.release();
-  if (consume_fault(IndexerOutboxFaultPoint::kFsyncPublishedDirectory)) {
-    return std::unexpected("injected fsync indexer slot directory");
-  }
-  if (fsync(directory_fd_.get()) != 0) {
-    return std::unexpected(
-        system_error("fsync directory after indexer slot replacement", errno));
   }
   return {};
 }

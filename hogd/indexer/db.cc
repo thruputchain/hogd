@@ -361,27 +361,6 @@ column_family_has_rows(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle)
 }
 
 IndexerStatus<bool>
-column_family_has_rows_other_than(rocksdb::DB *db,
-                                  rocksdb::ColumnFamilyHandle *handle,
-                                  std::string_view allowed_key)
-{
-  std::unique_ptr<rocksdb::Iterator> iterator(
-      db->NewIterator(rocksdb::ReadOptions(), handle));
-  for (iterator->SeekToFirst(); iterator->Valid(); iterator->Next()) {
-    if (iterator->key() !=
-        rocksdb::Slice(allowed_key.data(), allowed_key.size())) {
-      return true;
-    }
-  }
-  if (!iterator->status().ok()) {
-    error("failed to inspect indexer column family {}: {}", handle->GetName(),
-          iterator->status().ToString());
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  return false;
-}
-
-IndexerStatus<bool>
 column_family_has_prefix(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle,
                          std::string_view prefix)
 {
@@ -567,11 +546,7 @@ IndexDB::open(const std::filesystem::path &path,
   }
 
   IndexDB idx(db_ptr, tx_cf, contract_cf);
-  auto initialized = idx.initialize_registration_lineage_from_db();
-  if (!initialized) {
-    return initialized.error();
-  }
-  initialized = idx.initialize_progress_from_db();
+  auto initialized = idx.initialize_progress_from_db();
   if (!initialized) {
     return initialized.error();
   }
@@ -606,7 +581,6 @@ IndexDB::IndexDB(IndexDB &&other) noexcept // NOLINT(bugprone-exception-escape)
     stats_worker_thread_(std::move(other.stats_worker_thread_)),
     pending_heights_(std::move(other.pending_heights_)),
     durable_progress_(std::move(other.durable_progress_)),
-    registration_lineage_(std::move(other.registration_lineage_)),
     legacy_mode_(other.legacy_mode_),
     legacy_ingest_test_hook_(std::move(other.legacy_ingest_test_hook_)),
     initialize_epoch_test_hook_(std::move(other.initialize_epoch_test_hook_)),
@@ -645,7 +619,6 @@ IndexDB::operator=(IndexDB &&other) noexcept
     stats_worker_thread_ = std::move(other.stats_worker_thread_);
     pending_heights_ = std::move(other.pending_heights_);
     durable_progress_ = std::move(other.durable_progress_);
-    registration_lineage_ = std::move(other.registration_lineage_);
     legacy_mode_ = other.legacy_mode_;
     legacy_ingest_test_hook_ = std::move(other.legacy_ingest_test_hook_);
     initialize_epoch_test_hook_ = std::move(other.initialize_epoch_test_hook_);
@@ -1046,89 +1019,6 @@ IndexDB::durable_progress() const
   return initialized_progress(*durable_progress_);
 }
 
-IndexerStatus<IndexerRegistrationLineage>
-IndexDB::prepare_registration_lineage(UPID new_generation)
-{
-  std::lock_guard g(ingest_mutex_);
-  if (!is_open()) {
-    return IndexerError(IndexerErrorCode::kDBNotOpen);
-  }
-  if (registration_lineage_ && !registration_lineage_->acknowledged) {
-    return *registration_lineage_;
-  }
-  if (registration_lineage_ &&
-      registration_lineage_->generation == new_generation) {
-    error("new indexer registration generation repeats its predecessor");
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-
-  IndexerRegistrationLineage next{
-      .format_version = kIndexerRegistrationLineageFormatVersion,
-      .generation = std::move(new_generation),
-      .acknowledged = false,
-  };
-  if (registration_lineage_) {
-    next.predecessor_generation = registration_lineage_->generation;
-  }
-  const x23::Buf bytes = x23::serialize(next);
-  rocksdb::WriteOptions options;
-  options.sync = true;
-  const rocksdb::Status status =
-      db_->Put(options, db_->DefaultColumnFamily(),
-               rocksdb::Slice(IndexerKeyFormat::kRegistrationLineageMetaKey),
-               rocksdb::Slice(reinterpret_cast<const char *>(bytes.data()),
-                              bytes.size()));
-  if (!status.ok()) {
-    error("failed to persist indexer registration lineage: {}",
-          status.ToString());
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  registration_lineage_ = next;
-  return next;
-}
-
-IndexerStatus<void>
-IndexDB::acknowledge_registration(const UPID &generation)
-{
-  std::lock_guard g(ingest_mutex_);
-  if (!is_open()) {
-    return IndexerError(IndexerErrorCode::kDBNotOpen);
-  }
-  if (!registration_lineage_ ||
-      registration_lineage_->generation != generation) {
-    error("cannot acknowledge a non-current indexer registration generation");
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  if (registration_lineage_->acknowledged) {
-    return {};
-  }
-
-  IndexerRegistrationLineage acknowledged = *registration_lineage_;
-  acknowledged.acknowledged = true;
-  const x23::Buf bytes = x23::serialize(acknowledged);
-  rocksdb::WriteOptions options;
-  options.sync = true;
-  const rocksdb::Status status =
-      db_->Put(options, db_->DefaultColumnFamily(),
-               rocksdb::Slice(IndexerKeyFormat::kRegistrationLineageMetaKey),
-               rocksdb::Slice(reinterpret_cast<const char *>(bytes.data()),
-                              bytes.size()));
-  if (!status.ok()) {
-    error("failed to acknowledge indexer registration lineage: {}",
-          status.ToString());
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  registration_lineage_ = std::move(acknowledged);
-  return {};
-}
-
-std::optional<IndexerRegistrationLineage>
-IndexDB::registration_lineage() const
-{
-  std::lock_guard g(ingest_mutex_);
-  return registration_lineage_;
-}
-
 IndexerEpochResult
 IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
 {
@@ -1183,9 +1073,8 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
           IndexerEpochOutcome::IndexerEpochConflict,
           "fresh outbox origin must begin at height 1 and link genesis");
     }
-    auto default_has_rows = column_family_has_rows_other_than(
-        db_.get(), db_->DefaultColumnFamily(),
-        IndexerKeyFormat::kRegistrationLineageMetaKey);
+    auto default_has_rows =
+        column_family_has_rows(db_.get(), db_->DefaultColumnFamily());
     if (!default_has_rows) {
       return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
                            "failed to inspect index metadata");
@@ -1592,42 +1481,6 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
 }
 
 IndexerStatus<void>
-IndexDB::initialize_registration_lineage_from_db()
-{
-  std::string bytes;
-  const rocksdb::Status status =
-      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
-               rocksdb::Slice(IndexerKeyFormat::kRegistrationLineageMetaKey),
-               &bytes);
-  if (status.IsNotFound()) {
-    return {};
-  }
-  if (!status.ok()) {
-    error("failed to read indexer registration lineage: {}", status.ToString());
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-
-  IndexerRegistrationLineage lineage;
-  try {
-    x23::deserialize(&lineage, x23::BufView(reinterpret_cast<const uint8_t *>(
-                                                bytes.data()),
-                                            bytes.size()));
-  } catch (const x23::XdrException &e) {
-    error("malformed indexer registration lineage: {}", e.what());
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  if (lineage.format_version != kIndexerRegistrationLineageFormatVersion ||
-      x23::xdr_size(lineage) != bytes.size() ||
-      (lineage.predecessor_generation &&
-       *lineage.predecessor_generation == lineage.generation)) {
-    error("invalid indexer registration lineage metadata");
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  registration_lineage_ = std::move(lineage);
-  return {};
-}
-
-IndexerStatus<void>
 IndexDB::initialize_progress_from_db()
 {
   if (!is_open()) {
@@ -1684,9 +1537,8 @@ IndexDB::initialize_progress_from_db()
       legacy_mode_ = true;
       return {};
     }
-    auto default_has_rows = column_family_has_rows_other_than(
-        db_.get(), db_->DefaultColumnFamily(),
-        IndexerKeyFormat::kRegistrationLineageMetaKey);
+    auto default_has_rows =
+        column_family_has_rows(db_.get(), db_->DefaultColumnFamily());
     if (!default_has_rows) {
       return default_has_rows.error();
     }
