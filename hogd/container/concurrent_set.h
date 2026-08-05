@@ -23,11 +23,23 @@ concept concurrent_set_element =
 
 // Careful here. While these seem to be tunable, kEmpty must match whatever the
 // default constructor of T does since that is what we use to initialize the
-// hash set arrays.
+// hash set arrays. kInserting marks a slot that an insert has claimed but not
+// yet published; see ConcurrentSet::try_insert.
 template<typename T> struct DefaultConcurrentSetTraits {
   static constexpr T kEmpty = T{};
   static constexpr T kTombstone = ~T{};
+  static constexpr T kInserting = ~T{} - T{1};
   static size_t hash(const T &v) { return std::hash<T>{}(v); }
+};
+
+// Why an insert did not add the value. A caller feeding a set untrusted values
+// needs to tell these apart without knowing how the set represents empty and
+// erased slots: kValueReserved says the set can never store this value, which
+// is a property of the input rather than of the set's contents.
+enum class InsertResult {
+  kInserted,       // this call added the value
+  kAlreadyPresent, // the value was already in the set
+  kValueReserved,  // the set reserves this value to mark slot state
 };
 
 template<concurrent_set_element T,
@@ -35,6 +47,11 @@ template<concurrent_set_element T,
 class alignas(alignof(T)) ConcurrentSet {
 public:
   using Traits = TraitsT;
+
+  static_assert(Traits::kEmpty != Traits::kTombstone &&
+                    Traits::kEmpty != Traits::kInserting &&
+                    Traits::kTombstone != Traits::kInserting,
+                "The three reserved slot markers must be distinct");
 
   ConcurrentSet() : initial_level_{Traits::kEmpty}, capacity_{kInitialCapacity}
   {}
@@ -52,10 +69,10 @@ public:
            erases_.load(std::memory_order_relaxed);
   }
 
-  bool try_insert(const T &value)
+  InsertResult try_insert(const T &value)
   {
-    if (value == Traits::kEmpty || value == Traits::kTombstone) {
-      panic("ConcurrentSet::try_insert called with reserved value");
+    if (is_reserved(value)) {
+      return InsertResult::kValueReserved;
     }
 
     size_t hash = Traits::hash(value);
@@ -72,8 +89,11 @@ public:
         auto *l = get_level(level);
 
         T v = l[index].load(std::memory_order_acquire);
+        if (v == Traits::kInserting) {
+          v = cancel_claim(l[index]);
+        }
         if (v == value) {
-          return false;
+          return InsertResult::kAlreadyPresent;
         }
         if (v != Traits::kEmpty) {
           continue;
@@ -87,10 +107,13 @@ public:
           // deeper level. Without this re-read, we would skip to the new
           // deeper level without ever seeing the concurrent insert, and could
           // insert a duplicate there. The remaining TOCTOU (value inserted
-          // after this re-read) is covered by the post-CAS undo-retry below.
+          // after this re-read) is covered by the stale-level check below.
           v = l[index].load(std::memory_order_acquire);
+          if (v == Traits::kInserting) {
+            v = cancel_claim(l[index]);
+          }
           if (v == value) {
-            return false;
+            return InsertResult::kAlreadyPresent;
           }
           if (v != Traits::kEmpty) {
             continue;
@@ -98,26 +121,35 @@ public:
           goto outer;
         }
 
-        // we are at the deepest level, we can insert
-        if (l[index].compare_exchange_strong(v, value,
+        // We are at the deepest level, so claim the slot. A claim reserves the
+        // slot without publishing a value. erase() never matches kInserting, so
+        // an erase can no longer consume its tombstone on an insert that has
+        // not committed to publishing yet, which is what let a stale copy
+        // survive in a level that a resize had displaced.
+        if (l[index].compare_exchange_strong(v, Traits::kInserting,
                                              std::memory_order_release,
                                              std::memory_order_relaxed)) {
+          // Count the claim, not the publication: the slot is consumed either
+          // way, and try_resize() derives the load factor from inserts_.
           inserts_.fetch_add(1, std::memory_order_relaxed);
 
           // A resize may have added a deeper level between our levels() check
-          // and the CAS. If so, a concurrent inserter of the same value could
-          // have placed it in the new level. Undo and retry from level 0.
+          // and the claim. If so, a concurrent inserter of the same value could
+          // have placed it in the new level, so give up this claim instead of
+          // publishing a second copy, and retry from level 0.
           if (level < levels() - 1) {
-            T expected = value;
-            // CAS can only fail if a concurrent erase() already tombstoned
-            // this slot — erase is the only path that overwrites a live value
-            // (with kTombstone). In that case the eraser already incremented
-            // erases_, so our inserts_/erases_ stay balanced without action.
-            if (l[index].compare_exchange_strong(expected, Traits::kTombstone,
-                                                 std::memory_order_release,
-                                                 std::memory_order_relaxed)) {
-              erases_.fetch_add(1, std::memory_order_relaxed);
-            }
+            cancel_claim(l[index]);
+            level = static_cast<size_t>(-1);
+            goto outer;
+          }
+
+          T claimed = Traits::kInserting;
+          if (!l[index].compare_exchange_strong(claimed, value,
+                                                std::memory_order_release,
+                                                std::memory_order_relaxed)) {
+            // A concurrent insert cancelled our claim, so this slot is now a
+            // tombstone and that thread already accounted for the erase. Start
+            // over: the value may have been published in another slot since.
             level = static_cast<size_t>(-1);
             goto outer;
           }
@@ -126,10 +158,14 @@ public:
           // we started try_insert, but we don't know that our insert didn't
           // raise the load further. So, resize if necessary before retrying.
           try_resize();
-          return true;
+          return InsertResult::kInserted;
+        }
+        // Another thread took the slot first.
+        if (v == Traits::kInserting) {
+          v = cancel_claim(l[index]);
         }
         if (v == value) {
-          return false;
+          return InsertResult::kAlreadyPresent;
         }
       }
 
@@ -176,8 +212,7 @@ public:
           level_++;
           index_ = 0;
         }
-      } while (*this != set_->end() &&
-               (**this == Traits::kEmpty || **this == Traits::kTombstone));
+      } while (*this != set_->end() && is_reserved(**this));
       return *this;
     }
 
@@ -191,7 +226,7 @@ public:
   Iterator begin()
   {
     auto it = Iterator(this, 0, 0);
-    if (*it == Traits::kEmpty || *it == Traits::kTombstone) {
+    if (is_reserved(*it)) {
       ++it;
     }
     return it;
@@ -200,6 +235,34 @@ public:
   Iterator end() { return Iterator(this, 0, levels()); }
 
 private:
+  // The values the set reserves to mark slot state, which it therefore cannot
+  // store. Kept internal: callers learn about them from try_insert's result
+  // rather than by asking, so the set's slot encoding stays its own business.
+  static bool is_reserved(const T &v)
+  {
+    return v == Traits::kEmpty || v == Traits::kTombstone ||
+           v == Traits::kInserting;
+  }
+
+  // Tombstone a slot that holds an in-flight claim. The claim's owner calls
+  // this to give up a claim it can no longer publish, and another insert calls
+  // it to cancel a claim it must not walk past. Returns what the slot holds
+  // afterwards: kTombstone if this call or a racing one cancelled the claim, or
+  // the value the owner published just before we got here. No thread ever waits
+  // on a claim, so try_insert keeps the progress guarantee it had before: a
+  // cancelled owner retries, and the thread that cancelled it moves on.
+  T cancel_claim(std::atomic<T> &slot)
+  {
+    T expected = Traits::kInserting;
+    if (slot.compare_exchange_strong(expected, Traits::kTombstone,
+                                     std::memory_order_release,
+                                     std::memory_order_relaxed)) {
+      erases_.fetch_add(1, std::memory_order_relaxed);
+      return Traits::kTombstone;
+    }
+    return expected;
+  }
+
   constexpr static size_t entries_for_level(size_t level)
   {
     return kInitialCapacity * (1 << level);
@@ -262,8 +325,11 @@ private:
   // Returns true if the value was found (and erased if erase is true).
   bool do_contains(T value, bool erase)
   {
-    if (value == Traits::kEmpty || value == Traits::kTombstone) {
-      panic("ConcurrentSet::contains/erase called with reserved value");
+    // A reserved value can never have been stored, so it is definitively
+    // absent and there is nothing to erase. Answering instead of panicking is
+    // what keeps callers from having to pre-screen untrusted values.
+    if (is_reserved(value)) {
+      return false;
     }
 
     size_t hash = Traits::hash(value);
@@ -295,6 +361,13 @@ private:
           }
           return r;
         }
+        // Anything else keeps the probe going, including a slot claimed by an
+        // in-flight insert. Unlike try_insert we neither wait on nor cancel a
+        // claim: cancelling one would destroy an insert of some unrelated
+        // value, and if the claim does settle into value then that insert is
+        // concurrent with this call, so ordering it after us is a valid
+        // linearization. Walking past a claim cannot hide an already-published
+        // copy, since the probe continues to the end of the sequence.
         if (v != Traits::kEmpty) {
           continue;
         }
