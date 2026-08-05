@@ -18,12 +18,12 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/common/status.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/item/deployed_contract.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
@@ -100,7 +100,7 @@ TEST(TestBindingsTest,
 
   auto runtime_context =
       std::make_shared<RuntimeResolutionThrowingMockRuntimeContext>(
-          make_hogexec_context());
+          make_hog_exec_context());
   std::shared_ptr<MockRuntimeContext> runtime_context_handle = runtime_context;
   auto *rc = &runtime_context_handle;
 

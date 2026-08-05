@@ -18,11 +18,11 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/contract_trait_client.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -38,10 +38,10 @@ public:
   GenesisConfigurationUnfurlTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, false)
+          TestDB::kHogDb, false)
   {}
 
-  void SetUp() override { wasm_runtime_context_ = make_hogexec_context(); }
+  void SetUp() override { wasm_runtime_context_ = make_hog_exec_context(); }
 
 protected:
   std::unique_ptr<RuntimeContext> wasm_runtime_context_;

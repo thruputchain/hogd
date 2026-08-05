@@ -1,0 +1,149 @@
+#include "hogd/hog_exec/runtime/runtime.h"
+
+#include <exception>
+#include <memory>
+#include <string_view>
+
+#include "ffi_enums.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/syscall_entry.h"
+#include "hogd/hog_exec/runtime/wasm/wasmi_runtime.h" // IWYU pragma: keep
+#include "hogd/hog_exec/runtime/wasm/wasmtime_runtime.h"
+#include "x23/format.h"
+
+namespace hogd {
+
+// create RuntimeContext with no imported functions
+std::unique_ptr<RuntimeContext>
+make_runtime_context(RuntimeEngine engine)
+{
+  switch (engine) {
+  case RuntimeEngine::kWasmi:
+  {
+    // For now, wasmtime is used even when engine is kWasmi
+    static WasmtimeGlobalContext wasmtime_global_context =
+        WasmtimeGlobalContext(8);
+    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
+  }
+  default:
+    return nullptr;
+  }
+}
+
+namespace {
+// The Wasm host import names form the contract-visible `marmot::syscall` ABI.
+// link_fn() forwards these bytes to Rust, which decodes them as UTF-8 and
+// compares them exactly against the canonical SDK Wasm import names. Pin them
+// to `u8"..."` literals so the bytes are the standard-mandated UTF-8 (== ASCII)
+// encoding rather than implementation-defined ordinary-literal bytes that
+// depend on `-fexec-charset`; an alternate execution charset could otherwise
+// fail Rust UTF-8 decoding or register a manifest that does not match canonical
+// SDK imports. See hogd issue #2654.
+constexpr std::u8string_view kSyscallModuleName = u8"marmot";
+constexpr std::u8string_view kSyscallFnName = u8"syscall";
+
+std::string_view
+as_char_view(std::u8string_view s)
+{
+  return std::string_view(reinterpret_cast<char const *>(s.data()), s.size());
+}
+
+WasmtimeGlobalContext
+make_wasmtime_hog_exec_global_context()
+{
+  auto context = WasmtimeGlobalContext(8);
+  auto ok = context.link_fn(as_char_view(kSyscallModuleName),
+                            as_char_view(kSyscallFnName), &syscall_entry);
+  CHECK(ok);
+  return context;
+}
+
+[[maybe_unused]]
+WasmiGlobalContext
+make_wasmi_hog_exec_global_context()
+{
+  auto context = WasmiGlobalContext();
+  auto ok = context.link_fn(as_char_view(kSyscallModuleName),
+                            as_char_view(kSyscallFnName), &syscall_entry);
+  CHECK(ok);
+  return context;
+}
+
+} // namespace
+
+std::unique_ptr<RuntimeContext>
+make_hog_exec_wasm_context(RuntimeEngine engine)
+{
+  switch (engine) {
+  case RuntimeEngine::kWasmi:
+  {
+    // For now, wasmtime is used even when engine is kWasmi
+    static WasmtimeGlobalContext wasmtime_global_context =
+        make_wasmtime_hog_exec_global_context();
+    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
+  }
+  default:
+    return nullptr;
+  }
+}
+
+InvokeResult
+Runtime::invoke(MethodID method_id, uint64_t gas_limit)
+{
+
+  // This runs on the child-Invoke path inside the noexcept syscall body. A
+  // logger allocation/sink failure (typically std::bad_alloc out of memory)
+  // must not throw across the noexcept boundary and terminate the process;
+  // treat it as an unrecoverable invocation failure instead (issues #2713,
+  // #2718).
+  try {
+    trace("Invoking method {} with gas limit {}", method_id, gas_limit);
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = 0};
+  }
+  auto [res, gas_consumed] = invoke_internal(method_id, gas_limit);
+  try {
+    trace("Invoke result: {}, gas consumed: {}",
+          res.has_value() ? "success" : x23::show(res.error().code()),
+          gas_consumed);
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = gas_consumed};
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
+                        .gas_consumed_ = gas_consumed};
+  }
+
+  // Interpreters that perform metering on a basic block level, instead of
+  // instruction by instruction, might not actually charge for the last block.
+  // (The "consume fuel" operation is generally placed at the top of a basic
+  // block. As far as I can tell, this is the case for wasmi). We hide this
+  // detail by charging for the entire gas limit, if we reach an OutOfGas error.
+  //
+  // This makes the behavior of the wasm runtime consistent with the behavior of
+  // consume_gas (defined in this file), which is what we use to consume gas
+  // within syscalls.
+  if (!res.has_value() && res.error().code() == InvokeErrorCode::OutOfGas) {
+    gas_consumed = gas_limit;
+  }
+
+  CHECK(gas_consumed <= gas_limit);
+
+  return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
+}
+
+Runtime::Runtime(SystemCallHandler *syscall_handler)
+  : syscall_handler_(syscall_handler)
+{}
+
+} // namespace hogd

@@ -7,7 +7,7 @@ fi
 
 BUILD_DIR=$1
 
-$BUILD_DIR/hogd/hogexec/bench/wasm_stats \
+$BUILD_DIR/hogd/hog_exec/bench/wasm_stats \
   $BUILD_DIR/built_contracts/fibonacci.wasm \
   $BUILD_DIR/built_contracts/fibonacci_call.wasm \
   $BUILD_DIR/built_contracts/itc_erc20.wasm \

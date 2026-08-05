@@ -3,7 +3,7 @@ add_subdirectory(base)
 add_subdirectory(container)
 add_subdirectory(rust)
 add_subdirectory(crypto)
-add_subdirectory(event)
+add_subdirectory(hog_event)
 add_subdirectory(http)
 add_subdirectory(metrics)
 add_subdirectory(mockdb)
@@ -15,7 +15,7 @@ add_subdirectory(xdr)
 add_subdirectory(genesis)
 add_subdirectory(loadgen)
 add_subdirectory(auth_claim)
-add_subdirectory(auth)
+add_subdirectory(hog_auth)
 
 # Generate version.c at build time so git state changes in hogd/protocol do not
 # require a fresh configure step or manual deletion of the old output.
@@ -65,14 +65,14 @@ target_link_libraries(
 
 # Additional libraries that are not included by default (i.e., in hogd library)
 add_subdirectory(ramdb)
-add_subdirectory(indexer)
+add_subdirectory(hog_indexer)
 add_subdirectory(block_explorer)
 # add_subdirectory(rpc)
 
-# Finally, build the hogdb, hogexec, and mempool executables
-add_subdirectory(hogdb)
-add_subdirectory(hogexec)
-add_subdirectory(mempool)
+# Finally, build the database, executor, and mempool executables
+add_subdirectory(hog_db)
+add_subdirectory(hog_exec)
+add_subdirectory(hog_mempool)
 add_subdirectory(devnode)
 
 # Build utilities

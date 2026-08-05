@@ -59,13 +59,13 @@
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/status.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/indexer/db.h"
-#include "hogd/indexer/status.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/status.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
-#include "hogd/mempool/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -882,20 +882,20 @@ make_test_data_dir()
              std::chrono::steady_clock::now().time_since_epoch().count());
 }
 
-HogDBDAO
-open_persistent_hogdb(std::filesystem::path const &data_dir)
+HogDbDAO
+open_persistent_hog_db(std::filesystem::path const &data_dir)
 {
   const std::string db_path = (data_dir / "ramdb").string();
   DBStatus<std::uint64_t> lsn = Database::check(db_path, kTestRamDbBytes);
   if (!lsn.has_value()) {
-    lsn.error().raise("failed to check test hogdb");
+    lsn.error().raise("failed to check test hog_db");
   }
   DBStatus<std::unique_ptr<Database>> db =
       Database::open_lsn(db_path, *lsn, kTestRamDbBytes);
   if (!db.has_value()) {
-    db.error().raise("failed to open test hogdb");
+    db.error().raise("failed to open test hog_db");
   }
-  return HogDBDAO(RAMDB(std::move(*db)));
+  return HogDbDAO(RAMDB(std::move(*db)));
 }
 
 void
@@ -2216,8 +2216,8 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
 
   start_and_check("fresh");
   {
-    HogDBDAO db = open_persistent_hogdb(data_dir);
-    HogDBStatus<DbTip> tip = db.read_dbtip();
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
     ASSERT_TRUE(tip.has_value()) << tip.error();
     tip->value.proposal_header.network_hash = {};
     ASSERT_TRUE(db.write_dbtip(*tip).has_value());
@@ -2261,7 +2261,7 @@ TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
   initialize_persistent_data_dir(data_dir);
 
   {
-    HogDBDAO db = open_persistent_hogdb(data_dir);
+    HogDbDAO db = open_persistent_hog_db(data_dir);
     constexpr std::string_view kDbTipKey = "<DBTIP";
     constexpr uint8_t kWrongType = 1;
     std::array<std::byte, 1> value{};
@@ -2294,8 +2294,8 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
   initialize_persistent_data_dir(data_dir);
 
   {
-    HogDBDAO db = open_persistent_hogdb(data_dir);
-    HogDBStatus<DbTip> tip = db.read_dbtip();
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
     ASSERT_TRUE(tip.has_value());
     tip->storage_long_hash[0] ^= 1;
     ASSERT_TRUE(db.write_dbtip(*tip).has_value());

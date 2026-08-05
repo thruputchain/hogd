@@ -90,7 +90,7 @@ pub struct WasmtimeGlobalContext {
     // from contention on one InstancePreCache object, as compared to having one per engine.
     // The savings is that we significantly reduce memory usage (as the number of contracts cached increases).
     // I (geoff) made the choice to do one shared cache because
-    // (1) we already have some shared caches in hogexec (the snapshot cache), and while contention there is not insignificant,
+    // (1) we already have some shared caches in hog_exec (the snapshot cache), and while contention there is not insignificant,
     // the performance impact is tolerable.
     // (2) The performance change of having one shared cache is not extremely large on maximal contention workloads (with very few cache entries),
     // and I am more concerned with how performance will degrade as the number of cache entries increases

@@ -18,7 +18,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 
