@@ -293,6 +293,11 @@ private:
   // Loglet-index mask of the fast tier, filled by report_layout and used by
   // replay_reads to emulate a tier of that size. Empty means no emulation.
   std::vector<bool> fast_tier_keep_;
+  // Where each payee's item actually lives, recorded by the same for_each_location
+  // walk that computes the hit rate. Lets replay_reads count, per access, whether
+  // it landed in the fast tier -- which is the hit rate the model claims, checked
+  // against the layout the reads actually see rather than against a join.
+  std::unordered_map<std::string, size_t> payee_loglet_;
   AuthChangeSubscriptionManager subscription_manager_;
   bool compute_db_hash_;
 
@@ -855,19 +860,45 @@ Benchmark::replay_reads()
   // would count faults per distinct cold loglet rather than per cold access. The
   // replay is read-only, so the pages are clean and eviction costs no writeback.
   bool emulate = bench_emulate_tier && !fast_tier_keep_.empty();
-  if (emulate)
+  if (emulate) {
+    // Attribute the eviction sweep's own faults separately from the reads'. The
+    // caller's counters wrap this whole function, so without the split there is
+    // no way to tell a fault caused by an access to an evicted loglet from one
+    // caused by the msync/madvise/fadvise sweep itself -- and the two support
+    // opposite conclusions about whether the model is wrong.
+    Faults before = read_faults();
     db_.get_ramdb().evict_heap_except(fast_tier_keep_);
+    Faults after = read_faults();
+    std::println("evict,{},{}", after.major - before.major,
+                 after.minor - before.minor);
+  }
 
   Zipf zipf(payee_space_, bench_theta);
   uint64_t rng = kBenchSeed ^ 0x5C0DE5ULL;
+  size_t in_tier = 0;
+  size_t out_of_tier = 0;
+  size_t unlocated = 0;
   for (size_t i = 1; i < payee_space_; i++) {
     if (emulate && bench_evict_every > 0 && i % bench_evict_every == 0)
       db_.get_ramdb().evict_heap_except(fast_tier_keep_);
     ItemKey key = make_key(0, payee_slot_[zipf(rng)]);
+    if (emulate) {
+      auto db_key = make_contract_data_key(key);
+      auto it = payee_loglet_.find(
+          key_bytes_string(std::as_bytes(std::span(db_key))));
+      if (it == payee_loglet_.end())
+        ++unlocated;
+      else if (fast_tier_keep_[it->second])
+        ++in_tier;
+      else
+        ++out_of_tier;
+    }
     auto ret = db_.read_nnint128(key);
     if (unlikely(!ret))
       fail(ret.error());
   }
+  if (emulate)
+    std::println("tierreads,{},{},{}", in_tier, out_of_tier, unlocated);
 }
 
 void
@@ -896,6 +927,7 @@ Benchmark::report_layout(std::string_view label)
       return;
     accesses[idx] += it->second;
     touched_bytes[idx] += bytes;
+    payee_loglet_[key_bytes_string(key)] = idx;
   });
 
   std::vector<size_t> occupied;
@@ -925,13 +957,20 @@ Benchmark::report_layout(std::string_view label)
   }
   fast_hot /= static_cast<double>(fast_count);
 
-  // Record the fast tier as a loglet-index mask, so replay_reads() can emulate a
-  // tier of exactly this size by evicting everything else. The set is chosen by
-  // true access count -- the oracle the paper assumes -- so the emulated tier is
-  // the best a page-based tiering system could possibly pick.
-  fast_tier_keep_.assign(nloglets, false);
-  for (size_t i = 0; i < fast_count; ++i)
-    fast_tier_keep_[occupied[i]] = true;
+  // Record the slow tier as a loglet-index mask for replay_reads() to evict. The
+  // fast tier is chosen by true access count -- the oracle the paper assumes --
+  // so the emulation is the best a page-based tiering system could pick.
+  //
+  // Only *occupied* loglets outside the fast tier are evicted; everything else is
+  // kept. Marking the whole rest of the heap evictable made each sweep cover ~3 GB
+  // instead of ~116 MB, and repeating that put the whole file under writeback and
+  // reclaim pressure until the kept set went with it -- which showed up as exactly
+  // one major fault per access. Restricting the sweep to the data that exists is
+  // what makes periodic re-eviction affordable, and re-eviction is what makes the
+  // count a per-access miss rather than a one-off page population.
+  fast_tier_keep_.assign(nloglets, true);
+  for (size_t i = fast_count; i < occupied.size(); ++i)
+    fast_tier_keep_[occupied[i]] = false;
 
   double hit = total > 0 ? static_cast<double>(fast) /
                                static_cast<double>(total)

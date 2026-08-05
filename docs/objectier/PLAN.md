@@ -324,12 +324,17 @@ tier sizes from 5% to 50%, and exactly zero faults in both arms when the whole
 occupied set is kept. That is the first number here that assumes none of the three
 latency/capacity constants.
 
-**But it does not validate the model, and 3.3 is still open.** At a 50% tier the
-model predicts no misses at all while the measurement shows thousands, and the
-measured ratio grows with tier size where the model says the benefit should vanish.
-The fault count and the modelled hit rate are measuring subtly different things and
-the discrepancy is unexplained; the two must not be presented as corroborating.
-Resolving that is now the top item — see 3.3.
+**And the hit-rate model is now validated.** Counting per access against the real
+layout gives 0.6824 scattered and 0.8932 consolidated at a 20% tier — exactly the
+join's figures, to four decimals. The measured miss ratio is 2.98× against 2.91×
+predicted. So every hit rate in `TODO.md` is confirmed by direct measurement; what
+remains unvalidatable is only the latency constants, and no hardware available here
+can fix that.
+
+**The fault counts are a conservative proxy, not misses.** They under-count by ~60×
+because a cold page faults once and then stays resident, so they measure distinct
+cold pages first-touched — spatial density, which consolidation also improves.
+Quote the per-access hit rate, not the fault ratio.
 
 ### 3.2 Tier the allocator (C1)
 
@@ -395,18 +400,10 @@ assumed.
 
 ## Recommended order, and what to cut
 
-1. **Reconcile the measured fault count with the modelled hit rate** (3.3 / P3b).
-   The emulated tier now gives a real ~2× device-read reduction, but at a 50% tier
-   the model predicts zero misses where thousands are measured. Until that is
-   explained, the fault ratio is a standalone measurement and the model is
-   unvalidated. Instrument which loglets the replay actually faults on and compare
-   against the set the join calls cold.
-2. **Drift-driven aging** (successor to 1.1). A fixed epoch makes the trigger
-   relocate on every block forever; without any aging it goes silent and the
-   layout rots. Neither is shippable, and neither implementation has the middle.
-3. **Phase 4.2** — cheap, and it decides whether the deployed system cares.
-4. **Phase 1.2's residual** — the unexplained gap from 0.897 to the 0.9574
-   rank-sorted ceiling.
+1. **Drift-driven aging** (successor to 1.1). A fixed epoch makes the trigger
+   relocate on every block forever; without any aging it goes silent and the layout
+   rots. Neither is shippable, and neither implementation has the middle. Now the
+   top item, since 3.3's measurement question is answered.
 
 **Done since this plan was written:** 1.4, 1.2 (the threshold), 1.1, 2.1, 2.2, and
 the production wiring. 1.3's parallel consolidation is **cut**: 23 ms per loglet

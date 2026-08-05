@@ -1,3 +1,7 @@
+# NOTE: the fault columns count distinct cold pages first-touched, NOT tier
+# misses -- a cold page faults once and then stays resident. The measured
+# miss ratio at a 20% tier is 2.98x (158821 vs 53384 out-of-tier accesses),
+# not the ~2x implied here. See P3b in TODO.md.
 tier_fraction,scattered_major_faults,consolidated_major_faults,fault_ratio,scattered_modelled_hit,consolidated_modelled_hit
 0.05,2944,1520,1.94,0.2767,0.7911
 0.10,2797,1430,1.96,0.4541,0.8287

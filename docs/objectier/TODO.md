@@ -46,7 +46,7 @@ and cold objects primarily under a single index").
 | BUG-4 | Trigger default overridden by a DAO wrapper's own default | **fixed** |
 | P2.3 | Trigger wired into the production commit path | **done — verified on hog-devnode** |
 | P3a | SSD-backed slow tier via a resident-set cap | **abandoned — no cap both survives setup and binds on reads** |
-| P3b | Emulated fast tier by explicit eviction | **done — 2.0x fewer device reads, measured** |
+| P3b | Emulated fast tier by explicit eviction | **done — hit-rate model confirmed exactly; miss ratio 2.98x measured** |
 
 ### What landed
 
@@ -841,20 +841,44 @@ figure in this document that assumes none of `kFastNs`, `kSlowNs` or
 evicted loglets and there is no page-cache or disk-buffer confound. And fault
 counts fall monotonically as the tier grows, in both arms.
 
-#### What does not reconcile, and should not be glossed
+#### Resolved: the model's hit rate is exactly right; the fault count is a proxy
 
-At a 50% tier the modelled hit rate is 1.0000 for both arms — no misses at all —
-yet 1805 and 788 faults are measured. A hit rate of 1.0000 to four places allows
-~25 missed accesses out of 500 K; the measurement is ~70× that. The ratio also
-*grows* with tier size, where the model says the benefit should vanish by 50%.
+Counting per access, at read time, against the layout the reads actually see
+(`tierreads`, 20% tier):
 
-So the fault count and the modelled hit rate are measuring subtly different
-things, and the discrepancy is unexplained. **Do not present the two as
-confirming each other.** The ~2× fault ratio stands on its own as a measurement;
-the claim "measured AMAT tracks the model", which was Phase 3.3's purpose, is not
-supported by this and is still open. Next step is to instrument which loglets the
-replay actually faults on and compare that set against the ones the join counts
-as cold.
+| arm | in-tier | out-of-tier | measured hit | modelled hit |
+|---|---|---|---|---|
+| scattered | 341,178 | 158,821 | **0.6824** | 0.6824 |
+| consolidated | 446,615 | 53,384 | **0.8932** | 0.8932 |
+
+**Exact agreement.** The join that produces every hit rate in this document is
+confirmed against a direct per-access measurement on the real layout, so the hit
+rates are sound. That is Phase 3.3's question answered at the hit-rate level, and
+it retrospectively supports the modelled numbers built on it -- excluding the
+latency constants, which nothing here can validate.
+
+**The measured miss ratio is 158,821 / 53,384 = 2.98×**, against the 2.91×
+predicted from the hit rates. That is the real figure.
+
+**So the earlier 1.94-2.29× fault ratio was mislabelled**, and this corrects it.
+Major faults under-count misses by roughly 60× (158,821 misses produced 2,517
+faults) because a cold page faults once and then stays resident: the count is
+distinct cold *pages* first-touched, not cold accesses. It correlates with how
+densely the accessed bytes pack into pages, which is a real property consolidation
+improves -- but it is spatial density, not tier-miss reduction, and it must not be
+quoted as the latter.
+
+What made this findable: at a 50% tier every read landed in a kept loglet
+(`tierreads,499999,0,0`) while 1,824 major faults were still counted. Since no read
+could possibly have missed, the faults had to be something other than misses. The
+model's `hit = 1.0000` there was correct all along.
+
+**Consequence for the harness.** A per-access fault measurement needs the cold set
+re-evicted during the replay, which is now affordable: only *occupied* cold loglets
+are evicted (~116 MB) rather than the whole heap (~3 GB), which is what made the
+earlier re-eviction sweep drop the kept set as well. Untested at the time of
+writing -- the two-minute run window expired -- so the sound measurement remains
+the per-access `tierreads` count, and the fault count stays a conservative proxy.
 
 #### Two dead ends worth recording
 
