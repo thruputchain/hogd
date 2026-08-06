@@ -120,7 +120,7 @@ hog_devnode_init(std::string listen_host,
                  NetworkHash const &runtime_network_hash,
                  BootstrapAccountConfig const &bootstrap_config,
                  std::optional<std::filesystem::path> const &data_dir,
-                 std::size_t ramdb_bytes)
+                 std::size_t ramdb_bytes, std::size_t num_db_shards)
 {
   install_signal_handler();
   // Block SIGTERM before spawning any worker threads (init_hogexec_metrics and
@@ -137,7 +137,7 @@ hog_devnode_init(std::string listen_host,
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
                       bootstrap_config, data_dir, runtime_network_hash,
-                      ramdb_bytes);
+                      ramdb_bytes, num_db_shards);
   emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
@@ -182,6 +182,7 @@ struct HogDevnodeOptions {
   std::vector<std::filesystem::path> contract_artifact_directories;
   std::optional<hogd::LogLevel> log_level;
   std::size_t ramdb_bytes = hogd::HogDevnodeNode::kDefaultRamDbBytes;
+  std::size_t num_db_shards = 1;
 };
 
 class DataDirLock {
@@ -279,9 +280,14 @@ Options:
                                  [default: 1000000000]
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
-  --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.
-                                 Lower it on low-memory systems (e.g. WSL)
+  --ramdb-bytes <bytes>          RAM database capacity to reserve at startup,
+                                 split evenly across the db shards. Lower it on
+                                 low-memory systems (e.g. WSL)
                                  [default: 16106127360 (15 GiB)]
+  --num-db-shards <n>            Run the state db as this many shards, routed by
+                                 account address. A populated --data-dir records
+                                 its shard count and rejects a different one
+                                 [default: 1]
   --version                      Print version
   -h, --help                     Print help
 
@@ -510,6 +516,15 @@ parse_args(int argc, char *argv[])
       }
       continue;
     }
+    if (arg == "--num-db-shards" && i + 1 < argc) {
+      options.num_db_shards =
+          hogd::parse_integer_arg<std::size_t>("--num-db-shards", argv[++i],
+                                               argv, usage);
+      if (options.num_db_shards == 0) {
+        hogd::arg_error("--num-db-shards must be positive", argv, usage);
+      }
+      continue;
+    }
     usage(argv);
   }
   reject_manifest_shorthand_conflicts(sources, argv);
@@ -588,7 +603,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                                   options.readiness_sink,
                                   options.runtime_network_hash,
                                   options.bootstrap_config, options.data_dir,
-                                  options.ramdb_bytes);
+                                  options.ramdb_bytes, options.num_db_shards);
   } catch (const std::exception &error) {
     hogd::error("hog-devnode failed before readiness: {}", error.what());
     return EXIT_FAILURE;

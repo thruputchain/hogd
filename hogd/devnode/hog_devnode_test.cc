@@ -41,6 +41,8 @@
 #include "built_contracts/itc_erc20.h"
 #include "consensus.hh"
 #include "contract.hh"
+#include <set>
+
 #include "db_gateway.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -54,6 +56,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_shard_routing/sharding.h" // shard_of_address
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
@@ -1811,6 +1814,74 @@ TEST(HogDevnode, GatewayEndpointAnswersIntroAndGetItems)
     ASSERT_EQ(result.error(), RPCError::kRPCNone);
     ASSERT_EQ(result.payload().items.size(), 1U);
     EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
+  }
+
+  expect_clean_exit(process);
+}
+
+// The manifest advertises one dbGateway endpoint, so with more than one shard
+// that one server has to answer for keys every shard owns. A gateway bound to a
+// single shard passes GatewayEndpointAnswersIntroAndGetItems (which only
+// asserts NotFound) but returns NotFound here for the accounts it does not
+// hold.
+TEST(HogDevnode, ShardedGatewayServesAccountsOnEveryShard)
+{
+  constexpr std::uint32_t kAccounts = 8;
+  constexpr std::size_t kShards = 2;
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--num-db-shards",
+      "2",
+      "--dev-accounts",
+      "8",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), kAccounts);
+
+  const BootstrapAccountArtifact artifact =
+      build_bootstrap_account_artifact({.count = kAccounts});
+  ASSERT_EQ(artifact.accounts.size(), kAccounts);
+
+  // Guard the premise: if every account happened to land on one shard the test
+  // would pass without exercising the split at all.
+  std::set<std::size_t> shards_covered;
+  for (BootstrapAccountMetadata const &account : artifact.accounts) {
+    shards_covered.insert(shard_of_address(account.address, kShards));
+  }
+  ASSERT_EQ(shards_covered.size(), kShards)
+      << "bootstrap accounts do not straddle both shards, so this fixture "
+         "cannot detect a single-shard gateway";
+
+  {
+    auto client = create_client<DbGateway1>(readiness.db_gateway.host,
+                                            readiness.db_gateway.port,
+                                            /*retry=*/true)()
+                      .value();
+
+    EXPECT_EQ(client.dbgateway_intro(version::kHogdProtocol())(),
+              DbGatewayIntroOutcome::DbGatewayIntroSuccess);
+
+    AddressAndKeyBatch batch;
+    for (BootstrapAccountMetadata const &account : artifact.accounts) {
+      AddressAndKey query;
+      query.address = account.address;
+      query.key.key_type(StorageKeyType::FreeNativeTokenBalance);
+      batch.push_back(query);
+    }
+
+    DbGatewayResult result = client.dbgateway_get_items(batch)();
+    ASSERT_EQ(result.error(), RPCError::kRPCNone);
+    ASSERT_EQ(result.payload().items.size(), kAccounts);
+    // Every funded account resolves, whichever shard holds it, and the batch
+    // comes back in input order.
+    for (std::size_t i = 0; i < kAccounts; ++i) {
+      EXPECT_EQ(result.payload().items[i].error(), RPCError::kRPCNone)
+          << "account " << i << " on shard "
+          << shard_of_address(artifact.accounts[i].address, kShards);
+    }
   }
 
   expect_clean_exit(process);

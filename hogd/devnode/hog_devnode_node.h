@@ -11,6 +11,7 @@
 #include "genesis.hh"
 #include "hogd/auth/auth_server.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/db_shard_routing/sharding.h" // kDefaultShard
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/fake_coordinator.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
@@ -36,6 +37,7 @@
 #include "hogd/mempool/rpc_from_exec.h"
 #include "hogd/mempool/shared.h"
 #include "transaction.hh"
+#include "types.hh" // ContractAddress
 #include "x23/async.h"
 
 namespace hogd {
@@ -50,7 +52,8 @@ public:
       BootstrapAccountConfig const &bootstrap_config = {},
       std::optional<std::filesystem::path> const &data_dir = std::nullopt,
       NetworkHash network_hash = {},
-      std::size_t ramdb_bytes = kDefaultRamDbBytes);
+      std::size_t ramdb_bytes = kDefaultRamDbBytes,
+      std::size_t num_db_shards = 1);
   ~HogDevnodeNode();
 
   HogDevnodeNode(HogDevnodeNode const &) = delete;
@@ -67,8 +70,11 @@ public:
   {
     return indexer_block_explorer_server_->port();
   }
-  // Advertised in the runtime manifest as the `dbGateway` endpoint.
+  // Advertised in the runtime manifest as the `dbGateway` endpoint. One server
+  // for every shard: it splits each batch to the owning shards, so the manifest
+  // keeps a single dbGateway endpoint.
   std::uint16_t gateway_port() const { return db_gateway_server_->port(); }
+  std::size_t num_db_shards() const { return num_db_shards_; }
   // Advertised in the runtime manifest as the `viewGateway` endpoint.
   std::uint16_t view_gateway_port() const
   {
@@ -95,9 +101,40 @@ public:
 private:
   static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
 
-  HogDBDAO open_db_backend() const;
-  void init_db_backend(HogDBDAO db,
+  // One db shard: its ramdb directory, RPC context, and the per-shard servers
+  // hogdb exposes (the gateway spans shards, so it lives on the node).
+  // Declaration order is the teardown order: [dir] outlives the ramdb mapped
+  // out of it, and the servers borrow [ctx] so they go first.
+  struct DbShard {
+    DbShard(std::optional<std::filesystem::path> const &data_dir,
+            std::string_view subdir)
+      : dir(data_dir, subdir)
+    {}
+
+    HogDevnodeTmpDir dir;
+    std::unique_ptr<RPCContext> ctx;
+    std::unique_ptr<HogDBExecutorServer> executor_server;
+    std::unique_ptr<HogDBSchedServer> scheduler_server;
+    std::unique_ptr<HogDBAuthServer> auth_server;
+  };
+
+  // Every shard's context in shard-id order, for the servers that span shards.
+  std::vector<RPCContext *> shard_contexts();
+
+  HogDBDAO open_db_backend(std::size_t shard_id) const;
+  void init_db_backend(std::size_t shard_id, HogDBDAO db,
                        std::unique_ptr<sched_db_client_t> sched_db_client);
+  // The shard that owns [address], per shard_of_address. Reads that skip this
+  // ask a shard that does not hold the item.
+  RPCContext &db_for(ContractAddress const &address);
+  // kDefaultShard, for the requests that carry no address: every shard
+  // replicates the '<' globals (db tip, cost model), so any of them answers.
+  // Const like the unique_ptr member it replaced -- a const node still hands
+  // out a mutable context.
+  RPCContext &default_shard_db() const
+  {
+    return *db_shards_[kDefaultShard]->ctx;
+  }
   void init_indexer_backend();
   void reconcile_indexer_with_recovered_tip();
   void register_indexer_with_event_service();
@@ -121,14 +158,16 @@ private:
   const NetworkHash network_hash_;
   std::optional<std::filesystem::path> data_dir_;
   BootstrapAccountConfig bootstrap_config_;
+  // Total RAMDB capacity across every shard; each shard reserves an equal
+  // slice.
   const std::size_t ramdb_bytes_;
+  const std::size_t num_db_shards_;
   GenesisConfiguration genesis_configuration_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;
   bool recovered_data_dir_metadata_missing_ = false;
 
   HogDevnodeTmpDir runtime_dir_;
-  HogDevnodeTmpDir db_dir_;
   // Declaration order matters: event_ctx_ borrows event_dir_.directory(),
   // and the event RPC servers below borrow event_ctx_.
   HogDevnodeTmpDir event_dir_;
@@ -143,12 +182,14 @@ private:
   std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
   std::unique_ptr<RpcServer<IndexerBlockExplorerRpc>>
       indexer_block_explorer_server_;
-  std::unique_ptr<RPCContext> ctx_;
+  // Index is the shard id, so [db_shards_[i]] is shard i of
+  // [db_shards_.size()]. Held behind pointers because HogDevnodeTmpDir is
+  // neither copyable nor movable.
+  std::vector<std::unique_ptr<DbShard>> db_shards_;
   EventRPCContext event_ctx_;
 
-  std::unique_ptr<HogDBExecutorServer> db_executor_server_;
-  std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
-  std::unique_ptr<HogDBAuthServer> db_auth_server_;
+  // Both span every shard, so they are declared after [db_shards_] and torn
+  // down before it.
   std::unique_ptr<HogDBGatewayServer> db_gateway_server_;
   std::unique_ptr<ViewGatewayServer> view_gateway_server_;
 
