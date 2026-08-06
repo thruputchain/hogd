@@ -33,7 +33,6 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
-#include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"

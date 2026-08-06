@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
+#include <chrono> // IWYU pragma: keep
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +11,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -22,11 +23,13 @@
 #include "db_conflict.hh"
 #include "event.hh"
 #include "event_outbox_internal.hh"
+#include "event_rpc.hh"
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_event/rpc_context.h"
 #include "hogd/hog_event/rpc_from_exec.h"
@@ -41,18 +44,19 @@
 #include "network.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
 namespace {
-
-using namespace std::chrono_literals;
 
 template<typename T>
 void
@@ -62,20 +66,20 @@ expect_xdr_equal(const T &lhs, const T &rhs)
 }
 
 ProposedTransaction
-make_body(uint64_t nonce)
+make_body(std::uint64_t nonce)
 {
   ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.block_expiry_height = 1000 + nonce;
   body.signed_tx.tx.uniquifier.nonce = nonce;
   body.signed_tx.tx.invocation.gas_limit = 1'000'000 + nonce;
   body.nondeterministic_proposal_data.nondeterministic_bits.push_back(
-      static_cast<uint8_t>(nonce));
+      static_cast<std::uint8_t>(nonce));
   body.nondeterministic_proposal_data.nondeterministic_bit_count = 8;
   return body;
 }
 
 TxEventLog
-make_event(const ProposedTransaction &body, uint8_t marker)
+make_event(const ProposedTransaction &body, std::uint8_t marker)
 {
   TxEventLog event{};
   event.proposed_tx_hash = sha256(body.signed_tx.tx);
@@ -161,14 +165,14 @@ rewrite_outbox_protocol(std::string_view directory, BlockHeight height,
       IndexerOutboxStore::committed_filename(height);
   auto bytes = x23::readfile<x23::Buf>(path.string());
   ASSERT_TRUE(bytes.has_value());
-  uint32_t header_size = 0;
-  x23::deserialize(&header_size, x23::BufView(bytes->data(), size_t{4}));
+  std::uint32_t header_size = 0;
+  x23::deserialize(&header_size, x23::BufView(bytes->data(), std::size_t{4}));
   IndexerOutboxRecordHeader header;
   x23::deserialize(&header, x23::BufView(bytes->data() + 4, header_size));
   header.protocol = ProtocolCommit(protocol.data(), protocol.size());
   x23::Buf header_bytes = x23::serialize(header);
   x23::Buf rewritten =
-      x23::serialize(static_cast<uint32_t>(header_bytes.size()));
+      x23::serialize(static_cast<std::uint32_t>(header_bytes.size()));
   rewritten.append_range(header_bytes);
   rewritten.append_range(std::span(bytes->data() + 4 + header_size,
                                    bytes->size() - 4 - header_size));
@@ -182,7 +186,7 @@ rewrite_outbox_protocol(std::string_view directory, BlockHeight height,
 void
 write_epoch_origin(std::string_view directory, std::string_view protocol,
                    BlockHeight first_height, ConsensusValueHash first_prev_hash,
-                   uint64_t epoch_sequence)
+                   std::uint64_t epoch_sequence)
 {
   IndexerOutboxEpochOrigin origin{
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
@@ -208,7 +212,8 @@ write_epoch_origin(std::string_view directory, std::string_view protocol,
   header.record_identity.kind(
       IndexerOutboxRecordKind::IndexerOutboxEpochOrigin);
   x23::Buf header_bytes = x23::serialize(header);
-  x23::Buf bytes = x23::serialize(static_cast<uint32_t>(header_bytes.size()));
+  x23::Buf bytes =
+      x23::serialize(static_cast<std::uint32_t>(header_bytes.size()));
   bytes.append_range(header_bytes);
   bytes.append_range(payload);
   const std::filesystem::path path =
@@ -229,7 +234,7 @@ wait_for_condition(Predicate &&predicate, std::chrono::milliseconds timeout)
     if (std::chrono::steady_clock::now() >= deadline) {
       return false;
     }
-    std::this_thread::sleep_for(1ms);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   return true;
 }
@@ -335,7 +340,7 @@ public:
   }
 
   x23::Async<EventIndexerPullResult>
-  event_indexer_pull_next(EventIndexerPullRequest)
+  event_indexer_pull_next(EventIndexerPullRequest /*unused*/)
   {
     std::size_t call;
     {
@@ -354,7 +359,10 @@ public:
     co_return result;
   }
 
-  IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures() { return {}; }
+  static IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures()
+  {
+    return {};
+  }
 
   bool wait_for_calls(std::size_t count, std::chrono::milliseconds timeout)
   {
@@ -415,7 +423,8 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
 
   auto diagnostic = failures.lookup(event_server.impl()->failure_hash());
   ASSERT_TRUE(diagnostic.has_value());
-  EXPECT_EQ(diagnostic->conflict.code,
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by ASSERT.
+  EXPECT_EQ(diagnostic.value().conflict.code,
             DbConflictCode::kDbConflictValueMismatch);
 }
 
@@ -458,9 +467,9 @@ TEST(IndexerPullController,
   const std::string event_addr =
       std::string(x23::HostPort{"127.0.0.1", event_port}.show());
   IndexerPullControllerOptions options;
-  options.retry_delay = 1ms;
-  options.caught_up_poll_delay = 1ms;
-  options.startup_timeout = 5s;
+  options.retry_delay = std::chrono::milliseconds(1);
+  options.caught_up_poll_delay = std::chrono::milliseconds(1);
+  options.startup_timeout = std::chrono::seconds(5);
 
   {
     auto db = IndexDB::make_new(indexer_path);
@@ -513,8 +522,12 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   ConsensusValue block_one = commit_block(event, 1, 1, sha256(genesis));
 
   auto event_server = std::make_unique<EventIndexerServer>(event);
-  const std::uint16_t event_port =
-      event_server->start_server(x23::HostPort{"127.0.0.1", 0});
+  auto [event_port, event_listener] =
+      event_server->bind_server(x23::HostPort{"127.0.0.1", 0});
+  x23::UniqueFd replacement_listener(
+      ::fcntl(event_listener.get(), F_DUPFD_CLOEXEC, 0));
+  ASSERT_TRUE(replacement_listener);
+  event_server->start_accepting(std::move(event_listener));
   const std::string event_addr =
       std::string(x23::HostPort{"127.0.0.1", event_port}.show());
   auto db = IndexDB::make_new(std::filesystem::path(indexer_dir.directory()) /
@@ -522,22 +535,21 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   ASSERT_TRUE(db.has_value()) << db.error();
   RecentTxFailureCache failures;
   IndexerPullControllerOptions options;
-  options.retry_delay = 1ms;
-  options.caught_up_poll_delay = 1ms;
-  options.rpc_timeout = 1s;
-  options.startup_timeout = 5s;
+  options.retry_delay = std::chrono::milliseconds(1);
+  options.caught_up_poll_delay = std::chrono::milliseconds(1);
+  options.rpc_timeout = std::chrono::seconds(1);
+  options.startup_timeout = std::chrono::seconds(5);
   IndexerPullController controller(event_addr, *db, failures, options);
   controller.wait_until_caught_up();
 
   event_server.reset();
   ConsensusValue block_two = commit_block(event, 2, 2, sha256(block_one));
   event_server = std::make_unique<EventIndexerServer>(event);
-  ASSERT_EQ(event_server->start_server(x23::HostPort{"127.0.0.1", event_port}),
-            event_port);
+  event_server->start_accepting(std::move(replacement_listener));
 
   ASSERT_TRUE(
       wait_for_condition([&] { return db->latest_block() == BlockHeight{2}; },
-                         5s));
+                         std::chrono::seconds(5)));
   const IndexerProgress progress = db->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().last_consensus_hash, sha256(block_two));
@@ -556,18 +568,19 @@ TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
   x23::Defer release_server_calls(
       [&] { event_server.impl()->release(&event_server.cp_.pool_); });
   IndexerPullControllerOptions options;
-  options.retry_delay = 1ms;
-  options.caught_up_poll_delay = 1s;
-  options.rpc_timeout = 20ms;
-  options.startup_timeout = 5s;
+  options.retry_delay = std::chrono::milliseconds(1);
+  options.caught_up_poll_delay = std::chrono::seconds(1);
+  options.rpc_timeout = std::chrono::milliseconds(20);
+  options.startup_timeout = std::chrono::seconds(5);
   IndexerPullController controller(
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
       options);
 
-  const bool reconnected = event_server.impl()->wait_for_calls(2, 5s);
+  const bool reconnected =
+      event_server.impl()->wait_for_calls(2, std::chrono::seconds(5));
   event_server.impl()->release(&event_server.cp_.pool_);
   ASSERT_TRUE(reconnected);
-  EXPECT_TRUE(controller.wait_until_caught_up_for(5s));
+  EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
 }
 
 TEST(IndexerPullController, StartupTimeoutAndDestructionCancelBlockedPull)
@@ -583,18 +596,20 @@ TEST(IndexerPullController, StartupTimeoutAndDestructionCancelBlockedPull)
   x23::Defer release_server_calls(
       [&] { event_server.impl()->release(&event_server.cp_.pool_); });
   IndexerPullControllerOptions options;
-  options.rpc_timeout = 1min;
+  options.rpc_timeout = std::chrono::minutes(1);
   auto controller = std::make_unique<IndexerPullController>(
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
       options);
-  ASSERT_TRUE(event_server.impl()->wait_for_calls(1, 5s));
-  EXPECT_FALSE(controller->wait_until_caught_up_for(20ms));
+  ASSERT_TRUE(event_server.impl()->wait_for_calls(1, std::chrono::seconds(5)));
+  EXPECT_FALSE(
+      controller->wait_until_caught_up_for(std::chrono::milliseconds(20)));
 
   auto destroy = std::async(std::launch::async,
                             [controller = std::move(controller)]() mutable {
                               controller.reset();
                             });
-  const bool cancelled = destroy.wait_for(1s) == std::future_status::ready;
+  const bool cancelled =
+      destroy.wait_for(std::chrono::seconds(1)) == std::future_status::ready;
   event_server.impl()->release(&event_server.cp_.pool_);
   destroy.get();
   EXPECT_TRUE(cancelled);

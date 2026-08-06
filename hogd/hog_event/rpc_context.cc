@@ -4,12 +4,15 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <exception>
 #include <expected>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
@@ -37,6 +40,7 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 

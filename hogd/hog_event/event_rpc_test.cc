@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono> // IWYU pragma: keep
 #include <fcntl.h>

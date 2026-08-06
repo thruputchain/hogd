@@ -1,5 +1,6 @@
 #include "hogd/hog_indexer/pull_controller.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <exception>
@@ -8,21 +9,23 @@
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/metrics/health.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
+#include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 

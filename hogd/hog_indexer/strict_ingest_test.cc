@@ -24,7 +24,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"

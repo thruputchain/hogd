@@ -65,8 +65,6 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
-#include "hogd/hog_indexer/db.h"
-#include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
