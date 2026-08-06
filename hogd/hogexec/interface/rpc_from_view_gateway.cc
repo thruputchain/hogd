@@ -55,33 +55,41 @@ make_public_view_auth_claim()
   return claim;
 }
 
+// One card per db shard, identified by its index: DatabaseProxy binds clients
+// by declared shard_id (order_shards_by_id) and then routes reads with the same
+// shard_of_address the writers used, so a view over state another shard owns
+// reaches the shard that holds it.
 DatabaseIdentifier
-make_view_database_identifier(std::string const &db_executor_address)
+make_view_database_identifier(
+    std::vector<std::string> const &db_executor_addresses)
 {
-  return ShardedDB(IntroExecResult{
-      .exec_id = 0,
-      .shards = {ShardCard{
-          .protocol = version::kHogdProtocol(),
-          .upid = {},
-          .block_height = 0,
-          .shard_id = 0,
-          .total_shards = 1,
-          .shard_function_id = kShardFunctionId,
-          .address_for_exec = db_executor_address.c_str(),
-          .address_for_sched = "",
-          .address_for_auth = "",
-      }},
-      .event = {},
-  });
+  CHECK(!db_executor_addresses.empty());
+  IntroExecResult intro{.exec_id = 0, .shards = {}, .event = {}};
+  for (std::size_t shard_id = 0; shard_id < db_executor_addresses.size();
+       ++shard_id) {
+    intro.shards.push_back(ShardCard{
+        .protocol = version::kHogdProtocol(),
+        .upid = {},
+        .block_height = 0,
+        .shard_id = static_cast<std::uint32_t>(shard_id),
+        .total_shards =
+            static_cast<std::uint32_t>(db_executor_addresses.size()),
+        .shard_function_id = kShardFunctionId,
+        .address_for_exec = db_executor_addresses[shard_id].c_str(),
+        .address_for_sched = "",
+        .address_for_auth = "",
+    });
+  }
+  return ShardedDB(std::move(intro));
 }
 
 } // namespace
 
-ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
-                               std::string const &event_host,
-                               std::uint16_t event_exec_port,
-                               std::size_t nthreads)
-  : db_proxy_(make_view_database_identifier(db_executor_address)),
+ViewGatewayRpc::ViewGatewayRpc(
+    std::vector<std::string> const &db_executor_addresses,
+    std::string const &event_host, std::uint16_t event_exec_port,
+    std::size_t nthreads)
+  : db_proxy_(make_view_database_identifier(db_executor_addresses)),
     event_server_proxy_(x23::HostPort{event_host, event_exec_port}),
     worker_pool_(static_cast<int>(nthreads))
 {
