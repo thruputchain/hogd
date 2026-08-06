@@ -56,7 +56,7 @@ def main():
     # learned before each of these lines is now about the wrong accounts.
     for x in range(REDRAW_EVERY, last + 1, REDRAW_EVERY):
         ax.axvline(x, color=INK_MUTED, linewidth=1, dashes=(3, 3), zorder=1)
-        ax.text(x + 0.4, 0.906, "hot set moves", fontsize=7, color=INK_SOFT,
+        ax.text(x + 0.5, 0.985, "hot set moves", fontsize=7, color=INK_SOFT,
                 ha="left", va="top", rotation=90)
 
     # Un-aged last so it sits on top: it is the line the figure is about.
@@ -78,11 +78,15 @@ def main():
     ax.set_xlabel("Block boundary", fontsize=8.5, color=INK)
     ax.set_ylabel("Fast-tier hit rate", fontsize=8.5, color=INK)
     ax.set_xlim(0, last)
-    # Headroom above the plateau for a single-row legend, so it never sits on
-    # the data -- the flat un-aged line is the whole point and must stay clear.
-    ax.set_ylim(0.62, 0.98)
+    # A hit rate is a fraction, so the axis runs 0 to 1. Cropping to the data
+    # would turn each post-move drop into a cliff spanning the whole panel and
+    # overstate both the damage and the recovery.
+    ax.set_ylim(0, 1)
+    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
 
-    leg = ax.legend(fontsize=7.5, loc="upper center", frameon=False,
+    # Into the lower half, which the 0-1 axis leaves empty; the data sits in
+    # the top third and must stay clear.
+    leg = ax.legend(fontsize=7.5, loc="lower center", frameon=False,
                     handlelength=1.8, borderpad=0.2, labelspacing=0.25,
                     ncols=3, columnspacing=1.2,
                     title="sketch halved every N blocks", title_fontsize=7.5)

@@ -87,11 +87,11 @@ def main():
 
     if quiet is not None:
         for a in (ax, bar):
-            a.axvspan(quiet - 0.5, blocks[-1] + 0.5, color=CONSOLIDATED,
+            a.axvspan(quiet, blocks[-1] + 1, color=CONSOLIDATED,
                       alpha=0.07, zorder=0, linewidth=0)
         # In the empty lower half, which the honest 0-1 axis leaves free. The
         # band would otherwise be an unexplained tint.
-        ax.text((quiet + blocks[-1]) / 2, 0.42, "trigger selects\nnothing",
+        ax.text((quiet + blocks[-1] + 1) / 2, 0.42, "trigger selects\nnothing",
                 fontsize=7.5, color=INK_SOFT, ha="center", va="center")
 
     # The two bounds, so the climb is read against what is reachable rather than
@@ -105,18 +105,18 @@ def main():
         if y is None:
             continue
         ax.axhline(y, color=INK_MUTED, linewidth=1.1, dashes=(4, 2.5), zorder=2)
-        ax.text(blocks[-1], y + dy, f"{name} ({y:.3f})", fontsize=7.5,
+        ax.text(blocks[-1] + 1, y + dy, f"{name} ({y:.3f})", fontsize=7.5,
                 color=INK_SOFT, ha="right", va=va)
 
     ax.plot(blocks, hits, color=CONSOLIDATED, linewidth=2, marker="o",
             markersize=3.2, markeredgecolor=SURFACE, markeredgewidth=1.0,
             zorder=5)
-    ax.annotate(f"{max(hits):.3f}", xy=(blocks[-1], hits[-1]), xytext=(-2, -10),
+    ax.annotate(f"{max(hits):.3f}", xy=(blocks[-1], hits[-1]), xytext=(-4, -10),
                 textcoords="offset points", fontsize=8, color=INK, ha="right")
 
     if ceiling is not None:
         share = (max(hits) - floor) / (ceiling - floor)
-        ax.text(blocks[0] + 0.4, 0.06,
+        ax.text(0.4, 0.06,
                 f"{share:.0%} of the reachable gap, in {quiet} blocks",
                 fontsize=7.5, color=INK, ha="left", va="bottom")
 
@@ -124,13 +124,15 @@ def main():
     ax.set_ylim(0, 1)
     ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
 
-    bar.bar(blocks, moved, color=INK_MUTED, width=0.62, zorder=3)
+    # Edge-aligned so block i's work occupies [i, i+0.62] and the axes can meet
+    # at the origin; centred bars would put half of block 0's bar at x < 0.
+    bar.bar(blocks, moved, color=INK_MUTED, width=0.62, align="edge", zorder=3)
     bar.set_ylabel("Loglets\nrelocated", fontsize=8, color=INK, labelpad=2)
     bar.set_xlabel("Block boundary", fontsize=8.5, color=INK)
     bar.set_ylim(0, max(moved) + 0.6)
     bar.set_yticks(range(0, max(moved) + 1))
-    bar.set_xlim(blocks[0] - 0.7, blocks[-1] + 0.7)
-    bar.set_xticks([b for b in blocks if b % 4 == 0])
+    bar.set_xlim(0, blocks[-1] + 1)
+    bar.set_xticks([b for b in blocks if b % 4 == 0] + [blocks[-1] + 1])
 
     # The same bars in bytes moved -- the cost figure an operator would budget.
     mib = bar.secondary_yaxis(
