@@ -280,7 +280,8 @@ public:
   // ThreadPool, as that would cause deadlock.
   void quiesce() noexcept;
 
-  // Wait for a quiescent state and then run a callback.
+  // Run a callback asynchronously after every worker has passed through a
+  // quiescent state.  Unlike quiesce(), this can be called from a worker.
   void on_quiesce(move_only_function<void() noexcept> cb)
   {
     std::lock_guard _g(qcbq_lock_);
