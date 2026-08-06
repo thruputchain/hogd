@@ -56,6 +56,19 @@ echo "=== p2: convergence and termination ===" >&2
 } > "$OUT/p2_convergence.csv"
 column -t -s, "$OUT/p2_convergence.csv" >&2
 
+# The rank-sorted prefill: hot payees placed contiguously at creation, so no
+# consolidator is involved and no relocation is paid for. It bounds what any
+# amount of consolidation could reach on this workload, and the convergence
+# figure plots it so the climb is read against what is achievable rather than
+# against the top of the axis.
+rm -rf "$DB"; mkdir -p "$DB"
+{
+  echo "hit_rate"
+  timeout 1800 "$BIN" "$DB" zipf_payments -n "$NUM" -t "$THETA" -S 2>/dev/null |
+    grep -a "^layout,zipf_payments," | cut -d, -f6
+} > "$OUT/p2_ceiling.csv"
+cat "$OUT/p2_ceiling.csv" >&2
+
 echo "=== p1: aging epoch sweep, hot set re-drawn every 15 blocks ===" >&2
 {
   echo "age_epoch,block,loglets_moved,consolidate_seconds,fast_hot_bytes,hit_rate,amat_ns"

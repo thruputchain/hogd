@@ -628,9 +628,19 @@ triggered at every block boundary, bounded to two loglets. The layout converges 
 13 closes and the trigger then selects nothing for the rest of the run -- the lower
 panel is the work done per block, 56 MiB in total. The stop condition was not
 designed: once no loglet is mixed, mixedness-based victim selection finds nothing.
-The dashed line is the identical workload with the trigger off, flat
-at 0.6824 throughout: the rise is the trigger's doing, not the workload
-reorganising itself.*
+The two dashed lines bound what is reachable: the identical
+workload with the trigger off, flat at 0.682 throughout, and the rank-sorted
+prefill at 0.956, which places hot payees contiguously at creation and pays no
+relocation cost. The trigger captures 81% of that gap. The axis runs 0 to 1
+because the metric is a fraction; zooming to the data would make a 22-point rise
+fill the panel.*
+
+**81.4% of the reachable gap**, `(0.9050 - 0.6824) / (0.9558 - 0.6824)`. Both
+bounds are measured at this exact configuration rather than carried over: the
+floor is the trigger-off control arm, and the ceiling comes from a `-S` run
+captured to `data/p2_ceiling.csv`. The earlier V1 figure of 76% was at 2 M
+accounts against a differently measured ceiling, so the two are not directly
+comparable.
 
 **A trigger-off control runs beside it, and it is perfectly flat**: 0.6824 at
 block 0 and 0.6824 at block 23, unchanged to four decimals over 24 blocks. So the
