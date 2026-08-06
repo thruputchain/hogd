@@ -28,6 +28,7 @@ add_library(hogdb_objects OBJECT
   rpc_from_exec.cc
   rpc_from_gateway.cc
   rpc_from_sched.cc
+  shard_identity.cc
   status.cc
 )
 target_link_libraries(
