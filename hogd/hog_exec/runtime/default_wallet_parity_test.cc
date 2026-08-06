@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "built_contracts/calldata_wrapper.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
@@ -21,6 +22,8 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -38,6 +41,8 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
+#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -240,6 +245,44 @@ protected:
                                              : make_pubkey_claim(preimage));
   }
 
+  // Root-invokes `wallet`'s entrypoint with hand-crafted raw calldata (for
+  // malformed-encoding cases that make_calldata cannot produce).
+  CapturedRecord run_wallet_raw_tx(ContractAddress const &wallet,
+                                   PubkeyAccountPreimage const &preimage,
+                                   Runtime::MethodID method_id,
+                                   std::vector<uint8_t> const &raw_calldata)
+  {
+    Invocation invocation{.invoked_address = wallet,
+                          .entrypoint = entrypoint_from_method_id(method_id),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {}};
+    invocation.calldata.append(raw_calldata.begin(), raw_calldata.end());
+    return run_wallet_root_tx(std::move(invocation),
+                              make_pubkey_claim(preimage));
+  }
+
+  // Runs the same raw calldata through both wallets and byte-compares.
+  void expect_raw_parity(Runtime::MethodID method_id,
+                         std::vector<uint8_t> const &raw_calldata)
+  {
+    auto native = run_wallet_raw_tx(native_wallet_, native_preimage_, method_id,
+                                    raw_calldata);
+    auto wasm = run_wallet_raw_tx(wasm_wallet_, wasm_preimage_, method_id,
+                                  raw_calldata);
+    EXPECT_EQ(native, wasm);
+  }
+
+  // The expected abort payload for calldata the entrypoint glue rejects:
+  // cxs(kLibraryExceptionSelector, LibraryExn::Handling(DecodingArgs)).
+  static std::vector<uint8_t> decoding_args_abort_bytes()
+  {
+    LibraryExn exn(LibraryExn::kLibraryExnHandling);
+    exn.handling() = HandlingError(HandlingError::kHandlingDecodingArgs);
+    auto buf = x23::serialize_cxs(kLibraryExceptionSelector, exn);
+    CHECK(buf.has_value());
+    return {buf->begin(), buf->end()};
+  }
+
   // Runs the same call list through both wallets and byte-compares.
   void expect_parity(wallet_calls_t const &calls)
   {
@@ -266,15 +309,38 @@ protected:
   // Builds a native "driver" contract whose method 0 invokes `target`'s
   // `execute` entrypoint with `calls`, then records (tag, frame_status,
   // literal return bytes) into `result_key`. Adapted from erc20_parity_test.cc.
-  static NativeContract::function_t
-  make_wallet_capture_driver(ContractAddress target,
-                             StorageKeyContractData result_key,
-                             wallet_calls_t const &calls)
+  static NativeContract::function_t make_wallet_capture_driver(
+      ContractAddress target, StorageKeyContractData result_key,
+      wallet_calls_t const &calls, bool mint_and_forward_token = false)
   {
     auto calldata = wallet_meta::make_calldata<u8"execute">(calls);
     Runtime::MethodID method_id = wallet_meta::method_id<u8"execute">();
-    return [target, result_key, method_id, calldata = std::move(calldata)](
+    return [target, result_key, method_id, mint_and_forward_token,
+            calldata = std::move(calldata)](
                NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      // Optionally mint an auth token and forward its handle: execute takes
+      // no Signer args, so the wallet must reject the unconsumed handle.
+      uint32_t token_id = 0;
+      std::span<uint32_t> forwarded{};
+      if (mint_and_forward_token) {
+        AuthTokenNode root_node{.consumer_address = target,
+                                .payload = x23::serialize(1U),
+                                .child_nodes = {}};
+        auto serialized_root = x23::serialize(root_node);
+        auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000},
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                           serialized_root.data()),
+                                       serialized_root.size()},
+            token_id);
+        if (!mint_res.has_value() ||
+            mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MintAuthToken failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        forwarded = std::span<uint32_t>{&token_id, 1};
+      }
+
       CopyableInvokeOutputs outputs{};
       CopyableInvokeInputs inputs{
           .entrypoint_id = method_id,
@@ -283,7 +349,7 @@ protected:
       };
       auto r = ctx.syscall<SyscallNo::kInvoke>(
           target, std::as_bytes(std::span(calldata.data(), calldata.size())),
-          std::span<uint32_t>{}, inputs, outputs);
+          forwarded, inputs, outputs);
 
       std::vector<uint8_t> record;
       if (!r.has_value()) {
@@ -639,6 +705,224 @@ TEST_F(DefaultWalletParityTest, DeployUnknownHashFaults)
   auto wasm = run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, bogus);
   // Address-independent outcome: full byte comparison applies.
   EXPECT_EQ(native, wasm);
+}
+
+// Malformed calldata never reaches the method body: the sdk entrypoint glue
+// aborts with LibraryExn::Handling(DecodingArgs), and the native builder
+// must produce byte-identical aborts. User-reachable once the precompile is
+// registered, so every malformed shape is pinned here.
+TEST_F(DefaultWalletParityTest, MalformedCalldataExecute)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto exec_id = wallet_meta::method_id<u8"execute">();
+
+  wallet_calls_t calls;
+  calls.push_back(echo_call(4));
+  auto valid = wallet_meta::make_calldata<u8"execute">(calls);
+  std::vector<uint8_t> valid_bytes(valid.begin(), valid.end());
+
+  {
+    SCOPED_TRACE("empty");
+    expect_raw_parity(exec_id, {});
+  }
+  {
+    SCOPED_TRACE("truncated");
+    auto truncated = valid_bytes;
+    truncated.pop_back();
+    expect_raw_parity(exec_id, truncated);
+  }
+  {
+    SCOPED_TRACE("trailing");
+    auto trailing = valid_bytes;
+    trailing.push_back(0x00);
+    expect_raw_parity(exec_id, trailing);
+  }
+  {
+    SCOPED_TRACE("noncanonical-count-width");
+    // Replace the call-count's 1-byte CXS prefix with the 4-byte integer
+    // form (0xBF header + LE u32) encoding the same count. Whether decoders
+    // accept the wide form or reject it, both backends must agree.
+    std::vector<uint8_t> wide = {0xBF, 0x01, 0x00, 0x00, 0x00};
+    wide.insert(wide.end(), valid_bytes.begin() + 1, valid_bytes.end());
+    expect_raw_parity(exec_id, wide);
+  }
+
+  // Absolute check on one case: the abort payload is exactly the
+  // DecodingArgs encoding, and the tx is a reverted root frame.
+  auto native =
+      run_wallet_raw_tx(native_wallet_, native_preimage_, exec_id, {});
+  auto expected = decoding_args_abort_bytes();
+  ASSERT_EQ(native.size(), 2U + expected.size());
+  EXPECT_EQ(native[1],
+            static_cast<uint8_t>(ExecResult::ExecResultTxRootFrameReverted));
+  EXPECT_TRUE(std::equal(expected.begin(), expected.end(), native.begin() + 2));
+}
+
+TEST_F(DefaultWalletParityTest, MalformedCalldataDeploy)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto deploy_id = wallet_meta::method_id<u8"deploy">();
+
+  SHA256Hash nonce{};
+  nonce.fill(9);
+  SHA256Hash hash{};
+  hash.fill(1);
+  auto valid = wallet_meta::make_calldata<u8"deploy">(nonce, hash);
+  std::vector<uint8_t> valid_bytes(valid.begin(), valid.end());
+
+  {
+    SCOPED_TRACE("empty");
+    expect_raw_parity(deploy_id, {});
+  }
+  {
+    SCOPED_TRACE("truncated");
+    auto truncated = valid_bytes;
+    truncated.pop_back();
+    expect_raw_parity(deploy_id, truncated);
+  }
+  {
+    SCOPED_TRACE("trailing");
+    auto trailing = valid_bytes;
+    trailing.push_back(0x00);
+    expect_raw_parity(deploy_id, trailing);
+  }
+}
+
+// The sdk rejects auth handles left unconsumed by argument decoding
+// (execute takes no Signer args), folding them into the same DecodingArgs
+// abort. A driver mints a real token and forwards its handle to each
+// wallet; both backends must reject identically, before the method runs.
+TEST_F(DefaultWalletParityTest, ForwardedAuthHandleRejected)
+{
+  setup_wallets_and_targets();
+
+  wallet_calls_t calls;
+  calls.push_back(echo_call(4));
+
+  static constexpr ContractAddress kNativeDriverAddr =
+      make_contract_address(230);
+  static constexpr ContractAddress kWasmDriverAddr = make_contract_address(231);
+  auto native_result_key = make_storage_key("native_result");
+  auto wasm_result_key = make_storage_key("wasm_result");
+
+  auto make_driver = [&](ContractAddress const &wallet,
+                         StorageKeyContractData const &result_key) {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(0, make_wallet_capture_driver(wallet, result_key, calls,
+                                              /*mint_and_forward_token=*/true));
+    return std::make_unique<NativeContract>(std::move(fns));
+  };
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
+  extra.emplace(kDriverBaseId, make_driver(native_wallet_, native_result_key));
+  extra.emplace(kDriverBaseId + 1, make_driver(wasm_wallet_, wasm_result_key));
+  make_ctx(std::move(extra));
+
+  auto deploy_driver = [&](int32_t id, ContractAddress const &addr) {
+    auto obj = make_native_contract(id);
+    write_contract(obj);
+    write_deployment(addr, obj);
+    setup_grant_storage_token(addr, 1'000'000'000);
+  };
+  deploy_driver(kDriverBaseId, kNativeDriverAddr);
+  deploy_driver(kDriverBaseId + 1, kWasmDriverAddr);
+
+  auto native_record =
+      run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_);
+  auto wasm_record = run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
+  EXPECT_EQ(native_record, wasm_record);
+
+  // Absolute check: [commit, tag=0x00, frame_status=Abort, DecodingArgs].
+  auto expected = decoding_args_abort_bytes();
+  ASSERT_EQ(native_record.size(), 3U + expected.size());
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_TRUE(
+      std::equal(expected.begin(), expected.end(), native_record.begin() + 3));
+}
+
+// echo_call(0) returns a 1-byte CXS encoding of an empty Vec<u8>, not an
+// empty buffer. A raw native callee that sets no return buffer exercises
+// the true outputs.return_buffer_len == 0 path.
+TEST_F(DefaultWalletParityTest, ZeroByteChildReturn)
+{
+  setup_wallets_and_targets();
+
+  static constexpr ContractAddress kEmptyReturnAddr =
+      make_contract_address(222);
+  constexpr int32_t kEmptyReturnId = 63;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0,
+              [](NativeSyscallContext & /*unused*/) noexcept
+                  -> InvokeStatus<void> { return {}; });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
+  extra.emplace(kEmptyReturnId,
+                std::make_unique<NativeContract>(std::move(fns)));
+  make_ctx(std::move(extra));
+  auto obj = make_native_contract(kEmptyReturnId);
+  write_contract(obj);
+  write_deployment(kEmptyReturnAddr, obj);
+  setup_grant_storage_token(kEmptyReturnAddr, 1'000'000'000);
+
+  WalletCall call{};
+  call.target = kEmptyReturnAddr;
+  call.entrypoint = entrypoint_from_method_id(0);
+  call.gas_limit = UINT64_MAX;
+  wallet_calls_t calls;
+  calls.push_back(call);
+  calls.push_back(echo_call(4));
+  expect_parity_success(calls);
+}
+
+// A callee that returns a minted auth handle: the wasm wallet fetches the
+// handle list and drops it, the native wallet passes an empty fetch span —
+// the observable wallet behavior must match regardless.
+TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)
+{
+  setup_wallets_and_targets();
+
+  static constexpr ContractAddress kTokenReturnAddr =
+      make_contract_address(223);
+  constexpr int32_t kTokenReturnId = 64;
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    AuthTokenNode root_node{.consumer_address = kTokenReturnAddr,
+                            .payload = x23::serialize(2U),
+                            .child_nodes = {}};
+    auto serialized_root = x23::serialize(root_node);
+    uint32_t token_id = 0;
+    auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+        BlockHeight{1000},
+        std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                       serialized_root.data()),
+                                   serialized_root.size()},
+        token_id);
+    if (!mint_res.has_value() ||
+        mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      ADD_FAILURE() << "MintAuthToken failed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    ctx.handler().set_return_buffer(ReturnBuffer{0xAA, 0xBB}, false,
+                                    {token_id});
+    return {};
+  });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
+  extra.emplace(kTokenReturnId,
+                std::make_unique<NativeContract>(std::move(fns)));
+  make_ctx(std::move(extra));
+  auto obj = make_native_contract(kTokenReturnId);
+  write_contract(obj);
+  write_deployment(kTokenReturnAddr, obj);
+  setup_grant_storage_token(kTokenReturnAddr, 1'000'000'000);
+
+  WalletCall call{};
+  call.target = kTokenReturnAddr;
+  call.entrypoint = entrypoint_from_method_id(0);
+  call.gas_limit = UINT64_MAX;
+  wallet_calls_t calls;
+  calls.push_back(call);
+  expect_parity_success(calls);
 }
 
 // NOLINTEND(bugprone-exception-escape)

@@ -183,19 +183,17 @@ make_native_default_wallet_contract()
             return execute_result_t::make_err(
                 WalletException{WalletError::CallFaulted});
           }
-          if (outputs.frame_status == InvocationFrameStatusCode::Abort) {
-            return execute_result_t::make_err(
-                WalletException{WalletError::CallAborted});
-          }
-          if (outputs.frame_status != InvocationFrameStatusCode::Return) {
+          if (outputs.frame_status != InvocationFrameStatusCode::Return &&
+              outputs.frame_status != InvocationFrameStatusCode::Abort) {
             // Fault or unexpected status: sdk contract_call Err(Fault).
             return execute_result_t::make_err(
                 WalletException{WalletError::CallFaulted});
           }
 
-          // Fetch the child's return bytes. The wallet forwards no auth
-          // tokens and drops any returned ids, so pass an empty auth span
-          // (the host accepts zero-length spans).
+          // Fetch the child's payload — return or abort bytes — as the
+          // sdk's fetch_frame_payload does for both outcomes. The wallet
+          // forwards no auth tokens and drops any returned ids, so pass an
+          // empty auth span (the host accepts zero-length spans).
           std::vector<uint8_t> return_buf(outputs.return_buffer_len);
           RuntimeMemoryLength return_written = 0;
           RuntimeMemoryLength auth_written = 0;
@@ -205,19 +203,21 @@ make_native_default_wallet_contract()
           if (!get.has_value()) {
             return NativeContractBuilder::host_fn_error_conversion(get.error());
           }
-          // Unreachable with a correct host: after frame_status == Return a
-          // return buffer exists and the syscall succeeds. The wasm sdk would
-          // map a failure here to CallFaulted; this path is a host-contract
-          // violation, so fault the frame instead.
-          if (*get != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          // The sdk's checked_returned_len guard: a host that reported one
-          // length at Invoke but wrote another here broke its contract; the
-          // wasm wallet surfaces that as CallFaulted, so mirror it.
-          if (return_written != return_buf.size()) {
+          // Unreachable with a correct host (after a Return/Abort frame the
+          // payload exists and the syscall succeeds), but the sdk maps a
+          // fetch failure — error code or short write (checked_returned_len)
+          // — to CallFaulted; mirror it exactly.
+          if (*get != SyscallErrorCode::kSyscallErrorCodeNone ||
+              return_written != return_buf.size()) {
             return execute_result_t::make_err(
                 WalletException{WalletError::CallFaulted});
+          }
+
+          if (outputs.frame_status == InvocationFrameStatusCode::Abort) {
+            // sdk contract_call: payload fetched (and here dropped), then
+            // the abort is reported.
+            return execute_result_t::make_err(
+                WalletException{WalletError::CallAborted});
           }
 
           encoded_return_data_len +=
