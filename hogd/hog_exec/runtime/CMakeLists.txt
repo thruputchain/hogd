@@ -57,6 +57,7 @@ add_library(runtime STATIC
   $<TARGET_OBJECTS:rv32_runtime_objects>
   $<TARGET_OBJECTS:item_objects>
 )
+target_link_libraries(runtime native_contract_record)
 
 add_library(runtime_test_lib
   native_contract_test_framework.cc

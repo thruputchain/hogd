@@ -10,6 +10,7 @@ add_dependencies(
 )
 
 target_link_libraries(genesis
+  native_contract_record
   base
   crypto
   storage_item
