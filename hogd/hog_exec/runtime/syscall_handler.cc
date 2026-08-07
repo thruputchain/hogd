@@ -845,8 +845,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
   auto start_status = start_frame(invocation, flags, owned_auth_token_ids);
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
-    // back the invocation stack, so no child frame is present and finish_frame()
-    // must be skipped; surface the unrecoverable error (issue #3058).
+    // back the invocation stack, so no child frame is present and
+    // finish_frame() must be skipped; surface the unrecoverable error (issue
+    // #3058).
     return {start_status.error(), 0};
   }
   auto stashed_parent_trace = std::move(start_status.value());
@@ -921,9 +922,10 @@ SystemCallHandler::start_frame(
   // transactional: on failure it restores the state it touched and returns an
   // error. Put the parent's stashed trace back so the surviving parent frame
   // keeps its diagnostics, and report the failure as an unrecoverable error.
-  auto admitted = invocation_frame_stack_.start_frame(
-      invocation.invoked_address, std::move(invocation.calldata), flags,
-      owned_auth_token_ids);
+  auto admitted =
+      invocation_frame_stack_.start_frame(invocation.invoked_address,
+                                          std::move(invocation.calldata), flags,
+                                          owned_auth_token_ids);
   if (!admitted.has_value()) {
     if (stashed_parent_trace) {
       invocation_frame_trace_ = std::move(stashed_parent_trace);

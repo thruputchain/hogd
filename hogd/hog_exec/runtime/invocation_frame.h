@@ -310,9 +310,10 @@ public:
   // back — and an Unrecoverable SystemError is returned, so the noexcept caller
   // (SystemCallHandler::start_frame) never lets the exception terminate the
   // executor (#3058).
-  SystemStatus<void> start_frame(ContractAddress const &address,
-                                 Calldata &&calldata, InvokeFlagSet flags,
-                                 std::span<uint32_t const> owned_auth_token_ids);
+  SystemStatus<void>
+  start_frame(ContractAddress const &address, Calldata &&calldata,
+              InvokeFlagSet flags,
+              std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
