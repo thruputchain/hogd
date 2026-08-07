@@ -821,14 +821,18 @@ struct Deserializer
   template<bool Safe, is_xdr_cat<XdrCategory::kVec> X> void go(X &x)
   {
     size_t size = get32<Safe>();
-    // TODO(geoff): the following code would standardize behavior on bad input
-    // vecs as throwing XdrBadInput, instead of the current behavior (throw
-    // XdrLengthError). Before making this change (an extra if statement), do a
-    // proper set of end to end benchmarks
-    //
-    // if (size > X::max_size()) [[unlikely]]
-    //   raise("length {} exceeds maximum deserializing {}", size,
-    //         xdr_type_name<X>());
+    // Reject a count past the vector's maximum before reserving, so an
+    // oversized count cannot drive a speculative allocation ahead of the
+    // length check -- and, for a zero-wire-size element (which consumes no
+    // input), cannot be materialized element-by-element until std::bad_alloc.
+    // This mirrors the CXS decoder, which checks max_size before its bounded
+    // reserve.  Thrown as XdrLengthError to match Vec::check_size (see the
+    // VectorTooLarge test); standardizing bad-vec input to XdrBadInput would
+    // change that contract and wants end-to-end benchmarks first.
+    if (size > X::max_size()) [[unlikely]]
+      throw XdrLengthError(
+          std::format("vector count {} exceeds max size {} deserializing {}",
+                      size, X::max_size(), xdr_type_name<X>()));
     x.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     x.reserve(

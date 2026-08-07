@@ -567,16 +567,16 @@ TEST(Deserialize, ZeroWireBoundedVectorRejectsOverflow)
   static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
                 "test relies on the empty struct being zero-wire-size");
   x23::Vec<std::tuple<>, 8> vec;
-  uint8_t input[] = {0x00, 0x00, 0x00, 0x09}; // count 9 > max_size 8
+  uint8_t input[] = {0xff, 0xff, 0xff, 0xff}; // count 0xffffffff >> max_size 8
   EXPECT_THROW(x23::deserialize(&vec, x23::BufView(input, sizeof(input))),
                x23::XdrLengthError);
 }
 
 // Same for the CXS decode pathway (a Vec<tuple<>> serializes to just its
-// count, so the CXS-encoded count 9 is the whole record).
+// count, so the CXS-encoded count is the whole record).
 TEST(Deserialize, CxsZeroWireBoundedVectorRejectsOverflow)
 {
-  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(9)); // count 9 > max 8
+  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(0xffffffff));
   x23::Vec<std::tuple<>, 8> vec;
   auto status =
       x23::deserialize_cxs(&vec, std::span<const uint8_t>(bytes.data(),

@@ -392,6 +392,18 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
               std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
                           ProcMeta::proc_name, e.what_);
           ret = std::unexpected{std::move(e)};
+        } catch (const std::exception &e) {
+          // A non-XdrException here (notably std::bad_alloc from decoding a
+          // reply that contains an unbounded vector of zero-wire-size
+          // elements) must likewise not escape this callback and cross the
+          // noexcept SRpcFd::input boundary.  Surface it to the caller as an
+          // XdrException, symmetric with the SRPC server argument-decode path.
+          if (logging)
+            logger_.template log_client<ProcMeta>(
+                *msg, uformat("deserializion error: {}", e.what()));
+          ret = std::unexpected{XdrException(
+              std::format("{}::{}: {}", ProcMeta::version_meta::version_name,
+                          ProcMeta::proc_name, e.what()))};
         }
       done.release();
     });
