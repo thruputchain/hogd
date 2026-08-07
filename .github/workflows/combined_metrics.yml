@@ -13,6 +13,7 @@ jobs:
         permissions:
             contents: read
             actions: read
+            issues: write
 
         steps:
             - name: Clean up .gitconfig
@@ -58,3 +59,6 @@ jobs:
             - name: Print Log Download Instructions
               if: always()
               uses: ./.github/actions/print-log-instructions
+            - name: File failure issue
+              if: failure()
+              uses: ./.github/actions/file-failure-issue

@@ -1,0 +1,90 @@
+name: File Failure Issue
+description: Files a GitHub issue linking to the failed run so a human or agent can start diagnosing
+
+inputs:
+  label:
+    description: Label applied to the filed issue (created automatically if missing)
+    required: false
+    default: ci-failure
+
+runs:
+  using: composite
+  steps:
+    - name: File failure issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        LABEL: ${{ inputs.label }}
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
+        RUN_NUMBER: ${{ github.run_number }}
+        WORKFLOW_NAME: ${{ github.workflow }}
+        CURRENT_JOB: ${{ github.job }}
+        SHA: ${{ github.sha }}
+        REF_NAME: ${{ github.ref_name }}
+        EVENT_NAME: ${{ github.event_name }}
+        SERVER_URL: ${{ github.server_url }}
+      run: |
+        # This step runs after the job has already failed; it must never mask
+        # that signal, so every API problem is logged and the step exits 0.
+        set -u
+
+        api() {
+            curl -sS \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "$@"
+        }
+
+        api -X POST "https://api.github.com/repos/${REPO}/labels" \
+            -d "$(jq -n --arg name "$LABEL" \
+                '{name: $name, color: "b60205", description: "Auto-filed CI failure needing diagnosis"}')" \
+            > /dev/null || true
+
+        RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}"
+
+        JOBS_JSON=$(api "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" || echo '{}')
+
+        # Jobs already concluded as failures, plus the current job (mid-failure,
+        # so its conclusion is still null).
+        FAILED_JOBS=$(echo "$JOBS_JSON" | jq -r \
+            --arg current "$CURRENT_JOB" --arg repo "$REPO" '
+            [.jobs[]? | select(.conclusion == "failure" or .name == $current)]
+            | map("- **" + .name + "**: " + .html_url
+                + "\n  - Logs: `gh run view --log --job " + (.id | tostring)
+                + " --repo " + $repo + "`")
+            | join("\n")')
+        if [ -z "$FAILED_JOBS" ]; then
+            FAILED_JOBS="(could not determine failed jobs; see the run link above)"
+        fi
+
+        TITLE="[${LABEL}] ${WORKFLOW_NAME}: run #${RUN_NUMBER} failed"
+        BODY="Workflow **${WORKFLOW_NAME}** failed.
+
+        - **Run:** ${RUN_URL}
+        - **Commit:** ${SERVER_URL}/${REPO}/commit/${SHA}
+        - **Branch/ref:** \`${REF_NAME}\`
+        - **Trigger:** \`${EVENT_NAME}\`
+        - **Failed at:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+        ### Failed jobs
+
+        ${FAILED_JOBS}
+
+        ---
+        Auto-filed by \`.github/actions/file-failure-issue\`. This issue is a starting
+        point for diagnosis; the logs at the links above have the details."
+
+        RESPONSE=$(api -X POST "https://api.github.com/repos/${REPO}/issues" \
+            -d "$(jq -n --arg title "$TITLE" --arg body "$BODY" --arg label "$LABEL" \
+                '{title: $title, body: $body, labels: [$label]}')" || echo '{}')
+
+        ISSUE_URL=$(echo "$RESPONSE" | jq -r '.html_url // empty')
+        if [ -n "$ISSUE_URL" ]; then
+            echo "Filed failure issue: ${ISSUE_URL}"
+        else
+            echo "WARNING: could not file failure issue. API response:"
+            echo "$RESPONSE"
+        fi
+        exit 0
