@@ -41,6 +41,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "consensus.hh"
 #include "contract.hh"
+#include <map>
 #include <set>
 
 #include "db_gateway.hh"
@@ -1952,6 +1953,91 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
     EXPECT_EQ(result.payload().height, 1);
     EXPECT_EQ(result.payload().output.status_code(),
               InvocationFrameStatusCode::Abort);
+  }
+
+  expect_clean_exit(process);
+}
+
+// Views one wallet from each shard and requires both to behave the same.
+//
+// DISABLED: fails on every non-primary shard today, and the cause sits upstream
+// of this test. DatabaseProxy::open_viewing_snapshot() opens on the primary
+// shard only (see its TODO(sharding)), while snapshot-scoped reads route by
+// address to the owning shard -- which never minted that snapshot id, since
+// each hogdb mints its own. The view retries until its budget is exhausted and
+// returns ViewGatewayAbandoned. Handing the view gateway one db-executor
+// address per shard fixed the routing but not the snapshot lifecycle.
+//
+// Enable once open/close fan out and one snapshot id per shard is threaded
+// through ViewState and the snapshot-scoped reads.
+TEST(HogDevnode, DISABLED_ShardedViewGatewayViewsWalletsOnEveryShard)
+{
+  constexpr std::uint32_t kAccounts = 8;
+  constexpr std::size_t kShards = 2;
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--num-db-shards",
+      "2",
+      "--dev-accounts",
+      "8",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), kAccounts);
+
+  const BootstrapAccountArtifact artifact =
+      build_bootstrap_account_artifact({.count = kAccounts});
+  ASSERT_EQ(artifact.accounts.size(), kAccounts);
+
+  // One wallet per shard, so the run covers both the shard a single-shard
+  // gateway would hold and one it could only reach by routing.
+  std::map<std::size_t, ContractAddress> wallet_by_shard;
+  for (BootstrapAccountMetadata const &account : artifact.accounts) {
+    wallet_by_shard.emplace(shard_of_address(account.address, kShards),
+                            account.address);
+  }
+  ASSERT_EQ(wallet_by_shard.size(), kShards)
+      << "bootstrap wallets do not straddle both shards, so this fixture "
+         "cannot detect a single-shard view gateway";
+
+  {
+    auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                              readiness.view_gateway.port,
+                                              /*retry=*/true)()
+                      .value();
+
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+
+    using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+    for (auto const &[shard, wallet_address] : wallet_by_shard) {
+      TransactionViewQuery query{
+          .invocation =
+              Invocation{
+                  .invoked_address = wallet_address,
+                  .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                  .gas_limit = GasAmount{10'000'000},
+                  .calldata = Calldata{},
+              },
+          .parent_address = {},
+          .auth_claim = source_address_auth_claim(),
+          .forwarded_tokens = {},
+          .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+      };
+
+      ViewGatewayResult result = client.viewgateway_view(query)();
+      ASSERT_EQ(result.outcome(), ViewGatewayOutcome::ViewGatewayOk)
+          << "shard " << shard;
+      EXPECT_EQ(result.payload().height, 1) << "shard " << shard;
+      // Reaching the deployed wallet and aborting on empty calldata is what
+      // says the view found the contract; a wallet whose deployment record
+      // lives on an unreachable shard does not get this far.
+      EXPECT_EQ(result.payload().output.status_code(),
+                InvocationFrameStatusCode::Abort)
+          << "shard " << shard;
+    }
   }
 
   expect_clean_exit(process);

@@ -30,8 +30,14 @@ class ViewGatewayRpc {
 public:
   using rpc_service = ViewGateway1;
 
-  // [db_executor_addresses] is indexed by shard id, so views route to the shard
-  // that owns the state they read.
+  // [db_executor_addresses] is indexed by shard id, so reads route to the shard
+  // that owns the state they touch.
+  //
+  // NOT sufficient for cross-shard views on its own: DatabaseProxy still opens
+  // the viewing snapshot on the primary shard only, and each hogdb mints its
+  // own snapshot id, so a read routed elsewhere finds no such snapshot and the
+  // view ends in ViewGatewayAbandoned. See open_viewing_snapshot()'s
+  // TODO(sharding) and DISABLED_ShardedViewGatewayViewsWalletsOnEveryShard.
   ViewGatewayRpc(std::vector<std::string> const &db_executor_addresses,
                  std::string const &event_host, std::uint16_t event_exec_port,
                  std::size_t nthreads = 2);
