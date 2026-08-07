@@ -1408,6 +1408,7 @@ is_banned_redeploy_native_contract(
   switch (native_contract_id) {
   case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
   case HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim:
+  case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
     return true;
   }
   panic("Unknown native contract deployed: {}", native_contract_id);
