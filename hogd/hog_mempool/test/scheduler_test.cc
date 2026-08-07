@@ -956,8 +956,8 @@ public:
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  static x23::Async<DbBlockResult>
-  dbsched_commit_snapshot(BlockID id, ConsensusValue value)
+  static x23::Async<DbBlockResult> dbsched_commit_snapshot(BlockID id,
+                                                           ConsensusValue value)
   {
     co_return DbBlockResult(DbSchedResult::DbSchedResultError);
   }
@@ -972,8 +972,9 @@ public:
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  static x23::Async<DbSchedResult> dbsched_load_genesis_configuration(
-      GenesisConfiguration genesis_configuration, ConsensusValue value)
+  static x23::Async<DbSchedResult>
+  dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
+                                     ConsensusValue value)
   {
     co_return DbSchedResult::DbSchedResultError;
   }
@@ -997,8 +998,8 @@ read_hog_ages_from_malformed_db(MalformedHogAgeDbRpc::ReplyMode mode)
           .value();
   Scheduler scheduler(/*current_block=*/0,
                       std::make_shared<db_sched_client_t>(std::move(client)));
-  return scheduler
-      .read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
+  return scheduler.read_average_hog_ages(
+      {MempoolTestInfra::kAccountAddresses[0]})();
 }
 
 } // namespace
@@ -1011,7 +1012,8 @@ TEST(Scheduler, MalformedHogAgeReplyMarksAccountsMissing)
     const Scheduler::ReadAverageHogAgesResult result =
         read_hog_ages_from_malformed_db(mode);
     EXPECT_TRUE(result.found.empty());
-    EXPECT_TRUE(result.missing.contains(MempoolTestInfra::kAccountAddresses[0]));
+    EXPECT_TRUE(
+        result.missing.contains(MempoolTestInfra::kAccountAddresses[0]));
   }
 }
 
