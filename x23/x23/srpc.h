@@ -234,6 +234,19 @@ private:
               rmsg, uformat(" deserialization error: {}", e.what()));
         }
         return make_record(rmsg);
+      } catch (const std::exception &e) {
+        // Argument decode can throw exceptions other than XdrException --
+        // notably std::bad_alloc when an unbounded vector of zero-wire-size
+        // elements is decoded with a huge count.  Convert them to SYSTEM_ERR
+        // rather than letting them cross the noexcept SRpcFd::input boundary
+        // and terminate the process.
+        msg_set_reply_stat(&rmsg, SYSTEM_ERR);
+        if constexpr (!std::same_as<Logger, RpcNoLogger>) {
+          d_.logger_.template log_server<ProcMeta>(callmsg_);
+          d_.logger_.template log_server<ProcMeta>(
+              rmsg, uformat(" deserialization error: {}", e.what()));
+        }
+        return make_record(rmsg);
       }
       d_.logger_.template log_server<ProcMeta>(callmsg_, args);
       try {

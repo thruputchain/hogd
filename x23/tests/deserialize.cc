@@ -554,54 +554,35 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
   static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 100>>);
 }
 
-// A vector whose element is a zero-wire-size type (here an empty XDR struct)
-// consumes no input per element, so a four-byte count must not be trusted to
-// drive materialization: an unbounded count of 0xffffffff would otherwise grow
-// the vector until std::bad_alloc, which escapes SRPC's noexcept input
-// boundary.  The decoder caps materialization and rejects the oversized count
-// as malformed XDR (which SRPC argument decode turns into GARBAGE_ARGS).
-TEST(Deserialize, ZeroWireVectorCountRejectsBomb)
+// A vector of a zero-wire-size element (here an empty XDR struct) consumes no
+// input per element, so the per-element decode never runs short of input; the
+// only bound on the count is the vector's own maximum.  A *bounded* such vector
+// must therefore reject a count past its maximum rather than materialize empty
+// elements until std::bad_alloc.  (An unbounded such vector has no wire-derived
+// limit; that case is contained at the SRPC boundary, which converts the
+// allocator failure into a SYSTEM_ERR reply instead of crossing its noexcept
+// input boundary.)
+TEST(Deserialize, ZeroWireBoundedVectorRejectsOverflow)
 {
   static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
                 "test relies on the empty struct being zero-wire-size");
-  x23::Vec<std::tuple<>> vec;
-  uint8_t input[] = {0xff, 0xff, 0xff, 0xff}; // count = 0xffffffff, no elements
+  x23::Vec<std::tuple<>, 8> vec;
+  uint8_t input[] = {0x00, 0x00, 0x00, 0x09}; // count 9 > max_size 8
   EXPECT_THROW(x23::deserialize(&vec, x23::BufView(input, sizeof(input))),
-               x23::XdrBadInput);
+               x23::XdrLengthError);
 }
 
-// The cap must not reject legitimate encodings: a small count of zero-wire-size
-// elements is a valid four-byte record that the serializer itself produces.
-TEST(Deserialize, ZeroWireVectorCountAcceptsSmall)
+// Same for the CXS decode pathway (a Vec<tuple<>> serializes to just its
+// count, so the CXS-encoded count 9 is the whole record).
+TEST(Deserialize, CxsZeroWireBoundedVectorRejectsOverflow)
 {
-  x23::Vec<std::tuple<>> vec;
-  uint8_t input[] = {0x00, 0x00, 0x00, 0x03}; // count = 3, no trailing bytes
-  x23::deserialize(&vec, x23::BufView(input, sizeof(input)));
-  EXPECT_EQ(vec.size(), 3U);
-}
-
-// The CXS decode pathway needs the same materialization cap.  A Vec<tuple<>>
-// serializes to just its count, so the CXS encoding of the count 0xffffffff is
-// the bomb; it must be rejected rather than growing the vector until bad_alloc.
-TEST(Deserialize, CxsZeroWireVectorCountRejectsBomb)
-{
-  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(0xffffffff));
-  x23::Vec<std::tuple<>> vec;
-  EXPECT_FALSE(
+  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(9)); // count 9 > max 8
+  x23::Vec<std::tuple<>, 8> vec;
+  auto status =
       x23::deserialize_cxs(&vec, std::span<const uint8_t>(bytes.data(),
-                                                          bytes.size())));
-}
-
-TEST(Deserialize, CxsZeroWireVectorCountAcceptsSmall)
-{
-  x23::Vec<std::tuple<>> in;
-  in.resize_uninitialized(3);
-  x23::Buf bytes = serialize_cxs_for_test(in);
-  x23::Vec<std::tuple<>> out;
-  ASSERT_TRUE(
-      x23::deserialize_cxs(&out, std::span<const uint8_t>(bytes.data(),
-                                                          bytes.size())));
-  EXPECT_EQ(out.size(), 3U);
+                                                          bytes.size()));
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kLengthExceeded);
 }
 
 // NOLINTEND(modernize-type-traits)
