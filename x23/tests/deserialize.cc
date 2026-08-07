@@ -556,12 +556,13 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
 
 // A vector of a zero-wire-size element (here an empty XDR struct) consumes no
 // input per element, so the per-element decode never runs short of input; the
-// only bound on the count is the vector's own maximum.  A *bounded* such vector
-// must therefore reject a count past its maximum rather than materialize empty
+// only bound on the count is the vector's own maximum.  For a *bounded* such
+// vector the decoder's bounded reserve plus Vec::check_size still rejects a
+// count past the maximum (XdrLengthError) rather than materializing empty
 // elements until std::bad_alloc.  (An unbounded such vector has no wire-derived
 // limit; that case is contained at the SRPC boundary, which converts the
-// allocator failure into a SYSTEM_ERR reply instead of crossing its noexcept
-// input boundary.)
+// allocator failure into an error reply instead of crossing its noexcept input
+// boundary.)
 TEST(Deserialize, ZeroWireBoundedVectorRejectsOverflow)
 {
   static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
