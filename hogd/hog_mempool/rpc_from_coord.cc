@@ -1706,6 +1706,15 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
            last_committed_block_.value.proposal_header.block_height + 1);
 
   if (last_committed_block_.id != parent_id) {
+    // Release the validation-gate increment taken at the top of this loop.
+    // Without this, the increment leaks: [close_validation_gate()] then waits
+    // forever for the count to reach zero, and every subsequent
+    // [schedulercoord_commit_block()] wedges. (The bench harness maps a
+    // timeout to success, so a wedged validator is silently masked in CI.)
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
