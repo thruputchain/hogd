@@ -111,9 +111,11 @@ check_root_pubkey_auth(NativeSyscallContext &ctx)
   if (!root.has_value()) {
     return root.error();
   }
-  if (!*root) {
-    return std::optional{WalletError::NotRootInvocation};
-  }
+  // Root-only reachability is enforced by resolution: the wallet has no
+  // deployment row, its contract hash is banned from kDeployContract, and
+  // resolve_runtime only falls back to it on an empty frame stack. A nested
+  // wallet frame is handler-level invariant breakage.
+  CHECK(*root);
   auto auth = has_valid_pubkey_auth(ctx);
   if (!auth.has_value()) {
     return auth.error();

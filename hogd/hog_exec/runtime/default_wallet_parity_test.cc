@@ -274,6 +274,18 @@ protected:
     EXPECT_EQ(native, wasm);
   }
 
+  // cxs(kWalletExceptionSelector, wallet_error): abort payload the wallet
+  // emits for WalletError reverts (mirrors ContractException<WalletError,
+  // 0x931d3297d37d1bdfULL>::serialize() in the generated SDK trait).
+  static std::vector<uint8_t>
+  wallet_error_abort_bytes(default_wallet::WalletError err)
+  {
+    constexpr uint64_t kWalletExceptionSelector = 0x931d3297d37d1bdfULL;
+    auto buf = x23::serialize_cxs(kWalletExceptionSelector, err);
+    CHECK(buf.has_value());
+    return {buf->begin(), buf->end()};
+  }
+
   // The expected abort payload for calldata the entrypoint glue rejects:
   // cxs(kLibraryExceptionSelector, LibraryExn::Handling(DecodingArgs)).
   static std::vector<uint8_t> decoding_args_abort_bytes()
@@ -479,10 +491,57 @@ TEST_F(DefaultWalletParityTest, MismatchedPreimageInvalidAuthClaim)
   EXPECT_EQ(native, wasm);
 }
 
-// Non-root invocation: a native driver contract invokes each wallet;
-// both must abort with NotRootInvocation. Driver pattern from
-// erc20_parity_test.cc make_capture_driver / run_capture_tx / read_record.
-TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
+// Non-root invocation (wasm reference): a native driver invokes the wasm
+// wallet; the wasm reference rejects with NotRootInvocation. The native
+// wallet's root guard is now a CHECK (resolution enforces root-only
+// reachability), so the native side is tested separately as a death test
+// (NonRootInvocationNativeChecks below).
+TEST_F(DefaultWalletParityTest, NonRootInvocationWasmReferenceRejects)
+{
+  setup_wallets_and_targets();
+
+  wallet_calls_t calls;
+  calls.push_back(echo_call(4));
+
+  static constexpr ContractAddress kWasmDriverAddr = make_contract_address(231);
+  auto wasm_result_key = make_storage_key("wasm_result");
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
+  {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(
+        0, make_wallet_capture_driver(wasm_wallet_, wasm_result_key, calls));
+    extra.emplace(kDriverBaseId + 1,
+                  std::make_unique<NativeContract>(std::move(fns)));
+  }
+  make_ctx(std::move(extra));
+
+  auto obj = make_native_contract(kDriverBaseId + 1);
+  write_contract(obj);
+  write_deployment(kWasmDriverAddr, obj);
+  setup_grant_storage_token(kWasmDriverAddr, 1'000'000'000);
+
+  auto wasm_record = run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
+
+  // Record layout from run_capture_tx + make_wallet_capture_driver:
+  // [commit, 0x00=invoke-accepted, frame_status, abort_payload].
+  auto expected =
+      wallet_error_abort_bytes(default_wallet::WalletError::NotRootInvocation);
+  ASSERT_EQ(wasm_record.size(), 3U + expected.size());
+  EXPECT_EQ(wasm_record[0], static_cast<uint8_t>(ExecResult::ExecResultOK));
+  EXPECT_EQ(wasm_record[1], 0x00); // invoke succeeded, frame ran
+  EXPECT_EQ(wasm_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_TRUE(
+      std::equal(expected.begin(), expected.end(), wasm_record.begin() + 3));
+}
+
+// Non-root invocation (native): the native wallet's root guard is now a CHECK
+// rather than a NotRootInvocation revert, because resolution enforces
+// root-only reachability (no deployment row, hash banned from kDeployContract,
+// resolve_runtime only falls back on an empty frame stack). A nested wallet
+// frame is handler-level invariant breakage; verify the process dies.
+TEST_F(DefaultWalletParityTest, NonRootInvocationNativeChecks)
 {
   setup_wallets_and_targets();
 
@@ -491,35 +550,27 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationRejected)
 
   static constexpr ContractAddress kNativeDriverAddr =
       make_contract_address(230);
-  static constexpr ContractAddress kWasmDriverAddr = make_contract_address(231);
-
   auto native_result_key = make_storage_key("native_result");
-  auto wasm_result_key = make_storage_key("wasm_result");
 
-  auto make_driver = [&](ContractAddress const &wallet,
-                         StorageKeyContractData const &result_key) {
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0, make_wallet_capture_driver(wallet, result_key, calls));
-    return std::make_unique<NativeContract>(std::move(fns));
-  };
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
-  extra.emplace(kDriverBaseId, make_driver(native_wallet_, native_result_key));
-  extra.emplace(kDriverBaseId + 1, make_driver(wasm_wallet_, wasm_result_key));
+  {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+    fns.emplace(
+        0,
+        make_wallet_capture_driver(native_wallet_, native_result_key, calls));
+    extra.emplace(kDriverBaseId,
+                  std::make_unique<NativeContract>(std::move(fns)));
+  }
   make_ctx(std::move(extra));
 
-  auto deploy_driver = [&](int32_t id, ContractAddress const &addr) {
-    auto obj = make_native_contract(id);
-    write_contract(obj);
-    write_deployment(addr, obj);
-    setup_grant_storage_token(addr, 1'000'000'000);
-  };
-  deploy_driver(kDriverBaseId, kNativeDriverAddr);
-  deploy_driver(kDriverBaseId + 1, kWasmDriverAddr);
+  auto obj = make_native_contract(kDriverBaseId);
+  write_contract(obj);
+  write_deployment(kNativeDriverAddr, obj);
+  setup_grant_storage_token(kNativeDriverAddr, 1'000'000'000);
 
-  auto native_record =
-      run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_);
-  auto wasm_record = run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
-  EXPECT_EQ(native_record, wasm_record);
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_),
+               "CHECK FAILED");
 }
 
 TEST_F(DefaultWalletParityTest, EmptyCallList)
