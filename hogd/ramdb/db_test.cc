@@ -384,7 +384,7 @@ TEST_F(DatabaseTest, Snapshot)
   remove_every_n(3);
 
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[lsn, snapshot_future] = *sync_ret;
   EXPECT_EQ(lsn, 1);
   DBStatus<void> ret = snapshot_future.get();
@@ -458,7 +458,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
 
   {
     auto sync_ret = db_->sync_and_snapshot(0);
-    EXPECT_TRUE(sync_ret);
+    ASSERT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     EXPECT_EQ(lsn, 1);
     DBStatus<void> ret = snapshot_future.get();
@@ -477,7 +477,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   insert_n(kInsertions / 2);
   {
     auto sync_ret = db_->sync_and_snapshot(1);
-    EXPECT_TRUE(sync_ret);
+    ASSERT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     EXPECT_EQ(lsn, 2);
     DBStatus<void> ret = snapshot_future.get();
@@ -506,7 +506,7 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
   // Take a snapshot of the oracle.
   std::unordered_map<std::string, std::string> backup(oracle_);
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
   rand_ = rand; // restore rng state to try to get overwrites.
@@ -536,7 +536,7 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
   // Take a snapshot of the oracle.
   std::unordered_map<std::string, std::string> backup{oracle_};
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
   std::jthread bg{[this] { remove_every_n(1); }};
@@ -722,15 +722,18 @@ TEST_F(DatabaseTest, DiskCleanup)
     }
   };
 
-  // create enough log files that we exceed the cleaning threshold.
-  fill_file_and_sync(2);
+  // create enough log files that we exceed the cleaning threshold. The ASSERTs
+  // inside fill_file_and_sync only return from the lambda, so the fatal failure
+  // has to be re-checked here; otherwise a failing sync() lets the test run on
+  // and dereference an errored sync_and_snapshot() result below (#3206).
+  ASSERT_NO_FATAL_FAILURE(fill_file_and_sync(2));
 
-  check_file_exists("0.log");
-  check_file_exists("1.log");
+  ASSERT_NO_FATAL_FAILURE(check_file_exists("0.log"));
+  ASSERT_NO_FATAL_FAILURE(check_file_exists("1.log"));
 
   // manually trigger a snapshot so some of the wal files become redundant.
   auto sync_ret = db_->sync_and_snapshot(0);
-  EXPECT_TRUE(sync_ret);
+  ASSERT_TRUE(sync_ret);
   auto &[new_lsn, snapshot_future] = *sync_ret;
   EXPECT_EQ(new_lsn, 3);
   DBStatus<void> snap_ret = snapshot_future.get();
