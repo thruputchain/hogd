@@ -14,16 +14,19 @@
 
 #include <utility>
 
-#include "hogd/base/types.h"
+#include "consensus.hh"
+#include "header.hh"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
-#include "hogd/hog_mempool/test/loadgen.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "proposal.hh"
+#include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
-#include "types.hh"
+#include "validator.hh"
 
 namespace hogd {
 
@@ -52,8 +55,9 @@ TEST(ValidationGate, UnknownParentBlockReleasesValidationGate)
   MempoolTestInfra server;
   server.mempool_coord_rpc().wait_for_auth_data(/*expected_height=*/0)();
 
-  server.mempool_coord_rpc().schedulercoord_submit_vetted(
-      validator_id, t_to_parallel_batch(txs)())();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
