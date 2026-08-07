@@ -1297,8 +1297,7 @@ SystemCallHandler::make_root_fallback_wallet_runtime()
   if (record.value() == nullptr) {
     return nullptr;
   }
-  return runtime_context_.make_new_runtime(DeployedContract{wallet_hash},
-                                           this);
+  return runtime_context_.make_new_runtime(DeployedContract{wallet_hash}, this);
 }
 
 Calldata const &

@@ -14,7 +14,6 @@
 #include "built_contracts/default_wallet.hh"
 #include "contract.hh"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -31,7 +30,6 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "invoke_args.hh"
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
@@ -128,7 +126,8 @@ protected:
     setup_grant_storage_token(kEchoAddr, 1'000'000'000);
   }
 
-  // [root_success, commit, frame bytes (Return/Abort payload or 0xFF for Fault)].
+  // [root_success, commit, frame bytes (Return/Abort payload or 0xFF for
+  // Fault)].
   CapturedRecord run_wallet_root_tx(Invocation invocation, AuthClaim claim)
   {
     SignedTransaction stx;
@@ -169,17 +168,18 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"execute">(UINT64_MAX, calls),
-        claim_override ? *claim_override : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
+                                                                  calls),
+                              claim_override ? *claim_override
+                                             : make_pubkey_claim(preimage_));
   }
 
   CapturedRecord run_deploy_tx(SHA256Hash const &nonce, SHA256Hash const &hash)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"deploy">(UINT64_MAX, nonce, hash),
-        make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(client.make_invocation<u8"deploy">(UINT64_MAX,
+                                                                 nonce, hash),
+                              make_pubkey_claim(preimage_));
   }
 
   static WalletCall echo_call(size_t payload_len)
@@ -210,8 +210,8 @@ protected:
   // cxs(kLibraryExceptionSelector, LibraryExn::Syscall{call, err}): the abort
   // payload the sdk emits on syscall_throw() — matches the native builder's
   // deploy redeploy-ban encoding.
-  static std::vector<uint8_t>
-  syscall_exn_abort_bytes(SyscallNo call_number, SyscallErrorCode err_code)
+  static std::vector<uint8_t> syscall_exn_abort_bytes(SyscallNo call_number,
+                                                      SyscallErrorCode err_code)
   {
     LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
     exn.syscall_exn() = SyscallExn{
@@ -406,9 +406,10 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"execute">(UINT64_MAX, calls),
-        claim_override ? *claim_override : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
+                                                                  calls),
+                              claim_override ? *claim_override
+                                             : make_pubkey_claim(preimage_));
   }
 };
 
@@ -453,12 +454,11 @@ TEST_F(DefaultWalletFallbackTest, UnknownEntrypointFaults)
 {
   setup_wallet_and_echo();
   make_ctx();
-  Invocation inv{
-      .invoked_address = wallet_,
-      .entrypoint =
-          entrypoint_from_method_id(static_cast<Runtime::MethodID>(999)),
-      .gas_limit = UINT64_MAX,
-      .calldata = {}};
+  Invocation inv{.invoked_address = wallet_,
+                 .entrypoint = entrypoint_from_method_id(
+                     static_cast<Runtime::MethodID>(999)),
+                 .gas_limit = UINT64_MAX,
+                 .calldata = {}};
   auto rec = run_wallet_root_tx(std::move(inv), make_pubkey_claim(preimage_));
   ASSERT_EQ(rec.size(), 3U);
   EXPECT_EQ(rec[0], 0);
@@ -493,7 +493,8 @@ TEST_F(DefaultWalletFallbackTest, NestedInvokeUndeployedNoFallback)
   ContractAddress undeployed2 = pubkey_auth_address(make_preimage(2)).value();
   WalletCall nested_call{};
   nested_call.target = undeployed2;
-  nested_call.entrypoint = entrypoint_from_method_id(0); // irrelevant: pre-frame rejection
+  nested_call.entrypoint =
+      entrypoint_from_method_id(0); // irrelevant: pre-frame rejection
   nested_call.gas_limit = UINT64_MAX;
   wallet_calls_t calls;
   calls.push_back(nested_call);
@@ -517,8 +518,7 @@ TEST_F(DefaultWalletFallbackTest, WalletHashNotDeployable)
   make_ctx();
   SHA256Hash nonce{};
   nonce.fill(1);
-  auto rec =
-      run_deploy_tx(nonce, default_wallet_deployed_contract_hash().hash);
+  auto rec = run_deploy_tx(nonce, default_wallet_deployed_contract_hash().hash);
   auto expected = syscall_exn_abort_bytes(
       SyscallNo::kDeployContract,
       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);

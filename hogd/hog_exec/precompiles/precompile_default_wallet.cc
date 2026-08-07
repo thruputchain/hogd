@@ -11,6 +11,7 @@
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/hog_exec/common/status.h"

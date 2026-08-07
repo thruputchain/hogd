@@ -509,8 +509,8 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationWasmReferenceRejects)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(
-        0, make_wallet_capture_driver(wasm_wallet_, wasm_result_key, calls));
+    fns.emplace(0, make_wallet_capture_driver(wasm_wallet_, wasm_result_key,
+                                              calls));
     extra.emplace(kDriverBaseId + 1,
                   std::make_unique<NativeContract>(std::move(fns)));
   }
@@ -555,9 +555,8 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationNativeChecks)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(
-        0,
-        make_wallet_capture_driver(native_wallet_, native_result_key, calls));
+    fns.emplace(0, make_wallet_capture_driver(native_wallet_, native_result_key,
+                                              calls));
     extra.emplace(kDriverBaseId,
                   std::make_unique<NativeContract>(std::move(fns)));
   }

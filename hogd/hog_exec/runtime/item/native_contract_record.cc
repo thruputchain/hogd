@@ -1,10 +1,10 @@
 #include "hogd/hog_exec/runtime/item/native_contract_record.h"
 
-#include <cstdint>
 #include <memory>
 
 #include "contract.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "precompiles.hh"
 

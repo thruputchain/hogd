@@ -133,8 +133,8 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   EXPECT_EQ(deployment_map_.size(), 2);
   // The default wallet has a contract-store record but no deployment row:
   // it is reachable only through root-resolution fallback.
-  EXPECT_TRUE(contract_map_.contains(
-      default_wallet_deployed_contract_hash().hash));
+  EXPECT_TRUE(
+      contract_map_.contains(default_wallet_deployed_contract_hash().hash));
   for (auto const &[addr, dep_hash] : deployment_map_) {
     EXPECT_NE(dep_hash.hash, default_wallet_deployed_contract_hash().hash);
   }
