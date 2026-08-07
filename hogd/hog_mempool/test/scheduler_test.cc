@@ -125,6 +125,47 @@ TEST(Scheduler, AddVettedTxDuplicate)
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
+// Regression test for #3208. A tx that has been scheduled during a nomination
+// is removed from its account runqueue but kept in [txs_]. Re-adding it while
+// the nomination is still in progress (a replay-exempt tx, such as one rooted
+// at the initial-token-claim precompile, can be legitimately resubmitted)
+// re-enqueues it from the surviving [txs_] entry. [schedule()] must not then
+// emit the same hash a second time: a duplicate hash would place a duplicate
+// key in the tx set and abort tx-set Merkle construction.
+TEST(Scheduler, ResubmitDuringNominationDoesNotScheduleDuplicate)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const SignedTransactionHash tx_hash = sha256(txs[0].tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0]})();
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  ASSERT_EQ(scheduled_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled_hashes[0], tx_hash);
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // Resubmit the identical tx while the nomination is still in progress; it is
+  // re-enqueued from the surviving [txs_] entry.
+  scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 1);
+
+  // Scheduling again must drop the duplicate rather than emit the hash twice.
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_EQ(scheduled_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0);
+
+  scheduler->abandon_pending_nomination(/*block_id=*/1);
+}
+
 TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
 {
   HogAge hog_age{};

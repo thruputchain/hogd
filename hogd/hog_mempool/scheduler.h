@@ -207,6 +207,13 @@ private:
     std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
     std::unordered_set<ContractAddress, ByteArrayHasher>
         accounts_excluded_from_block;
+    // Hashes already emitted by [schedule()] during this nomination. A tx that
+    // has been scheduled is removed from its account runqueue but kept in
+    // [txs_], so a resubmission (legal for replay-exempt txs such as the
+    // initial-token-claim precompile) can re-enqueue it mid-nomination. This
+    // set lets [schedule()] drop such a duplicate instead of emitting the same
+    // hash twice, which would abort tx-set Merkle construction.
+    std::unordered_set<SignedTransactionHash, ByteArrayHasher> scheduled_hashes;
 
     PendingNominationState() { clear(); }
 
@@ -216,6 +223,7 @@ private:
       hog_ages.clear();
       touched_accounts.clear();
       accounts_excluded_from_block.clear();
+      scheduled_hashes.clear();
     }
   };
 
