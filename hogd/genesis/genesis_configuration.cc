@@ -95,6 +95,12 @@ GenesisConfigurationLoader::load_genesis_configuration(
   write_contract(precompiled_token_contract);
   write_deployment(kPresetNativeTokenAddress,
                    make_deployed_contract_hash(*precompiled_token_contract));
+
+  // The default wallet precompile: contract-store record only, no deployment
+  // row. It is reachable solely via root-resolution fallback at addresses
+  // with no deployed contract (SystemCallHandler::resolve_runtime).
+  write_contract(make_native_contract_record(
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
 }
 
 std::vector<SignedTransaction>
