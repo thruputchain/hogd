@@ -138,35 +138,38 @@ echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
 ./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
 
+# Each step's output is streamed as usual and also captured under
+# [bench_logs/]. This job runs five suites back to back, so its log is long
+# enough that GitHub only serves a bounded tail of it: a suite that dies early
+# has its crash output evicted by the thousands of lines [metrics.sh] emits
+# afterwards. [ci_report_failed_bench_steps] replays the tail of whatever
+# failed at the very end of the job, where it is still reachable.
 echo 'run multiexec interface benchmarks'
 kill_stale_benchmark_processes
-exec_scaling_exit=0
-./scripts/ci/exec_scaling.sh || exec_scaling_exit=$?
+ci_run_bench_step exec_scaling ./scripts/ci/exec_scaling.sh
 
 echo 'run e2e payment benchmark'
 kill_stale_benchmark_processes
-mempool_bench_exit=0
-./scripts/ci/mempool_bench.sh || mempool_bench_exit=$?
+ci_run_bench_step mempool_bench ./scripts/ci/mempool_bench.sh
 
 echo 'run e2e payment multi-node benchmark'
 # Skip the per-benchmark metrics-history commit; the combined run makes a
 # single commit at the end via commit_metrics.sh.
 kill_stale_benchmark_processes
-mempool_multi_node_bench_exit=0
-MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh || mempool_multi_node_bench_exit=$?
+ci_run_bench_step mempool_multi_node_bench \
+  env MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 \
+  ./scripts/ci/mempool_multi_node_bench.sh
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
 ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
 
 echo 'run event server benchmarks'
 kill_stale_benchmark_processes
-event_bench_exit=0
-./scripts/ci/event_bench.sh || event_bench_exit=$?
+ci_run_bench_step event_bench ./scripts/ci/event_bench.sh
 
 echo 'run metrics'
 kill_stale_benchmark_processes
-metrics_exit=0
-./scripts/ci/metrics.sh || metrics_exit=$?
+ci_run_bench_step metrics ./scripts/ci/metrics.sh
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
@@ -174,11 +177,7 @@ echo 'commit metrics'
 echo 'bench servers will be shut down by EXIT trap'
 
 echo 'check for failures'
-if [ "$exec_scaling_exit" -ne 0 ] || \
-    [ "$mempool_bench_exit" -ne 0 ] || \
-    [ "$mempool_multi_node_bench_exit" -ne 0 ] || \
-    [ "$event_bench_exit" -ne 0 ] || \
-    [ "$metrics_exit" -ne 0 ]; then
+if ! ci_report_failed_bench_steps; then
     echo "one or more benchmark steps failed"
     exit 1
 fi

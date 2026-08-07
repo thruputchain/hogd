@@ -164,11 +164,15 @@ echo 'copy coordinator output from hog4'
 scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
-  echo "mempool exited with status $mempool_status" >&2
+  # 124 is [timeout] reaping a mempool that outlived the load, which is the
+  # expected end of this benchmark. Anything else is a real failure, and a
+  # signal-terminated status is a crash rather than a reported error, so name
+  # the signal instead of leaving a bare number in the log.
+  echo "mempool $(ci_describe_exit_status "$mempool_status")" >&2
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
-  echo "coordinator exited with status $coordinator_status" >&2
+  echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
   exit "$coordinator_status"
 fi
 
