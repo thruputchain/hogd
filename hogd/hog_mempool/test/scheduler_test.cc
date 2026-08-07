@@ -583,6 +583,39 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }
 
+// Regression test for the #3209 review. During a nomination a tx whose
+// current scheduling group is short on HOGs is revisited after its account is
+// cycled. The nomination duplicate guard must key off txs that were actually
+// emitted, not off the pre-cycle visit; otherwise the revisit would be treated
+// as a duplicate and the tx silently dropped.
+TEST(Scheduler, CycleAccountDuringNominationStillSchedules)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5, /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({txs[0]})();
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
+
+  scheduler->abandon_pending_nomination(/*block_id=*/1);
+}
+
 TEST(Scheduler, FindTx)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

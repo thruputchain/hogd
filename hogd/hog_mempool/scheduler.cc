@@ -970,13 +970,15 @@ Scheduler::schedule(size_t num_txs,
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
       if (pending_nomination_.block_id &&
-          !pending_nomination_.scheduled_hashes.insert(tx_hash).second) {
-        // This tx was already scheduled earlier in the current nomination. It
+          pending_nomination_.scheduled_hashes.contains(tx_hash)) {
+        // This tx was already emitted earlier in the current nomination. It
         // was removed from the runqueue by that earlier [schedule()] call but
         // its entry survives in [txs_], so a resubmission can re-enqueue it
         // mid-nomination. Drop the duplicate: emitting the same hash twice
         // would place a duplicate key in the tx set and abort tx-set Merkle
-        // construction.
+        // construction. Note we only record a hash once the tx is actually
+        // emitted below, so a tx awaiting a HOG-group cycle is not dropped
+        // here.
         it = txs_to_schedule.erase(it);
         size_.fetch_sub(1, std::memory_order_relaxed);
         continue;
@@ -990,6 +992,11 @@ Scheduler::schedule(size_t num_txs,
 
         tx_hashes.push_back(tx_hash);
         txs.push_back(tx);
+        if (pending_nomination_.block_id) {
+          // Record the emitted hash so a resubmission of this tx later in the
+          // same nomination is dropped as a duplicate rather than re-emitted.
+          pending_nomination_.scheduled_hashes.insert(tx_hash);
+        }
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx]
         // beyond this point!
