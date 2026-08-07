@@ -142,6 +142,12 @@ private:
         mmap(/*addr=*/nullptr, kMmapLength, /*prot=*/PROT_READ | PROT_WRITE,
              /*flags=*/MAP_PRIVATE | MAP_ANONYMOUS, /*fildes=*/-1, /*off=*/0);
     CHECK_NE(addr, MAP_FAILED);
+    // mmap() with addr==nullptr is required by POSIX to return a page-aligned
+    // mapping, so this is a defensive sanity check that always holds. The
+    // pointer-to-uintptr_t mapping is technically implementation-defined, but
+    // on every target we support (Linux / GCC / Clang) uintptr_t exposes the
+    // virtual-address low bits, so testing them is a well-defined alignment
+    // check on those platforms.
     CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
 
 #ifdef __cpp_lib_start_lifetime_as
