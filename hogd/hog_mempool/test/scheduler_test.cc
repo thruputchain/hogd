@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "genesis.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -894,6 +896,122 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
     // Ensure that this does not trigger a CHECK in the scheduler (see issue
     // #1474).
     scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  }
+}
+
+namespace {
+
+// A DbSched1 server whose [dbsched_get_hog_ages] returns a malformed reply, so
+// we can verify that the scheduler treats it as missing data rather than
+// aborting the mempool (issue #3199). All other methods return errors; they are
+// only present to satisfy the DbSched1 service concept.
+class MalformedHogAgeDbRpc {
+public:
+  using rpc_service = DbSched1;
+
+  enum class ReplyMode { kEmptyResults, kWrongAddress };
+
+  explicit MalformedHogAgeDbRpc(ReplyMode mode) : mode_(mode) {}
+
+  static x23::Async<void> dbsched_null() { co_return; }
+
+  x23::Async<HogAgeResults>
+  dbsched_get_hog_ages(const ContractAddressBatch &addresses)
+  {
+    HogAgeResults ret;
+    if (mode_ == ReplyMode::kEmptyResults) {
+      // Fewer results than requested accounts.
+      co_return ret;
+    }
+    // One OK result, but for an address the caller did not request.
+    HogAge age{};
+    age.address = MempoolTestInfra::kAccountAddresses[1];
+    HogAgeResult res(DbSchedResult::DbSchedResultOK);
+    res.hog_age() = age;
+    ret.push_back(res);
+    co_return ret;
+  }
+
+  static x23::Async<DbSchedResult>
+  dbsched_write_hog_ages(const HogAgeBatch &ages)
+  {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  static x23::Async<DbAddressAuthDataBatchResult>
+  dbsched_get_address_auth_data(BlockID block_id, ContractAddressBatch accounts)
+  {
+    co_return DbAddressAuthDataBatchResult(DbSchedResult::DbSchedResultError);
+  }
+
+  static x23::Async<DbSchedResult>
+  dbsched_create_snapshot(BlockID parent_id, BlockID new_id,
+                          BlockExecutionMode mode)
+  {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  static x23::Async<DbSchedResult> dbsched_open_snapshot(BlockID id)
+  {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  static x23::Async<DbBlockResult>
+  dbsched_commit_snapshot(BlockID id, ConsensusValue value)
+  {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
+
+  static x23::Async<DbBlockResult> dbsched_close_snapshot(BlockID id)
+  {
+    co_return DbBlockResult(DbSchedResult::DbSchedResultError);
+  }
+
+  static x23::Async<DbSchedResult> dbsched_abandon_snapshot(BlockID id)
+  {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  static x23::Async<DbSchedResult> dbsched_load_genesis_configuration(
+      GenesisConfiguration genesis_configuration, ConsensusValue value)
+  {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  static x23::Async<DbTipResult> dbsched_get_tip()
+  {
+    co_return DbTipResult(DbSchedResult::DbSchedResultError);
+  }
+
+private:
+  ReplyMode mode_;
+};
+
+Scheduler::ReadAverageHogAgesResult
+read_hog_ages_from_malformed_db(MalformedHogAgeDbRpc::ReplyMode mode)
+{
+  RpcServer<MalformedHogAgeDbRpc> db_server(mode);
+  db_server.start_server(/*port=*/0);
+  auto client =
+      create_client<DbSched1>(MempoolTestInfra::kAddress, db_server.port())()
+          .value();
+  Scheduler scheduler(/*current_block=*/0,
+                      std::make_shared<db_sched_client_t>(std::move(client)));
+  return scheduler
+      .read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
+}
+
+} // namespace
+
+TEST(Scheduler, MalformedHogAgeReplyMarksAccountsMissing)
+{
+  for (const MalformedHogAgeDbRpc::ReplyMode mode :
+       {MalformedHogAgeDbRpc::ReplyMode::kEmptyResults,
+        MalformedHogAgeDbRpc::ReplyMode::kWrongAddress}) {
+    const Scheduler::ReadAverageHogAgesResult result =
+        read_hog_ages_from_malformed_db(mode);
+    EXPECT_TRUE(result.found.empty());
+    EXPECT_TRUE(result.missing.contains(MempoolTestInfra::kAccountAddresses[0]));
   }
 }
 

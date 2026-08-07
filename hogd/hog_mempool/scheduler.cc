@@ -270,7 +270,19 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 
   HogAgeResults results =
       co_await db_sched_client_->dbsched_get_hog_ages(accounts);
-  CHECK_EQ(results.size(), accounts.size());
+  // The DB scheduler reply is peer-controlled, so we do not trust it to match
+  // the request shape. A well-behaved HogDB returns one ordered result per
+  // requested account; a malformed reply is treated as missing data rather
+  // than aborting the mempool.
+  if (results.size() != accounts.size()) {
+    info("read_average_hog_ages: DB scheduler returned {} results for {} "
+         "requested accounts; treating all requested accounts as missing",
+         results.size(), accounts.size());
+    for (const ContractAddress &account : accounts) {
+      ret.missing.insert(account);
+    }
+    co_return ret;
+  }
   for (size_t i = 0; i < results.size(); i++) {
     const HogAgeResult &res = results[i];
     if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -281,7 +293,13 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
     }
 
     const HogAge &age = res.hog_age();
-    CHECK_EQ(age.address, accounts[i]);
+    if (age.address != accounts[i]) {
+      info("read_average_hog_ages: DB scheduler returned address {} for "
+           "requested address {}; treating as missing",
+           show_byte_array(age.address), show_byte_array(accounts[i]));
+      ret.missing.insert(accounts[i]);
+      continue;
+    }
     ret.found.insert(age.address);
     auto [account_state, lock] = accounts_[age.address];
     account_state.hog_age = age;
