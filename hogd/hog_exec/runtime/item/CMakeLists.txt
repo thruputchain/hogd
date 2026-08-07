@@ -1,13 +1,3 @@
-# Standalone library for the native-contract-record helper (make_native_contract_record,
-# make_deployed_contract_hash, default_wallet_deployed_contract_hash).  Both genesis and
-# runtime need these symbols; genesis cannot link runtime (circular via db_interface), so
-# they live in a small shared library with only protocol-level dependencies.
-add_library(native_contract_record
-  native_contract_record.cc
-)
-target_link_libraries(native_contract_record hogd_interface)
-target_include_directories(native_contract_record PRIVATE ${CMAKE_BINARY_DIR})
-
 add_library(item_objects OBJECT
   item_view.cc
   snapshot_storage_item.cc

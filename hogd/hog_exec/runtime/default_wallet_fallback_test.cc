@@ -24,7 +24,6 @@
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
-#include "hogd/hog_exec/runtime/item/native_contract_record.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -115,8 +114,7 @@ protected:
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     wallet_ = pubkey_auth_address(preimage_).value();
 
-    write_contract(make_native_contract_record(
-        HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
+    write_contract(make_native_contract(kNativeWalletId));
     setup_grant_storage_token(wallet_, 1'000'000'000);
 
     auto echo_obj = echo_meta::load_wasm();
@@ -324,7 +322,9 @@ public:
     // Genesis wrote the wallet contract record at wallet_hash. Erase it now,
     // before any transaction runs (so the StorageSnapshotCache has not yet
     // cached the entry). Subsequent lookups will see it as absent.
-    erase_contract_from_mock_db(default_wallet_deployed_contract_hash().hash);
+    erase_contract_from_mock_db(
+        make_deployed_contract_hash(make_native_contract(kNativeWalletId))
+            .hash);
   }
 
 protected:
@@ -454,8 +454,7 @@ TEST_F(DefaultWalletFallbackNoRecordTest, TxAttachedRecordNoFallback)
       client.make_invocation<u8"execute">(UINT64_MAX, wallet_calls_t{});
   stx.tx.auth_claim = make_pubkey_claim(preimage_);
   stx.tx.uniquifier = make_new_uniquifier();
-  stx.tx.contracts_to_deploy.push_back(*make_native_contract_record(
-      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
+  stx.tx.contracts_to_deploy.push_back(*make_native_contract(kNativeWalletId));
 
   auto handler = make_new_system_call_handler(stx, *ctx_);
   auto res = handler.root_invoke();
@@ -552,17 +551,18 @@ TEST_F(DefaultWalletFallbackTest, NestedInvokeUndeployedNoFallback)
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
 }
 
-// Redeploy ban end-to-end: root invoke wallet `deploy` with
-// contract_hash = default_wallet_deployed_contract_hash().hash ->
-// kDeployContract returns InvalidSyscallInput -> wallet aborts with
-// LibraryExn::Syscall{kDeployContract, InvalidSyscallInput}.
+// Redeploy ban end-to-end: root invoke wallet `deploy` with the wallet's own
+// contract hash -> kDeployContract returns InvalidSyscallInput -> wallet aborts
+// with LibraryExn::Syscall{kDeployContract, InvalidSyscallInput}.
 TEST_F(DefaultWalletFallbackTest, WalletHashNotDeployable)
 {
   setup_wallet_and_echo();
   make_ctx();
   SHA256Hash nonce{};
   nonce.fill(1);
-  auto rec = run_deploy_tx(nonce, default_wallet_deployed_contract_hash().hash);
+  auto rec = run_deploy_tx(
+      nonce,
+      make_deployed_contract_hash(make_native_contract(kNativeWalletId)).hash);
   auto expected = syscall_exn_abort_bytes(
       SyscallNo::kDeployContract,
       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);

@@ -40,7 +40,6 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
-#include "hogd/hog_exec/runtime/item/native_contract_record.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/metrics.h"
@@ -1279,6 +1278,27 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // back to resolve_contract).
   return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
 }
+
+namespace {
+// The wallet's on-chain record is two fixed fields (kNative,
+// kNativeContractDefaultWallet). Its DeployedContractHash is therefore a
+// protocol constant: genesis writes the identical record. Computed once and
+// cached as a function-local static.
+DeployedContractHash const &
+default_wallet_deployed_contract_hash()
+{
+  static const DeployedContractHash hash = [] {
+    Contract record{};
+    record.contract_type(ContractType::kNative);
+    record.native_contract_id() =
+        HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+    return DeployedContractHash{.hash = sha256(record),
+                                .contract_size = 0,
+                                .contract_type = ContractType::kNative};
+  }();
+  return hash;
+}
+} // namespace
 
 // An address with no deployed contract, invoked at the root of a
 // transaction, resolves to the default_wallet precompile; the wallet's own

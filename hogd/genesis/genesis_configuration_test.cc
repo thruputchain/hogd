@@ -13,7 +13,6 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/item/native_contract_record.h"
 #include "hogd/hog_exec/test_main.h"
 #include "types.hh"
 
@@ -133,10 +132,15 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   EXPECT_EQ(deployment_map_.size(), 2);
   // The default wallet has a contract-store record but no deployment row:
   // it is reachable only through root-resolution fallback.
-  EXPECT_TRUE(
-      contract_map_.contains(default_wallet_deployed_contract_hash().hash));
+  // Compute the wallet hash locally (same two-field record genesis writes).
+  Contract wallet_record{};
+  wallet_record.contract_type(ContractType::kNative);
+  wallet_record.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  SHA256Hash wallet_hash = sha256(wallet_record);
+  EXPECT_TRUE(contract_map_.contains(wallet_hash));
   for (auto const &[addr, dep_hash] : deployment_map_) {
-    EXPECT_NE(dep_hash.hash, default_wallet_deployed_contract_hash().hash);
+    EXPECT_NE(dep_hash.hash, wallet_hash);
   }
   EXPECT_EQ(auth_data_map_.size(), 1);
   auto auth_it =
