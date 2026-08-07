@@ -310,7 +310,7 @@ public:
   // back — and an Unrecoverable SystemError is returned, so the noexcept caller
   // (SystemCallHandler::start_frame) never lets the exception terminate the
   // executor (#3058).
-  SystemStatus<void>
+  [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
               InvokeFlagSet flags,
               std::span<uint32_t const> owned_auth_token_ids);
