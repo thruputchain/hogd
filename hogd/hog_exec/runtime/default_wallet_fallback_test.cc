@@ -430,6 +430,50 @@ TEST_F(DefaultWalletFallbackNoRecordTest, AbsentRecordKeepsNullResolution)
             static_cast<uint8_t>(ExecResult::ExecResultTxDeterministicError));
 }
 
+// Tx-attached wallet record must NOT activate the fallback on a store without
+// the genesis write. A SignedTransaction with contracts_to_deploy containing
+// Contract{kNative, kNativeContractDefaultWallet} populates
+// newly_created_contracts_, which resolve_contract searches first. Before the
+// fix, resolve_contract would find the record there and enable the fallback.
+// After the fix, make_root_fallback_wallet_runtime reads only the snapshot
+// (snapshot_cache_.try_get_contract_by_hash) and gets nullptr because the
+// record was erased from the mock DB — same outcome as
+// AbsentRecordKeepsNullResolution.
+TEST_F(DefaultWalletFallbackNoRecordTest, TxAttachedRecordNoFallback)
+{
+  preimage_ = make_preimage(1);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  wallet_ = pubkey_auth_address(preimage_).value();
+  make_ctx();
+
+  // Build a SignedTransaction that attaches the wallet's native contract
+  // record.
+  ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
+  SignedTransaction stx;
+  stx.tx.invocation =
+      client.make_invocation<u8"execute">(UINT64_MAX, wallet_calls_t{});
+  stx.tx.auth_claim = make_pubkey_claim(preimage_);
+  stx.tx.uniquifier = make_new_uniquifier();
+  stx.tx.contracts_to_deploy.push_back(*make_native_contract_record(
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
+
+  auto handler = make_new_system_call_handler(stx, *ctx_);
+  auto res = handler.root_invoke();
+  CapturedRecord rec;
+  rec.push_back(res.is_root_success() ? 1 : 0);
+  ExecResult commit = handler.try_commit_transaction();
+  rec.push_back(static_cast<uint8_t>(commit));
+  advance_block();
+
+  // Snapshot has no wallet record (erased after genesis) → nullptr from
+  // snapshot cache → no fallback → DeterministicError, same as
+  // AbsentRecordKeepsNullResolution.
+  ASSERT_GE(rec.size(), 2U);
+  EXPECT_EQ(rec[0], 0);
+  EXPECT_EQ(rec[1],
+            static_cast<uint8_t>(ExecResult::ExecResultTxDeterministicError));
+}
+
 // Auth claim from a different preimage -> InvalidAuthClaim revert.
 TEST_F(DefaultWalletFallbackTest, MismatchedClaimRevertsInvalidAuthClaim)
 {

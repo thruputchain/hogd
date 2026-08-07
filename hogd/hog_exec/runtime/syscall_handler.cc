@@ -1285,16 +1285,22 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 // auth guard rejects callers that cannot authenticate for the address. The
 // wallet's record is written by genesis; if the store lacks it, resolution
 // fails exactly as before the fallback existed.
+//
+// Intentionally checks the SNAPSHOT directly (not resolve_contract, which
+// also searches newly_created_contracts_). A tx-attached record must not
+// re-enable the fallback on stores without the genesis write: the fallback
+// exists iff the chain has persisted the wallet record.
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::make_root_fallback_wallet_runtime()
 {
   DeployedContractHash const &wallet_hash =
       default_wallet_deployed_contract_hash();
-  auto record = resolve_contract(wallet_hash.hash);
-  if (!record.has_value()) {
-    return record.error();
+  auto snapshot_res =
+      snapshot_cache_.try_get_contract_by_hash(wallet_hash.hash);
+  if (!snapshot_res.has_value()) {
+    return snapshot_res.error();
   }
-  if (record.value() == nullptr) {
+  if (*snapshot_res == nullptr) {
     return nullptr;
   }
   return runtime_context_.make_new_runtime(DeployedContract{wallet_hash}, this);
