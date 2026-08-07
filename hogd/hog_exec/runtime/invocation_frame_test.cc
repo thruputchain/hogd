@@ -223,6 +223,33 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
   ASSERT_FALSE(result.value().first.result_.has_value());
 }
 
+TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
+{
+  // Frame admission is status-returning so that an allocation failure surfaces
+  // as an Unrecoverable SystemError instead of terminating the executor across
+  // SystemCallHandler::start_frame()'s noexcept boundary (#3058). On the normal
+  // path it reports success, including when a token is forwarded into the
+  // child.
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+
+  AuthToken auth_token{.mint_address = make_test_address(0),
+                       .expiry_height = 100,
+                       .root_node = {.consumer_address = make_test_address(1),
+                                     .payload = {},
+                                     .child_nodes = {}}};
+  auto token_id = stack.mint_auth_token(auth_token);
+  ASSERT_TRUE(token_id.has_value());
+
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0,
+                               std::span<uint32_t>{&token_id.value(), 1})
+                  .has_value());
+  ASSERT_TRUE(
+      stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
+}
+
 TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
 {
   InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
