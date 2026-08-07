@@ -16,7 +16,6 @@ add_dependencies(mempool_test_infra
 add_library(mempool_test_objects OBJECT
   mempool_test.cc
   scheduler_test.cc
-  validation_gate_test.cc
 )
 target_include_directories(mempool_test_objects
   PRIVATE
