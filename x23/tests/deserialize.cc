@@ -556,11 +556,11 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
 
 // A vector whose element is a zero-wire-size type (here an empty XDR struct)
 // consumes no input per element, so a four-byte count must not be trusted to
-// drive materialization: 0xffffffff would otherwise grow the vector until
-// std::bad_alloc.  Such a count cannot fit the remaining input and must be
-// rejected as malformed XDR (which SRPC argument decode turns into
-// GARBAGE_ARGS) rather than escaping as an allocator failure.
-TEST(Deserialize, ZeroWireVectorCountRejectsUnbounded)
+// drive materialization: an unbounded count of 0xffffffff would otherwise grow
+// the vector until std::bad_alloc, which escapes SRPC's noexcept input
+// boundary.  The decoder caps materialization and rejects the oversized count
+// as malformed XDR (which SRPC argument decode turns into GARBAGE_ARGS).
+TEST(Deserialize, ZeroWireVectorCountRejectsBomb)
 {
   static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
                 "test relies on the empty struct being zero-wire-size");
@@ -568,6 +568,16 @@ TEST(Deserialize, ZeroWireVectorCountRejectsUnbounded)
   uint8_t input[] = {0xff, 0xff, 0xff, 0xff}; // count = 0xffffffff, no elements
   EXPECT_THROW(x23::deserialize(&vec, x23::BufView(input, sizeof(input))),
                x23::XdrBadInput);
+}
+
+// The cap must not reject legitimate encodings: a small count of zero-wire-size
+// elements is a valid four-byte record that the serializer itself produces.
+TEST(Deserialize, ZeroWireVectorCountAcceptsSmall)
+{
+  x23::Vec<std::tuple<>> vec;
+  uint8_t input[] = {0x00, 0x00, 0x00, 0x03}; // count = 3, no trailing bytes
+  x23::deserialize(&vec, x23::BufView(input, sizeof(input)));
+  EXPECT_EQ(vec.size(), 3U);
 }
 
 // NOLINTEND(modernize-type-traits)

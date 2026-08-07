@@ -829,15 +829,25 @@ struct Deserializer
     // if (size > X::max_size()) [[unlikely]]
     //   raise("length {} exceeds maximum deserializing {}", size,
     //         xdr_type_name<X>());
-    if constexpr (xdr_size_bounds<typename X::value_type>().max_ == 0)
+    if constexpr (xdr_size_bounds<typename X::value_type>().max_ == 0) {
       // A zero-wire-size element consumes no input, so neither the unsafe_ok
-      // check below nor the per-element decode bounds the attacker-controlled
-      // count; it can drive materialization until std::bad_alloc.  The count
-      // can never exceed the remaining input, the only input-derived bound
-      // available for such elements.
-      if (e - p < std::ptrdiff_t(size)) [[unlikely]]
-        raise("vector count {} exceeds remaining input deserializing {}", size,
-              xdr_type_name<X>());
+      // check below nor the per-element decode bounds the count; left
+      // unchecked, an attacker-supplied count grows the vector until
+      // std::bad_alloc, which would escape SRPC's noexcept input boundary.
+      // (An oversized count on a *bounded* vector already throws
+      // XdrLengthError via check_size; the gap is the unbounded vector, which
+      // has no wire-derived bound at all.)  Impose an explicit materialization
+      // limit: never create more empty elements than the 64 KiB reserve budget
+      // used just below, and never more than the vector's own maximum.  This
+      // is ample for any legitimate vector of empty elements and leaves normal
+      // (positive-wire) vector decoding untouched.
+      constexpr size_t kMaxZeroWire =
+          std::min<size_t>(X::max_size(),
+                           0x1'0000 / sizeof(typename X::value_type));
+      if (size > kMaxZeroWire) [[unlikely]]
+        raise("vector count {} exceeds materialization limit deserializing {}",
+              size, xdr_type_name<X>());
+    }
     x.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     x.reserve(
