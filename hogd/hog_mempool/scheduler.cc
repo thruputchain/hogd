@@ -787,13 +787,14 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     // A well-behaved HogDB returns a hog age for every account referenced by a
     // committed transfer, so [missing] is normally empty here. A malformed or
     // inconsistent DB scheduler reply (see [read_average_hog_ages]) can leave
-    // accounts missing. Rather than aborting the mempool on peer-controlled
-    // data, skip applying this transfer batch; the scheduler's cached hog ages
-    // simply remain unchanged for the affected accounts.
+    // accounts missing. Rather than aborting the mempool on this
+    // peer-controlled data, we skip only the deltas for the missing accounts
+    // below and still apply the rest. A missing account stays uncached, so it
+    // is re-read from the (authoritative) HogDB the next time it is referenced;
+    // that read reflects all committed blocks, so its balance self-heals.
     error("process_transfers: DB scheduler reply left {} transfer account(s) "
-          "missing; skipping transfer batch for block {}",
+          "missing for block {}; skipping their deltas",
           missing.size(), transfers.block);
-    co_return;
   }
 
   const std::vector<ChunkRange> chunks =
@@ -803,15 +804,23 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
-                         Scheduler *scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
-      for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
-        scheduler->process_transfers_helper(transfers->deltas[delta_idx],
-                                            transfers->block);
-      }
-      co_return;
-    }(chunk, &transfers, this));
+    handles.push_back(
+        [](ChunkRange chunk, const HogsTransferred *transfers,
+           const std::unordered_set<ContractAddress, ByteArrayHasher> &missing,
+           Scheduler *scheduler) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          for (size_t delta_idx = chunk.start; delta_idx < chunk.end;
+               delta_idx++) {
+            const Delta &delta = transfers->deltas[delta_idx];
+            if (missing.contains(delta.address)) {
+              // See the comment above: skip deltas for accounts the DB reply
+              // did not return; they stay uncached and are re-read later.
+              continue;
+            }
+            scheduler->process_transfers_helper(delta, transfers->block);
+          }
+          co_return;
+        }(chunk, &transfers, missing, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
