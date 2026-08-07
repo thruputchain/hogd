@@ -1,10 +1,13 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <optional>
 #include <random>
 #include <set>
+#include <shared_mutex>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -115,8 +118,25 @@ private:
   // (db tip, viewing snapshots) and content-addressed lookups (contracts).
   client_t &client_for();
 
+  // The id `shard` knows this block by.
+  //
+  // Block-execution ids are coordinated -- the scheduler broadcasts one id to
+  // every shard -- so they are absent here and pass through unchanged. Viewing
+  // snapshots are not: each hogdb mints its own, so one view spans N ids.
+  // Callers keep handling the single id open_viewing_snapshot() handed back
+  // (the primary's); this maps it to whatever the owning shard actually minted.
+  BlockID shard_block_id(BlockID block_id, size_t shard) const;
+
   // One client per discovered db shard (see ShardedDB::shards_).
   std::vector<client_t> clients_;
+
+  // Keyed by the primary shard's id, valued by every shard's id indexed by
+  // shard. Read on routed reads, written only as a view opens or closes.
+  mutable std::shared_mutex viewing_ids_mutex_;
+  std::unordered_map<BlockID, std::vector<BlockID>> viewing_ids_;
+  // Lets a routed read skip the lock while no view holds a snapshot, so block
+  // execution does not pay for a facility only views use.
+  std::atomic<size_t> open_viewing_snapshots_ = 0;
 };
 
 // A DatabaseProxy that is scoped to a single transaction.

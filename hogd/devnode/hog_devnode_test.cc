@@ -1960,17 +1960,12 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
 
 // Views one wallet from each shard and requires both to behave the same.
 //
-// DISABLED: fails on every non-primary shard today, and the cause sits upstream
-// of this test. DatabaseProxy::open_viewing_snapshot() opens on the primary
-// shard only (see its TODO(sharding)), while snapshot-scoped reads route by
-// address to the owning shard -- which never minted that snapshot id, since
-// each hogdb mints its own. The view retries until its budget is exhausted and
-// returns ViewGatewayAbandoned. Handing the view gateway one db-executor
-// address per shard fixed the routing but not the snapshot lifecycle.
-//
-// Enable once open/close fan out and one snapshot id per shard is threaded
-// through ViewState and the snapshot-scoped reads.
-TEST(HogDevnode, DISABLED_ShardedViewGatewayViewsWalletsOnEveryShard)
+// Two things have to hold for the wallet on the non-primary shard: the view
+// gateway has to know that shard's db-executor address, and the viewing
+// snapshot has to exist on that shard. Each hogdb mints its own snapshot id, so
+// a snapshot opened on the primary alone leaves the wallet unreachable and the
+// view ends in ViewGatewayAbandoned instead of reaching the contract.
+TEST(HogDevnode, ShardedViewGatewayViewsWalletsOnEveryShard)
 {
   constexpr std::uint32_t kAccounts = 8;
   constexpr std::size_t kShards = 2;

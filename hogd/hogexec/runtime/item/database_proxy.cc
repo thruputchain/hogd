@@ -4,7 +4,9 @@
 #include <concepts>
 #include <exception>
 #include <format>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <stdexcept>
 #include <type_traits>
@@ -223,8 +225,9 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
 SystemStatus<std::optional<WireStorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
-  auto &client = client_for(addrkey);
-  auto res = client.get_snapshot_item(block_id, addrkey);
+  size_t const shard = look_up_shard(addrkey);
+  auto res = clients_[shard].get_snapshot_item(shard_block_id(block_id, shard),
+                                               addrkey);
   return to_system_error_code<std::nullopt>(
       res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
         return std::make_optional<WireStorageItem>(std::move(x));
@@ -247,8 +250,9 @@ DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
   // Deployment metadata is address-keyed, so read it from the owner shard, not
   // the primary -- else a contract whose address isn't on shard 0 is
   // uninvokable.
-  auto &client = client_for(addr);
-  auto res = client.get_deployment(block_id, addr);
+  size_t const shard = shard_of_address(addr, clients_.size());
+  auto res =
+      clients_[shard].get_deployment(shard_block_id(block_id, shard), addr);
   return to_system_error_code<std::nullopt>(res, [](DeployedContractHash &&x) {
     return std::make_optional<DeployedContractHash>(std::move(x));
   });
@@ -259,9 +263,9 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 AddressAndKey const &addrkey,
                                                 uint64_t search_start_number)
 {
-  auto &client = client_for(addrkey);
-  auto res = client.get_next_retrocausal_queue_block(block_id, addrkey,
-                                                     search_start_number);
+  size_t const shard = look_up_shard(addrkey);
+  auto res = clients_[shard].get_next_retrocausal_queue_block(
+      shard_block_id(block_id, shard), addrkey, search_start_number);
   return to_system_error_code<std::nullopt>(res, [](RetrocausalQueueBlock &&x) {
     return std::make_optional<RetrocausalQueueBlock>(std::move(x));
   });
@@ -271,9 +275,9 @@ SystemStatus<std::optional<QueueEntry>>
 DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
-  auto &client = client_for(addrkey);
-  auto res =
-      client.get_concurrent_retrocausal_queue_entry(block_id, addrkey, index);
+  size_t const shard = look_up_shard(addrkey);
+  auto res = clients_[shard].get_concurrent_retrocausal_queue_entry(
+      shard_block_id(block_id, shard), addrkey, index);
   return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });
@@ -603,27 +607,88 @@ DatabaseProxy::get_db_tip(BlockID block_id)
 SystemStatus<ViewingSnapshot>
 DatabaseProxy::open_viewing_snapshot()
 {
-  // TODO(sharding): opens on the primary only, but snapshot-scoped reads route
-  // by address to the owner shard, which never opened this snapshot (each shard
-  // mints its own id) -- so with >1 shard, non-primary accounts are unreadable
-  // via the view gateway. Latent (read path unexercised, single-shard fine).
-  // Fix: open on every shard, thread one id per shard through ViewState/reads,
-  // and fan out close.
-  auto &client = client_for();
-  auto res = client.open_viewing_snapshot();
-  return to_system_error_code<NotFoundIsUnrecoverableError{}>(
-      res,
-      [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
+  // Open on every shard, not the primary alone: snapshot-scoped reads route by
+  // address, and a shard that never minted this snapshot cannot serve one, so a
+  // primary-only snapshot leaves every other shard's accounts unreadable.
+  std::vector<BlockID> ids(clients_.size());
+  std::optional<ViewingSnapshot> primary;
+  for (size_t shard = 0; shard < clients_.size(); ++shard) {
+    auto res = clients_[shard].open_viewing_snapshot();
+    SystemStatus<ViewingSnapshot> opened =
+        to_system_error_code<NotFoundIsUnrecoverableError{}>(
+            res, [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> {
+              return x;
+            });
+    if (!opened.has_value()) {
+      // Hand back the snapshots already taken rather than leaving them pinned
+      // on their shards for the life of the process.
+      for (size_t open_shard = 0; open_shard < shard; ++open_shard) {
+        std::ignore =
+            clients_[open_shard].close_viewing_snapshot(ids[open_shard]);
+      }
+      return opened;
+    }
+    ids[shard] = opened->viewing_block_id;
+    if (shard == kDefaultShard) {
+      primary = *opened;
+    }
+  }
+  CHECK(primary.has_value());
+
+  // Publish the mapping before the count, so a reader that sees a non-zero
+  // count is guaranteed to find the entry.
+  {
+    std::unique_lock lock(viewing_ids_mutex_);
+    viewing_ids_.emplace(primary->viewing_block_id, std::move(ids));
+  }
+  open_viewing_snapshots_.fetch_add(1, std::memory_order_release);
+  return *primary;
 }
 
 SystemStatus<void>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
-  // TODO(sharding): primary-shard only; must fan out to every shard once
-  // viewing snapshots are sharded (see open_viewing_snapshot).
-  auto &client = client_for();
-  auto res = client.close_viewing_snapshot(block_id);
-  return to_system_error_code<VoidMarker{}>(res, [] {});
+  std::vector<BlockID> ids;
+  {
+    std::unique_lock lock(viewing_ids_mutex_);
+    if (auto it = viewing_ids_.find(block_id); it != viewing_ids_.end()) {
+      ids = std::move(it->second);
+      viewing_ids_.erase(it);
+    }
+  }
+  if (ids.empty()) {
+    // Not a snapshot we opened, or already closed. Ask the primary and let it
+    // report, which is what this did before snapshots spanned shards.
+    auto res = client_for().close_viewing_snapshot(block_id);
+    return to_system_error_code<VoidMarker{}>(res, [] {});
+  }
+  open_viewing_snapshots_.fetch_sub(1, std::memory_order_release);
+
+  // Close every shard even after one fails, so a single bad shard cannot pin
+  // the rest; report the first failure.
+  SystemStatus<void> result;
+  for (size_t shard = 0; shard < clients_.size(); ++shard) {
+    auto res = clients_[shard].close_viewing_snapshot(ids[shard]);
+    SystemStatus<void> closed = to_system_error_code<VoidMarker{}>(res, [] {});
+    if (!closed.has_value() && result.has_value()) {
+      result = closed;
+    }
+  }
+  return result;
+}
+
+BlockID
+DatabaseProxy::shard_block_id(BlockID block_id, size_t shard) const
+{
+  // Nothing to translate for an unsharded proxy, and nothing to look up while
+  // no view holds a snapshot -- which covers every block-execution read.
+  if (clients_.size() == 1 ||
+      open_viewing_snapshots_.load(std::memory_order_acquire) == 0) {
+    return block_id;
+  }
+  std::shared_lock lock(viewing_ids_mutex_);
+  auto it = viewing_ids_.find(block_id);
+  return it == viewing_ids_.end() ? block_id : it->second[shard];
 }
 
 } // namespace hogd
