@@ -136,6 +136,15 @@ public:
     return block_manager_.get_cost_model();
   }
 
+  // For testing only: removes a previously-written contract record from the
+  // in-memory store so subsequent lookups see it as absent. Call before any
+  // test that exercises the "wallet record missing" code path, and only after
+  // genesis has run (to avoid losing the cost model or other genesis state).
+  void erase_contract_by_hash(SHA256Hash const &hash)
+  {
+    in_memory_db_.erase_contract(hash);
+  }
+
 private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
@@ -641,6 +650,16 @@ public:
           return db_wrapper.get_hogs_transferred(height);
         },
         db_wrapper_);
+  }
+
+  // For testing only: erases a contract record from the in-memory store
+  // (kMockInMemory only) so subsequent lookups treat it as absent. Must be
+  // called BEFORE any transaction runs (so the snapshot cache has not yet
+  // cached the entry). Use to simulate an absent wallet record without
+  // skipping genesis (which is needed for the cost model and block state).
+  void erase_contract_from_mock_db(SHA256Hash const &hash)
+  {
+    std::get<MockDBWrapper>(db_wrapper_).erase_contract_by_hash(hash);
   }
 
   // Only valid when test_db == kHogDb. Returns the underlying HogDb DAO

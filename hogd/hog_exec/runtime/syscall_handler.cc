@@ -41,6 +41,7 @@
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hog_exec/runtime/item/native_contract_record.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -1269,11 +1270,35 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   auto local_hash =
       invocation_frame_stack_.lookup_locally_deployed_contract(addr);
   if (!local_hash) {
+    if (invocation_frame_stack_.empty()) {
+      return make_root_fallback_wallet_runtime();
+    }
     return nullptr;
   }
   // Tx-local deployment: no cache entry (entry stays null; the engine falls
   // back to resolve_contract).
   return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
+}
+
+// An address with no deployed contract, invoked at the root of a
+// transaction, resolves to the default_wallet precompile; the wallet's own
+// auth guard rejects callers that cannot authenticate for the address. The
+// wallet's record is written by genesis; if the store lacks it, resolution
+// fails exactly as before the fallback existed.
+SystemStatus<std::unique_ptr<Runtime>>
+SystemCallHandler::make_root_fallback_wallet_runtime()
+{
+  DeployedContractHash const &wallet_hash =
+      default_wallet_deployed_contract_hash();
+  auto record = resolve_contract(wallet_hash.hash);
+  if (!record.has_value()) {
+    return record.error();
+  }
+  if (record.value() == nullptr) {
+    return nullptr;
+  }
+  return runtime_context_.make_new_runtime(DeployedContract{wallet_hash},
+                                           this);
 }
 
 Calldata const &
