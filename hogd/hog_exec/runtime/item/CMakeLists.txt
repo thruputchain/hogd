@@ -1,5 +1,6 @@
 add_library(item_objects OBJECT
   item_view.cc
+  native_contract_record.cc
   snapshot_storage_item.cc
   database_proxy.cc
   storage_snapshot_cache.cc

@@ -23,6 +23,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/item/native_contract_record.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 #include "transaction.hh"
@@ -34,44 +35,6 @@ GenesisConfigurationLoader::GenesisConfigurationLoader(
     GenesisConfiguration genesis_configuration)
   : genesis_configuration_(std::move(genesis_configuration))
 {}
-
-namespace {
-std::shared_ptr<const Contract>
-make_native_contract(HogexecPrecompiledNativeContracts contract_id)
-{
-  auto out = std::make_shared<Contract>();
-  out->contract_type(ContractType::kNative);
-  out->native_contract_id() = contract_id;
-  return out;
-}
-
-DeployedContractHash
-make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
-{
-  assert(contract);
-  switch (contract->contract_type()) {
-  case ContractType::kNative:
-  case ContractType::kMockTest:
-    return DeployedContractHash{.hash = sha256(*contract),
-                                .contract_size = 0,
-                                .contract_type = contract->contract_type()};
-  case ContractType::kWasmi:
-    return DeployedContractHash{.hash = sha256(*contract),
-                                .contract_size = static_cast<uint32_t>(
-                                    contract->wasmi_contract().data.size()),
-                                .contract_type = ContractType::kWasmi};
-  case ContractType::kRv32:
-    return DeployedContractHash{.hash = sha256(*contract),
-                                .contract_size = static_cast<uint32_t>(
-                                    contract->rv32_contract().data.size()),
-                                .contract_type = ContractType::kRv32};
-  }
-  // ContractType is an XDR union discriminant, rejected at parse time if it is
-  // not one of the arms above, so this is unreachable.
-  panic("make_deployed_contract_hash: unsupported contract type: {}",
-        contract->contract_type());
-}
-} // namespace
 
 int128_t
 GenesisConfigurationLoader::initial_hog_token_supply()
@@ -91,11 +54,11 @@ GenesisConfigurationLoader::load_genesis_configuration(
     std::function<int128_t(ContractAddress const &,
                            AddressAuthData const &)> const &write_auth_data)
 {
-  auto deploy_contract = make_native_contract(
+  auto deploy_contract = make_native_contract_record(
       HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim);
   write_contract(deploy_contract);
   write_deployment(kDeployContractAddress,
-                   make_deployed_contract_hash(deploy_contract));
+                   make_deployed_contract_hash(*deploy_contract));
 
   // Write the initial token allocation
   StorageKey allocation_key(StorageKeyType::FreeNativeTokenBalance);
@@ -127,11 +90,11 @@ GenesisConfigurationLoader::load_genesis_configuration(
                 initial_hog_token_supply() - total_storage_costs);
 
   // write the precompiled token contract
-  auto precompiled_token_contract = make_native_contract(
+  auto precompiled_token_contract = make_native_contract_record(
       HogexecPrecompiledNativeContracts::kNativeContractHogToken);
   write_contract(precompiled_token_contract);
   write_deployment(kPresetNativeTokenAddress,
-                   make_deployed_contract_hash(precompiled_token_contract));
+                   make_deployed_contract_hash(*precompiled_token_contract));
 }
 
 std::vector<SignedTransaction>
