@@ -156,26 +156,26 @@ CoroPollImpl::poison(BorrowedFd fd)
   // 3. poison() is called, which, without the if (stop_requested())) check,
   //    would add back the fd state to state_
   // 4. ~CoroPoll() then waits for time_to_stop() to return true (which only
-  // happens
-  //    if state_ is empty)
+  //     happens if state_ is empty)
   //
   // The check prevents this case, as the entry for fd is only added to state_
   // (via operator[]) if we are not shutting down.
   //
   // We need to check stop_requested() while the state_ lock is held
-  // (instead of before acquiring the lock)
-  // or else there is a rare, probably just theoretical race condition.
-  // In that case, we could have a situation where one thread calls poison(),
-  // then before it can acquire the state_ lock, another thread calls
-  // ~CoroPoll() and reset().  When the first thread makes progress it would add
-  // the fd state back to state_ again, causing a deadlock. Note that
-  // request_stop() also acquires the state_ lock, so once we acquire state_ we
-  // can be sure we will not race with another thread on this stop_requested()
-  // check.
+  // (instead of before acquiring the lock) or else there is a rare,
+  // probably just theoretical race condition.  In that case, we could
+  // have a situation where one thread calls poison(), then before it
+  // can acquire the state_ lock, another thread calls ~CoroPoll() and
+  // reset().  When the first thread makes progress it would add the
+  // fd state back to state_ again, causing a deadlock. Note that
+  // request_stop() also acquires the state_ lock, so once we acquire
+  // state_ we can be sure we will not race with another thread on
+  // this stop_requested() check.
   if (stop_requested())
     return;
   auto &f = (*s)[fd.get()];
   f.poisoned = true;
+  f.generation = 0;
   auto work = report_badfd(f);
   s.reset();
   pool_.go(std::move(work));
@@ -198,6 +198,16 @@ CoroPollImpl::reset(BorrowedFd fd)
     ptr.reset();
     pool_.go(std::move(work));
   }
+}
+
+uint64_t
+CoroPollImpl::generation(BorrowedFd fd, bool make)
+{
+  auto ptr = state_.take();
+  if (make && !stop_requested())
+    return (*ptr)[fd.get()].generation;
+  auto it = ptr->find(fd.get());
+  return it == ptr->end() ? 0 : it->second.generation;
 }
 
 void

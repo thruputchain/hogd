@@ -332,6 +332,12 @@ protected:
   Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
 
+  // XXX - shouldn't be necessary
+  void finalize(this auto &self) noexcept
+  {
+    self.cp_->pool_.on_quiesce([self = &self] noexcept { delete self; });
+  }
+
 private:
   struct ClientState {
     std::uint32_t lastxid_{};

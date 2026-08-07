@@ -1,4 +1,5 @@
 
+#include <atomic>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -154,6 +155,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     return;
 
   unlock_mode = mode;
+  fdp->generation_.fetch_add(1, std::memory_order_relaxed);
 
   if (mode == kActive) {
 #if X23_FD_TRACE
@@ -313,6 +315,16 @@ CoroPollImpl::poison(BorrowedFd fd)
       std::format("fd {} poison stack trace\n{}", fd.get(), stacktrace());
 #endif // X23_FD_TRACE
   setmode(fdp, FdState::Mode::kPoisoned);
+}
+
+uint64_t
+CoroPollImpl::generation(BorrowedFd fd, bool make)
+{
+  using enum FdState::Mode;
+  auto fdp = getfd(fd);
+  if (make && fdp->mode() == kFree && !stop_requested())
+    setmode(fdp, kActive);
+  return fdp->generation_.load(std::memory_order_relaxed);
 }
 
 void

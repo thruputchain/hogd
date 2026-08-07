@@ -297,6 +297,8 @@ public:
     return std::move(async);
   }
 
+  uint64_t generation(BorrowedFd fd, bool make = false);
+
   // You must reset a file descriptor before closing it if you have
   // ever called read_clear(), write_clear(), or poison() on it, even
   // if there are not any currently active callbacks.  This is
@@ -358,7 +360,8 @@ private:
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
-    std::atomic<std::uint32_t> ready_{0};
+    std::atomic_uint32_t ready_{0};
+    std::atomic_uint64_t generation_{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
 #if X23_FD_TRACE
@@ -446,6 +449,8 @@ private:
                                                 POLLOUT | POLLHUP | POLLERR};
   struct FdState : BufHolder {
     bool poisoned{false};
+    uint64_t generation =
+        std::chrono::steady_clock::now().time_since_epoch().count();
     std::array<WorkItem, 2> callbacks;
     short events() const
     {
