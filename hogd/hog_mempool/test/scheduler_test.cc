@@ -3,6 +3,7 @@
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "db_sched.hh"
@@ -13,8 +14,10 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -1002,6 +1005,24 @@ read_hog_ages_from_malformed_db(MalformedHogAgeDbRpc::ReplyMode mode)
       {MempoolTestInfra::kAccountAddresses[0]})();
 }
 
+void
+process_transfer_from_malformed_db(MalformedHogAgeDbRpc::ReplyMode mode)
+{
+  RpcServer<MalformedHogAgeDbRpc> db_server(mode);
+  db_server.start_server(/*port=*/0);
+  auto client =
+      create_client<DbSched1>(MempoolTestInfra::kAddress, db_server.port())()
+          .value();
+  Scheduler scheduler(/*current_block=*/0,
+                      std::make_shared<db_sched_client_t>(std::move(client)));
+  HogsTransferred transfer;
+  transfer.block = 1;
+  transfer.deltas.push_back(
+      Delta{.address = MempoolTestInfra::kAccountAddresses[0],
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  scheduler.process_transfers(transfer)();
+}
+
 } // namespace
 
 TEST(Scheduler, MalformedHogAgeReplyMarksAccountsMissing)
@@ -1015,6 +1036,19 @@ TEST(Scheduler, MalformedHogAgeReplyMarksAccountsMissing)
     EXPECT_TRUE(
         result.missing.contains(MempoolTestInfra::kAccountAddresses[0]));
   }
+}
+
+// A malformed reply during transfer processing must not reach the fatal
+// missing-account check in [process_transfers]; the transfer batch is skipped
+// instead of aborting the mempool.
+TEST(Scheduler, MalformedHogAgeReplyDuringTransferDoesNotAbort)
+{
+  for (const MalformedHogAgeDbRpc::ReplyMode mode :
+       {MalformedHogAgeDbRpc::ReplyMode::kEmptyResults,
+        MalformedHogAgeDbRpc::ReplyMode::kWrongAddress}) {
+    process_transfer_from_malformed_db(mode);
+  }
+  SUCCEED() << "process_transfers returned without aborting the mempool";
 }
 
 } // namespace hogd

@@ -783,8 +783,17 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // then calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
   const auto &[_, missing] = co_await read_average_hog_ages(transfers);
-  if (!transfers.deltas.empty()) {
-    CHECK(missing.empty());
+  if (!missing.empty()) {
+    // A well-behaved HogDB returns a hog age for every account referenced by a
+    // committed transfer, so [missing] is normally empty here. A malformed or
+    // inconsistent DB scheduler reply (see [read_average_hog_ages]) can leave
+    // accounts missing. Rather than aborting the mempool on peer-controlled
+    // data, skip applying this transfer batch; the scheduler's cached hog ages
+    // simply remain unchanged for the affected accounts.
+    error("process_transfers: DB scheduler reply left {} transfer account(s) "
+          "missing; skipping transfer batch for block {}",
+          missing.size(), transfers.block);
+    co_return;
   }
 
   const std::vector<ChunkRange> chunks =
