@@ -969,7 +969,7 @@ Scheduler::schedule(size_t num_txs,
       }
       const SignedTransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
-      if (pending_nomination_.block_id &&
+      if (pending_nomination_.block_id != 0 &&
           pending_nomination_.scheduled_hashes.contains(tx_hash)) {
         // This tx was already emitted earlier in the current nomination. It
         // was removed from the runqueue by that earlier [schedule()] call but
@@ -992,7 +992,7 @@ Scheduler::schedule(size_t num_txs,
 
         tx_hashes.push_back(tx_hash);
         txs.push_back(tx);
-        if (pending_nomination_.block_id) {
+        if (pending_nomination_.block_id != 0) {
           // Record the emitted hash so a resubmission of this tx later in the
           // same nomination is dropped as a duplicate rather than re-emitted.
           pending_nomination_.scheduled_hashes.insert(tx_hash);
