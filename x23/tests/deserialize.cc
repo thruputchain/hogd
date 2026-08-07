@@ -580,6 +580,30 @@ TEST(Deserialize, ZeroWireVectorCountAcceptsSmall)
   EXPECT_EQ(vec.size(), 3U);
 }
 
+// The CXS decode pathway needs the same materialization cap.  A Vec<tuple<>>
+// serializes to just its count, so the CXS encoding of the count 0xffffffff is
+// the bomb; it must be rejected rather than growing the vector until bad_alloc.
+TEST(Deserialize, CxsZeroWireVectorCountRejectsBomb)
+{
+  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(0xffffffff));
+  x23::Vec<std::tuple<>> vec;
+  EXPECT_FALSE(
+      x23::deserialize_cxs(&vec, std::span<const uint8_t>(bytes.data(),
+                                                          bytes.size())));
+}
+
+TEST(Deserialize, CxsZeroWireVectorCountAcceptsSmall)
+{
+  x23::Vec<std::tuple<>> in;
+  in.resize_uninitialized(3);
+  x23::Buf bytes = serialize_cxs_for_test(in);
+  x23::Vec<std::tuple<>> out;
+  ASSERT_TRUE(
+      x23::deserialize_cxs(&out, std::span<const uint8_t>(bytes.data(),
+                                                          bytes.size())));
+  EXPECT_EQ(out.size(), 3U);
+}
+
 // NOLINTEND(modernize-type-traits)
 
 } // namespace x23

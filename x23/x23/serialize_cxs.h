@@ -881,6 +881,14 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
       return status.error();
     if (size > X::max_size()) [[unlikely]]
       return CxsError{CxsErrorCode::kLengthExceeded};
+    if constexpr (detail::xdr_size_bounds<typename X::value_type>().max_ == 0)
+      // A zero-wire-size element consumes no input, so the count is not bounded
+      // by the remaining input and (for an unbounded vector) not by max_size
+      // above either; left unchecked it grows the vector until std::bad_alloc.
+      // Cap materialization at the 64 KiB reserve budget used just below, the
+      // same limit the XDR path applies in Deserializer::go.
+      if (size > 0x10000 / sizeof(typename X::value_type)) [[unlikely]]
+        return CxsError{CxsErrorCode::kLengthExceeded};
     value.resize(0);
     value.reserve(
         std::min<std::uint32_t>(size,
