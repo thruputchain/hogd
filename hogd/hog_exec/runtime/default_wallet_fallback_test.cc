@@ -447,6 +447,8 @@ TEST_F(DefaultWalletFallbackTest, MismatchedClaimRevertsInvalidAuthClaim)
 
 // Unknown method id at an undeployed root address: fallback resolves the
 // wallet, find_function misses -> deterministic error, frame Fault; no crash.
+// rec[2] == 0xFF pins the Fault branch: null resolution would yield size==2
+// (no buffer appended), so the exact-size check discriminates the two paths.
 TEST_F(DefaultWalletFallbackTest, UnknownEntrypointFaults)
 {
   setup_wallet_and_echo();
@@ -458,10 +460,51 @@ TEST_F(DefaultWalletFallbackTest, UnknownEntrypointFaults)
       .gas_limit = UINT64_MAX,
       .calldata = {}};
   auto rec = run_wallet_root_tx(std::move(inv), make_pubkey_claim(preimage_));
-  ASSERT_GE(rec.size(), 2U);
+  ASSERT_EQ(rec.size(), 3U);
   EXPECT_EQ(rec[0], 0);
   EXPECT_EQ(rec[1],
             static_cast<uint8_t>(ExecResult::ExecResultTxDeterministicError));
+  EXPECT_EQ(rec[2], 0xFF);
+}
+
+// Root-only guard regression pin: the fallback MUST NOT fire for nested
+// invocations. A WalletCall targeting a second undeployed pubkey-derived
+// address is dispatched via kInvoke; at that point invocation_frame_stack_ is
+// non-empty, so resolve_runtime returns nullptr and kInvoke is rejected
+// pre-frame. The wallet's execute handler maps that pre-frame rejection to
+// WalletError::CallFaulted (precompile_default_wallet.cc:182-185).
+//
+// Discrimination: if the invocation_frame_stack_.empty() guard were removed,
+// the nested kInvoke would reach the fallback, find the genesis wallet record
+// ({kNative, 2}), but fail to locate id 2 in the test-context NativeContext
+// (which only registers kNativeContractDefaultWallet with TEST id 60 in the
+// parity suite). That code-path produces a different error. More importantly,
+// the test asserts the tx REVERTS via the wallet (CallFaulted abort) rather
+// than the nested address somehow resolving to a runnable frame, which would
+// violate the root-only invariant and could CHECK-crash under deeper nesting.
+TEST_F(DefaultWalletFallbackTest, NestedInvokeUndeployedNoFallback)
+{
+  setup_wallet_and_echo();
+  make_ctx();
+  // Second undeployed pubkey-derived address (different preimage, no
+  // deployment row written, no storage grant needed since kInvoke is rejected
+  // before any frame runs).
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  ContractAddress undeployed2 = pubkey_auth_address(make_preimage(2)).value();
+  WalletCall nested_call{};
+  nested_call.target = undeployed2;
+  nested_call.entrypoint = entrypoint_from_method_id(0); // irrelevant: pre-frame rejection
+  nested_call.gas_limit = UINT64_MAX;
+  wallet_calls_t calls;
+  calls.push_back(nested_call);
+  auto rec = run_execute_tx(calls);
+  // kInvoke pre-frame rejection → CallFaulted abort (no fallback fires nested).
+  auto expected = wallet_error_abort_bytes(WalletError::CallFaulted);
+  ASSERT_EQ(rec.size(), 2U + expected.size());
+  EXPECT_EQ(rec[0], 1); // Abort is root_success
+  EXPECT_EQ(rec[1],
+            static_cast<uint8_t>(ExecResult::ExecResultTxRootFrameReverted));
+  EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
 }
 
 // Redeploy ban end-to-end: root invoke wallet `deploy` with
