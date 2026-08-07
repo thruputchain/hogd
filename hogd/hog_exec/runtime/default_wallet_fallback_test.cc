@@ -17,6 +17,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
@@ -233,9 +234,60 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackExecutesWallet)
   wallet_calls_t calls;
   calls.push_back(echo_call(4));
   auto rec = run_execute_tx(calls);
-  ASSERT_GE(rec.size(), 2U);
+
+  // Echo returns CXS of Vec<u8>(payload) — same encoding as make_calldata.
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(4, 0xAB);
+  auto echo_inner = echo_meta::make_calldata<u8"echo">(payload);
+  // Wallet return: CXS of Vec<Vec<u8>>{ echo_inner }.
+  //   outer count = 1 -> 1 byte (0x01, ≤ 62)
+  //   inner len   = echo_inner.size() -> 1 byte (5 ≤ 62)
+  //   data        = echo_inner bytes
+  std::vector<uint8_t> expected;
+  expected.push_back(0x01); // outer Vec length = 1
+  expected.push_back(static_cast<uint8_t>(echo_inner.size())); // inner len
+  expected.insert(expected.end(), echo_inner.begin(), echo_inner.end());
+
+  ASSERT_EQ(rec.size(), 2U + expected.size());
   EXPECT_EQ(rec[0], 1);
   EXPECT_EQ(rec[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
+  EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
+}
+
+// Deploy success through the root-fallback path: root tx with a valid pubkey
+// claim to an UNDEPLOYED address invokes `deploy` with a contract hash that IS
+// in the store (echo wasm, written by setup). Assert root_success (wallet ran
+// and returned a ContractAddress without faulting or aborting) and that the
+// returned address matches static_get_deploy_address.
+//
+// Note: the kHogDb test fixture's write_address_balance path does not register
+// the pre-written balance as a lockable 2PC entry, so the balance-deduction
+// step in the host deploy syscall triggers a non-deterministic conflict at
+// commit time. This is the same limitation that affects DefaultWalletParityTest
+// (which also does not assert ExecResultOK for deploy). What matters here is
+// that the fallback resolution runs the wallet's deploy entrypoint end-to-end
+// and produces the correct deterministic output.
+TEST_F(DefaultWalletFallbackTest, RootFallbackDeploysContract)
+{
+  setup_wallet_and_echo();
+  make_ctx();
+  // Echo wasm is already in the store from setup_wallet_and_echo().
+  auto echo_obj = echo_meta::load_wasm();
+  ASSERT_TRUE(echo_obj);
+  SHA256Hash target_hash = sha256(*echo_obj);
+  SHA256Hash nonce{};
+  nonce.fill(9);
+  auto rec = run_deploy_tx(nonce, target_hash);
+  auto expected_addr =
+      SystemCallHandler::static_get_deploy_address(wallet_, nonce, target_hash);
+  // Deploy return: 32 raw bytes of ContractAddress (fixed array, no CXS
+  // prefix). root_success == 1 means the wallet ran and returned an address
+  // (neither fault nor abort); the address bytes must match the deterministic
+  // computation regardless of the commit outcome.
+  ASSERT_EQ(rec.size(), 2U + 32U);
+  EXPECT_EQ(rec[0], 1); // root_success: wallet ran, no fault/abort
+  EXPECT_TRUE(
+      std::equal(expected_addr.begin(), expected_addr.end(), rec.begin() + 2));
 }
 
 // Wallet code demonstrably runs with zero other fixtures: empty call list
