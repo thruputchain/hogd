@@ -829,6 +829,15 @@ struct Deserializer
     // if (size > X::max_size()) [[unlikely]]
     //   raise("length {} exceeds maximum deserializing {}", size,
     //         xdr_type_name<X>());
+    if constexpr (xdr_size_bounds<typename X::value_type>().max_ == 0)
+      // A zero-wire-size element consumes no input, so neither the unsafe_ok
+      // check below nor the per-element decode bounds the attacker-controlled
+      // count; it can drive materialization until std::bad_alloc.  The count
+      // can never exceed the remaining input, the only input-derived bound
+      // available for such elements.
+      if (e - p < std::ptrdiff_t(size)) [[unlikely]]
+        raise("vector count {} exceeds remaining input deserializing {}", size,
+              xdr_type_name<X>());
     x.resize(0);
     // Don't let bad input exhaust memory, but 64kB usually enough.
     x.reserve(

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <span>
+#include <tuple>
 #include <utility>
 
 #include <vector>
@@ -551,6 +552,22 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
   static_assert(
       x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 0xffffffff>>);
   static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 100>>);
+}
+
+// A vector whose element is a zero-wire-size type (here an empty XDR struct)
+// consumes no input per element, so a four-byte count must not be trusted to
+// drive materialization: 0xffffffff would otherwise grow the vector until
+// std::bad_alloc.  Such a count cannot fit the remaining input and must be
+// rejected as malformed XDR (which SRPC argument decode turns into
+// GARBAGE_ARGS) rather than escaping as an allocator failure.
+TEST(Deserialize, ZeroWireVectorCountRejectsUnbounded)
+{
+  static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
+                "test relies on the empty struct being zero-wire-size");
+  x23::Vec<std::tuple<>> vec;
+  uint8_t input[] = {0xff, 0xff, 0xff, 0xff}; // count = 0xffffffff, no elements
+  EXPECT_THROW(x23::deserialize(&vec, x23::BufView(input, sizeof(input))),
+               x23::XdrBadInput);
 }
 
 // NOLINTEND(modernize-type-traits)
