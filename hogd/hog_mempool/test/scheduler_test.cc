@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/rpc_server.h"
