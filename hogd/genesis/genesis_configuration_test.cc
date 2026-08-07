@@ -14,6 +14,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/test_main.h"
+#include "precompiles.hh"
 #include "types.hh"
 
 namespace hogd {
