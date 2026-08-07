@@ -13,12 +13,14 @@ jobs:
         permissions:
             contents: read
             actions: read
+            issues: write
 
         steps:
             - name: Clean up .gitconfig
               run: |
                   echo "Cleaning up .gitconfig"
                   rm -f /home/hogci/.gitconfig
+            - uses: actions/checkout@v6
             - uses: webfactory/ssh-agent@v0.10.0
               with:
                   ssh-private-key: |
@@ -41,7 +43,6 @@ jobs:
                       ${{ secrets.HOGD_TO_XDR_RPC }}
                       ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
                       ${{ secrets.HOGD_TO_HOGX_KEY }}
-            - uses: actions/checkout@v6
             - name: Run hog schedule
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
@@ -58,3 +59,6 @@ jobs:
             - name: Print Log Download Instructions
               if: always()
               uses: ./.github/actions/print-log-instructions
+            - name: File failure issue
+              if: failure()
+              uses: ./.github/actions/file-failure-issue
