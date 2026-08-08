@@ -1856,7 +1856,8 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 // A protocol-matching auth intro that advertises an unusable reverse-callback
 // address must be rejected at registration. Otherwise the malformed address is
 // stored and later aborts the mempool when a coordinator intro drives
-// [finish_init] -> [MempoolAuthRpc::get_client] -> [server_address_to_sockaddr].
+// [finish_init] -> [MempoolAuthRpc::get_client] ->
+// [server_address_to_sockaddr].
 TEST(Mempool, AuthIntroRejectsUnusableCallbackAddress)
 {
   Registration &registration = Registration::registration();
