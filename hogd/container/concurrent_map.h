@@ -175,6 +175,59 @@ public:
       next_value_bucket = scan_ptr->load(std::memory_order_acquire);
     }
   }
+
+  // Like insert(), but the value is produced lazily by factory() only at the
+  // point we are about to insert (i.e. the key is absent). factory() returns a
+  // std::optional; if it yields std::nullopt no bucket is allocated and nullptr
+  // is returned. This lets a caller decline an admission -- e.g. one that will
+  // be rejected anyway -- without retaining an unreclaimable bucket. factory()
+  // is invoked at most once. Like insert(), do not run concurrent with a
+  // for_each.
+  template<typename Allocator, typename Factory>
+  static Value *get_or_insert_with(std::atomic<value_bucket_t *> *scan_ptr,
+                                   Allocator &allocator, const KeyType &key,
+                                   Factory &factory)
+  {
+    value_bucket_t *new_value_bucket = nullptr;
+
+    value_bucket_t *next_value_bucket =
+        scan_ptr->load(std::memory_order_acquire);
+
+    while (true) {
+      if (next_value_bucket == nullptr) {
+
+        if (!new_value_bucket) {
+          auto value = factory();
+          if (!value.has_value()) {
+            return nullptr;
+          }
+          new_value_bucket = allocator.alloc();
+          CHECK_PTR(new_value_bucket);
+          new (new_value_bucket) value_bucket_t{key, std::move(*value)};
+        }
+
+        if (scan_ptr->compare_exchange_strong(next_value_bucket,
+                                              new_value_bucket,
+                                              std::memory_order_release,
+                                              std::memory_order_acquire)) {
+          return &new_value_bucket->value_;
+        }
+
+        cpu_relax();
+        continue;
+      }
+
+      if (KeyEqual{}(next_value_bucket->key_, key)) {
+        if (new_value_bucket) {
+          new_value_bucket->~value_bucket_t();
+        }
+        return &next_value_bucket->value_;
+      }
+
+      scan_ptr = &next_value_bucket->next_ptr_;
+      next_value_bucket = scan_ptr->load(std::memory_order_acquire);
+    }
+  }
 };
 
 } // namespace detail
@@ -228,6 +281,23 @@ public:
     auto *bucket = &buckets_[bucket_index];
     return value_bucket_t::insert(bucket, value_allocator_, key,
                                   std::forward<Args>(args)...);
+  }
+
+  // insert_or_get variant that only allocates when factory() yields a value.
+  // See ValueBucket::get_or_insert_with. Returns nullptr (allocating nothing)
+  // when factory() returns std::nullopt.
+  template<typename Factory>
+  Value *get_or_insert_with(const KeyType &key, Factory &&factory)
+  {
+    assert(!cleared_);
+    uint64_t overall_shortkey = hasher_(key);
+    size_t bucket_index = overall_shortkey & (buckets_.size() - 1);
+
+    assert(buckets_.size() > bucket_index);
+
+    auto *bucket = &buckets_[bucket_index];
+    return value_bucket_t::get_or_insert_with(bucket, value_allocator_, key,
+                                              factory);
   }
 
   template<typename Func>

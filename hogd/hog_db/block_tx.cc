@@ -118,33 +118,40 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     ctx.conflict_reason = conflict_reason;
 
-    auto *lock = addr_balance_locks_.get(addr);
-    if (lock == nullptr) [[unlikely]] {
-      // First touch of this balance in the block. ConcurrentMap has no per-key
-      // reclamation, so a lock inserted here survives until block teardown even
-      // when the change is rejected. BalanceLock's fresh-balance guard rejects
-      // a no-snapshot address whose delta cannot cover the balance item's own
-      // storage cost; that guard depends only on the snapshot and the requested
-      // delta -- not on any concurrent reservation -- so evaluate it here and
-      // reject *before* allocating a bucket. Otherwise a contract could deploy
-      // to endless fresh addresses, each failing balance reconciliation and
-      // retaining a bucket, growing addr_balance_locks_ without bound (#3235).
-      auto snapshot =
-          get_snapshot_cost_and_cache_data(make_address_balance_item_key(addr));
-      if (!snapshot) [[unlikely]] {
-        return snapshot.error();
-      }
-      assert(snapshot->second.is_cached_balance());
-      auto after = change.to_balance();
-      if (after.has_value() &&
-          !snapshot->second.get_cached_balance().has_value() &&
-          after->delta() <
-              BalanceLock::get_storage_cost_of_committed_value(&cost_model_)) {
-        return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
-      }
-      lock = addr_balance_locks_.insert_or_get(addr, *snapshot);
+    // Look up (or lazily create) the shared balance lock in a single map
+    // traversal. The factory declines -- returns nullopt, so no bucket is
+    // allocated -- when the change cannot be admitted anyway: a fresh
+    // (no-snapshot) address whose delta cannot cover the balance item's own
+    // storage cost is rejected by BalanceLock's fresh-balance guard. Because
+    // ConcurrentMap has no per-key reclamation, allocating first would retain
+    // that bucket until block teardown, so a contract could deploy to endless
+    // fresh addresses -- each failing balance reconciliation -- and grow
+    // addr_balance_locks_ without bound (#3235). The guard depends only on the
+    // snapshot and the delta, not on any concurrent reservation, so it is safe
+    // to evaluate before the shared lock exists. The already-present (hot) path
+    // never runs the factory, so it stays a single lookup.
+    auto *lock = addr_balance_locks_.get_or_insert_with(
+        addr, [&]() -> std::optional<std::pair<int128_t, ItemLockCacheData>> {
+          auto snapshot = get_snapshot_cost_and_cache_data(
+              make_address_balance_item_key(addr));
+          if (!snapshot) [[unlikely]] {
+            // Matches ItemLock's lazy ctor: a failed balance snapshot read is
+            // corrupted state we must not treat as valid.
+            panic("failed to load balance snapshot: {}", snapshot.error());
+          }
+          assert(snapshot->second.is_cached_balance());
+          auto after = change.to_balance();
+          if (after.has_value() &&
+              !snapshot->second.get_cached_balance().has_value() &&
+              after->delta() < BalanceLock::get_storage_cost_of_committed_value(
+                                   &cost_model_)) {
+            return std::nullopt;
+          }
+          return *snapshot;
+        });
+    if (lock == nullptr) {
+      return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
     }
-
     return do_lock(*lock, change, ctx)
         .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
   }
