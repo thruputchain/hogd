@@ -730,6 +730,67 @@ TEST_F(EventBlockContextTest, IndexerFanoutCanMispairPerThreadEventBodies)
   }
 }
 
+// The indexer fan-out flattens a whole block's event/body pairs into one
+// aggregate RPC call.  The producer must reject an aggregate that exceeds the
+// client's message-size cap *before* serializing it into a contiguous record,
+// so a large block cannot force an allocator failure on the event server
+// (issue #3213).  Here a capped client stands in for that guard: the direct
+// call must throw the size error without the indexer observing a batch, and the
+// commit-time fan-out must likewise drop the block rather than deliver it.
+TEST_F(EventBlockContextTest, IndexerFanoutRejectsAggregateBatchBeforeClientCap)
+{
+  constexpr size_t kNumEvents = 32;
+  constexpr size_t kIndexerMessageCap = 4096;
+
+  EventBlockContext context(temp_dir_, 1);
+  context.executor_open_block();
+
+  TxEventLogBatch expected_events;
+  ProposedTransactionBatch expected_bodies;
+
+  for (size_t i = 0; i < kNumEvents; i++) {
+    auto body = make_distinct_body(10'000 + i);
+    auto event = make_event_for_body(body, static_cast<uint8_t>(i));
+    event.events[0].serialized_event.resize(kMaxEventLength);
+    std::memcpy(event.events[0].serialized_event.data(), &i, sizeof(i));
+
+    expected_events.push_back(event);
+    expected_bodies.push_back(body);
+    EXPECT_TRUE(context.add_event(std::move(event), std::move(body))());
+  }
+
+  context.executor_close_block();
+  finish_file(context);
+
+  const size_t serialized_args_size =
+      x23::xdr_size(expected_events) + x23::xdr_size(expected_bodies);
+  ASSERT_GT(serialized_args_size, kIndexerMessageCap);
+
+  CapturingIndexerRpc direct_indexer;
+  auto direct_client =
+      make_capped_socketpair_indexer_client(&direct_indexer,
+                                            kIndexerMessageCap);
+  try {
+    direct_client.indexer_event_process_events(7, expected_events,
+                                               expected_bodies)();
+    FAIL() << "expected capped RPC client to reject aggregate indexer batch";
+  } catch (x23::XdrBadInput const &e) {
+    std::string what = e.what();
+    EXPECT_NE(what.find("message size"), std::string::npos) << what;
+    EXPECT_NE(what.find("exceeds maximum"), std::string::npos) << what;
+  }
+  EXPECT_EQ(direct_indexer.received_batches, 0);
+
+  CapturingIndexerRpc commit_indexer;
+  std::vector<indexer_event_client_t> indexers;
+  indexers.push_back(make_capped_socketpair_indexer_client(&commit_indexer,
+                                                           kIndexerMessageCap));
+
+  context.send_events_to_indexers(/*block_height=*/7, indexers)();
+
+  EXPECT_EQ(commit_indexer.received_batches, 0);
+}
+
 } // namespace hogd
 
 int

@@ -439,13 +439,28 @@ struct RpcStream : public detail::RpcStreamImpl {
   send_call(const is_xdr_serializable auto &...args)
   {
     auto msg = call_msg<ProcMeta>();
-    Buf record = make_record(msg, args...);
 
-    if (record.size() - 4 > max_message_size) [[unlikely]]
+    // Reject an oversized call *before* allocating and serializing the record.
+    // The record is a single contiguous buffer holding the whole message, so on
+    // bulk links that forward whole-block state (e.g. the event server's
+    // indexer fan-out) building it just to reject it would force a large --
+    // possibly failing -- allocation for a request we already know is over the
+    // limit.  xdr_size walks the arguments without allocating, so the
+    // serialized size is known up front (it equals record.size() - 4);
+    // make_record_presized then reuses it to serialize in one pass.  The cap is
+    // also bounded by the record-framing maximum: a single unchunked record
+    // cannot carry a larger body regardless of the negotiated max_message_size.
+    size_t const message_size =
+        xdr_size(msg) + (size_t{0} + ... + xdr_size(args));
+    size_t const effective_max = max_message_size < kMaxRpcRecordBody
+                                     ? max_message_size
+                                     : kMaxRpcRecordBody;
+    if (message_size > effective_max) [[unlikely]]
       throw XdrBadInput("{}::{}: message size {} exceeds maximum {}",
                         ProcMeta::version_meta::version_name,
-                        ProcMeta::proc_name, record.size() - 4,
-                        max_message_size);
+                        ProcMeta::proc_name, message_size, effective_max);
+
+    Buf record = make_record_presized(message_size, msg, args...);
 
     // Note we generate the xid after calling make_record just in case
     // make_record throws because of illegal XDR values (such as an

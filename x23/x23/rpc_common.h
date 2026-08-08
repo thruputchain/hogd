@@ -107,12 +107,39 @@ msg_set_reply_stat(rpc_msg *msg, auth_stat stat)
 
 std::string msg_show_stat(const rpc_msg &msg);
 
+// RPC record marking (RFC 5531) encodes the fragment body length in the low 31
+// bits of a uint32, with the high bit flagging the last fragment.  A single
+// unchunked record therefore cannot carry a body larger than this, so a
+// max_message_size set above it is not actually reachable.
+inline constexpr size_t kMaxRpcRecordBody = 0x7fffffffUZ;
+
 template<is_xdr_serializable... X>
 Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  x23assert(ret.size() <= 0x80000003UZ);
+  x23assert(ret.size() - 4 <= kMaxRpcRecordBody);
+  putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
+  return ret;
+}
+
+// Like make_record, but the caller has already computed the serialized body
+// size (msg plus args -- i.e. the record size minus the 4-byte length word),
+// typically to enforce a size limit before allocating. Serializing straight
+// into a pre-sized buffer avoids the second xdr_size() pass that
+// make_record() -> serialize() would make, which matters on the bulk
+// block-batch RPCs.
+template<is_xdr_serializable... X>
+Buf
+make_record_presized(size_t body_size, const rpc_msg &msg, const X &...x)
+{
+  Buf ret;
+  ret.resize_uninitialized(4 + body_size);
+  detail::Serializer ser{ret.data()};
+  ser(std::uint32_t{0});
+  ser(msg);
+  (ser(x), ...);
+  x23assert(ret.size() - 4 <= kMaxRpcRecordBody);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
