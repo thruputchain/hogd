@@ -564,46 +564,4 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   propose_thread.join();
 }
 
-// Standalone (no fixture): fresh database so block_height is still -1.
-// Step 1 confirms a zero-wallet config is rejected; step 2 passes a valid
-// wallet on the SAME instance and expects success, proving step 1 failed on
-// the wallet gate (the height guard could not have fired — height is still -1).
-TEST(GenesisLoadStandaloneTest, ZeroWalletGateFiresBeforeHeightGuard)
-{
-  HogdbWrapper fresh_wrapper;
-  auto db_client = make_srpc_multiclient<DbSched1>(
-      x23::HostPort{"localhost", fresh_wrapper.coord_port()}, false);
-
-  ConsensusValue genesis_value{};
-  genesis_value.proposal_header.block_height = 0;
-
-  // Step 1: zero default_wallet → wallet gate rejects on a fresh DB.
-  auto res = db_client.dbsched_load_genesis_configuration(
-      GenesisConfiguration{}, genesis_value);
-  EXPECT_EQ(res, DbSchedResult::DbSchedResultError);
-
-  // Step 2: valid default_wallet → success, confirming height is still -1
-  // after the rejection and the gate left the DB in a reusable state.
-  GenesisConfiguration good_config{
-      .default_wallet =
-          GenesisConfigurationLoader::native_default_wallet_hash()};
-  res = db_client.dbsched_load_genesis_configuration(good_config, genesis_value);
-  EXPECT_EQ(res, DbSchedResult::DbSchedResultOK);
-}
-
-TEST_F(RpcNegativeTest, GenesisLoadRejectsZeroDefaultWallet)
-{
-  // The fixture's SetUp already committed a genesis block, so the
-  // block_height != -1 guard in dbsched_load_genesis_configuration fires
-  // first and returns DbSchedResultError before the zero-wallet validation
-  // is reached. This test only pins that zero-wallet configs can never
-  // succeed; the fresh-DB coverage is in ZeroWalletGateFiresBeforeHeightGuard.
-  ConsensusValue genesis_value{};
-  genesis_value.proposal_header.block_height = 0;
-  auto res =
-      db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
-                                                    genesis_value);
-  EXPECT_EQ(res, DbSchedResult::DbSchedResultError);
-}
-
 } // namespace hogd

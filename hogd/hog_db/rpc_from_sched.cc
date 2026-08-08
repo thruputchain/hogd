@@ -322,10 +322,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  if (genesis_configuration.default_wallet.hash == SHA256Hash{}) {
-    error("genesis configuration has a zero default_wallet contract hash");
-    co_return DbSchedResult::DbSchedResultError;
-  }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);
 
   ctx_.initialize_cost_model(

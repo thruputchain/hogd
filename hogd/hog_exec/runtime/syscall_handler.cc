@@ -1274,20 +1274,15 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     // the chain-configured default wallet, carried in the DbTip (installed
     // at genesis from GenesisConfiguration::default_wallet). The wallet's
     // auth guard rejects callers that cannot authenticate for the address.
-    // Genesis rejects a zero hash, so a tip carrying one is broken chain
-    // state -- fail Unrecoverable, loudly, by design.
+    // If the configured hash has no contract record, resolution fails the
+    // same way as any other missing contract.
     // NOTE: called with no snapshot-cache lock held; try_get_db_tip must
     // stay outside any SynchronizedMap lock scope (lock-free atomic tip).
     auto tip = snapshot_cache_.try_get_db_tip();
     if (!tip.has_value()) {
       return tip.error();
     }
-    DeployedContractHash const &default_wallet = tip.value()->default_wallet;
-    if (default_wallet.hash == SHA256Hash{}) {
-      error("Unrecoverable: DbTip carries a zero default_wallet hash");
-      return SystemError{SystemErrorCode::Unrecoverable};
-    }
-    local_hash = default_wallet;
+    local_hash = tip.value()->default_wallet;
   }
 
   if (!local_hash) {
