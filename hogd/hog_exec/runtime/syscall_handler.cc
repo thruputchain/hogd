@@ -1251,6 +1251,27 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   return nullptr;
 }
 
+namespace {
+// The wallet's on-chain record is two fixed fields (kNative,
+// kNativeContractDefaultWallet). Its DeployedContractHash is therefore a
+// protocol constant: genesis writes the identical record. Computed once and
+// cached as a function-local static.
+DeployedContractHash const &
+default_wallet_deployed_contract_hash()
+{
+  static const DeployedContractHash hash = [] {
+    Contract record{};
+    record.contract_type(ContractType::kNative);
+    record.native_contract_id() =
+        HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+    return DeployedContractHash{.hash = sha256(record),
+                                .contract_size = 0,
+                                .contract_type = ContractType::kNative};
+  }();
+  return hash;
+}
+} // namespace
+
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
@@ -1268,11 +1289,21 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // Not in the snapshot; check the transaction's local context.
   auto local_hash =
       invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+
+  if (!local_hash && invocation_frame_stack_.empty()) {
+    // Root invocation of an address with no deployed contract resolves to the
+    // default_wallet precompile; its auth guard rejects callers that cannot
+    // authenticate for the address. Genesis writes the wallet's contract
+    // record, so a store lacking it is broken chain state — the NativeContext
+    // lookup then fails Unrecoverable, loudly, by design.
+    local_hash = default_wallet_deployed_contract_hash();
+  }
+
   if (!local_hash) {
     return nullptr;
   }
-  // Tx-local deployment: no cache entry (entry stays null; the engine falls
-  // back to resolve_contract).
+  // Tx-local deployment or root default-wallet fallback: no cache entry
+  // (entry stays null; the engine falls back to resolve_contract).
   return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
 }
 
@@ -1408,6 +1439,7 @@ is_banned_redeploy_native_contract(
   switch (native_contract_id) {
   case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
   case HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim:
+  case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
     return true;
   }
   panic("Unknown native contract deployed: {}", native_contract_id);
