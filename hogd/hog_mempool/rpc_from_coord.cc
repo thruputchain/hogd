@@ -1448,11 +1448,14 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .proposal_txs_hash = proposal_txs_compatibility_hash(
                            proposal.transactions),
                        .upgrades = {}};
+  // default_wallet comes from the committed parent tip: the cache's db_tip
+  // only ever receives storage/event hashes from the scheduler's close
+  // result, never the wallet field.
   nominated_block_cache_.db_tip = DbTip{
       .id = nominated_block_cache_.proposal_result.proposed_block().block_id,
       .storage_long_hash = nominated_block_cache_.db_tip.storage_long_hash,
       .value = std::move(value),
-      .default_wallet = nominated_block_cache_.db_tip.default_wallet};
+      .default_wallet = last_committed_block_.default_wallet};
   info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
@@ -2105,11 +2108,13 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                  proposal_txs_compatibility_hash(
                                      proposal.transactions),
                              .upgrades = {}};
+        // default_wallet comes from the committed parent tip (see the
+        // nomination-path comment).
         cache.db_tip =
             DbTip{.id = validation_block_id,
                   .storage_long_hash = cache.db_tip.storage_long_hash,
                   .value = std::move(value),
-                  .default_wallet = cache.db_tip.default_wallet};
+                  .default_wallet = last_committed_block_.default_wallet};
         co_await set_result(SchedulerValidationOutcome::SchedulerValidationOK);
         result.block().block_id = cache.db_tip.id;
         result.block().signed_transactions = {};
