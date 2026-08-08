@@ -86,3 +86,35 @@ ci_remote_killall_hosts() {
     ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
   done
 }
+
+# Digest of the commands that killed benchmark scripts, replayed by the
+# combined-metrics schedule at the end of its job. That job runs five suites
+# into one log and only the tail of it survives, so a suite that fails early is
+# otherwise anonymous: the suites run with xtrace off, so errexit kills them
+# with a bare exit status and no message. Sourcing installs the trap; the
+# suites all set -E, so it reaches their functions too.
+CI_BENCH_FAILURE_LOG=${CI_BENCH_FAILURE_LOG:-$CI_BENCH_REPO_ROOT/bench_failures.log}
+
+ci_report_error_trace() {
+  local script=${BASH_SOURCE[${#FUNCNAME[@]} - 1]:-$0}
+  local at report
+
+  # The ERR trap runs whether or not errexit is set, so ignore the failures the
+  # suites tolerate: a benchmark whose timeout is its expected end, cleanup
+  # handlers. Then keep only the first report per script -- errexit ends it at
+  # its first failure, and what follows is propagation, such as the parent
+  # shell reporting a pipeline after the failing component's subshell already
+  # reported the command that failed.
+  case $- in
+  *e*) ;;
+  *) return 0 ;;
+  esac
+  grep -qsF -- "$script: " "$CI_BENCH_FAILURE_LOG" && return 0
+
+  at="${BASH_SOURCE[1]}:${BASH_LINENO[0]}"
+  [ "${BASH_SOURCE[1]}" != "$script" ] || at="line ${BASH_LINENO[0]}"
+  report="$script: $at: exit status $1: $2"
+  echo "FAILED $report" >&2
+  echo "$report" >>"$CI_BENCH_FAILURE_LOG" 2>/dev/null || true
+}
+trap 'ci_report_error_trace "$?" "$BASH_COMMAND"' ERR
