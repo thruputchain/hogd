@@ -120,6 +120,14 @@ public:
     cost_model_.emplace(cost_model);
   }
 
+  // Install the chain-configured default wallet into the tip. Called at
+  // genesis load, before the genesis commit; update_dbtip preserves the
+  // field, so the commit's write_dbtip persists it.
+  void set_default_wallet(DeployedContractHash const &default_wallet)
+  {
+    tip_.with([&](DbTip &tip) { tip.default_wallet = default_wallet; });
+  }
+
   // opens a new block transaction.
   // Does not acquire a reference to the blocktx.
   HogDbStatus<PerThreadARC<BlockTX> *> open_block_tx(BlockTXID bid,

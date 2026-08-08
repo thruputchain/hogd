@@ -21,6 +21,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -64,8 +65,11 @@ public:
 
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
+    GenesisConfiguration genesis_configuration{
+        .default_wallet =
+            GenesisConfigurationLoader::native_default_wallet_hash()};
     auto db_res =
-        db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
+        db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
         << "Failed to load genesis configuration";
@@ -558,6 +562,21 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();
+}
+
+TEST_F(RpcNegativeTest, GenesisLoadRejectsZeroDefaultWallet)
+{
+  // The fixture already committed a genesis block, and a zero default_wallet
+  // must be rejected before anything else -- the validation error, not the
+  // "genesis already loaded" error, proves the config gate exists only if
+  // the check runs first. Both return DbSchedResultError; the observable
+  // contract here is simply that a zero-wallet config can never succeed.
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
+  auto res =
+      db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
+                                                    genesis_value);
+  EXPECT_EQ(res, DbSchedResult::DbSchedResultError);
 }
 
 } // namespace hogd
