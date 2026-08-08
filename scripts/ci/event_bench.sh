@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 . "$(dirname "$0")/bench_harness.sh"
+ci_enable_error_trace
 
 cleanup() {
   local exit_code=$1

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 . "$(dirname "$0")/bench_harness.sh"
 . "$(dirname "$0")/../hog-ip.sh"
+ci_enable_error_trace
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)

@@ -8,6 +8,7 @@ set -Eeuo pipefail
 CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-1000}
 
 . "$(dirname "$0")/bench_harness.sh"
+ci_enable_error_trace
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./${BUILD_DIR}/hogd/utils/get_port kCIControlServerPort)
