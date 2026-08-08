@@ -1251,7 +1251,6 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   return nullptr;
 }
 
-
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
