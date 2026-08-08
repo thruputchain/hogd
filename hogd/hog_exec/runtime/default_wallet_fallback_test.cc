@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -569,11 +570,11 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
           {ContractType::kWasmi, {wasm_ctx.release(), true}},
       });
 
-  ContractAddress kUndeployed = make_contract_address(77);
+  ContractAddress undeployed = make_contract_address(77);
   x23::Vec<uint8_t, 4294967295> payload;
   payload.resize(8, 0xAB);
 
-  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(kUndeployed);
+  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
   SignedTransaction stx;
   stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
   stx.tx.uniquifier = make_new_uniquifier();
@@ -586,8 +587,7 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
   ASSERT_EQ(frame_output.status_code(), InvocationFrameStatusCode::Return);
   auto const &buf = frame_output.return_buffer();
   // The echoed payload (8 x 0xAB) must appear in the return buffer.
-  EXPECT_NE(std::search(buf.begin(), buf.end(), payload.begin(), payload.end()),
-            buf.end());
+  EXPECT_FALSE(std::ranges::search(buf, payload).empty());
 }
 
 // NOLINTEND(bugprone-exception-escape)
