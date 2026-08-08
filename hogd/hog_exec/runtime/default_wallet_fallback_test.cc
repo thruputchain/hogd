@@ -65,7 +65,7 @@ public:
 
 protected:
   // Production native contract id — the key genesis writes and the key
-  // make_root_fallback_wallet_runtime() resolves against in NativeContext.
+  // resolve_runtime's root fallback resolves against in NativeContext.
   static constexpr int32_t kNativeWalletId = std::to_underlying(
       HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet);
   static constexpr ContractAddress kEchoAddr = make_contract_address(220);
@@ -307,9 +307,9 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackEmptyCallListReverts)
 // Separate fixture for the absent-record test: uses kMockInMemory so that
 // the wallet contract record can be erased from the in-memory store after
 // genesis writes it. Genesis must run (cost model required), but the wallet
-// record is removed before any test runs so resolve_contract(wallet_hash)
-// returns nullptr, exercising the nullptr-return path of
-// make_root_fallback_wallet_runtime.
+// record is removed before any test runs so the snapshot lookup returns
+// nullptr, exercising the record-absent path of resolve_runtime's root
+// fallback.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class DefaultWalletFallbackNoRecordTest : public ::testing::Test,
                                           public NativeContractTestFramework {
@@ -414,8 +414,8 @@ protected:
 };
 
 // Record absent (erased from mock DB after genesis): root invoke of the
-// missing address must return nullptr from make_root_fallback_wallet_runtime
-// and produce ExecResultTxDeterministicError, preserving pre-fallback
+// missing address must yield null resolution from resolve_runtime's root
+// fallback and produce ExecResultTxDeterministicError, preserving pre-fallback
 // behavior for nodes whose store does not carry the genesis wallet record.
 TEST_F(DefaultWalletFallbackNoRecordTest, AbsentRecordKeepsNullResolution)
 {
@@ -435,7 +435,7 @@ TEST_F(DefaultWalletFallbackNoRecordTest, AbsentRecordKeepsNullResolution)
 // Contract{kNative, kNativeContractDefaultWallet} populates
 // newly_created_contracts_, which resolve_contract searches first. Before the
 // fix, resolve_contract would find the record there and enable the fallback.
-// After the fix, make_root_fallback_wallet_runtime reads only the snapshot
+// After the fix, resolve_runtime's root fallback reads only the snapshot
 // (snapshot_cache_.try_get_contract_by_hash) and gets nullptr because the
 // record was erased from the mock DB — same outcome as
 // AbsentRecordKeepsNullResolution.

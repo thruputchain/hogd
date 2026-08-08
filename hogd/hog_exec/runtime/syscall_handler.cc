@@ -1251,34 +1251,6 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   return nullptr;
 }
 
-SystemStatus<std::unique_ptr<Runtime>>
-SystemCallHandler::resolve_runtime(ContractAddress const &addr)
-{
-  // Check the snapshot for a deployed contract; on a hit, the returned entry
-  // carries the back-pointer to its (eagerly translated) code.
-  auto deployed_expect = snapshot_cache_.try_get_deployed_contract(addr);
-  if (!deployed_expect) {
-    return deployed_expect.error();
-  }
-  const DeployedContract *deployed = *deployed_expect;
-  if (deployed != nullptr) {
-    return runtime_context_.make_new_runtime(*deployed, this);
-  }
-
-  // Not in the snapshot; check the transaction's local context.
-  auto local_hash =
-      invocation_frame_stack_.lookup_locally_deployed_contract(addr);
-  if (!local_hash) {
-    if (invocation_frame_stack_.empty()) {
-      return make_root_fallback_wallet_runtime();
-    }
-    return nullptr;
-  }
-  // Tx-local deployment: no cache entry (entry stays null; the engine falls
-  // back to resolve_contract).
-  return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
-}
-
 namespace {
 // The wallet's on-chain record is two fixed fields (kNative,
 // kNativeContractDefaultWallet). Its DeployedContractHash is therefore a
@@ -1300,30 +1272,48 @@ default_wallet_deployed_contract_hash()
 }
 } // namespace
 
-// An address with no deployed contract, invoked at the root of a
-// transaction, resolves to the default_wallet precompile; the wallet's own
-// auth guard rejects callers that cannot authenticate for the address. The
-// wallet's record is written by genesis; if the store lacks it, resolution
-// fails exactly as before the fallback existed.
-//
-// Intentionally checks the SNAPSHOT directly (not resolve_contract, which
-// also searches newly_created_contracts_). A tx-attached record must not
-// re-enable the fallback on stores without the genesis write: the fallback
-// exists iff the chain has persisted the wallet record.
 SystemStatus<std::unique_ptr<Runtime>>
-SystemCallHandler::make_root_fallback_wallet_runtime()
+SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
-  DeployedContractHash const &wallet_hash =
-      default_wallet_deployed_contract_hash();
-  auto snapshot_res =
-      snapshot_cache_.try_get_contract_by_hash(wallet_hash.hash);
-  if (!snapshot_res.has_value()) {
-    return snapshot_res.error();
+  // Check the snapshot for a deployed contract; on a hit, the returned entry
+  // carries the back-pointer to its (eagerly translated) code.
+  auto deployed_expect = snapshot_cache_.try_get_deployed_contract(addr);
+  if (!deployed_expect) {
+    return deployed_expect.error();
   }
-  if (*snapshot_res == nullptr) {
+  const DeployedContract *deployed = *deployed_expect;
+  if (deployed != nullptr) {
+    return runtime_context_.make_new_runtime(*deployed, this);
+  }
+
+  // Not in the snapshot; check the transaction's local context.
+  auto local_hash =
+      invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+
+  // An address with no deployed contract, invoked at the root of a
+  // transaction (empty frame stack), resolves to the default_wallet
+  // precompile; the wallet's own auth guard rejects callers that cannot
+  // authenticate for the address. The wallet record must be PERSISTED: the
+  // snapshot is checked directly (not resolve_contract, which also searches
+  // newly_created_contracts_), so a tx-attached record cannot enable the
+  // fallback on stores without the genesis write.
+  if (!local_hash && invocation_frame_stack_.empty()) {
+    auto wallet_record = snapshot_cache_.try_get_contract_by_hash(
+        default_wallet_deployed_contract_hash().hash);
+    if (!wallet_record.has_value()) {
+      return wallet_record.error();
+    }
+    if (*wallet_record != nullptr) {
+      local_hash = default_wallet_deployed_contract_hash();
+    }
+  }
+
+  if (!local_hash) {
     return nullptr;
   }
-  return runtime_context_.make_new_runtime(DeployedContract{wallet_hash}, this);
+  // Tx-local deployment or root default-wallet fallback: no cache entry
+  // (entry stays null; the engine falls back to resolve_contract).
+  return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
 }
 
 Calldata const &

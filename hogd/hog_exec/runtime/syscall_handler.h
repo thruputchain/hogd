@@ -504,13 +504,6 @@ private:
   SystemStatus<std::unique_ptr<Runtime>>
   resolve_runtime(ContractAddress const &addr);
 
-  // Root-only fallback: called by resolve_runtime when the address has no
-  // deployed contract AND the invocation frame stack is empty (i.e. this is a
-  // root transaction). Resolves the default_wallet precompile if its genesis
-  // record is present in the contract store; returns nullptr when the record is
-  // absent, preserving pre-fallback behavior on stores without genesis data.
-  SystemStatus<std::unique_ptr<Runtime>> make_root_fallback_wallet_runtime();
-
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
