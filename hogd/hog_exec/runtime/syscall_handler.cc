@@ -1251,26 +1251,6 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
   return nullptr;
 }
 
-namespace {
-// The wallet's on-chain record is two fixed fields (kNative,
-// kNativeContractDefaultWallet). Its DeployedContractHash is therefore a
-// protocol constant: genesis writes the identical record. Computed once and
-// cached as a function-local static.
-DeployedContractHash const &
-default_wallet_deployed_contract_hash()
-{
-  static const DeployedContractHash hash = [] {
-    Contract record{};
-    record.contract_type(ContractType::kNative);
-    record.native_contract_id() =
-        HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
-    return DeployedContractHash{.hash = sha256(record),
-                                .contract_size = 0,
-                                .contract_type = ContractType::kNative};
-  }();
-  return hash;
-}
-} // namespace
 
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
@@ -1291,12 +1271,24 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
       invocation_frame_stack_.lookup_locally_deployed_contract(addr);
 
   if (!local_hash && invocation_frame_stack_.empty()) {
-    // Root invocation of an address with no deployed contract resolves to the
-    // default_wallet precompile; its auth guard rejects callers that cannot
-    // authenticate for the address. Genesis writes the wallet's contract
-    // record, so a store lacking it is broken chain state — the NativeContext
-    // lookup then fails Unrecoverable, loudly, by design.
-    local_hash = default_wallet_deployed_contract_hash();
+    // Root invocation of an address with no deployed contract resolves to
+    // the chain-configured default wallet, carried in the DbTip (installed
+    // at genesis from GenesisConfiguration::default_wallet). The wallet's
+    // auth guard rejects callers that cannot authenticate for the address.
+    // Genesis rejects a zero hash, so a tip carrying one is broken chain
+    // state -- fail Unrecoverable, loudly, by design.
+    // NOTE: called with no snapshot-cache lock held; try_get_db_tip must
+    // stay outside any SynchronizedMap lock scope (lock-free atomic tip).
+    auto tip = snapshot_cache_.try_get_db_tip();
+    if (!tip.has_value()) {
+      return tip.error();
+    }
+    DeployedContractHash const &default_wallet = tip.value()->default_wallet;
+    if (default_wallet.hash == SHA256Hash{}) {
+      error("Unrecoverable: DbTip carries a zero default_wallet hash");
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+    local_hash = default_wallet;
   }
 
   if (!local_hash) {
