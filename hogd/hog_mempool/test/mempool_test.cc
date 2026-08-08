@@ -1849,6 +1849,36 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
   EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
 }
 
+// A protocol-matching auth intro that advertises an unusable reverse-callback
+// address must be rejected at registration. Otherwise the malformed address is
+// stored and later aborts the mempool when a coordinator intro drives
+// [finish_init] -> [MempoolAuthRpc::get_client] -> [server_address_to_sockaddr].
+TEST(Mempool, AuthIntroRejectsUnusableCallbackAddress)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+
+  AuthCard bad_card = {.protocol = version::kHogdProtocol(),
+                       .upid = {},
+                       .address_for_db = "127.0.0.1:1",
+                       .address_for_mempool = "INVALID"};
+  IntroAuthResult bad_result =
+      MempoolAuthRpc::mempoolauth_intro_auth(bad_card)();
+  EXPECT_EQ(bad_result.outcome(), IntroAuthOutcome::kFailure);
+  EXPECT_FALSE(registration.auth_registered(nullptr));
+
+  AuthCard good_card = {.protocol = version::kHogdProtocol(),
+                        .upid = {},
+                        .address_for_db = "127.0.0.1:1",
+                        .address_for_mempool = "127.0.0.1:1"};
+  IntroAuthResult good_result =
+      MempoolAuthRpc::mempoolauth_intro_auth(good_card)();
+  EXPECT_EQ(good_result.outcome(), IntroAuthOutcome::kSuccess);
+  EXPECT_TRUE(registration.auth_registered(nullptr));
+
+  registration.clear();
+}
+
 } // namespace hogd
 
 int

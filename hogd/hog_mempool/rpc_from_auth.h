@@ -39,6 +39,16 @@ public:
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 
+    // Reject unusable reverse-callback addresses before publishing the card.
+    // The stored [address_for_mempool] is later fed to
+    // [server_address_to_sockaddr] in [get_client]; a malformed or unresolvable
+    // address would abort the mempool during coordinator-driven [finish_init].
+    if (!try_server_address_to_sockaddr(card.address_for_mempool)) {
+      info("rejecting auth intro: unusable address_for_mempool {}",
+           card.address_for_mempool.c_str());
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
+
     Registration::registration().register_auth(card);
     x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);

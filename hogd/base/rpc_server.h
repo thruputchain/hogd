@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
@@ -190,13 +191,30 @@ host_port_to_sockaddr(const std::string &host, uint16_t port)
   return *addr;
 }
 
+// Parses and resolves [server_address] into a socket address, returning
+// [std::nullopt] instead of aborting when it is malformed or unresolvable. Use
+// this to validate an untrusted address before storing it, so that a later
+// [server_address_to_sockaddr] on the same address cannot abort the process.
+inline std::optional<sockaddr_storage>
+try_server_address_to_sockaddr(std::string_view server_address)
+{
+  x23::HostPort helper;
+  if (!helper.parse(server_address)) {
+    return std::nullopt;
+  }
+  std::expected<sockaddr_storage, x23::GaiError> addr =
+      helper.to_addr(/*dns=*/true);
+  if (!addr.has_value()) {
+    return std::nullopt;
+  }
+  return *addr;
+}
+
 inline sockaddr_storage
 server_address_to_sockaddr(std::string_view server_address)
 {
-  x23::HostPort helper;
-  CHECK(helper.parse(server_address));
-  std::expected<sockaddr_storage, x23::GaiError> addr =
-      helper.to_addr(/*dns=*/true);
+  std::optional<sockaddr_storage> addr =
+      try_server_address_to_sockaddr(server_address);
   CHECK(addr.has_value());
   return *addr;
 }
