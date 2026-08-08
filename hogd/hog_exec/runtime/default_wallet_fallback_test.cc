@@ -306,10 +306,10 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackEmptyCallListReverts)
 
 // Separate fixture for the absent-record test: uses kMockInMemory so that
 // the wallet contract record can be erased from the in-memory store after
-// genesis writes it. Genesis must run (cost model required), but the wallet
-// record is removed before any test runs so the snapshot lookup returns
-// nullptr, exercising the record-absent path of resolve_runtime's root
-// fallback.
+// genesis writes it. Genesis must run (cost model required). With the wallet
+// record erased, the root fallback sets local_hash unconditionally and
+// NativeContext::make_new_runtime fails Unrecoverable — the expected
+// hard-failure behavior for broken chain state.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class DefaultWalletFallbackNoRecordTest : public ::testing::Test,
                                           public NativeContractTestFramework {
@@ -319,9 +319,10 @@ public:
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kMockInMemory)
   {
-    // Genesis wrote the wallet contract record at wallet_hash. Erase it now,
-    // before any transaction runs (so the StorageSnapshotCache has not yet
-    // cached the entry). Subsequent lookups will see it as absent.
+    // Genesis wrote the wallet contract record. Erase it now, before any
+    // transaction runs (so the StorageSnapshotCache has not yet cached the
+    // entry). Subsequent resolve_contract calls will see it as absent and
+    // NativeContext::make_new_runtime will return Unrecoverable.
     erase_contract_from_mock_db(
         make_deployed_contract_hash(make_native_contract(kNativeWalletId))
             .hash);
@@ -413,64 +414,23 @@ protected:
   }
 };
 
-// Record absent (erased from mock DB after genesis): root invoke of the
-// missing address must yield null resolution from resolve_runtime's root
-// fallback and produce ExecResultTxDeterministicError, preserving pre-fallback
-// behavior for nodes whose store does not carry the genesis wallet record.
-TEST_F(DefaultWalletFallbackNoRecordTest, AbsentRecordKeepsNullResolution)
+// Record absent (erased from mock DB after genesis): the root fallback sets
+// local_hash unconditionally, then NativeContext::make_new_runtime calls
+// resolve_contract(wallet_hash) which returns nullptr (no snapshot entry,
+// no tx-attached record) → SystemError{Unrecoverable} propagates through
+// root_invoke → try_commit_transaction → ExecResultUnrecoverable. A store
+// without the genesis wallet record is broken chain state; we fail loudly.
+TEST_F(DefaultWalletFallbackNoRecordTest, AbsentRecordIsUnrecoverable)
 {
   preimage_ = make_preimage(1);
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   wallet_ = pubkey_auth_address(preimage_).value();
   make_ctx();
   auto rec = run_execute_tx(wallet_calls_t{});
-  ASSERT_GE(rec.size(), 2U);
+  ASSERT_EQ(rec.size(), 3U);
   EXPECT_EQ(rec[0], 0);
-  EXPECT_EQ(rec[1],
-            static_cast<uint8_t>(ExecResult::ExecResultTxDeterministicError));
-}
-
-// Tx-attached wallet record must NOT activate the fallback on a store without
-// the genesis write. A SignedTransaction with contracts_to_deploy containing
-// Contract{kNative, kNativeContractDefaultWallet} populates
-// newly_created_contracts_, which resolve_contract searches first. Before the
-// fix, resolve_contract would find the record there and enable the fallback.
-// After the fix, resolve_runtime's root fallback reads only the snapshot
-// (snapshot_cache_.try_get_contract_by_hash) and gets nullptr because the
-// record was erased from the mock DB — same outcome as
-// AbsentRecordKeepsNullResolution.
-TEST_F(DefaultWalletFallbackNoRecordTest, TxAttachedRecordNoFallback)
-{
-  preimage_ = make_preimage(1);
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  wallet_ = pubkey_auth_address(preimage_).value();
-  make_ctx();
-
-  // Build a SignedTransaction that attaches the wallet's native contract
-  // record.
-  ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-  SignedTransaction stx;
-  stx.tx.invocation =
-      client.make_invocation<u8"execute">(UINT64_MAX, wallet_calls_t{});
-  stx.tx.auth_claim = make_pubkey_claim(preimage_);
-  stx.tx.uniquifier = make_new_uniquifier();
-  stx.tx.contracts_to_deploy.push_back(*make_native_contract(kNativeWalletId));
-
-  auto handler = make_new_system_call_handler(stx, *ctx_);
-  auto res = handler.root_invoke();
-  CapturedRecord rec;
-  rec.push_back(res.is_root_success() ? 1 : 0);
-  ExecResult commit = handler.try_commit_transaction();
-  rec.push_back(static_cast<uint8_t>(commit));
-  advance_block();
-
-  // Snapshot has no wallet record (erased after genesis) → nullptr from
-  // snapshot cache → no fallback → DeterministicError, same as
-  // AbsentRecordKeepsNullResolution.
-  ASSERT_GE(rec.size(), 2U);
-  EXPECT_EQ(rec[0], 0);
-  EXPECT_EQ(rec[1],
-            static_cast<uint8_t>(ExecResult::ExecResultTxDeterministicError));
+  EXPECT_EQ(rec[1], static_cast<uint8_t>(ExecResult::ExecResultUnrecoverable));
+  EXPECT_EQ(rec[2], 0xFF); // Fault: no frame ran (resolve_runtime failed)
 }
 
 // Auth claim from a different preimage -> InvalidAuthClaim revert.
@@ -518,13 +478,12 @@ TEST_F(DefaultWalletFallbackTest, UnknownEntrypointFaults)
 // WalletError::CallFaulted (precompile_default_wallet.cc:182-185).
 //
 // Discrimination: if the invocation_frame_stack_.empty() guard were removed,
-// the nested kInvoke would reach the fallback, find the genesis wallet record
-// ({kNative, 2}), but fail to locate id 2 in the test-context NativeContext
-// (which only registers kNativeContractDefaultWallet with TEST id 60 in the
-// parity suite). That code-path produces a different error. More importantly,
-// the test asserts the tx REVERTS via the wallet (CallFaulted abort) rather
-// than the nested address somehow resolving to a runnable frame, which would
-// violate the root-only invariant and could CHECK-crash under deeper nesting.
+// the nested kInvoke would set local_hash unconditionally, NativeContext would
+// find the wallet record (it is in the snapshot — written by
+// setup_wallet_and_echo) and instantiate the wallet for undeployed2, executing
+// a second wallet invocation that violates the root-only invariant. The test
+// asserts the tx REVERTS via the wallet (CallFaulted abort), not that a nested
+// wallet frame starts.
 TEST_F(DefaultWalletFallbackTest, NestedInvokeUndeployedNoFallback)
 {
   setup_wallet_and_echo();

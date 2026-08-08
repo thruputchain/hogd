@@ -1290,22 +1290,13 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   auto local_hash =
       invocation_frame_stack_.lookup_locally_deployed_contract(addr);
 
-  // An address with no deployed contract, invoked at the root of a
-  // transaction (empty frame stack), resolves to the default_wallet
-  // precompile; the wallet's own auth guard rejects callers that cannot
-  // authenticate for the address. The wallet record must be PERSISTED: the
-  // snapshot is checked directly (not resolve_contract, which also searches
-  // newly_created_contracts_), so a tx-attached record cannot enable the
-  // fallback on stores without the genesis write.
   if (!local_hash && invocation_frame_stack_.empty()) {
-    auto wallet_record = snapshot_cache_.try_get_contract_by_hash(
-        default_wallet_deployed_contract_hash().hash);
-    if (!wallet_record.has_value()) {
-      return wallet_record.error();
-    }
-    if (*wallet_record != nullptr) {
-      local_hash = default_wallet_deployed_contract_hash();
-    }
+    // Root invocation of an address with no deployed contract resolves to the
+    // default_wallet precompile; its auth guard rejects callers that cannot
+    // authenticate for the address. Genesis writes the wallet's contract
+    // record, so a store lacking it is broken chain state — the NativeContext
+    // lookup then fails Unrecoverable, loudly, by design.
+    local_hash = default_wallet_deployed_contract_hash();
   }
 
   if (!local_hash) {
