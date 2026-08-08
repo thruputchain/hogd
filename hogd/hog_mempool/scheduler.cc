@@ -776,9 +776,20 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
-  const auto &[_, missing] = co_await read_average_hog_ages(transfers);
-  if (!transfers.deltas.empty()) {
-    CHECK(missing.empty());
+  const ReadAverageHogAgesResult read_result =
+      co_await read_average_hog_ages(transfers);
+  const std::unordered_set<ContractAddress, ByteArrayHasher> &missing =
+      read_result.missing;
+  // A well-behaved DB scheduler returns a valid record for every account that
+  // appears in a committed-block transfer. A malformed or impersonated peer can
+  // instead return records that fail validation in [read_average_hog_ages] and
+  // are reported as missing. We cannot apply a transfer delta for such an
+  // account because its hog age is not cached, so we skip it below rather than
+  // aborting the process.
+  for (const ContractAddress &account : missing) {
+    info("process_transfers skipping delta for account {} with missing or "
+         "invalid hog age",
+         show_byte_array(account));
   }
 
   const std::vector<ChunkRange> chunks =
@@ -788,15 +799,21 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
-                         Scheduler *scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
-      for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
-        scheduler->process_transfers_helper(transfers->deltas[delta_idx],
-                                            transfers->block);
-      }
-      co_return;
-    }(chunk, &transfers, this));
+    handles.push_back(
+        [](ChunkRange chunk, const HogsTransferred *transfers,
+           const std::unordered_set<ContractAddress, ByteArrayHasher> *missing,
+           Scheduler *scheduler) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          for (size_t delta_idx = chunk.start; delta_idx < chunk.end;
+               delta_idx++) {
+            const Delta &delta = transfers->deltas[delta_idx];
+            if (missing->contains(delta.address)) {
+              continue;
+            }
+            scheduler->process_transfers_helper(delta, transfers->block);
+          }
+          co_return;
+        }(chunk, &transfers, &missing, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

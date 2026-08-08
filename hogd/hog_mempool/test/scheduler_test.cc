@@ -898,11 +898,11 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
 }
 
 // A malicious or impersonated DB scheduler peer can return a HogAge whose group
-// totals violate the scheduler arithmetic invariants (here, an already-scheduled
-// bucket at UINT128_MAX). Such a record must be treated as a missing account
-// rather than cached; otherwise a later nomination-scheduling pass aborts the
-// process on the overflow CHECK in try_move_hogs_to_already_scheduled_group().
-// See issue #3221.
+// totals violate the scheduler arithmetic invariants (here, an
+// already-scheduled bucket at UINT128_MAX). Such a record must be treated as a
+// missing account rather than cached; otherwise a later nomination-scheduling
+// pass aborts the process on the overflow CHECK in
+// try_move_hogs_to_already_scheduled_group(). See issue #3221.
 TEST(Scheduler, MalformedHogAgeFromDbIsTreatedAsMissingAccount)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
@@ -932,6 +932,40 @@ TEST(Scheduler, MalformedHogAgeFromDbIsTreatedAsMissingAccount)
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
+}
+
+// The transfer path must also tolerate a malformed DB record: applying a
+// committed-block transfer delta for an account whose DB scheduler record fails
+// validation must not abort the process. The account is reported as missing and
+// its delta is skipped. See issue #3221.
+TEST(Scheduler, MalformedHogAgeFromDbSkippedDuringProcessTransfers)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/5'000'000'000);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/std::numeric_limits<uint128_t>::max());
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = 5;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+
+  // Must complete without aborting the process.
+  scheduler->process_transfers(transfer)();
+
+  // The malformed record was never cached, so the account is still reported as
+  // missing on a subsequent read.
+  const auto result =
+      scheduler->read_average_hog_ages(x23::XdrVec<ContractAddress>{account})();
+  EXPECT_TRUE(result.missing.contains(account));
+  EXPECT_TRUE(result.found.empty());
 }
 
 } // namespace hogd
