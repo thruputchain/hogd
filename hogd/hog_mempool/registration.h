@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
+#include <sys/socket.h>
 
 #include "auth_card.hh"
 #include "hogd/base/types.h"
@@ -82,16 +83,24 @@ public:
   }
 
   // Auth.
-  void register_auth(const AuthCard &card)
+  // [mempool_addr] is the reverse callback address, pre-resolved by the caller
+  // so that consumers reuse it rather than re-resolving the stored string (a
+  // second resolution could fail even though registration succeeded).
+  void register_auth(const AuthCard &card, const sockaddr_storage &mempool_addr)
   {
     auth_card_ = card;
+    auth_mempool_addr_ = mempool_addr;
     auth_registered_.store(true, std::memory_order_release);
   }
-  bool auth_registered(AuthCard *card) const
+  bool auth_registered(AuthCard *card,
+                       sockaddr_storage *mempool_addr = nullptr) const
   {
     bool ret = auth_registered_.load(std::memory_order_acquire);
     if (card) {
       *card = auth_card_;
+    }
+    if (mempool_addr) {
+      *mempool_addr = auth_mempool_addr_;
     }
     return ret;
   }
@@ -132,6 +141,7 @@ public:
     }
     auth_registered_ = false;
     auth_card_ = AuthCard{};
+    auth_mempool_addr_ = sockaddr_storage{};
   }
 
 private:
@@ -152,6 +162,7 @@ private:
 
   std::atomic<bool> auth_registered_ = false;
   AuthCard auth_card_;
+  sockaddr_storage auth_mempool_addr_{};
 
   std::mutex shard_cards_mutex_;
   x23::Vec<ShardCard> shard_cards_;

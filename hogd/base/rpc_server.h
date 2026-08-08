@@ -216,6 +216,7 @@ server_address_to_sockaddr(std::string_view server_address)
   std::optional<sockaddr_storage> addr =
       try_server_address_to_sockaddr(server_address);
   CHECK(addr.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return *addr;
 }
 

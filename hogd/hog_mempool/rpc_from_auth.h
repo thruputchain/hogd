@@ -1,6 +1,8 @@
 #pragma once
 
+#include <optional>
 #include <string_view>
+#include <sys/socket.h>
 #include <utility>
 
 #include "auth_card.hh"
@@ -40,16 +42,20 @@ public:
     }
 
     // Reject unusable reverse-callback addresses before publishing the card.
-    // The stored [address_for_mempool] is later fed to
-    // [server_address_to_sockaddr] in [get_client]; a malformed or unresolvable
-    // address would abort the mempool during coordinator-driven [finish_init].
-    if (!try_server_address_to_sockaddr(card.address_for_mempool)) {
+    // The resolved address is stored and reused by [get_client]; without this,
+    // a malformed or unresolvable [address_for_mempool] would abort the mempool
+    // during coordinator-driven [finish_init]. Resolving once here (rather than
+    // re-resolving the string later under a fatal CHECK) also closes the window
+    // where a hostname that resolves now fails to resolve at [get_client] time.
+    std::optional<sockaddr_storage> mempool_addr =
+        try_server_address_to_sockaddr(card.address_for_mempool);
+    if (!mempool_addr) {
       info("rejecting auth intro: unusable address_for_mempool {}",
            card.address_for_mempool.c_str());
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 
-    Registration::registration().register_auth(card);
+    Registration::registration().register_auth(card, *mempool_addr);
     x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);
     IntroAuthResult result(IntroAuthOutcome::kSuccess);
@@ -67,11 +73,12 @@ public:
 
   static x23::Async<auth_sched_client_t> get_client()
   {
-    AuthCard card;
-    CHECK(Registration::registration().auth_registered(&card));
+    sockaddr_storage mempool_addr;
+    CHECK(Registration::registration().auth_registered(/*card=*/nullptr,
+                                                       &mempool_addr));
 
     auto ret = co_await create_client<AuthMempool1>(
-        server_address_to_sockaddr(card.address_for_mempool), /*retry=*/false,
+        mempool_addr, /*retry=*/false,
         /*max_message_size=*/kBulkRpcMaxMessageSize);
     if (!ret)
       panic("rpc_from_auth get_client connect failed: {}",

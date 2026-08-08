@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "address_auth.hh"
+#include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
@@ -28,6 +29,8 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/shared.h"
@@ -35,6 +38,7 @@
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/version.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
