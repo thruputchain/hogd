@@ -19,6 +19,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -543,6 +544,16 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationWasmReferenceRejects)
 // frame is handler-level invariant breakage; verify the process dies.
 TEST_F(DefaultWalletParityTest, NonRootInvocationNativeChecks)
 {
+  if constexpr (!is_debug_build()) {
+    // The "CHECK FAILED" panic message this death test matches is only
+    // produced in debug builds (x23::panic is std::unreachable() under
+    // NDEBUG).  Matches RecoveryTests.RecoveredHighBitRCQLiveEntriesDiesOnLoad
+    // and IndexDBTest.GetEventsShadowedReceiptBlockMismatchIsFatal.  Without
+    // this skip the release ASAN build reaches std::unreachable() and dies of
+    // a SEGV instead, so the expected-message match fails.
+    GTEST_SKIP();
+  }
+
   setup_wallets_and_targets();
 
   wallet_calls_t calls;
