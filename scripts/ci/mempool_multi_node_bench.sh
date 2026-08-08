@@ -8,7 +8,8 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 . "$SCRIPT_DIR/bench_harness.sh"
-WAIT_PORT=ci_wait_port
+. "$SCRIPT_DIR/wait_port_report.sh"
+WAIT_PORT=wait_port_or_report
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
@@ -311,7 +312,12 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"
+# This gate waits on every host at once and collapses them to one status, so say
+# which gate failed rather than exiting 1 with only the per-host lines above.
+if ! ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"; then
+  echo "readiness: a bench control server is not listening on $CI_CONTROL_PORT" >&2
+  exit 1
+fi
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do
