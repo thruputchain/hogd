@@ -11,6 +11,7 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
@@ -215,6 +216,12 @@ BlockManager::initialize_genesis_configuration(
     return false;
   }
   initialized_genesis_ = true;
+
+  if (config.default_wallet.hash == SHA256Hash{}) {
+    error("genesis configuration has a zero default_wallet contract hash");
+    return false;
+  }
+  default_wallet_.emplace(config.default_wallet);
 
   cost_model_.emplace(config.storage_cost_model);
 
