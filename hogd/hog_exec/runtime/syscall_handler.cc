@@ -842,7 +842,14 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  auto start_status = start_frame(invocation, flags, owned_auth_token_ids);
+  // Move (never copy) the Invocation into start_frame: copying its Calldata
+  // allocates, and the argument is constructed here in invoke() -- reachable
+  // from the noexcept syscall_Invoke_inner() -- before start_frame()'s
+  // protected body runs, so a copy could throw std::bad_alloc across that
+  // noexcept boundary and terminate the executor. The move is allocation-free
+  // and invocation is unused afterward (#3058).
+  auto start_status =
+      start_frame(std::move(invocation), flags, owned_auth_token_ids);
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
