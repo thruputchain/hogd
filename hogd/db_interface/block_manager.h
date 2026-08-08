@@ -60,6 +60,12 @@ public:
     cost_model_.emplace(std::move(model));
   }
 
+  DeployedContractHash const &get_default_wallet() const
+  {
+    assert(default_wallet_.has_value());
+    return *default_wallet_;
+  }
+
 private:
   // One block.
   // Does not own a reference to children.
@@ -103,6 +109,7 @@ private:
   };
 
   std::optional<const StorageCostModel> cost_model_;
+  std::optional<DeployedContractHash> default_wallet_;
 
   // remove the block, and all of its children
   // returns the block_data_ for each block that was removed;

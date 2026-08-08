@@ -269,7 +269,9 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
 TEST_F(GenesisConfigurationUnfurlTest, DoubleLoadError)
 {
-  GenesisConfiguration genesis_configuration{};
+  GenesisConfiguration genesis_configuration{
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
 

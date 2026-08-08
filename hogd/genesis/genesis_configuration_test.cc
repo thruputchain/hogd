@@ -14,6 +14,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/test_main.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
 #include "types.hh"
 
@@ -249,6 +250,51 @@ TEST_F(GenesisBlockTest, MultipleEntries)
   EXPECT_NE(keys[0], keys[1]);
   EXPECT_EQ(get_initial_balance(),
             GenesisConfigurationLoader::initial_hog_token_supply() - 300);
+}
+
+TEST(GenesisConfigurationTest, BuilderDefaultsToNativeDefaultWallet)
+{
+  GenesisConfigurationBuilder builder;
+  GenesisConfiguration config =
+      builder.build_or_panic(StorageCostModel::default_cost_model());
+
+  DeployedContractHash expected =
+      GenesisConfigurationLoader::native_default_wallet_hash();
+  EXPECT_EQ(config.default_wallet.hash, expected.hash);
+  EXPECT_EQ(config.default_wallet.contract_size, expected.contract_size);
+  EXPECT_EQ(config.default_wallet.contract_type, expected.contract_type);
+  EXPECT_NE(config.default_wallet.hash, SHA256Hash{});
+  EXPECT_EQ(config.default_wallet.contract_type, ContractType::kNative);
+  EXPECT_EQ(config.default_wallet.contract_size, 0U);
+}
+
+TEST(GenesisConfigurationTest, BuilderHonorsDefaultWalletOverride)
+{
+  DeployedContractHash custom{};
+  custom.hash.fill(0xAB);
+  custom.contract_size = 7;
+  custom.contract_type = ContractType::kWasmi;
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(custom);
+  GenesisConfiguration config =
+      builder.build_or_panic(StorageCostModel::default_cost_model());
+
+  EXPECT_EQ(config.default_wallet.hash, custom.hash);
+  EXPECT_EQ(config.default_wallet.contract_size, 7U);
+  EXPECT_EQ(config.default_wallet.contract_type, ContractType::kWasmi);
+}
+
+TEST(GenesisConfigurationTest, NativeDefaultWalletHashMatchesGenesisRecord)
+{
+  // Must equal the sha256 of the exact contract record genesis writes for
+  // the wallet (load_genesis_configuration's final write_contract).
+  Contract record{};
+  record.contract_type(ContractType::kNative);
+  record.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  EXPECT_EQ(GenesisConfigurationLoader::native_default_wallet_hash().hash,
+            sha256(record));
 }
 
 } // namespace hogd

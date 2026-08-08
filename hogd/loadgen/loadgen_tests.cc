@@ -39,8 +39,10 @@ public:
 TEST_F(LoadgenTests, EmptyGenesisConfiguration)
 {
   auto cost_model = StorageCostModel::default_cost_model();
-  run_genesis_initialization(
-      GenesisConfiguration{.storage_cost_model = cost_model.to_xdr()});
+  run_genesis_initialization(GenesisConfiguration{
+      .storage_cost_model = cost_model.to_xdr(),
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()});
 
   auto bal = lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
       GenesisConfigurationLoader::kDeployContractAddress));
@@ -63,8 +65,10 @@ TEST_F(LoadgenTests, EmptyGenesisConfiguration)
 TEST_F(LoadgenTests, OneInitialConfig)
 {
   auto cost_model = StorageCostModel::default_cost_model();
-  GenesisConfiguration genesis_configuration{.storage_cost_model =
-                                                 cost_model.to_xdr()};
+  GenesisConfiguration genesis_configuration{
+      .storage_cost_model = cost_model.to_xdr(),
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()};
   genesis_configuration.initial_config.emplace_back(InitialConfigurationEntry{
       .config = PresetDeploymentConfig{.initial_nonce = sha256(Bytestring{}),
                                        .contract_hash = sha256(Bytestring{}),

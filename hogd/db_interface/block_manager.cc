@@ -216,6 +216,8 @@ BlockManager::initialize_genesis_configuration(
   }
   initialized_genesis_ = true;
 
+  default_wallet_.emplace(config.default_wallet);
+
   cost_model_.emplace(config.storage_cost_model);
 
   GenesisConfigurationLoader loader(config);

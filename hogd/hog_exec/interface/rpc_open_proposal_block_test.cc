@@ -15,6 +15,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -53,8 +54,11 @@ public:
 
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
+    GenesisConfiguration genesis_configuration{
+        .default_wallet =
+            GenesisConfigurationLoader::native_default_wallet_hash()};
     auto db_res =
-        db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
+        db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
         << "Failed to load genesis configuration";

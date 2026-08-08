@@ -322,6 +322,8 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     co_return DbSchedResult::DbSchedResultError;
   }
 
+  ctx_.set_default_wallet(genesis_configuration.default_wallet);
+
   ctx_.initialize_cost_model(
       StorageCostModel(genesis_configuration.storage_cost_model));
   {

@@ -31,6 +31,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/db_interface/db_sched_server.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/block_id_manager.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -719,6 +720,8 @@ private:
       GenesisConfiguration genesis_configuration{
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
+          .default_wallet =
+              GenesisConfigurationLoader::native_default_wallet_hash(),
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;
