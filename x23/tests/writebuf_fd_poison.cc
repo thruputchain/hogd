@@ -87,8 +87,8 @@ main() // NOLINT(bugprone-exception-escape)
   set_nonblock(peer);
 
   int sndbuf = 4096;
-  if (setsockopt(server.get(), SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) ==
-      -1)
+  if (setsockopt(server.get(), SOL_SOCKET, SO_SNDBUF, &sndbuf,
+                 sizeof(sndbuf)) == -1)
     Errno{}.raise("setsockopt(SO_SNDBUF)");
 
   fill_send_buffer(server);
