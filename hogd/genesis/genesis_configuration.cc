@@ -68,6 +68,13 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
 }
 } // namespace
 
+DeployedContractHash
+GenesisConfigurationLoader::native_default_wallet_hash()
+{
+  return make_deployed_contract_hash(make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
+}
+
 GenesisConfigurationLoader::GenesisConfigurationLoader(
     GenesisConfiguration genesis_configuration)
   : genesis_configuration_(std::move(genesis_configuration))
@@ -269,6 +276,8 @@ GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
   }
 
   genesis_configuration.storage_cost_model = cost_model.to_xdr();
+  genesis_configuration.default_wallet = default_wallet_override_.value_or(
+      GenesisConfigurationLoader::native_default_wallet_hash());
   return genesis_configuration;
 }
 

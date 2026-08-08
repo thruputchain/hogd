@@ -56,6 +56,13 @@ public:
   // These could be, but are not required to be, all run in the first block.
   std::vector<SignedTransaction> make_unfurl_genesis_transactions() const;
 
+  // Override GenesisConfiguration::default_wallet (defaults to
+  // native_default_wallet_hash()).
+  void set_default_wallet(DeployedContractHash const &default_wallet)
+  {
+    default_wallet_override_ = default_wallet;
+  }
+
 private:
   struct Entry {
     PresetDeploymentConfig config;
@@ -65,6 +72,7 @@ private:
 
   std::vector<Entry> entries_;
   int128_t allocated_hogs_ = 0;
+  std::optional<DeployedContractHash> default_wallet_override_;
 };
 
 class GenesisConfigurationLoader {
@@ -108,6 +116,11 @@ public:
                              SHA256Hash const &nonce);
 
   static int128_t initial_hog_token_supply();
+
+  // DeployedContractHash of the native default_wallet precompile's contract
+  // record — the record load_genesis_configuration writes unconditionally.
+  // Canonical default for GenesisConfiguration::default_wallet.
+  static DeployedContractHash native_default_wallet_hash();
 
 private:
   GenesisConfiguration genesis_configuration_;
