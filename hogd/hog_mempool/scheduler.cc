@@ -282,6 +282,18 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 
     const HogAge &age = res.hog_age();
     CHECK_EQ(age.address, accounts[i]);
+    if (!hog_age_groups_have_valid_total(age)) {
+      // A malformed or impersonated DB scheduler peer can return group totals
+      // that violate the scheduler arithmetic invariants (e.g. an
+      // already-scheduled bucket at UINT128_MAX). Caching such a value would
+      // let a later nomination-scheduling pass abort the process on a fatal
+      // overflow CHECK, so we treat the record as a missing account instead.
+      info("read_average_hog_ages returned invalid hog age totals for "
+           "address {}",
+           show_byte_array(accounts[i]));
+      ret.missing.insert(accounts[i]);
+      continue;
+    }
     ret.found.insert(age.address);
     auto [account_state, lock] = accounts_[age.address];
     account_state.hog_age = age;

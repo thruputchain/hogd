@@ -897,4 +897,41 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
   }
 }
 
+// A malicious or impersonated DB scheduler peer can return a HogAge whose group
+// totals violate the scheduler arithmetic invariants (here, an already-scheduled
+// bucket at UINT128_MAX). Such a record must be treated as a missing account
+// rather than cached; otherwise a later nomination-scheduling pass aborts the
+// process on the overflow CHECK in try_move_hogs_to_already_scheduled_group().
+// See issue #3221.
+TEST(Scheduler, MalformedHogAgeFromDbIsTreatedAsMissingAccount)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/gas_limit);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/std::numeric_limits<uint128_t>::max());
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // The malformed age is rejected, so the tx is dropped and nothing is cached
+  // or enqueued.
+  scheduler->add_txs({txs[0]})();
+  EXPECT_EQ(scheduler->size(), 0UL);
+
+  // Nomination scheduling must complete without aborting the process and
+  // schedule nothing.
+  scheduler->start_pending_nomination(/*block_id=*/1);
+  x23::XdrVec<SignedTransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_TRUE(scheduled.empty());
+}
+
 } // namespace hogd
