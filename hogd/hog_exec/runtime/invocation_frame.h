@@ -304,9 +304,16 @@ public:
 
   // It MUST be the case that the owned_auth_token_ids are owned by the parent
   // frame. Caller is responsible for checking as much.
-  void start_frame(ContractAddress const &address, Calldata &&calldata,
-                   InvokeFlagSet flags,
-                   std::span<uint32_t const> owned_auth_token_ids);
+  //
+  // Admitting a child frame runs throwing STL allocations. On allocation
+  // failure the call is a clean no-op — any parent state touched is rolled
+  // back — and an Unrecoverable SystemError is returned, so the noexcept caller
+  // (SystemCallHandler::start_frame) never lets the exception terminate the
+  // executor (#3058).
+  [[nodiscard]] SystemStatus<void>
+  start_frame(ContractAddress const &address, Calldata &&calldata,
+              InvokeFlagSet flags,
+              std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode

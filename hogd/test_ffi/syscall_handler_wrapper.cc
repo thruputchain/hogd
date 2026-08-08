@@ -291,6 +291,17 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
 
   auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags,
                                                    std::span<uint32_t const>{});
+  if (!stashed_parent_trace.has_value()) {
+    // Child frame admission failed under memory pressure. start_frame() rolled
+    // back, so the handler has no new frame; skip publishing the mock-runtime
+    // and trace bookkeeping (which would otherwise leave an active frame with
+    // no backing mock runtime, #2507) and surface an unrecoverable FFI error
+    // (#3058). The reserved capacity and unreleased mock_runtime above are
+    // harmless.
+    error("unrecoverable: frame admission allocation failed in "
+          "start_mock_invocation_frame");
+    return kTestFFIErrorCodeUnrecoverableError;
+  }
   // Push exactly one slot per mock frame so this stack stays in lockstep with
   // the handler's invocation-frame depth, and finish_mock_invocation_frame()
   // restores only the trace the finishing frame actually stashed. The slot may
@@ -303,7 +314,8 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // gas_remaining_at_end guard in finish_syscall_trace() (#2948). The null
   // placeholder is harmless — finish_frame() already tolerates a null stashed
   // parent trace.
-  invocation_frame_trace_stack_.push_back(std::move(stashed_parent_trace));
+  invocation_frame_trace_stack_.push_back(
+      std::move(stashed_parent_trace).value());
 
   // Capacity was reserved above, so this push_back cannot reallocate or throw.
   push_mock_runtime(mock_runtime.release());

@@ -842,8 +842,22 @@ SystemCallHandler::invoke(ContractAddress const &address,
                            .gas_limit = gas_limit,
                            .calldata = std::move(calldata)};
 
-  auto stashed_parent_trace =
-      start_frame(invocation, flags, owned_auth_token_ids);
+  // Move (never copy) the Invocation into start_frame: copying its Calldata
+  // allocates, and the argument is constructed here in invoke() -- reachable
+  // from the noexcept syscall_Invoke_inner() -- before start_frame()'s
+  // protected body runs, so a copy could throw std::bad_alloc across that
+  // noexcept boundary and terminate the executor. The move is allocation-free
+  // and invocation is unused afterward (#3058).
+  auto start_status =
+      start_frame(std::move(invocation), flags, owned_auth_token_ids);
+  if (!start_status.has_value()) {
+    // Child frame admission failed under memory pressure. start_frame() rolled
+    // back the invocation stack, so no child frame is present and
+    // finish_frame() must be skipped; surface the unrecoverable error (issue
+    // #3058).
+    return {start_status.error(), 0};
+  }
+  auto stashed_parent_trace = std::move(start_status.value());
 
   InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
 
@@ -877,7 +891,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
   return {status_code, gas_consumed};
 }
 
-std::unique_ptr<InvocationFrameTrace>
+SystemStatus<std::unique_ptr<InvocationFrameTrace>>
 SystemCallHandler::start_frame(
     Invocation invocation, InvokeFlagSet flags,
     std::span<uint32_t const> owned_auth_token_ids) noexcept
@@ -908,9 +922,23 @@ SystemCallHandler::start_frame(
     warn("dropping invocation frame trace after setup failure: {}", e.what());
     invocation_frame_trace_ = nullptr;
   }
-  invocation_frame_stack_.start_frame(invocation.invoked_address,
-                                      std::move(invocation.calldata), flags,
-                                      owned_auth_token_ids);
+  // Frame admission mutates the invocation frame stack and parent auth-token
+  // ownership through throwing STL allocations. Unlike the best-effort trace
+  // setup above, a failure here must not cross this noexcept boundary and
+  // terminate the executor (#3058). InvocationFrameStack::start_frame() is
+  // transactional: on failure it restores the state it touched and returns an
+  // error. Put the parent's stashed trace back so the surviving parent frame
+  // keeps its diagnostics, and report the failure as an unrecoverable error.
+  auto admitted =
+      invocation_frame_stack_.start_frame(invocation.invoked_address,
+                                          std::move(invocation.calldata), flags,
+                                          owned_auth_token_ids);
+  if (!admitted.has_value()) {
+    if (stashed_parent_trace) {
+      invocation_frame_trace_ = std::move(stashed_parent_trace);
+    }
+    return admitted.error();
+  }
   return stashed_parent_trace;
 }
 

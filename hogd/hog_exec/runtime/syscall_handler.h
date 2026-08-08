@@ -114,9 +114,11 @@ public:
   // These should ONLY be used within the testing framework
   // and from the SDK FFI bindings
   //
-  // Returns the parent trace, if any, which should be stashed and restored in
-  // finish_frame
-  std::unique_ptr<InvocationFrameTrace>
+  // On success returns the parent trace, if any, which should be stashed and
+  // restored in finish_frame. Returns an Unrecoverable SystemError if child
+  // frame admission fails under memory pressure; no child frame is pushed in
+  // that case, so finish_frame must not be called (#3058).
+  [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
               std::span<uint32_t const> owned_auth_token_ids) noexcept;
   SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
