@@ -532,5 +532,63 @@ TEST_F(DefaultWalletFallbackTest, WalletHashNotDeployable)
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
 }
 
+// Configurability suite: genesis carries a default_wallet pointing at the
+// echo wasm contract instead of the native wallet; a root invocation of an
+// UNDEPLOYED address must resolve to the configured contract. (With the
+// native wallet this same transaction would abort in the auth guard; the
+// echo contract just returns its payload.)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class CustomDefaultWalletTest : public ::testing::Test,
+                                public NativeContractTestFramework {
+public:
+  CustomDefaultWalletTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDb, /*empty_genesis=*/false)
+  {}
+};
+
+TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
+{
+  auto echo_obj = echo_meta::load_wasm();
+  ASSERT_TRUE(echo_obj);
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(
+      NativeContractTestFramework::make_deployed_contract_hash(echo_obj));
+  run_genesis_initialization(builder.build_or_panic(*get_default_cost_model()),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+
+  // The configured contract's code record must exist in the store; genesis
+  // only writes the native precompile records.
+  write_contract(echo_obj);
+
+  auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  MultiplexedContext ctx(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kWasmi, {wasm_ctx.release(), true}},
+      });
+
+  ContractAddress kUndeployed = make_contract_address(77);
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(8, 0xAB);
+
+  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(kUndeployed);
+  SignedTransaction stx;
+  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.uniquifier = make_new_uniquifier();
+
+  auto handler = make_new_system_call_handler(stx, ctx);
+  auto res = handler.root_invoke();
+  EXPECT_TRUE(res.is_root_success());
+
+  auto frame_output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(frame_output.status_code(), InvocationFrameStatusCode::Return);
+  auto const &buf = frame_output.return_buffer();
+  // The echoed payload (8 x 0xAB) must appear in the return buffer.
+  EXPECT_NE(std::search(buf.begin(), buf.end(), payload.begin(), payload.end()),
+            buf.end());
+}
+
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
