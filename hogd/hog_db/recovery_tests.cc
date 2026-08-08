@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "consensus.hh"
+#include "contract.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"

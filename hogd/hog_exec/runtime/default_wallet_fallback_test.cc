@@ -19,6 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/library_exception.hh"
