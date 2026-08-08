@@ -68,7 +68,16 @@ WriteBuffer::Service::worker(Service self, BufVec work)
   for (;;) {
     while (!work.empty()) {
       if (self.tok_)
-        co_await self.cp_->write_wait(self.tok_);
+        // If write_wait returns an error (e.g. EBADF after the fd was
+        // poisoned or reset), stop; otherwise a delayed write could
+        // land on a later connection that recycles the same integer fd.
+        // Release the service lock first: on co_return the frame drops
+        // wbref (possibly freeing the WriteBuffer, and with it the lock)
+        // before ~self runs, so the lock must not be held here.
+        if (co_await self.cp_->write_wait(self.tok_)) {
+          self.lk_.unlock();
+          co_return;
+        }
       if (self.write(work))
         co_return;
     }
