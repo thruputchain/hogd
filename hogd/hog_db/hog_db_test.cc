@@ -659,6 +659,44 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+// A deployment to a fresh, unfunded address fails balance reconciliation
+// because the address has no snapshot balance and the deployment storage cost
+// is a negative delta. ConcurrentMap has no per-key reclamation, so if the
+// balance lock were inserted before that guard ran, each failed attempt would
+// retain a bucket for the block's lifetime -- letting a contract grow
+// addr_balance_locks_ without bound by deploying to endless fresh addresses
+// (#3235). The rejection must therefore happen before any bucket is allocated.
+TEST_F(HogDbTest, FailedFreshDeploymentBalanceLockRetainsNoBucket)
+{
+  constexpr size_t kAttempts = 8;
+  DeployedContractHash deployed_hash{.hash = sha256(
+                                         std::as_bytes(std::span("deploy"))),
+                                     .contract_size = 64};
+  ASSERT_GT(cost_model_.get_deployment_cost(deployed_hash), 0);
+
+  BlockHeight height = 1;
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, height,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  for (size_t i = 0; i < kAttempts; ++i) {
+    int depth = invoke_tx.create_savepoint();
+    Address fresh_addr = make_address(kAddress + 1'000 + i);
+
+    ASSERT_TRUE(invoke_tx.request_deploy_contract(fresh_addr, deployed_hash));
+
+    auto sync_result = invoke_tx.sync_balance_locks();
+    ASSERT_FALSE(sync_result.has_value());
+    EXPECT_EQ(HogDbCode::kConflict, sync_result.error().code());
+
+    invoke_tx.rollback_to_savepoint(depth - 1);
+  }
+
+  EXPECT_EQ(0, block_tx.get().count_address_balance_locks_for_testing());
+}
+
 TEST_F(HogDbTest, ItemChangeReplayCache)
 {
   BlockHeight height = 9;

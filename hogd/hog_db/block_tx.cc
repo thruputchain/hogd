@@ -114,14 +114,37 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
     return s ? HogDbError(HogDbCode::kInvalidExecutorBehavior) : s.error();
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-
-    auto *lock = addr_balance_locks_.insert_or_get(key.get_address(), [&] {
-      return get_snapshot_cost_and_cache_data(
-          make_address_balance_item_key(key.get_address()));
-    });
-
+    const Address &addr = key.get_address();
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     ctx.conflict_reason = conflict_reason;
+
+    auto *lock = addr_balance_locks_.get(addr);
+    if (lock == nullptr) [[unlikely]] {
+      // First touch of this balance in the block. ConcurrentMap has no per-key
+      // reclamation, so a lock inserted here survives until block teardown even
+      // when the change is rejected. BalanceLock's fresh-balance guard rejects
+      // a no-snapshot address whose delta cannot cover the balance item's own
+      // storage cost; that guard depends only on the snapshot and the requested
+      // delta -- not on any concurrent reservation -- so evaluate it here and
+      // reject *before* allocating a bucket. Otherwise a contract could deploy
+      // to endless fresh addresses, each failing balance reconciliation and
+      // retaining a bucket, growing addr_balance_locks_ without bound (#3235).
+      auto snapshot =
+          get_snapshot_cost_and_cache_data(make_address_balance_item_key(addr));
+      if (!snapshot) [[unlikely]] {
+        return snapshot.error();
+      }
+      assert(snapshot->second.is_cached_balance());
+      auto after = change.to_balance();
+      if (after.has_value() &&
+          !snapshot->second.get_cached_balance().has_value() &&
+          after->delta() <
+              BalanceLock::get_storage_cost_of_committed_value(&cost_model_)) {
+        return ctx.conflict(DbConflictCode::kDbConflictBoundsExceeded);
+      }
+      lock = addr_balance_locks_.insert_or_get(addr, *snapshot);
+    }
+
     return do_lock(*lock, change, ctx)
         .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
   }

@@ -95,6 +95,16 @@ public:
   // Do not use in production code — the db hash is required for consensus.
   HogDbStatus<void> close_skip_hash_for_testing();
 
+  // Test only: number of retained address-balance lock buckets. Used to assert
+  // that rejected fresh-address balance locks do not retain buckets (#3235).
+  size_t count_address_balance_locks_for_testing()
+  {
+    std::atomic<size_t> count = 0;
+    addr_balance_locks_.for_each_parallel(
+        [&count](auto /*unused*/) { count.fetch_add(1); });
+    return count.load();
+  }
+
 private:
   HogDbStatus<std::pair<int128_t, ItemLockCacheData>>
   get_snapshot_cost_and_cache_data(const ItemKey &key);
