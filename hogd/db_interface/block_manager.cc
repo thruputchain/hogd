@@ -219,6 +219,9 @@ BlockManager::initialize_genesis_configuration(
 
   if (config.default_wallet.hash == SHA256Hash{}) {
     error("genesis configuration has a zero default_wallet contract hash");
+    // Intentional one-shot semantics: initialized_genesis_ stays set so the
+    // flag cannot be reset and this path retried. A zero default_wallet is a
+    // test-configuration bug that should fail the test loudly, not be retried.
     return false;
   }
   default_wallet_.emplace(config.default_wallet);
