@@ -20,6 +20,46 @@ namespace x23 {
 
 using std::source_location;
 
+// Work around GCC bug #104177: coroutine frames are allocated via
+// default operator new (16-byte aligned on x86-64) but may contain
+// locals with stricter alignment (e.g., alignas(64)).  GCC never
+// calls the aligned overload (size_t, align_val_t) — that IS the
+// bug — so we override the unaligned overload to always return
+// cache-line-aligned memory.  This doesn't help alignas(N) for
+// N > hardware_destructive_interference_size, but nothing in
+// practice needs that.  On ARM the bug is latent (misaligned
+// accesses don't fault) but this avoids the perf penalty too.
+//
+// Alignment is done by hand over the plain (unaligned) allocator
+// rather than via ::operator new(size, align_val_t): the aligned
+// overload takes glibc's memalign path, which is both slower than
+// plain malloc's tcache path and far more volatile across glibc
+// releases (2.44 regressed it ~17% for coroutine-frame-sized
+// alloc/free patterns).  The pointer returned by the underlying
+// allocation is stashed in the word just below the aligned block.
+//
+// Shared by both the trace-enabled and trace-disabled PromiseBase
+// definitions below so every build configuration gets the same
+// allocator.
+struct FramePromiseAlloc {
+  static constexpr std::size_t kFrameAlign =
+      hardware_destructive_interference_size;
+  void *operator new(std::size_t size)
+  {
+    void *base = ::operator new(size + kFrameAlign);
+    void *p = static_cast<char *>(base) + sizeof(void *);
+    std::size_t space = size + kFrameAlign - sizeof(void *);
+    p = std::align(kFrameAlign, size, p, space);
+    assert(p);
+    static_cast<void **>(p)[-1] = base;
+    return p;
+  }
+  void operator delete(void *ptr, std::size_t size)
+  {
+    ::operator delete(static_cast<void **>(ptr)[-1], size + kFrameAlign);
+  }
+};
+
 #if X23_CORO_TRACE
 
 #define X23_IFTRACE(...) __VA_ARGS__
@@ -38,44 +78,10 @@ using std::source_location;
 #define SLOC_VAR sloc
 #define SLOC_COMMA_VAR , SLOC_VAR
 
-struct PromiseBase {
+struct PromiseBase : FramePromiseAlloc {
   source_location creation_{};
   source_location suspension_{};
   PromiseBase *waiter_{}; // non-NULL if another coro is co_awaiting us
-
-  // Work around GCC bug #104177: coroutine frames are allocated via
-  // default operator new (16-byte aligned on x86-64) but may contain
-  // locals with stricter alignment (e.g., alignas(64)).  GCC never
-  // calls the aligned overload (size_t, align_val_t) — that IS the
-  // bug — so we override the unaligned overload to always return
-  // cache-line-aligned memory.  This doesn't help alignas(N) for
-  // N > hardware_destructive_interference_size, but nothing in
-  // practice needs that.  On ARM the bug is latent (misaligned
-  // accesses don't fault) but this avoids the perf penalty too.
-  //
-  // Alignment is done by hand over the plain (unaligned) allocator
-  // rather than via ::operator new(size, align_val_t): the aligned
-  // overload takes glibc's memalign path, which is both slower than
-  // plain malloc's tcache path and far more volatile across glibc
-  // releases (2.44 regressed it ~17% for coroutine-frame-sized
-  // alloc/free patterns).  The pointer returned by the underlying
-  // allocation is stashed in the word just below the aligned block.
-  static constexpr std::size_t kFrameAlign =
-      hardware_destructive_interference_size;
-  void *operator new(std::size_t size)
-  {
-    void *base = ::operator new(size + kFrameAlign);
-    void *p = static_cast<char *>(base) + sizeof(void *);
-    std::size_t space = size + kFrameAlign - sizeof(void *);
-    p = std::align(kFrameAlign, size, p, space);
-    assert(p);
-    static_cast<void **>(p)[-1] = base;
-    return p;
-  }
-  void operator delete(void *ptr, std::size_t size)
-  {
-    ::operator delete(static_cast<void **>(ptr)[-1], size + kFrameAlign);
-  }
 
   PromiseBase(source_location sloc) noexcept
     : creation_(sloc), suspension_(creation_)
@@ -146,19 +152,7 @@ private:
 #define SLOC_VAR
 #define SLOC_COMMA_VAR
 
-struct PromiseBase {
-  // Work around GCC bug #104177 (see trace-enabled PromiseBase above).
-  static constexpr std::align_val_t kFrameAlign{
-      hardware_destructive_interference_size};
-  void *operator new(std::size_t size)
-  {
-    return ::operator new(size, kFrameAlign);
-  }
-  void operator delete(void *ptr, std::size_t size)
-  {
-    ::operator delete(ptr, size, kFrameAlign);
-  }
-
+struct PromiseBase : FramePromiseAlloc {
   PromiseBase() noexcept = default;
   PromiseBase(source_location) noexcept {}
   PromiseBase *waiter() const noexcept { return nullptr; }
