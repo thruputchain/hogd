@@ -244,6 +244,98 @@ ci_wait_port_hosts() {
   return "$status"
 }
 
+# How long a port may keep answering after the stale-process kill before the
+# host is called still busy. A listening socket goes away with its process, so
+# this is slack for a process that is on its way out, not a retry budget.
+CI_PORT_FREE_WAIT_SEC=${CI_PORT_FREE_WAIT_SEC:-15}
+# How many listening sockets [ci_report_port_holders] prints per host.
+CI_PORT_HOLDER_REPORT_LINES=${CI_PORT_HOLDER_REPORT_LINES:-40}
+
+# Is anything listening on this address? The same probe [ci_wait_port] waits on,
+# which is the point: a port that answers here is a port that would satisfy a
+# readiness wait.
+ci_port_in_use() {
+  nc -z "$1" "$2" 2>/dev/null
+}
+
+# Best effort: names what is holding the ports, so the report says which stale
+# process to chase rather than only that the host is busy. A host that cannot be
+# asked must not replace the failure being reported with a failure of its own.
+ci_report_port_holders() {
+  local host=$1
+  local alternation listeners
+  shift
+
+  printf -v alternation '%s|' "$@"
+  alternation=${alternation%|}
+
+  echo "===== listening sockets on $host holding $* ====="
+  # [ss] names the process only for sockets the caller may see, so a port held
+  # by another account matches on the address alone. Both outcomes say more than
+  # silence, and neither is worth failing over.
+  if ! listeners=$(ci_remote_run "$host" \
+    "ss -lntp 2>/dev/null | grep -E ':($alternation)\b' |
+       head -n $CI_PORT_HOLDER_REPORT_LINES"); then
+    echo "(could not ask $host what is listening)"
+  elif [ -z "$listeners" ]; then
+    echo "(nothing found; the port may be held by a process ss did not show)"
+  else
+    printf '%s\n' "$listeners"
+  fi
+  echo "===== end of listening sockets on $host ====="
+}
+
+# Requires that every port a suite is about to bind on one host is free, and
+# names the ones that are not.
+#
+# A readiness wait is satisfied by whatever answers on the port, including a
+# process this run did not start. When the previous suite's processes are still
+# up, this run's binaries die on "bind(<ip>:<port>): Address already in use"
+# while the stale ones keep answering, so every readiness wait for a port they
+# hold passes. The run then fails a readiness timeout later, on the first port
+# nothing happened to be holding -- a port and a host that have nothing to do
+# with the machine that is actually busy.
+#
+# Checking before anything launches turns that into the true statement, at the
+# moment it becomes true, about the port that is actually taken. $1 is the host
+# to ask what is listening, $2 the address the suite binds on it (they differ:
+# services bind the benchmark network, ssh reaches the host by name), and the
+# rest are its ports.
+ci_require_ports_free() {
+  local host=$1
+  local ip=$2
+  local port waited=0
+  local -a pending busy
+  shift 2
+
+  pending=("$@")
+  while :; do
+    busy=()
+    for port in ${pending[@]+"${pending[@]}"}; do
+      if ci_port_in_use "$ip" "$port"; then
+        busy+=("$port")
+      fi
+    done
+    if [ "${#busy[@]}" -eq 0 ]; then
+      return 0
+    fi
+    # One deadline for the host, not one per port: a suite binds dozens of them
+    # and waiting out each in turn would be minutes of nothing happening.
+    if [ "$waited" -ge "$CI_PORT_FREE_WAIT_SEC" ]; then
+      break
+    fi
+    pending=("${busy[@]}")
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  for port in "${busy[@]}"; do
+    echo "preflight: $ip:$port is in use before this run launched anything" >&2
+  done
+  ci_report_port_holders "$host" "${busy[@]}"
+  return 1
+}
+
 ci_remote_run() {
   local host=$1
   shift

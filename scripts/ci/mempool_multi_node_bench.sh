@@ -27,6 +27,7 @@ HOG_EXEC_SLOT_A_PORT=8040
 HOG_EXEC_SLOT_B_PORT=8041
 HOG_EXEC_SLOT_A_HTTP_PORT=8042
 HOG_EXEC_SLOT_B_HTTP_PORT=8043
+CHUCKD_IN_PORT=7888
 
 ALL_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 NODE_IDS=(0 1)
@@ -300,6 +301,96 @@ kill_stale_processes() {
   ci_remote_killall_hosts "loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
+# Every port this suite binds, as "<host> <port>", split into the loadgen
+# servers -- launched and waited on first -- and everything launched after them.
+# [require_bench_ports_free] requires the whole set free before anything
+# launches and the readiness waits require each entry listening afterwards, from
+# this one table: a port missing from it is a port whose readiness is never
+# checked, and a port missing from the preflight is one this suite can silently
+# inherit from the previous run instead of binding itself.
+declare -a LOADGEN_PORT_TARGETS=()
+declare -a SERVICE_PORT_TARGETS=()
+
+build_port_targets() {
+  local node
+
+  for node in "${NODE_IDS[@]}"; do
+    LOADGEN_PORT_TARGETS+=("${LOADGEN_HOSTS[$node]} $LOADGEN_PORT")
+    LOADGEN_PORT_TARGETS+=("${LOADGEN_HOSTS[$node]} $LOADGEN_HTTP_PORT")
+  done
+
+  for node in "${NODE_IDS[@]}"; do
+    SERVICE_PORT_TARGETS+=("${HOG_EXEC_HOSTS[$node]} $HOG_EXEC_SLOT_A_PORT")
+    SERVICE_PORT_TARGETS+=("${HOG_EXEC_HOSTS[$node]} $HOG_EXEC_SLOT_B_PORT")
+    SERVICE_PORT_TARGETS+=("${HOG_EXEC_HOSTS[$node]} $HOG_EXEC_SLOT_A_HTTP_PORT")
+    SERVICE_PORT_TARGETS+=("${HOG_EXEC_HOSTS[$node]} $HOG_EXEC_SLOT_B_HTTP_PORT")
+
+    SERVICE_PORT_TARGETS+=("${EVENT_HOSTS[$node]} $EVENT_EXECUTOR_PORT")
+    SERVICE_PORT_TARGETS+=("${EVENT_HOSTS[$node]} $EVENT_MEMPOOL_PORT")
+    SERVICE_PORT_TARGETS+=("${EVENT_HOSTS[$node]} $EVENT_INDEXER_PORT")
+    SERVICE_PORT_TARGETS+=("${EVENT_HOSTS[$node]} $EVENT_HTTP_PORT")
+
+    SERVICE_PORT_TARGETS+=("${INDEXER_HOSTS[$node]} $INDEXER_EVENT_PORT")
+    SERVICE_PORT_TARGETS+=("${INDEXER_HOSTS[$node]} $INDEXER_BLOCK_EXPLORER_PORT")
+    SERVICE_PORT_TARGETS+=("${INDEXER_HOSTS[$node]} $INDEXER_HTTP_PORT")
+
+    SERVICE_PORT_TARGETS+=("${MEMPOOL_HOSTS[$node]} $MEMPOOL_DB_PORT")
+    SERVICE_PORT_TARGETS+=("${MEMPOOL_HOSTS[$node]} $MEMPOOL_EVENT_PORT")
+    SERVICE_PORT_TARGETS+=("${MEMPOOL_HOSTS[$node]} $MEMPOOL_EXECUTOR_PORT")
+    SERVICE_PORT_TARGETS+=("${MEMPOOL_HOSTS[$node]} $MEMPOOL_AUTH_PORT")
+    SERVICE_PORT_TARGETS+=("${MEMPOOL_HOSTS[$node]} $MEMPOOL_COORDINATOR_PORT")
+    SERVICE_PORT_TARGETS+=("${MEMPOOL_HOSTS[$node]} $MEMPOOL_HTTP_PORT")
+
+    SERVICE_PORT_TARGETS+=("${HOG_DB_HOSTS[$node]} $DB_EXECUTOR_PORT")
+    SERVICE_PORT_TARGETS+=("${HOG_DB_HOSTS[$node]} $DB_MEMPOOL_PORT")
+    SERVICE_PORT_TARGETS+=("${HOG_DB_HOSTS[$node]} $DB_AUTH_PORT")
+    SERVICE_PORT_TARGETS+=("${HOG_DB_HOSTS[$node]} $DB_HTTP_PORT")
+
+    SERVICE_PORT_TARGETS+=("${AUTH_HOSTS[$node]} $AUTH_DB_PORT")
+    SERVICE_PORT_TARGETS+=("${AUTH_HOSTS[$node]} $AUTH_MEMPOOL_PORT")
+    SERVICE_PORT_TARGETS+=("${AUTH_HOSTS[$node]} $AUTH_HTTP_PORT")
+
+    SERVICE_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $CHUCKD_IN_PORT")
+  done
+}
+
+wait_for_port_targets() {
+  local target host port
+
+  for target in "$@"; do
+    read -r host port <<<"$target"
+    "$WAIT_PORT" "$(hog_ip "$host")" "$port"
+  done
+}
+
+# Refuses to launch onto ports the last suite is still holding. The kill above
+# only asks the stale processes to leave; one that has not gone yet keeps its
+# listening socket, this suite's binary dies on "Address already in use", and
+# the stale process answers the readiness wait in its place. Say so here, naming
+# the host and port that are actually busy, rather than ten minutes later in a
+# readiness timeout for whichever port nothing happened to be holding.
+require_bench_ports_free() {
+  local target host port status=0
+  local -A ports_by_host=()
+
+  for target in "${LOADGEN_PORT_TARGETS[@]}" "${SERVICE_PORT_TARGETS[@]}"; do
+    read -r host port <<<"$target"
+    ports_by_host[$host]+=" $port"
+  done
+
+  # [ALL_HOSTS] order rather than the hash order, so a run that has to be
+  # compared against another run reports its hosts the same way twice.
+  for host in "${ALL_HOSTS[@]}"; do
+    [[ -n ${ports_by_host[$host]:-} ]] || continue
+    # Unquoted: the accumulated ports are one argument per port.
+    # shellcheck disable=SC2086
+    ci_require_ports_free "$host" "$(hog_ip "$host")" ${ports_by_host[$host]} ||
+      status=1
+  done
+
+  return "$status"
+}
+
 cleanup() {
   local exit_code=$1
   ci_enter_cleanup
@@ -328,6 +419,13 @@ done
 echo 'kill stale processes'
 kill_stale_processes
 
+echo 'check the ports this suite binds are free'
+build_port_targets
+if ! require_bench_ports_free; then
+  echo "preflight: the previous suite is still holding ports this one binds" >&2
+  exit 1
+fi
+
 echo 'clear benchmark work dirs'
 for node in "${NODE_IDS[@]}"; do
   for host in ${NODE_HOST_GROUPS[$node]}; do
@@ -342,10 +440,7 @@ for node in "${NODE_IDS[@]}"; do
 done
 
 echo 'wait for loadgen servers'
-for node in "${NODE_IDS[@]}"; do
-  "$WAIT_PORT" "$(hog_ip "${LOADGEN_HOSTS[$node]}")" "$LOADGEN_PORT"
-  "$WAIT_PORT" "$(hog_ip "${LOADGEN_HOSTS[$node]}")" "$LOADGEN_HTTP_PORT"
-done
+wait_for_port_targets "${LOADGEN_PORT_TARGETS[@]}"
 
 echo 'launch hog-exec shards'
 for node in "${NODE_IDS[@]}"; do
@@ -383,7 +478,7 @@ echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
-    --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
+    --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":"$CHUCKD_IN_PORT" --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
     --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
@@ -472,45 +567,7 @@ node0_mempool_pid=$!
 node1_mempool_pid=$!
 
 echo 'wait for process readiness'
-for node in "${NODE_IDS[@]}"; do
-  hog_exec_ip="$(hog_ip "${HOG_EXEC_HOSTS[$node]}")"
-  "$WAIT_PORT" "$hog_exec_ip" "$HOG_EXEC_SLOT_A_PORT"
-  "$WAIT_PORT" "$hog_exec_ip" "$HOG_EXEC_SLOT_B_PORT"
-  "$WAIT_PORT" "$hog_exec_ip" "$HOG_EXEC_SLOT_A_HTTP_PORT"
-  "$WAIT_PORT" "$hog_exec_ip" "$HOG_EXEC_SLOT_B_HTTP_PORT"
-
-  event_ip="$(hog_ip "${EVENT_HOSTS[$node]}")"
-  "$WAIT_PORT" "$event_ip" "$EVENT_EXECUTOR_PORT"
-  "$WAIT_PORT" "$event_ip" "$EVENT_MEMPOOL_PORT"
-  "$WAIT_PORT" "$event_ip" "$EVENT_INDEXER_PORT"
-  "$WAIT_PORT" "$event_ip" "$EVENT_HTTP_PORT"
-
-  indexer_ip="$(hog_ip "${INDEXER_HOSTS[$node]}")"
-  "$WAIT_PORT" "$indexer_ip" "$INDEXER_EVENT_PORT"
-  "$WAIT_PORT" "$indexer_ip" "$INDEXER_BLOCK_EXPLORER_PORT"
-  "$WAIT_PORT" "$indexer_ip" "$INDEXER_HTTP_PORT"
-
-  mempool_ip="$(hog_ip "${MEMPOOL_HOSTS[$node]}")"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_DB_PORT"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EVENT_PORT"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EXECUTOR_PORT"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_AUTH_PORT"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_COORDINATOR_PORT"
-  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_HTTP_PORT"
-
-  hog_db_ip="$(hog_ip "${HOG_DB_HOSTS[$node]}")"
-  "$WAIT_PORT" "$hog_db_ip" "$DB_EXECUTOR_PORT"
-  "$WAIT_PORT" "$hog_db_ip" "$DB_MEMPOOL_PORT"
-  "$WAIT_PORT" "$hog_db_ip" "$DB_AUTH_PORT"
-  "$WAIT_PORT" "$hog_db_ip" "$DB_HTTP_PORT"
-
-  auth_ip="$(hog_ip "${AUTH_HOSTS[$node]}")"
-  "$WAIT_PORT" "$auth_ip" "$AUTH_DB_PORT"
-  "$WAIT_PORT" "$auth_ip" "$AUTH_MEMPOOL_PORT"
-  "$WAIT_PORT" "$auth_ip" "$AUTH_HTTP_PORT"
-
-  "$WAIT_PORT" "$(hog_ip "${CHUCKD_HOSTS[$node]}")" 7888
-done
+wait_for_port_targets "${SERVICE_PORT_TARGETS[@]}"
 
 # A mempool that dies mid-run takes the suite down with it, and by that point
 # every readiness wait has already passed, so nothing else in this script has
