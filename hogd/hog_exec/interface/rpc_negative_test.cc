@@ -564,4 +564,26 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   propose_thread.join();
 }
 
+// Genesis load with a consensus value carrying a height other than the genesis
+// height (here the -1 bootstrap sentinel) is rejected up front with an RPC
+// error, rather than persisting the invalid height as the db tip and then
+// fatal-checking after the commit (#3246). Uses a fresh HogdbWrapper so the tip
+// is still the pre-genesis sentinel.
+TEST(RpcGenesisTest, RejectsNonGenesisHeight)
+{
+  HogdbWrapper db_wrapper;
+  auto db_client = make_srpc_multiclient<DbSched1>(
+      x23::HostPort{"localhost", db_wrapper.coord_port()}, false);
+
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = -1;
+  GenesisConfiguration genesis_configuration{
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()};
+
+  EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,
+                                                         genesis_value),
+            DbSchedResult::DbSchedResultError);
+}
+
 } // namespace hogd
