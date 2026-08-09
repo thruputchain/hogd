@@ -117,10 +117,14 @@ ci_report_failed_bench_steps() {
 # combined-metrics schedule replays it at the very end of the job, where it
 # stays inside the part of the log GitHub still serves.
 CI_BENCH_FAILURE_LOG=${CI_BENCH_FAILURE_LOG:-$CI_BENCH_REPO_ROOT/bench_failures.log}
-# Which script invocation has already reported. errtrace puts the ERR trap in
+# Which script invocations have already reported. errtrace puts the ERR trap in
 # the subshells bash forks for pipeline components, and those report from a
-# different process, so the record of having reported has to be a file.
-CI_BENCH_REPORTED_FILE="${CI_BENCH_FAILURE_LOG}.reported"
+# different process, so the record of having reported has to live in the
+# filesystem. It is a directory of claims rather than a file of keys because
+# two components of one pipeline can fail at the same moment and run their
+# traps concurrently: a read-then-write of a shared file lets both see it empty
+# and both report, while [mkdir] of a claim succeeds for exactly one of them.
+CI_BENCH_REPORTED_DIR="${CI_BENCH_FAILURE_LOG}.reported"
 
 ci_enter_cleanup() {
   trap - EXIT INT TERM ERR
@@ -147,7 +151,7 @@ ci_report_error_trace() {
   local script
   local frame
   local location
-  local reported_key
+  local reported_key claim
 
   # The ERR trap runs whether or not errexit is set, so it also fires on the
   # failures these scripts deliberately tolerate (`set +e` around a benchmark
@@ -168,11 +172,18 @@ ci_report_error_trace() {
   # then reports the pipeline itself, naming its last command rather than the
   # one that failed. Keep the first, most specific report. $$ is the script's
   # pid in its subshells too, so it identifies the invocation across both.
+  #
+  # Claiming the invocation is a single [mkdir], which either creates the
+  # directory or fails because it is already there -- there is no window
+  # between deciding to report and recording it. A claim that cannot be made
+  # at all (an unwritable digest path) falls through and reports anyway: a
+  # failure to record must not turn into a failure to report.
   reported_key="$$ $script"
-  if [ "$(cat "$CI_BENCH_REPORTED_FILE" 2>/dev/null || true)" = "$reported_key" ]; then
+  claim="$CI_BENCH_REPORTED_DIR/${reported_key//[^A-Za-z0-9._-]/_}"
+  mkdir -p "$CI_BENCH_REPORTED_DIR" 2>/dev/null || true
+  if ! mkdir "$claim" 2>/dev/null && [ -d "$claim" ]; then
     return 0
   fi
-  printf '%s\n' "$reported_key" >"$CI_BENCH_REPORTED_FILE" 2>/dev/null || true
 
   {
     printf 'FAILED: %s exited with status %s\n' "$script" "$status"
@@ -194,7 +205,8 @@ ci_report_error_trace() {
 # Start a run with no digest, so a file left by an earlier run on the same
 # host is never reported as this run's failure.
 ci_reset_bench_failures() {
-  rm -f "$CI_BENCH_FAILURE_LOG" "$CI_BENCH_REPORTED_FILE"
+  rm -f "$CI_BENCH_FAILURE_LOG"
+  rm -rf "$CI_BENCH_REPORTED_DIR"
 }
 
 # Replay the digest. Prints nothing when no script aborted.

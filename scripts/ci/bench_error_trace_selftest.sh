@@ -84,7 +84,7 @@ expect_contains 'digest replay includes the failure' 'exit status 7' "$report"
 # a function failing in a pipeline reports there and the parent shell then
 # reports the pipeline itself, naming its last command. Only the first, most
 # specific report survives.
-rm -f "$WORK_DIR"/failures.log*
+rm -rf "$WORK_DIR"/failures.log*
 out=$(run_case '
 ci_enable_error_trace
 produce() { /bin/false; }
@@ -111,9 +111,40 @@ else
   echo 'ok   pipeline failure writes one digest line'
 fi
 
+# Two components of one pipeline can fail at the same moment and run their
+# inherited ERR traps concurrently -- each in its own process, neither waiting
+# on the other. Claiming the invocation is atomic, so one of them reports and
+# the other stays quiet however the two are interleaved.
+rm -rf "$WORK_DIR"/failures.log*
+out=$(run_case '
+ci_enable_error_trace
+left() { sleep 0.3; /bin/false; }
+mid() { sleep 0.3; /bin/false; }
+left | mid | cat
+echo "NOT REACHED"
+') && status=0 || status=$?
+expect_status 'concurrent pipeline failures' 1 "$status"
+expect_lacks 'concurrent pipeline failures stop the script' 'NOT REACHED' "$out"
+reports=$(grep -c '^FAILED:' <<<"$out" || true)
+if [[ "$reports" != 1 ]]; then
+  echo "FAIL concurrent pipeline failures reported $reports times, want 1"
+  printf '%s\n' "$out" | sed 's/^/     | /'
+  fail=1
+else
+  echo 'ok   concurrent pipeline failures reported once'
+fi
+digest_lines=$(wc -l <"$WORK_DIR/failures.log")
+if [[ "$digest_lines" != 1 ]]; then
+  echo "FAIL concurrent pipeline failures wrote $digest_lines digest lines, want 1"
+  sed 's/^/     | /' "$WORK_DIR/failures.log"
+  fail=1
+else
+  echo 'ok   concurrent pipeline failures write one digest line'
+fi
+
 # Suppressing propagation must not suppress a later script's failure: the
 # combined-metrics job runs five suites against one digest.
-rm -f "$WORK_DIR"/failures.log*
+rm -rf "$WORK_DIR"/failures.log*
 run_case '
 ci_enable_error_trace
 /bin/false
@@ -138,7 +169,7 @@ fi
 # The ERR trap fires whether or not errexit is set. A benchmark script that
 # deliberately tolerates a status -- mempool_bench.sh treats the timeout that
 # ends the mempool run as success -- must not be reported as aborting.
-rm -f "$WORK_DIR"/failures.log*
+rm -rf "$WORK_DIR"/failures.log*
 out=$(run_case '
 ci_enable_error_trace
 set +e
@@ -162,7 +193,7 @@ else
 fi
 
 # Cleanup handlers run after ci_enter_cleanup, whose failures are expected.
-rm -f "$WORK_DIR"/failures.log*
+rm -rf "$WORK_DIR"/failures.log*
 out=$(run_case '
 ci_enable_error_trace
 cleanup() {
@@ -178,7 +209,7 @@ expect_contains 'cleanup handler runs to the end' 'cleanup finished' "$out"
 expect_lacks 'cleanup failures are not reported' 'FAILED:' "$out"
 
 # A successful script reports nothing and leaves no digest.
-rm -f "$WORK_DIR"/failures.log*
+rm -rf "$WORK_DIR"/failures.log*
 out=$(run_case '
 ci_enable_error_trace
 echo "all good"
@@ -205,8 +236,12 @@ false
 expect_status 'unwritable digest' 1 "$status"
 expect_contains 'unwritable digest still reports' 'exited with status 1' "$out"
 
-# ci_reset_bench_failures clears a digest left by an earlier run.
+# ci_reset_bench_failures clears a digest left by an earlier run, and the claims
+# that went with it -- a pid the earlier run reported under can come round again
+# and would otherwise silence this run's report.
+rm -rf "$WORK_DIR"/failures.log*
 printf 'stale entry\n' >"$WORK_DIR/failures.log"
+mkdir -p "$WORK_DIR/failures.log.reported/stale_claim"
 CI_BENCH_FAILURE_LOG="$WORK_DIR/failures.log" bash -c \
   ". '$HARNESS'; ci_reset_bench_failures"
 if [[ -e "$WORK_DIR/failures.log" ]]; then
@@ -214,6 +249,12 @@ if [[ -e "$WORK_DIR/failures.log" ]]; then
   fail=1
 else
   echo 'ok   ci_reset_bench_failures clears a stale digest'
+fi
+if [[ -e "$WORK_DIR/failures.log.reported" ]]; then
+  echo 'FAIL ci_reset_bench_failures left a stale claim in place'
+  fail=1
+else
+  echo 'ok   ci_reset_bench_failures clears stale claims'
 fi
 
 exit "$fail"
