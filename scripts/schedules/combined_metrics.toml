@@ -118,7 +118,11 @@ BENCH_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth h
 CONTROL_CLI=./release/hogd/hog_exec/bench/control_cli
 
 kill_stale_benchmark_processes() {
-  ci_remote_killall_hosts "$BENCH_PROCESSES" "${ALL_BENCH_HOSTS[@]}"
+  # A host whose leftovers cannot be reaped is reported by the suite that trips
+  # over them, which keeps the per-suite failure report intact; ending the whole
+  # job here would skip the remaining suites and the report itself.
+  ci_remote_killall_hosts "$BENCH_PROCESSES" "${ALL_BENCH_HOSTS[@]}" ||
+    echo 'warning: stale benchmark processes were left running'
 }
 
 shutdown_bench_servers() {

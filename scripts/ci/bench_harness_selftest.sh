@@ -112,6 +112,130 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_killall_script
+
+# The script runs on the benchmark hosts, so exercise it against stubs for the
+# three commands it uses there: a [pgrep] and a [killall] backed by a file of
+# running process names, and a [sudo] that just drops its [-n] and runs the
+# rest. [$stub_dir/stubborn] names the processes that ignore SIGTERM, which is
+# the case that leaves a port bound under the old fire-and-forget kill.
+stub_dir="$work_dir/killall_stubs"
+mkdir -p "$stub_dir/bin"
+cat >"$stub_dir/bin/pgrep" <<'STUB'
+#!/usr/bin/env bash
+# Usage: pgrep -x NAME
+grep -qxF "$2" "$STUB_DIR/running"
+STUB
+cat >"$stub_dir/bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == -n ]] && shift
+exec "$@"
+STUB
+cat >"$stub_dir/bin/killall" <<'STUB'
+#!/usr/bin/env bash
+# Usage: killall -q [-KILL] NAME...
+signal=TERM
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  -q) ;;
+  -KILL) signal=KILL ;;
+  *) break ;;
+  esac
+  shift
+done
+echo "$signal $*" >>"$STUB_DIR/signals"
+status=0
+for name in "$@"; do
+  if ! grep -qxF "$name" "$STUB_DIR/running"; then
+    # What killall reports for a name that matched nothing, which is the normal
+    # case for a host running only some of these processes.
+    status=1
+    continue
+  fi
+  if [[ $signal == TERM ]] && grep -qxF "$name" "$STUB_DIR/stubborn"; then
+    continue
+  fi
+  if [[ $signal == KILL ]] && grep -qxF "$name" "$STUB_DIR/unkillable"; then
+    continue
+  fi
+  grep -vxF "$name" "$STUB_DIR/running" >"$STUB_DIR/running.tmp" || true
+  mv "$STUB_DIR/running.tmp" "$STUB_DIR/running"
+done
+exit "$status"
+STUB
+chmod +x "$stub_dir/bin/pgrep" "$stub_dir/bin/sudo" "$stub_dir/bin/killall"
+
+# Runs the generated script against the stubs. Arguments are the process names
+# that are running, and [$stubborn]/[$unkillable] name the ones that survive
+# SIGTERM and SIGKILL respectively.
+run_killall_script() {
+  printf '%s\n' "$@" >"$stub_dir/running"
+  printf '%s\n' ${stubborn:+$stubborn} >"$stub_dir/stubborn"
+  printf '%s\n' ${unkillable:+$unkillable} >"$stub_dir/unkillable"
+  : >"$stub_dir/signals"
+  STUB_DIR="$stub_dir" PATH="$stub_dir/bin:$PATH" \
+    bash -c "$(CI_KILLALL_WAIT_SEC=1 CI_KILLALL_BIN="$stub_dir/bin/killall" \
+      ci_killall_script 'hog-exec hog-db')" 2>&1
+}
+
+stubborn='' unkillable=''
+killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
+  killall_status=$?
+check_eq "reap of processes that exit on SIGTERM succeeds" "0" \
+  "$killall_status"
+check_eq "processes that exit on SIGTERM are not escalated to SIGKILL" \
+  "TERM hog-exec hog-db" "$(cat "$stub_dir/signals")"
+check_eq "successful reap is quiet" "" "$killall_out"
+
+# The failure this fix is for: a process that outlives SIGTERM keeps its ports
+# bound, so it has to be escalated rather than assumed gone.
+stubborn='hog-exec' unkillable=''
+killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
+  killall_status=$?
+check_eq "reap escalates past a stubborn process" "0" "$killall_status"
+check_contains "escalation names the stubborn process" \
+  "still running 1s after SIGTERM: hog-exec" "$killall_out"
+check_contains "escalation sends SIGKILL to the survivor only" \
+  "KILL hog-exec" "$(cat "$stub_dir/signals")"
+
+# A process that cannot be reaped at all must fail here, where it can still be
+# named, rather than as an unexplained bind failure in the next suite.
+stubborn='hog-exec' unkillable='hog-exec'
+killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
+  killall_status=$?
+check_eq "reap fails when a process survives SIGKILL" "1" "$killall_status"
+check_contains "unreapable process is named" \
+  "stale processes survived SIGKILL: hog-exec" "$killall_out"
+
+# A host that runs none of them is the common case, and killall reporting "no
+# process found" for every name must not read as a failed reap.
+stubborn='' unkillable=''
+killall_out=$(run_killall_script) && killall_status=0 || killall_status=$?
+check_eq "reap of a host with nothing running succeeds" "0" "$killall_status"
+
+## ci_remote_killall_hosts
+
+# The per-host status has to survive back to the caller: a suite that launches
+# anyway fails later on a port it cannot bind, with nothing left to say why.
+ci_remote_run() {
+  local host=$1
+  [[ $host == unreachable ]] && return 255
+  return 0
+}
+if ci_remote_killall_hosts "hog-exec" hog5 hog9 2>/dev/null; then
+  echo "ok   reaping every host reports success"
+else
+  echo "FAIL reaping every host should report success"
+  fail=1
+fi
+killall_out=$(ci_remote_killall_hosts "hog-exec" hog5 unreachable 2>&1) &&
+  {
+    echo "FAIL a host that could not be reaped should report failure"
+    fail=1
+  }
+check_contains "unreaped host is named" \
+  "failed to reap stale benchmark processes on unreachable" "$killall_out"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

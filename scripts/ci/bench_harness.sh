@@ -283,12 +283,109 @@ ci_control_clear_work_dirs() {
   done
 }
 
+# How long to wait for a stale process to be gone, first after SIGTERM and
+# then after SIGKILL, before giving up on it.
+CI_KILLALL_WAIT_SEC=${CI_KILLALL_WAIT_SEC:-15}
+
+# Absolute, because the benchmark hosts grant this one command through sudo by
+# path.
+CI_KILLALL_BIN=${CI_KILLALL_BIN:-/usr/bin/killall}
+
+# The remote half of [ci_remote_killall_hosts]: signal every named process and
+# wait for it to actually be gone, escalating to SIGKILL if SIGTERM was not
+# enough.
+#
+# [killall] returns as soon as it has delivered the signals, so a process that
+# takes its time shutting down -- or that never comes down at all -- is still
+# holding its listening ports when the next benchmark suite launches its own
+# processes on the same host. That collision does not surface here. It surfaces
+# minutes later, inside a suite that did nothing wrong, as
+#
+#     bind(10.100.0.105:8040): Address already in use
+#
+# from the suite whose ports the leftovers happen to occupy: [mempool_bench]
+# runs a [hog-exec] on hog5 with ports 8040 and 8041, which is exactly what
+# [mempool_multi_node_bench] gives its two hog5 executor slots when it runs
+# next. Wait for the processes here, where the stale one can still be named.
+ci_killall_script() {
+  local processes=$1
+
+  cat <<EOF
+set -u
+
+procs='$processes'
+wait_sec='$CI_KILLALL_WAIT_SEC'
+killall='$CI_KILLALL_BIN'
+
+# A kill that cannot be confirmed is the failure this script exists to prevent,
+# so a host without the tool to confirm it must say so rather than report the
+# processes reaped.
+command -v pgrep >/dev/null 2>&1 || {
+  echo 'pgrep not found (install procps)' >&2
+  exit 1
+}
+
+# Names the processes from [procs] that are still running. Probing with [pgrep]
+# rather than a signal-0 [killall] keeps the answer independent of whether this
+# shell is allowed to signal the process: a probe that fails for lack of
+# privilege would report a stale process as gone, which is the one answer that
+# must never be wrong here.
+alive_procs() {
+  found=''
+  for p in \$procs; do
+    if pgrep -x "\$p" >/dev/null 2>&1; then
+      found="\$found \$p"
+    fi
+  done
+  printf '%s' "\${found# }"
+}
+
+# Waits out [wait_sec] for the named processes to exit and names whatever is
+# left.
+wait_for_exit() {
+  waited=0
+  while [ "\$waited" -lt "\$wait_sec" ] && [ -n "\$(alive_procs)" ]; do
+    sleep 1
+    waited=\$((waited + 1))
+  done
+  alive_procs
+}
+
+# [killall] reports failure when any of the names it was given matched nothing,
+# which is the normal case for a host that runs only some of these processes.
+sudo -n "\$killall" -q \$procs || true
+
+remaining=\$(wait_for_exit)
+[ -n "\$remaining" ] || exit 0
+
+echo "stale processes still running \${wait_sec}s after SIGTERM: \$remaining" >&2
+sudo -n "\$killall" -q -KILL \$remaining || true
+
+remaining=\$(wait_for_exit)
+[ -n "\$remaining" ] || exit 0
+
+echo "stale processes survived SIGKILL: \$remaining" >&2
+exit 1
+EOF
+}
+
+# Reaps the named processes on each host. Returns non-zero, naming the host,
+# when a host could not be reached or still has one of them running: a suite
+# that starts anyway fails later on a port it cannot bind, with nothing left in
+# the log to say why.
 ci_remote_killall_hosts() {
   local processes=$1
   local host
+  local status=0
+  local script
   shift
 
+  script=$(ci_killall_script "$processes")
   for host in "$@"; do
-    ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
+    if ! ci_remote_run "$host" "$script"; then
+      echo "failed to reap stale benchmark processes on $host" >&2
+      status=1
+    fi
   done
+  return "$status"
 }
