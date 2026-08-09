@@ -152,6 +152,23 @@ CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   "${CMAKE_INJECT[@]}" \
   "${CMAKE_FLAGS[@]}" \
   "$ROOT_DIR"
+CONFIGURE_STATUS=$?
+
+# A configure that failed generated no build system, so there is nothing left to
+# do but report it. Under [-n] this script used to fall off the end with the
+# status of its own [if], which bash makes zero when the condition is false: the
+# caller was told the configure succeeded, and the failure resurfaced in a later
+# step as
+#
+#     ninja: error: loading 'build.ninja': No such file or directory
+#
+# with cmake's own diagnostic sitting in a configure log that the caller never
+# printed, because from its point of view the configure had passed.
+if [[ "$CONFIGURE_STATUS" -ne 0 ]]; then
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] Configure failed with exit code" \
+    "$CONFIGURE_STATUS." >&2
+  exit "$CONFIGURE_STATUS"
+fi
 
 if test -z "$NO_BUILD"; then
   if test -z "$BUILD_JOBS"; then
@@ -171,3 +188,6 @@ if test -z "$NO_BUILD"; then
   fi
   exit "$BUILD_STATUS"
 fi
+
+# Only the [-n] path reaches here, and it reaches it having configured cleanly.
+exit 0
