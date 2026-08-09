@@ -112,6 +112,86 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_control_start / ci_expect_running
+
+fake_cli="$work_dir/fake_control_cli"
+cat >"$fake_cli" <<'CLI'
+#!/usr/bin/env bash
+# Stands in for control_cli: <host> <port> <command> <args...>
+case $3 in
+start)
+  echo "Starting server: ${*:4}"
+  echo "CONTROL_STDOUT_PATH=$FAKE_STDOUT"
+  echo "CONTROL_STDERR_PATH=$FAKE_STDERR"
+  ;;
+expect_running)
+  echo "Process is not running: exit code 127"
+  exit 1
+  ;;
+esac
+CLI
+chmod +x "$fake_cli"
+
+export FAKE_STDOUT="$work_dir/proc.out" FAKE_STDERR="$work_dir/proc.err"
+echo 'coordinator starting' >"$FAKE_STDOUT"
+echo 'chuckd.dev: error while loading shared libraries: libc.so.6' \
+  >"$FAKE_STDERR"
+
+# The replay reads the logs over ssh in production; here the "remote" host is
+# this one, so run the command locally.
+ci_remote_run() {
+  shift
+  bash -c "$*"
+}
+
+CONTROL_LOG_RECORDS=()
+ci_control_start "$fake_cli" hog4 11111 chuckd chuckd.dev --seed 1 >/dev/null
+check_eq "start records the paths the control server captured" \
+  "hog4|chuckd|$FAKE_STDOUT|$FAKE_STDERR" "${CONTROL_LOG_RECORDS[0]}"
+
+report=$(ci_expect_running "$fake_cli" 11111 hog4 2>&1) && {
+  echo "FAIL expect_running should fail when the process is gone"
+  fail=1
+}
+check_contains "expect_running names the dead process and its host" \
+  "last 80 lines of chuckd on hog4" "$report"
+# The whole point: an exit 127 that used to arrive with no explanation now
+# arrives with the loader error that produced it.
+check_contains "expect_running replays the dead process's stderr" \
+  "error while loading shared libraries" "$report"
+check_contains "expect_running replays the dead process's stdout" \
+  "coordinator starting" "$report"
+
+# The control server tracks one process per host, and expect_running reports on
+# the last one started, so that is the one whose log must be replayed.
+CONTROL_LOG_RECORDS=()
+ci_control_start "$fake_cli" hog9 11111 event hogd/hog_event/hog-event >/dev/null
+ci_control_start "$fake_cli" hog9 11111 indexer hogd/hog_indexer/hog-indexer \
+  >/dev/null
+report=$(ci_expect_running "$fake_cli" 11111 hog9 2>&1) || true
+check_contains "expect_running replays the most recent launch on the host" \
+  "of indexer on hog9" "$report"
+
+# A host with nothing recorded must still say so rather than failing silently.
+CONTROL_LOG_RECORDS=()
+report=$(ci_expect_running "$fake_cli" 11111 hog5 2>&1) || true
+check_contains "expect_running reports a host with no captured output" \
+  "no captured output for the process on hog5" "$report"
+
+# A control_cli that did not print the paths is a launch that cannot be
+# diagnosed later, so fail at the launch rather than at the replay.
+broken_cli="$work_dir/broken_control_cli"
+printf '#!/usr/bin/env bash\necho "Start command sent successfully"\n' \
+  >"$broken_cli"
+chmod +x "$broken_cli"
+CONTROL_LOG_RECORDS=()
+report=$(ci_control_start "$broken_cli" hog4 11111 chuckd chuckd.dev 2>&1) && {
+  echo "FAIL start should fail when the log paths are missing"
+  fail=1
+}
+check_contains "start rejects a launch with no captured paths" \
+  "failed to parse control cli log paths for chuckd on hog4" "$report"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

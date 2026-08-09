@@ -272,6 +272,80 @@ ci_control_shutdown_hosts() {
   done
 }
 
+# How much of a dead process's captured output [ci_expect_running] replays.
+CI_CONTROL_FAIL_TAIL_LINES=${CI_CONTROL_FAIL_TAIL_LINES:-80}
+
+# "<host>|<label>|<stdout path>|<stderr path>" for every process launched
+# through [ci_control_start], in the format wait_port_report.sh already reads.
+declare -a CONTROL_LOG_RECORDS=()
+
+# Starts a process through the control server on [host] under [label], and
+# records where the server captured its output so a later failure can show it.
+ci_control_start() {
+  local control_cli=$1
+  local host=$2
+  local control_port=$3
+  local label=$4
+  local output stdout_path stderr_path
+  shift 4
+
+  if ! output=$("$control_cli" "$host" "$control_port" start "$@" 2>&1); then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+
+  stdout_path=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_STDOUT_PATH=//p' |
+    tail -n 1)
+  stderr_path=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_STDERR_PATH=//p' |
+    tail -n 1)
+  if [ -z "$stdout_path" ] || [ -z "$stderr_path" ]; then
+    echo "failed to parse control cli log paths for $label on $host" >&2
+    return 1
+  fi
+  CONTROL_LOG_RECORDS+=("${host}|${label}|${stdout_path}|${stderr_path}")
+}
+
+# Drop-in for [control_cli <host> <port> expect_running] that says why the
+# process is gone.
+#
+# [expect_running] reports only the status -- "Process is not running: exit code
+# 127" -- and nothing about what the process said on its way out. What it said
+# is in the temp files the control server captured on the remote host, and this
+# suite fetches them nowhere, so the bare exit code is the entire record of the
+# failure. Replay the tail here, at the point of failure, while the job log
+# still reaches back this far.
+ci_expect_running() {
+  local control_cli=$1
+  local control_port=$2
+  local host=$3
+  local index record record_host label stdout_path stderr_path
+
+  if "$control_cli" "$host" "$control_port" expect_running; then
+    return 0
+  fi
+
+  # The control server tracks one process per host and [expect_running] reports
+  # on the last one started, so that is the record to replay -- searching from
+  # the end finds it.
+  for ((index = ${#CONTROL_LOG_RECORDS[@]} - 1; index >= 0; index--)); do
+    record=${CONTROL_LOG_RECORDS[index]}
+    IFS='|' read -r record_host label stdout_path stderr_path <<<"$record"
+    [ "$record_host" = "$host" ] || continue
+
+    echo "===== last $CI_CONTROL_FAIL_TAIL_LINES lines of $label on $host ====="
+    # Best effort: a host that has gone away must not replace the failure being
+    # reported with a failure of its own.
+    ci_remote_run "$host" "tail -n $CI_CONTROL_FAIL_TAIL_LINES $(printf '%q %q' \
+      "$stdout_path" "$stderr_path")" || true
+    echo "===== end of $label on $host ====="
+    return 1
+  done
+
+  echo "no captured output for the process on $host" >&2
+  return 1
+}
+
 ci_control_clear_work_dirs() {
   local control_cli=$1
   local control_port=$2

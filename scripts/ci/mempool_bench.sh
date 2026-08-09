@@ -72,39 +72,39 @@ echo 'kill stale processes'
 kill_stale_processes
 
 echo 'launch loadgen'
-$CONTROL_CLI hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --bind-ip "$(hog_ip hog7)" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog7 "$CI_CONTROL_PORT" loadgen hogd/loadgen/loadgen_server --bind-ip "$(hog_ip hog7)" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
 
 echo 'wait for loadgen'
 ci_wait_port hog7 $LOADGEN_PORT
 
 echo 'launch first hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog5 "$CI_CONTROL_PORT" hog_exec_0 hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 # can't wait for hog-exec: that's waiting on the coordinator
 
 echo 'launch second hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog6 "$CI_CONTROL_PORT" hog_exec_1 hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 # can't wait for hog-exec: that's waiting on the coordinator
 
 echo 'check hog-exec is running'
-$CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog5
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog6
 
 echo 'launch event'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" event hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
 echo 'launch indexer'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" indexer hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
 echo 'launch hog-db'
-$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog11 "$CI_CONTROL_PORT" hog_db hogd/hog_db/hog-db --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
 
 echo 'launch auth'
-$CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
+ci_control_start "$CONTROL_CLI" hog8 "$CI_CONTROL_PORT" auth hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+ci_control_start "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" chuckd \
   chuckd.dev \
   -l info \
   --skip 20 \
@@ -128,13 +128,13 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --scp-control-addr 127.0.0.1:4400
 
 echo 'make sure procs are running'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog7 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog8 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
-$CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog5
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog6
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog7
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog8
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog9
+ci_expect_running "$CONTROL_CLI" "$CI_CONTROL_PORT" hog11
 
 echo 'launch mempool'
 set +e
