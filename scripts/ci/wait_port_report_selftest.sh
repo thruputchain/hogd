@@ -81,7 +81,14 @@ declare -a CONTROL_LOG_RECORDS=()
 . '$HELPERS'
 hog_ip() { printf '10.100.0.%s\n' \"\${1#hog}\"; }
 ci_wait_port() {
-  [ \"\$2\" != \"\${UNREACHABLE_PORT:-}\" ] || { echo \"Timed out: \$1:\$2\"; return 1; }
+  [ \"\$2\" != \"\${UNREACHABLE_PORT:-}\" ] || {
+    echo \"Timed out: \$1:\$2\"
+    # The real wait fails only by running out its slice. Most cases do not care
+    # how long that took and return at once; the ones timing the whole wait
+    # need it to cost what it says it costs.
+    [ \"\${SLOW_WAIT_PORT:-0}\" != 1 ] || sleep \"\${CI_WAIT_PORT_TIMEOUT_SEC:-0}\"
+    return 1
+  }
 }
 remote_run() {
   [ \"\${REMOTE_RUN_FAILS:-0}\" != 1 ] || { echo 'ssh: closed' >&2; return 255; }
@@ -256,6 +263,33 @@ echo NOT REACHED
 expect_status 'unbounded wait ends on a dead launch' 1 "$status"
 expect_lacks 'unbounded wait stops the script' 'NOT REACHED' "$out"
 expect_slices 'unbounded wait is not waited out' 1 "$out"
+
+# ...and the budget covers the probes, not just the port waits. A probe that has
+# to be abandoned is the signature of a control server that is wedged rather
+# than merely down, so it is the case where every slice pays the probe timeout.
+# Charged to nothing, those would carry the wait far past the timeout the caller
+# configured -- with the production 600s budget and 30s slices, twenty probes at
+# 20s each would end the wait around 1000s.
+#
+# The stub sleeps out its slices here so the whole wait can be timed: 8s of
+# budget in 2s slices with a probe that costs 2s is four slices' worth of work,
+# and it has to fit in the 8s rather than take the 16s it would if only the
+# slices counted.
+started=$SECONDS
+out=$(UNREACHABLE_PORT=8042 HANGING_HOSTS=hog5 SLOW_WAIT_PORT=1 \
+  CI_WAIT_PORT_TIMEOUT_SEC=8 READINESS_PROC_CHECK_INTERVAL_SEC=2 \
+  READINESS_PROC_CHECK_TIMEOUT_SEC=2 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+wait_port_or_report 10.100.0.5 8042
+') && status=0 || status=$?
+elapsed=$((SECONDS - started))
+expect_status 'wedged control server still times out' 1 "$status"
+if ((elapsed > 12)); then
+  echo "FAIL abandoned probes are charged to the budget: took ${elapsed}s, want <=12s"
+  fail=1
+else
+  echo "ok   abandoned probes are charged to the budget (${elapsed}s)"
+fi
 
 # A port waited on before anything was launched has no host to ask, and the
 # question must not be put to whichever host happens to be first.

@@ -36,13 +36,15 @@ READINESS_PROC_CHECK_TIMEOUT_SEC=${READINESS_PROC_CHECK_TIMEOUT_SEC:-20}
 # everything launched on that host when the wait ends without the port.
 #
 # The wait is served in slices, so the "(timeout: Ns)" line [wait-port.sh]
-# prints is now the slice rather than the whole budget. The budget is unchanged:
-# a port that never comes up on a host whose processes are all still running is
-# still waited on for [CI_WAIT_PORT_TIMEOUT_SEC].
+# prints is now the slice rather than the whole budget. The budget itself is
+# unchanged and covers everything done under it, the checks between slices
+# included: a port that never comes up is waited on for
+# [CI_WAIT_PORT_TIMEOUT_SEC] and no longer, however the time inside that is
+# spent.
 wait_port_or_report() {
   local ip=$1
   local port=$2
-  local budget slice host reason
+  local budget slice host reason remaining probe_started answered
   local waited=0
   local -a hosts=()
 
@@ -60,10 +62,29 @@ wait_port_or_report() {
     if CI_WAIT_PORT_TIMEOUT_SEC=$slice ci_wait_port "$ip" "$port"; then
       return 0
     fi
+    # [wait-port.sh] fails only by running out its timeout, so a slice that came
+    # back without the port took the whole slice.
     waited=$((waited + slice))
 
     for host in ${hosts[@]+"${hosts[@]}"}; do
-      reason=$(launched_process_exited "$host") || continue
+      # 0 is "no cap of its own" to [launched_process_exited], which is what an
+      # unbounded budget leaves it with.
+      remaining=0
+      if [ "$budget" -ne 0 ]; then
+        remaining=$((budget - waited))
+        [ "$remaining" -gt 0 ] || break
+      fi
+
+      probe_started=$SECONDS
+      answered=1
+      reason=$(launched_process_exited "$host" "$remaining") || answered=0
+      # A probe is time the caller spent waiting whether or not it answered, so
+      # charge it. Left uncharged, a wedged control server -- which is exactly
+      # what an unanswered probe suggests -- would add its timeout to every
+      # slice and carry the wait well past the budget it was given.
+      waited=$((waited + SECONDS - probe_started))
+      [ "$answered" -eq 1 ] || continue
+
       echo "readiness: $ip:$port is not going to come up; the last process" \
         "launched on $host has already exited ($reason)" >&2
       replay_control_logs_for_ip "$ip"
@@ -95,13 +116,20 @@ wait_port_or_report() {
 # last launch has gone. That covers the case this exists for, where the whole
 # host is dead, and leaves a longer wait for the case where one of several
 # processes died and the others are healthy.
+# $2 caps the probe at what is left of the caller's budget, with 0 meaning it
+# has none of its own to spend against.
 launched_process_exited() {
   local host=$1
+  local limit=${2:-0}
   local output reason
+  local probe_timeout=$READINESS_PROC_CHECK_TIMEOUT_SEC
 
   [ -n "${CONTROL_CLI:-}" ] && [ -n "${CI_CONTROL_PORT:-}" ] || return 1
+  if [ "$limit" -ne 0 ] && [ "$limit" -lt "$probe_timeout" ]; then
+    probe_timeout=$limit
+  fi
 
-  output=$(timeout "$READINESS_PROC_CHECK_TIMEOUT_SEC" \
+  output=$(timeout "$probe_timeout" \
     "$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" expect_running 2>&1) || true
   [[ $output == *"Process is not running: "* ]] || return 1
 
