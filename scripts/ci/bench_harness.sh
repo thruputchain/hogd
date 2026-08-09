@@ -283,12 +283,97 @@ ci_control_clear_work_dirs() {
   done
 }
 
+# How long a SIGTERMed benchmark process gets to exit before the kill escalates
+# to SIGKILL, and how long SIGKILL gets before the host is called still
+# occupied. Neither wait costs anything on a host that is already clear.
+CI_KILL_TERM_WAIT_SEC=${CI_KILL_TERM_WAIT_SEC:-20}
+CI_KILL_FORCE_WAIT_SEC=${CI_KILL_FORCE_WAIT_SEC:-10}
+
+# The program [ci_remote_killall_hosts] runs on one host, emitted as text so it
+# can be handed to ssh and exercised by the self-test.
+#
+# [killall] returns once the signal is sent, not once the process is gone, so a
+# caller that kills stale processes and immediately launches the next suite
+# races the processes it just asked to leave. The suite's own binaries then die
+# on "bind(<ip>:<port>): Address already in use" while the stale process keeps
+# answering on that port, and the run fails ten minutes later in a readiness
+# wait for some *other* port that never came up -- the failure surfaces nowhere
+# near the host that is actually still busy.
+#
+# So wait for the processes to really go, escalate to SIGKILL for anything that
+# ignores SIGTERM, and exit non-zero naming the survivors when even that leaves
+# something behind. [sudo] first because a stale process may belong to another
+# account, then plain [killall]: the benchmark binaries run as the CI user, and
+# a sudoers rule that has gone missing must not silently disarm the kill.
+ci_killall_script() {
+  local processes=$1
+  local term_wait=$2
+  local force_wait=$3
+
+  cat <<EOF
+ci_procs='$processes'
+ci_kill() {
+  sudo -n /usr/bin/killall -q -s "\$1" \$ci_procs 2>/dev/null ||
+    killall -q -s "\$1" \$ci_procs 2>/dev/null ||
+    true
+}
+ci_alive() {
+  for ci_p in \$ci_procs; do
+    if pgrep -x -- "\$ci_p" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+ci_wait_gone() {
+  ci_waited=0
+  while [ "\$ci_waited" -lt "\$1" ]; do
+    ci_alive || return 0
+    sleep 1
+    ci_waited=\$((ci_waited + 1))
+  done
+  ! ci_alive
+}
+ci_kill TERM
+ci_wait_gone $term_wait && exit 0
+echo "still running after SIGTERM; escalating to SIGKILL" >&2
+ci_kill KILL
+ci_wait_gone $force_wait && exit 0
+echo "still running after SIGKILL:" >&2
+for ci_p in \$ci_procs; do
+  pgrep -x -l -- "\$ci_p" >&2 || true
+done
+exit 1
+EOF
+}
+
+# Clears the named processes off every host, and reports the hosts it could not
+# confirm clear. Returns non-zero in that case: a host that still has the last
+# suite's processes on it cannot run the next one, and saying so here is the
+# difference between a one-line diagnosis and a bind failure on a remote host
+# discovered from a timed-out readiness wait.
 ci_remote_killall_hosts() {
   local processes=$1
   local host
+  local script
+  local rc
+  local status=0
   shift
 
+  script=$(ci_killall_script "$processes" "$CI_KILL_TERM_WAIT_SEC" \
+    "$CI_KILL_FORCE_WAIT_SEC")
+
   for host in "$@"; do
-    ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
+    rc=0
+    ci_remote_run "$host" "$script" || rc=$?
+    [ "$rc" -eq 0 ] && continue
+    if [ "$rc" -eq 255 ]; then
+      echo "kill_stale: $host is unreachable; cannot confirm it is clear" >&2
+    else
+      echo "kill_stale: stale benchmark processes survived on $host" >&2
+    fi
+    status=1
   done
+
+  return "$status"
 }

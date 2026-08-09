@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Self-test for the step-capture helpers in bench_harness.sh: exit-status
-# rendering, per-step log capture, and the end-of-job failure report that
-# replays a failed step's log tail.
+# rendering, per-step log capture, the end-of-job failure report that replays a
+# failed step's log tail, and the stale-process kill that has to leave a host
+# actually clear before the next suite launches on it.
 set -euo pipefail
 
 . "$(dirname "$(readlink -f "$0")")/bench_harness.sh"
@@ -111,6 +112,168 @@ case $- in
 esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
+
+## ci_killall_script / ci_remote_killall_hosts
+#
+# The kill runs on a remote host, so the test gives it stub [sudo], [killall]
+# and [pgrep] on PATH and a file of "running" process names for them to act on.
+# The stub [sudo] rewrites the absolute [/usr/bin/killall] the real script uses
+# back to the stub on PATH; everything else is the script under test.
+
+stub_dir="$work_dir/stubs"
+mkdir -p "$stub_dir"
+
+cat >"$stub_dir/sudo" <<'STUB'
+#!/usr/bin/env bash
+[[ -e "$STUB_STATE/no_sudo" ]] && exit 1
+[[ $1 == -n ]] && shift
+cmd=$1
+shift
+[[ $cmd == /usr/bin/killall ]] && cmd=killall
+exec "$cmd" "$@"
+STUB
+
+# Signals what it is asked to signal: a name goes away unless the case under
+# test declared it deaf to that signal. Exits 1 when nothing matched, as
+# killall does.
+cat >"$stub_dir/killall" <<'STUB'
+#!/usr/bin/env bash
+signal=TERM
+names=()
+while (($#)); do
+  case $1 in
+  -q) ;;
+  -s)
+    signal=$2
+    shift
+    ;;
+  *) names+=("$1") ;;
+  esac
+  shift
+done
+matched=1
+for name in "${names[@]}"; do
+  grep -qxF "$name" "$STUB_STATE/running" 2>/dev/null || continue
+  matched=0
+  grep -qxF "$name" "$STUB_STATE/unkillable" 2>/dev/null && continue
+  [[ $signal == TERM ]] && grep -qxF "$name" "$STUB_STATE/deaf_to_term" \
+    2>/dev/null && continue
+  grep -vxF "$name" "$STUB_STATE/running" >"$STUB_STATE/running.tmp" || true
+  mv "$STUB_STATE/running.tmp" "$STUB_STATE/running"
+done
+exit "$matched"
+STUB
+
+cat >"$stub_dir/pgrep" <<'STUB'
+#!/usr/bin/env bash
+list=0
+name=""
+while (($#)); do
+  case $1 in
+  -x) ;;
+  -l) list=1 ;;
+  --) ;;
+  *) name=$1 ;;
+  esac
+  shift
+done
+grep -qxF "$name" "$STUB_STATE/running" 2>/dev/null || exit 1
+((list)) && echo "1234 $name"
+exit 0
+STUB
+
+chmod +x "$stub_dir/sudo" "$stub_dir/killall" "$stub_dir/pgrep"
+
+# Runs the generated kill program against a stub host. $1 is the list of names
+# left running on it; the rest name the state files to seed.
+run_kill_stub() {
+  local running=$1
+  shift
+  local state="$work_dir/stub_state"
+  local marker
+
+  rm -rf "$state"
+  mkdir -p "$state"
+  printf '%s\n' $running >"$state/running"
+  [[ -n $running ]] || : >"$state/running"
+  for marker in "$@"; do
+    case $marker in
+    no_sudo) : >"$state/no_sudo" ;;
+    deaf_to_term) printf '%s\n' $running >"$state/deaf_to_term" ;;
+    unkillable) printf '%s\n' $running >"$state/unkillable" ;;
+    esac
+  done
+
+  STUB_STATE="$state" PATH="$stub_dir:$PATH" \
+    bash -c "$(ci_killall_script 'hog-exec chuckd' 1 1)" 2>&1
+}
+
+out=$(run_kill_stub "") || {
+  echo "FAIL kill on an already-clear host should succeed"
+  fail=1
+}
+check_eq "clear host needs no escalation" "" "$out"
+
+out=$(run_kill_stub "hog-exec chuckd") || {
+  echo "FAIL kill should succeed when SIGTERM is enough"
+  fail=1
+}
+check_eq "SIGTERM alone needs no escalation" "" "$out"
+
+# The failure this whole path exists for: a process that outlives SIGTERM keeps
+# its listening socket, and the next suite dies on "Address already in use".
+out=$(run_kill_stub "hog-exec" deaf_to_term) || {
+  echo "FAIL kill should succeed once SIGKILL lands"
+  fail=1
+}
+check_contains "SIGTERM survivor is escalated to SIGKILL" \
+  "escalating to SIGKILL" "$out"
+
+out=$(run_kill_stub "hog-exec" unkillable) && {
+  echo "FAIL kill should fail when a process survives SIGKILL"
+  fail=1
+}
+check_contains "survivor is named" "hog-exec" "$out"
+
+# A missing sudoers rule must not silently disarm the kill.
+out=$(run_kill_stub "hog-exec" no_sudo) || {
+  echo "FAIL kill should fall back to unprivileged killall"
+  fail=1
+}
+check_eq "unprivileged fallback needs no escalation" "" "$out"
+
+# The per-host reporting: an unreachable host and a host that could not be
+# cleared are both failures, and both have to name the host.
+ci_remote_run() {
+  local host=$1
+  shift
+  case $host in
+  unreachable) return 255 ;;
+  busy) return 1 ;;
+  esac
+  return 0
+}
+
+if ci_remote_killall_hosts "hog-exec" clean1 clean2 >/dev/null 2>&1; then
+  echo "ok   kill succeeds when every host comes back clear"
+else
+  echo "FAIL kill should succeed when every host comes back clear"
+  fail=1
+fi
+
+out=$(ci_remote_killall_hosts "hog-exec" clean1 busy 2>&1) && {
+  echo "FAIL kill should fail when a host could not be cleared"
+  fail=1
+}
+check_contains "uncleared host is named" \
+  "stale benchmark processes survived on busy" "$out"
+
+out=$(ci_remote_killall_hosts "hog-exec" unreachable 2>&1) && {
+  echo "FAIL kill should fail when a host is unreachable"
+  fail=1
+}
+check_contains "unreachable host is named" \
+  "unreachable is unreachable" "$out"
 
 if ((fail)); then
   echo "bench_harness selftest FAILED"
