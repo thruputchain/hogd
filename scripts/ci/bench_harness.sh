@@ -97,7 +97,7 @@ CI_BENCH_FAILURE_LOG=${CI_BENCH_FAILURE_LOG:-$CI_BENCH_REPO_ROOT/bench_failures.
 
 ci_report_error_trace() {
   local script=${BASH_SOURCE[${#FUNCNAME[@]} - 1]:-$0}
-  local at report
+  local at report frame i
 
   # The ERR trap runs whether or not errexit is set, so ignore the failures the
   # suites tolerate: a benchmark whose timeout is its expected end, cleanup
@@ -114,6 +114,22 @@ ci_report_error_trace() {
   at="${BASH_SOURCE[1]}:${BASH_LINENO[0]}"
   [ "${BASH_SOURCE[1]}" != "$script" ] || at="line ${BASH_LINENO[0]}"
   report="$script: $at: exit status $1: $2"
+
+  # Then the call stack that reached the failure. A command that dies inside a
+  # helper reports that helper's line, which is shared by every call site: all
+  # ~30 readiness waits in [mempool_multi_node_bench.sh] go through the one
+  # [wait-port.sh] invocation in [ci_wait_port], so the innermost location
+  # identifies none of them. The frame that names the wait -- which port, and
+  # whether it was the [ci_wait_port_hosts] gate or a per-process wait -- is
+  # the one back in the suite script. [BASH_LINENO[i]] is where [FUNCNAME[i]]
+  # was called, in the file [BASH_SOURCE[i + 1]]; the outermost frame is the
+  # script itself and has no call site of its own, so stop short of it.
+  for ((i = 1; i < ${#FUNCNAME[@]} - 1; i++)); do
+    frame="${BASH_SOURCE[i + 1]}:${BASH_LINENO[i]}"
+    [ "${BASH_SOURCE[i + 1]}" != "$script" ] || frame="$script:${BASH_LINENO[i]}"
+    report="$report"$'\n'"  in ${FUNCNAME[i]} at $frame"
+  done
+
   echo "FAILED $report" >&2
   echo "$report" >>"$CI_BENCH_FAILURE_LOG" 2>/dev/null || true
 }

@@ -42,6 +42,39 @@ produce | cat')
 check 'pipeline reports once' 1 "$(grep -c '^FAILED ' <<<"$out")"
 check 'pipeline names the failing command' 1 "$(grep -c ': /bin/false$' <<<"$out")"
 
+# A command that dies inside a helper is reported at the helper's line, which
+# every call site shares. The call stack must carry the frame back in the suite
+# script, so the ~30 readiness waits that all go through [ci_wait_port] are told
+# apart by their call site.
+rm -f "$WORK_DIR"/failures.log
+out=$(run_case 'wait_for_it() { /bin/false; }
+: "line 5 is the next one"
+wait_for_it')
+check 'names the failing command' 1 "$(grep -c ': /bin/false$' <<<"$out")"
+check 'stack names the call site in the script' 1 \
+  "$(grep -c '^  in wait_for_it at .*/case\.sh:6$' <<<"$out")"
+check 'digest carries the stack' 1 \
+  "$(grep -c '^  in wait_for_it at .*/case\.sh:6$' "$WORK_DIR/failures.log")"
+check 'stack does not add a second report' 1 "$(grep -c '^FAILED ' <<<"$out")"
+
+# Nested helpers report every frame, outermost last, so a wait reached through
+# ci_wait_port_hosts is distinguishable from a direct one.
+rm -f "$WORK_DIR"/failures.log
+out=$(run_case 'inner() { /bin/false; }
+outer() { inner; }
+outer')
+check 'nested stack reports both frames' 2 "$(grep -c '^  in ' <<<"$out")"
+check 'nested stack names the inner frame' 1 "$(grep -c '^  in inner at ' <<<"$out")"
+check 'nested stack ends at the script call site' 1 \
+  "$(grep -c '^  in outer at .*/case\.sh:6$' <<<"$out")"
+
+# A failure at the top level of the script has no frames to walk, and still
+# reports exactly one line.
+rm -f "$WORK_DIR"/failures.log
+out=$(run_case '/bin/false')
+check 'top-level failure reports one line' 1 "$(grep -c '^FAILED ' <<<"$out")"
+check 'top-level failure has no stack' 0 "$(grep -c '^  in ' <<<"$out")"
+
 # The trap fires whether or not errexit is set, but a suite that tolerates a
 # failure -- mempool_bench.sh takes the mempool's timeout as its expected end,
 # cleanup handlers run after ci_enter_cleanup -- is not aborting.
