@@ -19,8 +19,7 @@ source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43" > glibc
 echo 'build (1 of 2)'
 ./scripts/build.sh -d release -t Release -c gcc \
   -x -DX23_CORO_TRACE=0 \
-  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
-  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_LINKER_FLAG" \
   -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build (2 of 2)'
@@ -71,8 +70,7 @@ source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43" > glibc
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc \
   -x -DX23_CORO_TRACE=0 \
-  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
-  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_LINKER_FLAG" \
   -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'

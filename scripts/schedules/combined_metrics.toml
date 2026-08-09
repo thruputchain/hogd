@@ -20,8 +20,7 @@ source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43" > glibc
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc \
   -x "-DBUILD_BENCHMARKS=ON" \
-  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
-  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_LINKER_FLAG" \
   -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
@@ -104,8 +103,7 @@ source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43"
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc \
-  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
-  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_LINKER_FLAG" \
   -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
