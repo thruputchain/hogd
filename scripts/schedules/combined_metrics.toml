@@ -15,17 +15,25 @@ git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43" > glibc.log 2>&1 || (cat glibc.log && exit 1)
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -x "-DBUILD_BENCHMARKS=ON" -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc \
+  -x "-DBUILD_BENCHMARKS=ON" \
+  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
+./scripts/ci/verify_glibc_2_43_binary.sh ./release/hogd/hog_exec/bench/control_server
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
-../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
-../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
+CGO_LDFLAGS="$HOG_GLIBC_2_43_LDFLAGS" \
+  ../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
+RUSTFLAGS="$HOG_GLIBC_2_43_RUSTFLAGS" \
+  ../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
 popd >/dev/null
 
 echo 'set port env vars'
@@ -92,12 +100,17 @@ git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
+source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43"
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc \
+  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log && exit 1)
+./scripts/ci/verify_glibc_2_43_binary.sh ./release/x23/tests/bench
 
 echo 'clone metrics history'
 ./scripts/clone_metrics_history.sh

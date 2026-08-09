@@ -14,12 +14,18 @@ git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43" > glibc.log 2>&1 || (cat glibc.log && exit 1)
 
 echo 'build (1 of 2)'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=0 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc \
+  -x -DX23_CORO_TRACE=0 \
+  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build (2 of 2)'
 cmake --build release --parallel "$(nproc)" --target control_server hog-db hog-exec hog-event > build2.log 2>&1 || (cat build2.log && exit 1)
+./scripts/ci/verify_glibc_2_43_binary.sh ./release/hogd/hog_exec/bench/control_server
 
 echo 'clear hog-db file directory'
 mkdir -p ci_work_dir/
@@ -60,12 +66,18 @@ git checkout {{ .git_commit }}
 git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+source ./scripts/ci/prepare_glibc_2_43.sh "$(pwd -P)/release/glibc-2.43" > glibc.log 2>&1 || (cat glibc.log && exit 1)
 
 echo 'configure'
-./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=0 -n > build1.log 2>&1 || (cat build1.log && exit 1)
+./scripts/build.sh -d release -t Release -c gcc \
+  -x -DX23_CORO_TRACE=0 \
+  -x "$HOG_GLIBC_2_43_CMAKE_LOADER_FLAG" \
+  -x "$HOG_GLIBC_2_43_CMAKE_RPATH_FLAG" \
+  -n > build1.log 2>&1 || (cat build1.log && exit 1)
 
 echo 'build'
 cmake --build release --parallel "$(nproc)" --target multiexec_runner control_cli > build2.log 2>&1 || (cat build2.log && exit 1)
+./scripts/ci/verify_glibc_2_43_binary.sh ./release/hogd/hog_exec/bench/multiexec_runner
 
 echo 'wait for bench servers'
 ./scripts/wait-port.sh hog7 11111
