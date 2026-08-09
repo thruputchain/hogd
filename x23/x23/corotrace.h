@@ -6,6 +6,7 @@
 #include <cassert>
 #include <concepts>
 #include <coroutine>
+#include <memory>
 #include <new>
 #include <source_location>
 #include <string>
@@ -51,15 +52,29 @@ struct PromiseBase {
   // N > hardware_destructive_interference_size, but nothing in
   // practice needs that.  On ARM the bug is latent (misaligned
   // accesses don't fault) but this avoids the perf penalty too.
-  static constexpr std::align_val_t kFrameAlign{
-      hardware_destructive_interference_size};
+  //
+  // Alignment is done by hand over the plain (unaligned) allocator
+  // rather than via ::operator new(size, align_val_t): the aligned
+  // overload takes glibc's memalign path, which is both slower than
+  // plain malloc's tcache path and far more volatile across glibc
+  // releases (2.44 regressed it ~17% for coroutine-frame-sized
+  // alloc/free patterns).  The pointer returned by the underlying
+  // allocation is stashed in the word just below the aligned block.
+  static constexpr std::size_t kFrameAlign =
+      hardware_destructive_interference_size;
   void *operator new(std::size_t size)
   {
-    return ::operator new(size, kFrameAlign);
+    void *base = ::operator new(size + kFrameAlign);
+    void *p = static_cast<char *>(base) + sizeof(void *);
+    std::size_t space = size + kFrameAlign - sizeof(void *);
+    p = std::align(kFrameAlign, size, p, space);
+    assert(p);
+    static_cast<void **>(p)[-1] = base;
+    return p;
   }
   void operator delete(void *ptr, std::size_t size)
   {
-    ::operator delete(ptr, size, kFrameAlign);
+    ::operator delete(static_cast<void **>(ptr)[-1], size + kFrameAlign);
   }
 
   PromiseBase(source_location sloc) noexcept
