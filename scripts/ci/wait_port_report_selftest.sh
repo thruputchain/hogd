@@ -1,11 +1,44 @@
 #!/usr/bin/env bash
 # Self-test for wait_port_or_report: a wait that succeeds must behave like
-# ci_wait_port, and a wait that times out must name the port, replay the logs of
-# what was launched on that host, and still fail.
+# ci_wait_port, a wait that times out must name the port, replay the logs of
+# what was launched on that host, and still fail, and a wait whose process has
+# already exited must end there rather than run out its timeout.
 set -euo pipefail
 
 HELPERS="$(dirname "$(readlink -f "$0")")/wait_port_report.sh"
 fail=0
+
+work_dir=$(mktemp -d)
+trap 'rm -rf "$work_dir"' EXIT
+
+# Stands in for [control_cli <host> <port> expect_running]. Answers per host so
+# a case can have one host's launch dead and another's alive, and reproduces the
+# real command's output: the answer is in what it printed, and its exit status
+# of 1 is shared by every way of not knowing.
+CONTROL_CLI="$work_dir/control_cli"
+cat >"$CONTROL_CLI" <<'STUB'
+#!/usr/bin/env bash
+host=$1
+if [[ " ${UNREACHABLE_HOSTS:-} " == *" $host "* ]]; then
+  echo "I[0809 08:12:33 control_cli.cc:69] Error: connect($host:11111): Connection refused"
+  exit 1
+fi
+if [[ " ${HANGING_HOSTS:-} " == *" $host "* ]]; then
+  # [control_cli] retries a refused connection, so a server that has gone away
+  # leaves the probe waiting rather than failing.
+  sleep 30
+  exit 0
+fi
+if [[ " ${EXITED_HOSTS:-} " == *" $host "* ]]; then
+  echo "I[0809 08:12:33 control_cli.cc:44] Process is not running: exit code 134"
+  exit 1
+fi
+echo "I[0809 08:12:33 control_cli.cc:39] Process is running"
+exit 0
+STUB
+chmod +x "$CONTROL_CLI"
+export CONTROL_CLI
+export CI_CONTROL_PORT=11111
 
 expect_status() {
   local label=$1 want=$2 got=$3
@@ -133,5 +166,105 @@ expect_status 'replay of an unknown label' 0 "$status"
 expect_contains 'replay of an unknown label says so' \
   'no control log record for node1_mempool' "$out"
 expect_contains 'replay of an unknown label runs on' 'REACHED' "$out"
+
+## Giving up on a port whose process is already gone.
+#
+# The wait is run in slices and the host is asked between them, so the number of
+# [ci_wait_port] calls -- one "Timed out" line each -- is how many slices ran.
+# With the default 600s budget and 30s slices there are twenty; a wait that ends
+# after one is a wait that ended on the answer rather than on its timeout.
+
+expect_slices() {
+  local label=$1 want=$2 haystack=$3
+  local got
+  got=$(grep -c 'Timed out:' <<<"$haystack" || true)
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL $label: $got readiness slices, want $want"
+    printf '%s\n' "$haystack" | sed 's/^/     | /'
+    fail=1
+  else
+    echo "ok   $label"
+  fi
+}
+
+# The run that prompted this: both hog-exec shards on hog5 died a second after
+# launch on "Address already in use". Ten minutes of waiting could not have
+# produced a listener, and the port finally reported was not the one that failed
+# to bind.
+out=$(UNREACHABLE_PORT=8042 EXITED_HOSTS=hog5 CI_WAIT_PORT_TIMEOUT_SEC=600 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+record hog5 node0_hog_exec_slot_b /tmp/b.out /tmp/b.err
+wait_port_or_report 10.100.0.5 8042
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'dead launch ends the script' 1 "$status"
+expect_lacks 'dead launch stops the script' 'NOT REACHED' "$out"
+expect_slices 'dead launch is not waited out' 1 "$out"
+expect_contains 'dead launch names the port and host' \
+  'readiness: 10.100.0.5:8042 is not going to come up; the last process launched on hog5 has already exited (exit code 134)' \
+  "$out"
+expect_contains 'dead launch replays the process that died' \
+  'REMOTE(hog5): tail -n 80 /tmp/a.out /tmp/a.err' "$out"
+expect_contains 'dead launch replays the other process on the host' \
+  '/tmp/b.out' "$out"
+
+# A host whose launch is still running gets the whole budget: a process can be
+# slow to bind, and this must not turn a slow start into a failure.
+out=$(UNREACHABLE_PORT=8042 CI_WAIT_PORT_TIMEOUT_SEC=60 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+wait_port_or_report 10.100.0.5 8042
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'live launch still times out' 1 "$status"
+expect_slices 'live launch is waited out in full' 2 "$out"
+expect_contains 'live launch reports the timeout' \
+  'readiness: nothing is listening on 10.100.0.5:8042' "$out"
+expect_lacks 'live launch is not called dead' 'has already exited' "$out"
+
+# Not being able to ask is not an answer. A control server that cannot be
+# reached, one that reports a version mismatch, and one asked before anything
+# was launched all share [expect_running]'s exit status of 1, and reading any of
+# them as "the process is gone" would abandon a port that was still coming up.
+out=$(UNREACHABLE_PORT=8042 UNREACHABLE_HOSTS=hog5 CI_WAIT_PORT_TIMEOUT_SEC=60 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+wait_port_or_report 10.100.0.5 8042
+') && status=0 || status=$?
+expect_status 'unreachable control server still times out' 1 "$status"
+expect_slices 'unreachable control server is waited out in full' 2 "$out"
+expect_lacks 'unreachable control server is not read as an exit' \
+  'has already exited' "$out"
+
+# ...and a probe that never answers must not outlast the wait it was meant to
+# cut short.
+out=$(UNREACHABLE_PORT=8042 HANGING_HOSTS=hog5 CI_WAIT_PORT_TIMEOUT_SEC=60 \
+  READINESS_PROC_CHECK_TIMEOUT_SEC=1 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+wait_port_or_report 10.100.0.5 8042
+') && status=0 || status=$?
+expect_status 'hanging probe still times out' 1 "$status"
+expect_contains 'hanging probe reports the timeout' \
+  'readiness: nothing is listening on 10.100.0.5:8042' "$out"
+
+# A budget of 0 is [wait-port.sh]'s "wait forever", which has no last slice to
+# trim and no timeout to reach. The check between slices is then the only thing
+# that can end the wait.
+out=$(UNREACHABLE_PORT=8042 EXITED_HOSTS=hog5 CI_WAIT_PORT_TIMEOUT_SEC=0 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+wait_port_or_report 10.100.0.5 8042
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unbounded wait ends on a dead launch' 1 "$status"
+expect_lacks 'unbounded wait stops the script' 'NOT REACHED' "$out"
+expect_slices 'unbounded wait is not waited out' 1 "$out"
+
+# A port waited on before anything was launched has no host to ask, and the
+# question must not be put to whichever host happens to be first.
+out=$(UNREACHABLE_PORT=11222 EXITED_HOSTS=hog5 CI_WAIT_PORT_TIMEOUT_SEC=60 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+wait_port_or_report 10.100.0.4 11222
+') && status=0 || status=$?
+expect_status 'no records on this host' 1 "$status"
+expect_slices 'no records on this host is waited out in full' 2 "$out"
+expect_lacks 'no records on this host asks nobody' 'has already exited' "$out"
 
 exit "$fail"
