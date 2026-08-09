@@ -108,7 +108,10 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 export BUILD_DIR=release
 export WORK_DIR=ci_work_dir/
 source ./scripts/ci/bench_harness.sh
-rm -f "$CI_BENCH_FAILURE_LOG"
+
+# Drop any digest left by an earlier run on this host, so the report at the end
+# of the job describes this run only.
+ci_reset_bench_failures
 
 ALL_BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 BENCH_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
@@ -139,35 +142,38 @@ echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
 ./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
 
+# Each step's output is streamed as usual and also captured under
+# [bench_logs/]. This job runs five suites back to back, so its log is long
+# enough that GitHub only serves a bounded tail of it: a suite that dies early
+# has its crash output evicted by the thousands of lines [metrics.sh] emits
+# afterwards. [ci_report_failed_bench_steps] replays the tail of whatever
+# failed at the very end of the job, where it is still reachable.
 echo 'run multiexec interface benchmarks'
 kill_stale_benchmark_processes
-exec_scaling_exit=0
-./scripts/ci/exec_scaling.sh || exec_scaling_exit=$?
+ci_run_bench_step exec_scaling ./scripts/ci/exec_scaling.sh
 
 echo 'run e2e payment benchmark'
 kill_stale_benchmark_processes
-mempool_bench_exit=0
-./scripts/ci/mempool_bench.sh || mempool_bench_exit=$?
+ci_run_bench_step mempool_bench ./scripts/ci/mempool_bench.sh
 
 echo 'run e2e payment multi-node benchmark'
 # Skip the per-benchmark metrics-history commit; the combined run makes a
 # single commit at the end via commit_metrics.sh.
 kill_stale_benchmark_processes
-mempool_multi_node_bench_exit=0
-MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ./scripts/ci/mempool_multi_node_bench.sh || mempool_multi_node_bench_exit=$?
+ci_run_bench_step mempool_multi_node_bench \
+  env MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 \
+  ./scripts/ci/mempool_multi_node_bench.sh
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
 ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
 
 echo 'run event server benchmarks'
 kill_stale_benchmark_processes
-event_bench_exit=0
-./scripts/ci/event_bench.sh || event_bench_exit=$?
+ci_run_bench_step event_bench ./scripts/ci/event_bench.sh
 
 echo 'run metrics'
 kill_stale_benchmark_processes
-metrics_exit=0
-./scripts/ci/metrics.sh || metrics_exit=$?
+ci_run_bench_step metrics ./scripts/ci/metrics.sh
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
@@ -175,20 +181,16 @@ echo 'commit metrics'
 echo 'bench servers will be shut down by EXIT trap'
 
 echo 'check for failures'
-# Name the failed suites and the commands that killed them here, at the end of
-# the job: an early failure is long past the end of the retrievable log by now.
+# [ci_report_failed_bench_steps] names each failed suite with its exit status
+# and replays the tail of its captured output; [ci_report_bench_failures]
+# replays the command that killed each suite. This job runs five suites into
+# one log and GitHub serves only its tail, so an early failure is past the end
+# of the retrievable window by the time the job finishes; these two reports are
+# the surviving evidence.
 bench_failed=0
-for bench_step in "exec_scaling:$exec_scaling_exit" \
-    "mempool_bench:$mempool_bench_exit" \
-    "mempool_multi_node_bench:$mempool_multi_node_bench_exit" \
-    "event_bench:$event_bench_exit" \
-    "metrics:$metrics_exit"; do
-    if [ "${bench_step##*:}" -ne 0 ]; then
-        echo "FAILED benchmark step '${bench_step%%:*}': exit status ${bench_step##*:}"
-        bench_failed=1
-    fi
-done
-cat "$CI_BENCH_FAILURE_LOG" 2>/dev/null || true
+ci_report_failed_bench_steps || bench_failed=1
+
+ci_report_bench_failures
 
 if [ "$bench_failed" -ne 0 ]; then
     echo "one or more benchmark steps failed"
