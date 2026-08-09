@@ -83,6 +83,11 @@ ci_remote_run() {
     echo "ssh: connect to host $host: Connection refused" >&2
     return 255
   fi
+  # A reachable host that cannot enumerate its listeners. The real program says
+  # so with its own status rather than an empty, successful answer.
+  if [[ -e "$STUB_STATE/no_ss" ]]; then
+    return 3
+  fi
 
   [[ $command =~ :\(([0-9|]+)\) ]] || return 0
   alternation=${BASH_REMATCH[1]}
@@ -169,9 +174,11 @@ check_contains "unreachable host is reported as such" \
 ## checked by asking the host what it is listening on rather than by probing one
 ## address from here.
 
+# $2 marks the host as one that does not answer: "unreachable" for ssh failing,
+# "no_ss" for a reachable host that cannot enumerate its listeners.
 run_host_preflight() {
   local in_use=$1
-  local unreachable=${2:-}
+  local silent=${2:-}
   local port
 
   STUB_STATE="$work_dir/stub_state"
@@ -181,7 +188,7 @@ run_host_preflight() {
   : >"$STUB_STATE/in_use"
   echo scpd >"$STUB_STATE/holder"
   for port in $in_use; do echo "$port" >>"$STUB_STATE/in_use"; done
-  [[ -z $unreachable ]] || : >"$STUB_STATE/unreachable"
+  [[ -z $silent ]] || : >"$STUB_STATE/$silent"
 
   CI_PORT_FREE_WAIT_SEC=1 \
     ci_require_host_ports_free hog4 2223 5500 50000 3300 4400 2>&1
@@ -212,6 +219,29 @@ out=$(run_host_preflight "3300" unreachable) || {
 }
 check_contains "unaskable host leaves the ports unchecked" \
   "leaving 2223 5500 50000 3300 4400 unchecked" "$out"
+
+# A reachable host that cannot run [ss] must say so too. The danger is the
+# opposite of a false failure: an empty answer read as "nothing is listening"
+# would skip the check silently and hand the run straight back to the bind
+# failure this whole change exists to catch.
+out=$(run_host_preflight "3300" no_ss) || {
+  echo "FAIL host check should not fail the run when ss cannot run"
+  fail=1
+}
+check_contains "a host that cannot enumerate listeners says so" \
+  "leaving 2223 5500 50000 3300 4400 unchecked" "$out"
+
+# ...and the program that carries that status is the one actually sent, so run
+# it against an [ss] that cannot run and check it does not exit 0 with nothing.
+ss_stub_dir="$work_dir/no_ss_stub"
+mkdir -p "$ss_stub_dir"
+printf '#!/usr/bin/env bash\nexit 127\n' >"$ss_stub_dir/ss"
+chmod +x "$ss_stub_dir/ss"
+status=0
+out=$(PATH="$ss_stub_dir:$PATH" bash -c \
+  "$(ci_listening_sockets_script '3300' 40)" 2>&1) || status=$?
+check_eq "the emitted program fails when ss fails" 3 "$status"
+check_eq "the emitted program prints nothing when ss fails" "" "$out"
 
 if ((fail)); then
   echo "port preflight selftest FAILED"

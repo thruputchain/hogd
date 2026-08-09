@@ -258,6 +258,23 @@ ci_port_in_use() {
   nc -z "$1" "$2" 2>/dev/null
 }
 
+# The program that asks a host which of the given ports it is listening on,
+# emitted as text so it can be handed to ssh and exercised by the self-test.
+#
+# [ss | grep | head] would return the status of [head], so a host where [ss]
+# cannot run comes back successful with no output -- indistinguishable from a
+# host with nothing listening, which is the one answer this must never invent.
+# Take [ss]'s own status first, on its own, and match against what it printed.
+ci_listening_sockets_script() {
+  local alternation=$1
+  local limit=$2
+
+  cat <<EOF
+ci_sockets=\$(ss -lntp 2>/dev/null) || exit 3
+printf '%s\n' "\$ci_sockets" | grep -E ':($alternation)\b' | head -n $limit
+EOF
+}
+
 # Best effort: names what is holding the ports, so the report says which stale
 # process to chase rather than only that the host is busy. A host that cannot be
 # asked must not replace the failure being reported with a failure of its own.
@@ -274,8 +291,7 @@ ci_report_port_holders() {
   # by another account matches on the address alone. Both outcomes say more than
   # silence, and neither is worth failing over.
   if ! listeners=$(ci_remote_run "$host" \
-    "ss -lntp 2>/dev/null | grep -E ':($alternation)\b' |
-       head -n $CI_PORT_HOLDER_REPORT_LINES"); then
+    "$(ci_listening_sockets_script "$alternation" "$CI_PORT_HOLDER_REPORT_LINES")"); then
     echo "(could not ask $host what is listening)"
   elif [ -z "$listeners" ]; then
     echo "(nothing found; the port may be held by a process ss did not show)"
@@ -361,9 +377,12 @@ ci_require_host_ports_free() {
   while :; do
     status=0
     listeners=$(ci_remote_run "$host" \
-      "ss -lntp 2>/dev/null | grep -E ':($alternation)\b' |
-         head -n $CI_PORT_HOLDER_REPORT_LINES") || status=$?
+      "$(ci_listening_sockets_script "$alternation" \
+        "$CI_PORT_HOLDER_REPORT_LINES")") || status=$?
 
+    # Unreachable, or reachable but unable to enumerate its listeners. Either
+    # way the host did not answer the question, which is not the same as
+    # answering "nothing".
     if [ "$status" -ne 0 ]; then
       echo "preflight: could not ask $host what it is listening on;" \
         "leaving $* unchecked" >&2
