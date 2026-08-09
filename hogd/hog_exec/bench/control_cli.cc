@@ -61,7 +61,12 @@ handle_shutdown_command(std::string const &host, std::string const &port)
     auto client = hogd::connect_to_control_server(host, port, false);
 
     hogd::info("Sending shutdown command to {}:{}", host, port);
-    client.shutdown_server();
+    auto error_code = client.shutdown_server();
+    if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Error: shutdown of {}:{} reported {}", host, port,
+                 error_code);
+      return 1;
+    }
     hogd::info("Shutdown command sent successfully");
 
     return 0;
@@ -109,12 +114,22 @@ handle_start_command(std::string const &host, std::string const &port,
   }
 }
 
+// [stop], [shutdown] and [clear_work_dir] exist to leave the host in a known
+// state, and the CI scripts branch on their exit status. Reporting success for
+// a request the server refused -- a version mismatch, a work directory it
+// could not remove, a benchmark process it could not kill -- hands the caller
+// a clear host that is not clear, and the failure resurfaces later as a bind
+// or readiness failure somewhere else. Give back what the server said.
 int
 handle_stop_command(std::string const &host, std::string const &port)
 {
   try {
     auto client = hogd::connect_to_control_server(host, port, false);
-    client.stop_server();
+    auto error_code = client.stop_server();
+    if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Error: stop on {}:{} reported {}", host, port, error_code);
+      return 1;
+    }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
@@ -127,7 +142,12 @@ handle_clear_work_dir_command(std::string const &host, std::string const &port)
 {
   try {
     auto client = hogd::connect_to_control_server(host, port);
-    client.clear_work_dir();
+    auto error_code = client.clear_work_dir();
+    if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::info("Error: clear_work_dir on {}:{} reported {}", host, port,
+                 error_code);
+      return 1;
+    }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());

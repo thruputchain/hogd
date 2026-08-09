@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstddef>
 #include <cstdlib>
@@ -94,6 +96,35 @@ join_args(std::vector<std::string> const &args)
   args_joined.pop_back(); // remove the last space
   return args_joined;
 }
+
+// Darwin's POSIX signal declarations are not fully modeled by include-cleaner.
+// NOLINTBEGIN(misc-include-cleaner)
+
+// Set by the SIGTERM/SIGINT handler. A handler may touch nothing else: this is
+// the whole of what runs in signal context, and [wait_for_shutdown] polls it.
+volatile std::sig_atomic_t g_termination_requested =
+    0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+bool
+termination_requested()
+{
+  return g_termination_requested != 0;
+}
+
+void
+on_termination_signal(int /*signal_number*/)
+{
+  g_termination_requested = 1;
+}
+// NOLINTEND(misc-include-cleaner)
+
+// How long [stop] waits for a process to leave on SIGTERM before escalating,
+// and how long it then waits for SIGKILL to take effect. A process that is
+// going to leave does so at once, so these are only ever paid by one that is
+// not, and they are what turns "the signal was delivered" into "the host is
+// clear".
+constexpr auto kStopTermGrace = std::chrono::seconds(5);
+constexpr auto kStopKillGrace = std::chrono::seconds(5);
 } // namespace
 
 class Subprocess {
@@ -206,6 +237,22 @@ public:
     if (pid == 0) {
       // Child process
 
+      // Lead a new process group, so [stop] can signal everything this launch
+      // spawns rather than only the process we forked. The benchmark launches
+      // that go through [bash -lc "... exec ..."] end up as the workload
+      // itself, but a launch that spawns helpers of its own -- [chuckd.dev]
+      // starts [scpd.dev] -- leaves them out of a signal addressed to the pid
+      // alone, and a helper that outlives the run keeps its sockets.
+      //
+      // Both the child and the parent set the group: whichever runs first
+      // wins, so there is no window in which the parent can signal a pid that
+      // is not yet in its own group.
+      if (setpgid(0, 0) == -1) {
+        // NOLINTBEGIN(modernize-use-std-print)
+        info("setpgid failed: {}", strerror(errno));
+        // NOLINTEND(modernize-use-std-print)
+      }
+
       // Redirect stdout and stderr to temp files
       if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
           dup2(stderr_fd, STDERR_FILENO) == -1) {
@@ -245,6 +292,19 @@ public:
 
     // Parent process
 
+    pid_ = pid;
+    // EACCES means the child has already exec'd, which it can only do after
+    // running its own [setpgid]: the group exists either way. Any other error
+    // leaves the child in this server's group, where a group-directed signal
+    // would hit the server itself, so we fall back to signalling the pid.
+    if (setpgid(pid, pid) == 0 || errno == EACCES) {
+      pgid_ = pid;
+    }
+    else {
+      error("setpgid failed for child {}: {}; will signal the pid alone", pid,
+            Errno{});
+    }
+
     // Restore parent's original stderr in case child affected it
     if (dup2(parent_stderr, STDERR_FILENO) == -1) {
       error("failed to restore parent stderr: {}", Errno{});
@@ -279,6 +339,28 @@ public:
     return exit_code_;
   }
 
+  // Signals the launch. Addresses the whole process group when the child leads
+  // one, so helpers it spawned are signalled too.
+  void signal_process(int sig)
+  {
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    if (pgid_.has_value() && kill(-*pgid_, sig) == 0) {
+      return;
+    }
+    // The group can be empty while the child is still an unreaped zombie, and
+    // it does not exist at all if [setpgid] failed. Either way the pid is the
+    // thing we know about.
+    kill(pid_, sig); // NOLINT(misc-include-cleaner)
+  }
+
+  // True once the child has been reaped. False if it is still running when the
+  // timeout expires.
+  bool wait_for_exit(std::chrono::steady_clock::duration timeout)
+  {
+    std::unique_lock lock(exit_code_mutex_);
+    return exited_.wait_for(lock, timeout, [this] { return reaped_; });
+  }
+
   void wait_for_shutdown()
   {
     if (waitpid_thread_.joinable()) {
@@ -296,15 +378,26 @@ private:
     std::lock_guard lock(exit_code_mutex_);
     CHECK(!exit_code_.has_value());
     exit_code_ = res;
+    // [waitpid] has returned, so the child is gone whether or not it told us
+    // how. A failed wait must not read as "still running" to [stop]: that
+    // would escalate to SIGKILL and then report a survivor for a process that
+    // no longer exists.
+    reaped_ = true;
     if (exit_code_.has_value()) {
       info("child process: {} exited with code: {}", child_pid, *exit_code_);
     }
     else {
       error("failed to wait for child process: {}", child_pid);
     }
+    exited_.notify_all();
   }
 
+  pid_t pid_ = -1;
+  std::optional<pid_t> pgid_ = std::nullopt;
+
   std::mutex exit_code_mutex_;
+  std::condition_variable exited_;
+  bool reaped_ = false;
   std::optional<int> exit_code_ = std::nullopt;
 
   std::jthread waitpid_thread_;
@@ -373,17 +466,70 @@ public:
 
     std::lock_guard lock(running_pid_mutex_);
 
-    for (auto &[pid, subprocess] : subprocesses_) {
-      if (!subprocess->get_exit_code().has_value()) {
-        info("stopping running process: {}", pid);
-        kill(pid, SIGTERM); // NOLINT(misc-include-cleaner)
-      }
-
-      subprocess->wait_for_shutdown();
+    // Anything a previous stop could not kill is still this host's problem, so
+    // re-signal it and re-check it here rather than reporting a clear host on
+    // the second call.
+    std::erase_if(unstoppable_, [](Subprocess *subprocess) {
+      return subprocess->get_exit_code().has_value();
+    });
+    for (auto *subprocess : unstoppable_) {
+      subprocess->signal_process(SIGKILL); // NOLINT(misc-include-cleaner)
     }
 
-    subprocesses_.clear();
+    // Sending SIGTERM is not the same as the process being gone, and the
+    // caller of [stop] launches the next benchmark suite onto the same ports
+    // the moment this returns. A process that ignores SIGTERM, or that is
+    // simply slower to leave than the caller is to move on, keeps its
+    // listening sockets: the next suite then dies with "Address already in
+    // use", and the readiness wait that eventually reports it names the first
+    // port nothing happened to be holding rather than the host that was busy.
+    // Wait for the process to actually leave, escalate to SIGKILL if it does
+    // not, and tell the caller when even that was not enough.
+    std::vector<pid_t> survivors;
+    for (auto &[pid, subprocess] : subprocesses_) {
+      if (subprocess->get_exit_code().has_value()) {
+        continue;
+      }
+
+      info("stopping running process: {}", pid);
+      subprocess->signal_process(SIGTERM); // NOLINT(misc-include-cleaner)
+      if (subprocess->wait_for_exit(kStopTermGrace)) {
+        continue;
+      }
+
+      error("process {} is still running {}s after SIGTERM; sending SIGKILL",
+            pid, kStopTermGrace.count());
+      subprocess->signal_process(SIGKILL); // NOLINT(misc-include-cleaner)
+      if (subprocess->wait_for_exit(kStopKillGrace)) {
+        continue;
+      }
+
+      error("process {} is still running {}s after SIGKILL", pid,
+            kStopKillGrace.count());
+      survivors.push_back(pid);
+    }
+
+    for (auto it = subprocesses_.begin(); it != subprocesses_.end();) {
+      if (std::ranges::find(survivors, it->first) != survivors.end()) {
+        // Destroying this would join a [waitpid] thread that is still blocked
+        // on a process that has not exited, hanging the server on the very
+        // request meant to clean it up. Hand it to [unstoppable_], which never
+        // destroys what it holds; the next stop re-checks it, and the waitpid
+        // thread reaps the process if it ever does leave.
+        unstoppable_.push_back(it->second.release());
+        it = subprocesses_.erase(it);
+        continue;
+      }
+      it->second->wait_for_shutdown();
+      it = subprocesses_.erase(it);
+    }
+
     most_recent_pid_.reset();
+
+    if (!unstoppable_.empty()) {
+      error("could not stop {} process(es) on this host", unstoppable_.size());
+      return CIServerErrorCode::kCIServerErrorCodeInternal;
+    }
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
@@ -396,12 +542,16 @@ public:
     }
 
     info("stopping any running process");
-    ciserver_stop(hogd_git_hash);
+    auto stop_status = ciserver_stop(hogd_git_hash);
 
+    // The server comes down either way -- a host it could not clear is not a
+    // reason to leave the control server itself running -- but the caller is
+    // told, because "shutdown succeeded" on a host that still has a benchmark
+    // process holding its ports is the answer that sends the next suite into
+    // a bind failure.
     info("shutting down control server");
     waiting_for_shutdown_ = true;
-    waiting_for_shutdown_.notify_all();
-    return CIServerErrorCode::kCIServerErrorCodeOK;
+    return stop_status;
   }
 
   CIProcStatus ciserver_query_proc_status(HogdGitHash const &hogd_git_hash)
@@ -453,7 +603,24 @@ public:
     return CIServerErrorCode::kCIServerErrorCodeOK;
   }
 
-  void wait_for_shutdown() { waiting_for_shutdown_.wait(false); }
+  // Stops everything this server launched. Bypasses the version check because
+  // this is the server winding down its own children, not a client asking it
+  // to.
+  CIServerErrorCode stop_all_processes()
+  {
+    return ciserver_stop(hogd_git_hash_);
+  }
+
+  void wait_for_shutdown()
+  {
+    while (!waiting_for_shutdown_.load() && !termination_requested()) {
+      // Polled rather than waited on, so the signal handler that ends this
+      // loop has nothing to do but set a flag. Nothing here is latency
+      // sensitive: the shutdown RPC and a SIGTERM both arrive once, at the end
+      // of a run.
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
 
   void shut_down()
   {
@@ -505,6 +672,12 @@ private:
   std::unordered_map<pid_t, std::unique_ptr<Subprocess>> subprocesses_;
   std::optional<pid_t> most_recent_pid_ = std::nullopt;
   // NOLINTEND(misc-include-cleaner)
+
+  // Launches that survived SIGKILL. Deliberately never destroyed: their
+  // [waitpid] threads are still blocked on processes that have not exited, and
+  // joining one would hang the server. Only [ciserver_stop] touches this, and
+  // it never grows beyond the number of launches that would not die.
+  std::vector<Subprocess *> unstoppable_;
 
   std::string work_dir_;
 };
@@ -567,13 +740,37 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   hogd::info("using work directory: {}", work_dir);
 
+  // A control server that is asked to go away must take the benchmark
+  // processes it launched with it. Without a handler, SIGTERM ends this
+  // process outright: nothing stops the children, and they outlive the run
+  // still holding their listening sockets. The next run's server has no record
+  // of them -- it did not launch them -- so the suite that binds those ports
+  // dies with "Address already in use" on a host nobody has any reason to
+  // suspect. The CI setup reaps a leftover server with exactly this signal
+  // (`killall -TERM control_server`) before starting its own, so this is the
+  // path the orphans come from.
+  // NOLINTBEGIN(misc-include-cleaner)
+  std::signal(SIGTERM, hogd::on_termination_signal);
+  std::signal(SIGINT, hogd::on_termination_signal);
+  // NOLINTEND(misc-include-cleaner)
+
   hogd::CIControlServer control_server(work_dir);
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   control_server.start_server(*control_port);
   control_server->impl()->wait_for_shutdown();
 
+  hogd::info("stopping launched processes before exiting");
+  auto stop_status = control_server->impl()->stop_all_processes();
+
   // This is a temporary bandaid until issue #597 is resolved.
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+  if (stop_status != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+    // Exiting successfully here would leave the host dirty and say nothing,
+    // which is how a benchmark process outlives its run in the first place.
+    hogd::error("could not stop every launched process before exiting");
+    return EXIT_FAILURE;
+  }
   return 0;
 }
