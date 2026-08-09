@@ -132,10 +132,21 @@ kill_stale_benchmark_processes() {
 }
 
 shutdown_bench_servers() {
+  local exit_code=$1
+
   ci_enter_cleanup
-  ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${ALL_BENCH_HOSTS[@]}"
+  # This is the last thing that runs, so a host left dirty here is not this
+  # run's problem -- it is the next one's, which inherits the ports and has no
+  # record of what is holding them. Fail the job while there is still a run to
+  # attach the failure to. A job that was already failing keeps its own status.
+  if ! ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+    "${ALL_BENCH_HOSTS[@]}"; then
+    [ "$exit_code" -ne 0 ] || exit_code=1
+  fi
+
+  exit "$exit_code"
 }
-trap shutdown_bench_servers EXIT
+trap 'shutdown_bench_servers "$?"' EXIT
 
 echo 'reap any control_server left over from a previous run'
 # A control_server from a previous run can still be alive and holding the

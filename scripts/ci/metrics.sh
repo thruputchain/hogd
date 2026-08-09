@@ -14,7 +14,15 @@ cleanup() {
 
   ci_enter_cleanup
   echo 'stop any running processes'
-  ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
+  # A host this suite could not clear is handed straight to the next one:
+  # the combined-metrics job runs its suites back to back, so teardown is a
+  # handoff rather than the end of the run, and the next suite discovers an
+  # uncleared host by failing to bind its ports. Fail this suite on it instead,
+  # while it is still the suite that can be pointed at.
+  if ! ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+    "${BENCH_HOSTS[@]}"; then
+    [ "$exit_code" -ne 0 ] || exit_code=1
+  fi
 
   exit "$exit_code"
 }
