@@ -122,9 +122,36 @@ CONTROL_CLI=./release/hogd/hog_exec/bench/control_cli
 # machine rather than anything this job says. Run it as a bench step so a host
 # that could not be cleared is named in the end-of-job report, and the job goes
 # red on it, instead of the run continuing into a failure that points elsewhere.
+#
+# [ci_run_bench_step] returns 0 whatever the step did, which is right for a
+# suite that failed on its own -- the remaining suites still run -- and wrong
+# here, so report whether it recorded a new failure.
 kill_stale_benchmark_processes() {
+  local before=${#CI_FAILED_BENCH_STEPS[@]}
+
   ci_run_bench_step "kill_stale_before_$1" \
     ci_remote_killall_hosts "$BENCH_PROCESSES" "${ALL_BENCH_HOSTS[@]}"
+
+  [ "${#CI_FAILED_BENCH_STEPS[@]}" -eq "$before" ]
+}
+
+# Clears the hosts, then runs the suite on them. A suite whose hosts could not
+# be cleared is skipped rather than launched into the failure this whole change
+# is about: it would bind against the last suite's processes, then spend its
+# readiness timeout waiting for ports that can never come up, and any results it
+# did publish would describe a machine running two suites at once. The failed
+# kill is already recorded, so the job still goes red and the end-of-job report
+# still names the host.
+run_bench_suite() {
+  local name=$1
+  shift
+
+  if ! kill_stale_benchmark_processes "$name"; then
+    echo "skipping $name: its hosts could not be cleared" >&2
+    return 0
+  fi
+
+  ci_run_bench_step "$name" "$@"
 }
 
 shutdown_bench_servers() {
@@ -155,18 +182,15 @@ mkdir -p ci_work_dir/
 # afterwards. [ci_report_failed_bench_steps] replays the tail of whatever
 # failed at the very end of the job, where it is still reachable.
 echo 'run multiexec interface benchmarks'
-kill_stale_benchmark_processes exec_scaling
-ci_run_bench_step exec_scaling ./scripts/ci/exec_scaling.sh
+run_bench_suite exec_scaling ./scripts/ci/exec_scaling.sh
 
 echo 'run e2e payment benchmark'
-kill_stale_benchmark_processes mempool_bench
-ci_run_bench_step mempool_bench ./scripts/ci/mempool_bench.sh
+run_bench_suite mempool_bench ./scripts/ci/mempool_bench.sh
 
 echo 'run e2e payment multi-node benchmark'
 # Skip the per-benchmark metrics-history commit; the combined run makes a
 # single commit at the end via commit_metrics.sh.
-kill_stale_benchmark_processes mempool_multi_node_bench
-ci_run_bench_step mempool_multi_node_bench \
+run_bench_suite mempool_multi_node_bench \
   env MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 \
   ./scripts/ci/mempool_multi_node_bench.sh
 
@@ -174,12 +198,10 @@ echo 'release hog4, hog5, hog6, hog7, and hog9'
 ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
 
 echo 'run event server benchmarks'
-kill_stale_benchmark_processes event_bench
-ci_run_bench_step event_bench ./scripts/ci/event_bench.sh
+run_bench_suite event_bench ./scripts/ci/event_bench.sh
 
 echo 'run metrics'
-kill_stale_benchmark_processes metrics
-ci_run_bench_step metrics ./scripts/ci/metrics.sh
+run_bench_suite metrics ./scripts/ci/metrics.sh
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
