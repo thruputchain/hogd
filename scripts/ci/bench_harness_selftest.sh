@@ -123,8 +123,10 @@ stub_dir="$work_dir/killall_stubs"
 mkdir -p "$stub_dir/bin"
 cat >"$stub_dir/bin/pgrep" <<'STUB'
 #!/usr/bin/env bash
-# Usage: pgrep -x NAME
-grep -qxF "$2" "$STUB_DIR/running"
+# Usage: pgrep -x NAME. Prints the pid, as the real one does, so the caller can
+# read the process state out of the stub procfs.
+grep -qxF "$2" "$STUB_DIR/running" || exit 1
+cat "$STUB_DIR/pids/$2"
 STUB
 cat >"$stub_dir/bin/sudo" <<'STUB'
 #!/usr/bin/env bash
@@ -158,6 +160,11 @@ for name in "$@"; do
   if [[ $signal == KILL ]] && grep -qxF "$name" "$STUB_DIR/unkillable"; then
     continue
   fi
+  # A zombie is already dead; no signal moves it, and only its parent can
+  # clear it.
+  if grep -qxF "$name" "$STUB_DIR/zombies"; then
+    continue
+  fi
   grep -vxF "$name" "$STUB_DIR/running" >"$STUB_DIR/running.tmp" || true
   mv "$STUB_DIR/running.tmp" "$STUB_DIR/running"
 done
@@ -169,16 +176,37 @@ chmod +x "$stub_dir/bin/pgrep" "$stub_dir/bin/sudo" "$stub_dir/bin/killall"
 # that are running, and [$stubborn]/[$unkillable] name the ones that survive
 # SIGTERM and SIGKILL respectively.
 run_killall_script() {
+  local name pid=1000 state
+
   printf '%s\n' "$@" >"$stub_dir/running"
   printf '%s\n' ${stubborn:+$stubborn} >"$stub_dir/stubborn"
   printf '%s\n' ${unkillable:+$unkillable} >"$stub_dir/unkillable"
+  printf '%s\n' ${zombies:+$zombies} >"$stub_dir/zombies"
   : >"$stub_dir/signals"
+
+  # Give each running process a pid and a procfs entry in the state it is in.
+  # The pid is fixed per name for the whole run, so a kill of one name cannot
+  # renumber another out from under the probe.
+  rm -rf "$stub_dir/pids" "$stub_dir/proc"
+  mkdir -p "$stub_dir/pids" "$stub_dir/proc"
+  for name in "$@"; do
+    pid=$((pid + 1))
+    echo "$pid" >"$stub_dir/pids/$name"
+    state=S
+    [[ " ${zombies:-} " == *" $name "* ]] && state=Z
+    mkdir -p "$stub_dir/proc/$pid"
+    # Field 3 of a real stat line, behind the parenthesized command name.
+    echo "$pid ($name) $state 1 $pid $pid 0 -1 4194304" \
+      >"$stub_dir/proc/$pid/stat"
+  done
+
   STUB_DIR="$stub_dir" PATH="$stub_dir/bin:$PATH" \
     bash -c "$(CI_KILLALL_WAIT_SEC=1 CI_KILLALL_BIN="$stub_dir/bin/killall" \
+      CI_KILLALL_PROCFS="$stub_dir/proc" \
       ci_killall_script 'hog-exec hog-db')" 2>&1
 }
 
-stubborn='' unkillable=''
+stubborn='' unkillable='' zombies=''
 killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
   killall_status=$?
 check_eq "reap of processes that exit on SIGTERM succeeds" "0" \
@@ -189,7 +217,7 @@ check_eq "successful reap is quiet" "" "$killall_out"
 
 # The failure this fix is for: a process that outlives SIGTERM keeps its ports
 # bound, so it has to be escalated rather than assumed gone.
-stubborn='hog-exec' unkillable=''
+stubborn='hog-exec' unkillable='' zombies=''
 killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
   killall_status=$?
 check_eq "reap escalates past a stubborn process" "0" "$killall_status"
@@ -200,16 +228,27 @@ check_contains "escalation sends SIGKILL to the survivor only" \
 
 # A process that cannot be reaped at all must fail here, where it can still be
 # named, rather than as an unexplained bind failure in the next suite.
-stubborn='hog-exec' unkillable='hog-exec'
+stubborn='hog-exec' unkillable='hog-exec' zombies=''
 killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
   killall_status=$?
 check_eq "reap fails when a process survives SIGKILL" "1" "$killall_status"
 check_contains "unreapable process is named" \
   "stale processes survived SIGKILL: hog-exec" "$killall_out"
 
+# A zombie is pgrep-visible and no signal can clear it, but it exited already
+# and gave up its ports. Counting one as alive would wait out both timeouts and
+# then fail the reap over a process that holds nothing.
+stubborn='' unkillable='' zombies='hog-exec'
+killall_out=$(run_killall_script hog-exec hog-db) && killall_status=0 ||
+  killall_status=$?
+check_eq "a zombie does not fail the reap" "0" "$killall_status"
+check_eq "a zombie is not escalated to SIGKILL" "TERM hog-exec hog-db" \
+  "$(cat "$stub_dir/signals")"
+check_eq "a zombie is reaped quietly" "" "$killall_out"
+
 # A host that runs none of them is the common case, and killall reporting "no
 # process found" for every name must not read as a failed reap.
-stubborn='' unkillable=''
+stubborn='' unkillable='' zombies=''
 killall_out=$(run_killall_script) && killall_status=0 || killall_status=$?
 check_eq "reap of a host with nothing running succeeds" "0" "$killall_status"
 

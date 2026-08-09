@@ -291,6 +291,10 @@ CI_KILLALL_WAIT_SEC=${CI_KILLALL_WAIT_SEC:-15}
 # path.
 CI_KILLALL_BIN=${CI_KILLALL_BIN:-/usr/bin/killall}
 
+# Where the reap reads process state. Overridable so the self-test can present
+# a zombie without having to arrange a real one.
+CI_KILLALL_PROCFS=${CI_KILLALL_PROCFS:-/proc}
+
 # The remote half of [ci_remote_killall_hosts]: signal every named process and
 # wait for it to actually be gone, escalating to SIGKILL if SIGTERM was not
 # enough.
@@ -316,6 +320,7 @@ set -u
 procs='$processes'
 wait_sec='$CI_KILLALL_WAIT_SEC'
 killall='$CI_KILLALL_BIN'
+procfs='$CI_KILLALL_PROCFS'
 
 # A kill that cannot be confirmed is the failure this script exists to prevent,
 # so a host without the tool to confirm it must say so rather than report the
@@ -333,9 +338,19 @@ command -v pgrep >/dev/null 2>&1 || {
 alive_procs() {
   found=''
   for p in \$procs; do
-    if pgrep -x "\$p" >/dev/null 2>&1; then
+    for pid in \$(pgrep -x "\$p" 2>/dev/null); do
+      # A zombie has already exited and given up its ports; it lingers only
+      # until its parent reaps it, and no signal can hurry that along. It is
+      # [pgrep]-visible all the same, so counting one as alive would wait out
+      # both timeouts and then fail the reap over a process holding nothing.
+      read -r stat_line <"\$procfs/\$pid/stat" 2>/dev/null || continue
+      state=\${stat_line##*") "}
+      case \${state%% *} in
+      Z) continue ;;
+      esac
       found="\$found \$p"
-    fi
+      break
+    done
   done
   printf '%s' "\${found# }"
 }
