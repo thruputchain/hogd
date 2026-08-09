@@ -336,6 +336,59 @@ ci_require_ports_free() {
   return 1
 }
 
+# [ci_require_ports_free] for ports the coordinator can only be seen to hold
+# from the host itself.
+#
+# A probe from here reaches one address, and a suite binds more than that: a
+# loopback-only listener is invisible from another machine, and a port whose
+# bind address is not spelled out on the command line cannot be probed with any
+# confidence from off-host. So ask the host what it is listening on instead,
+# which covers every local address at once, and let a port nothing waits on be
+# checked all the same -- a stale process holding it aborts this run's process
+# just as surely as one holding a port with a readiness wait behind it.
+#
+# Not being able to ask is a warning, not a failure: the check exists to explain
+# a launch that is about to go wrong, and it must not become a new way for the
+# run to go wrong on its own.
+ci_require_host_ports_free() {
+  local host=$1
+  local alternation listeners busy waited=0 status
+  shift
+
+  printf -v alternation '%s|' "$@"
+  alternation=${alternation%|}
+
+  while :; do
+    status=0
+    listeners=$(ci_remote_run "$host" \
+      "ss -lntp 2>/dev/null | grep -E ':($alternation)\b' |
+         head -n $CI_PORT_HOLDER_REPORT_LINES") || status=$?
+
+    if [ "$status" -ne 0 ]; then
+      echo "preflight: could not ask $host what it is listening on;" \
+        "leaving $* unchecked" >&2
+      return 0
+    fi
+    if [ -z "$listeners" ]; then
+      return 0
+    fi
+    if [ "$waited" -ge "$CI_PORT_FREE_WAIT_SEC" ]; then
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  busy=$(printf '%s\n' "$listeners" | grep -oE ":($alternation)\b" |
+    tr -d ':' | sort -u | tr '\n' ' ')
+  echo "preflight: $host is listening on ${busy% } before this run launched" \
+    "anything" >&2
+  echo "===== listening sockets on $host holding ${busy% } ====="
+  printf '%s\n' "$listeners"
+  echo "===== end of listening sockets on $host ====="
+  return 1
+}
+
 ci_remote_run() {
   local host=$1
   shift

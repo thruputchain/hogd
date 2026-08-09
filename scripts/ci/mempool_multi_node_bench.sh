@@ -28,6 +28,16 @@ HOG_EXEC_SLOT_B_PORT=8041
 HOG_EXEC_SLOT_A_HTTP_PORT=8042
 HOG_EXEC_SLOT_B_HTTP_PORT=8043
 CHUCKD_IN_PORT=7888
+# The rest of what a coordinator and the SCP daemon it spawns bind. Nothing
+# waits on these -- 7888 is the one the suite gates on -- but a stale chuckd or
+# scpd holding one aborts this run's coordinator all the same, so the preflight
+# covers them. The last two are loopback, and the others do not spell out a bind
+# address, so all five are checked on the host rather than probed from here.
+CHUCKD_METRICS_PORT=2223
+CHUCKD_DEBUG_PORT=5500
+CHUCKD_OUT_PORT=50000
+SCPD_HANDLE_PORT=3300
+SCPD_CONTROL_PORT=4400
 
 ALL_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 NODE_IDS=(0 1)
@@ -301,15 +311,19 @@ kill_stale_processes() {
   ci_remote_killall_hosts "loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
-# Every port this suite binds, as "<host> <port>", split into the loadgen
-# servers -- launched and waited on first -- and everything launched after them.
-# [require_bench_ports_free] requires the whole set free before anything
-# launches and the readiness waits require each entry listening afterwards, from
-# this one table: a port missing from it is a port whose readiness is never
-# checked, and a port missing from the preflight is one this suite can silently
-# inherit from the previous run instead of binding itself.
+# Every port this suite binds, as "<host> <port>". The first two are its
+# readiness targets, split at the point the suite splits them: the loadgen
+# servers are launched and waited on before anything else goes up. The third is
+# the ports it binds without ever waiting on them.
+#
+# [require_bench_ports_free] requires all three free before anything launches
+# and the readiness waits require the first two listening afterwards, from this
+# one table: a port missing from a readiness list is a port whose readiness is
+# never checked, and a port missing from the table entirely is one this suite
+# can inherit from the previous run instead of binding itself.
 declare -a LOADGEN_PORT_TARGETS=()
 declare -a SERVICE_PORT_TARGETS=()
+declare -a HOST_CHECKED_PORT_TARGETS=()
 
 build_port_targets() {
   local node
@@ -352,6 +366,14 @@ build_port_targets() {
 
     SERVICE_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $CHUCKD_IN_PORT")
   done
+
+  for node in "${NODE_IDS[@]}"; do
+    HOST_CHECKED_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $CHUCKD_METRICS_PORT")
+    HOST_CHECKED_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $CHUCKD_DEBUG_PORT")
+    HOST_CHECKED_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $CHUCKD_OUT_PORT")
+    HOST_CHECKED_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $SCPD_HANDLE_PORT")
+    HOST_CHECKED_PORT_TARGETS+=("${CHUCKD_HOSTS[$node]} $SCPD_CONTROL_PORT")
+  done
 }
 
 wait_for_port_targets() {
@@ -371,21 +393,31 @@ wait_for_port_targets() {
 # readiness timeout for whichever port nothing happened to be holding.
 require_bench_ports_free() {
   local target host port status=0
-  local -A ports_by_host=()
+  local -A ports_by_host=() host_checked_by_host=()
 
   for target in "${LOADGEN_PORT_TARGETS[@]}" "${SERVICE_PORT_TARGETS[@]}"; do
     read -r host port <<<"$target"
     ports_by_host[$host]+=" $port"
   done
+  for target in "${HOST_CHECKED_PORT_TARGETS[@]}"; do
+    read -r host port <<<"$target"
+    host_checked_by_host[$host]+=" $port"
+  done
 
   # [ALL_HOSTS] order rather than the hash order, so a run that has to be
   # compared against another run reports its hosts the same way twice.
+  # Unquoted expansions below: the accumulated ports are one argument per port.
   for host in "${ALL_HOSTS[@]}"; do
-    [[ -n ${ports_by_host[$host]:-} ]] || continue
-    # Unquoted: the accumulated ports are one argument per port.
-    # shellcheck disable=SC2086
-    ci_require_ports_free "$host" "$(hog_ip "$host")" ${ports_by_host[$host]} ||
-      status=1
+    if [[ -n ${ports_by_host[$host]:-} ]]; then
+      # shellcheck disable=SC2086
+      ci_require_ports_free "$host" "$(hog_ip "$host")" \
+        ${ports_by_host[$host]} || status=1
+    fi
+    if [[ -n ${host_checked_by_host[$host]:-} ]]; then
+      # shellcheck disable=SC2086
+      ci_require_host_ports_free "$host" ${host_checked_by_host[$host]} ||
+        status=1
+    fi
   done
 
   return "$status"
@@ -478,11 +510,11 @@ echo 'launch coordinators'
 for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
-    --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":"$CHUCKD_IN_PORT" --debug-port 5500 \
+    --metrics :"$CHUCKD_METRICS_PORT" bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":"$CHUCKD_IN_PORT" --debug-port "$CHUCKD_DEBUG_PORT" \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
-    --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
+    --out-addr :"$CHUCKD_OUT_PORT" --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
     --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
-    --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
+    --scp-handle-addr 127.0.0.1:"$SCPD_HANDLE_PORT" --scp-control-addr 127.0.0.1:"$SCPD_CONTROL_PORT"
 done
 
 echo 'stream coordinator stdout logs'

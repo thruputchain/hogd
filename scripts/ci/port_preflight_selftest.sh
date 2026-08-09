@@ -70,16 +70,27 @@ exit 0
 STUB
 chmod +x "$stub_dir/nc"
 
-# What the host says is listening. The real command is [ss]; only its output
-# reaches the report.
+# What the host says is listening. The real command is an [ss] pipeline whose
+# [grep] narrows it to the ports being asked about; the stub reads the ports out
+# of that command and answers from the same "in use" file the [nc] stub reads,
+# so one seeding describes the host however it is asked.
 ci_remote_run() {
   local host=$1
-  shift
+  local command=$2
+  local alternation holder port
+
   if [[ -e "$STUB_STATE/unreachable" ]]; then
     echo "ssh: connect to host $host: Connection refused" >&2
     return 255
   fi
-  echo "LISTEN 0 4096 10.100.0.105:8040 0.0.0.0:* users:((\"hog-exec\",pid=3857552))"
+
+  [[ $command =~ :\(([0-9|]+)\) ]] || return 0
+  alternation=${BASH_REMATCH[1]}
+  holder=$(cat "$STUB_STATE/holder" 2>/dev/null) || holder=hog-exec
+  for port in ${alternation//|/ }; do
+    grep -qxF "$port" "$STUB_STATE/in_use" 2>/dev/null || continue
+    echo "LISTEN 0 4096 10.100.0.104:$port 0.0.0.0:* users:((\"$holder\",pid=3857552))"
+  done
 }
 
 # Seeds the stub host and runs the preflight against it. $1 is the list of ports
@@ -152,6 +163,55 @@ check_contains "unreachable host still names the port" \
   "preflight: 10.100.0.105:8040 is in use" "$out"
 check_contains "unreachable host is reported as such" \
   "could not ask hog5 what is listening" "$out"
+
+## The coordinator's other listeners, which no readiness wait covers. Two of
+## them are loopback and the rest do not spell out a bind address, so they are
+## checked by asking the host what it is listening on rather than by probing one
+## address from here.
+
+run_host_preflight() {
+  local in_use=$1
+  local unreachable=${2:-}
+  local port
+
+  STUB_STATE="$work_dir/stub_state"
+  export STUB_STATE
+  rm -rf "$STUB_STATE"
+  mkdir -p "$STUB_STATE"
+  : >"$STUB_STATE/in_use"
+  echo scpd >"$STUB_STATE/holder"
+  for port in $in_use; do echo "$port" >>"$STUB_STATE/in_use"; done
+  [[ -z $unreachable ]] || : >"$STUB_STATE/unreachable"
+
+  CI_PORT_FREE_WAIT_SEC=1 \
+    ci_require_host_ports_free hog4 2223 5500 50000 3300 4400 2>&1
+}
+
+out=$(run_host_preflight "") || {
+  echo "FAIL host check should pass when the host holds none of them"
+  fail=1
+}
+check_eq "clear coordinator host passes silently" "" "$out"
+
+out=$(run_host_preflight "3300 50000") && {
+  echo "FAIL host check should fail while a stale coordinator holds a port"
+  fail=1
+}
+check_contains "the loopback port is named" "3300" "$out"
+check_contains "the port with no bind address is named" "50000" "$out"
+check_contains "the busy ports are named together" \
+  "hog4 is listening on 3300 50000 before this run launched anything" "$out"
+check_missing "a free coordinator port is not named" "2223" "$out"
+check_contains "the coordinator holder is named" "scpd" "$out"
+
+# A check that cannot be run explains a launch that may be about to go wrong; it
+# must not become a new way for the run to go wrong on its own.
+out=$(run_host_preflight "3300" unreachable) || {
+  echo "FAIL host check should not fail the run when the host cannot be asked"
+  fail=1
+}
+check_contains "unaskable host leaves the ports unchecked" \
+  "leaving 2223 5500 50000 3300 4400 unchecked" "$out"
 
 if ((fail)); then
   echo "port preflight selftest FAILED"
