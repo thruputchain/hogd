@@ -250,16 +250,18 @@ ci_remote_run() {
   ssh "${CI_SSH_OPTS[@]}" "$host" "$@"
 }
 
-# [stop] and [shutdown] exit CI_CONTROL_EXIT_SERVER_ERROR when the server
-# answered and said it could not clear the host, and 1 when it could not be
-# reached at all. Only the first is a failure: the schedule shuts its hosts
+# [stop] and [shutdown] exit CI_CONTROL_EXIT_UNREACHABLE when the control
+# server could not be reached, and 2 when it answered and said it could not
+# clear the host. Only the first is tolerable: the schedule shuts its hosts
 # down twice -- once to release them mid-run, once from the EXIT trap -- so a
 # server that is already gone is the ordinary case and the outcome the caller
-# wanted. A blanket [|| true] cannot tell them apart, and swallowing both means
-# a host that kept its benchmark processes is passed over in silence, which the
-# next suite discovers by failing to bind their ports.
-CI_CONTROL_EXIT_SERVER_ERROR=2
+# wanted. A blanket [|| true] cannot tell the two apart, and swallowing both
+# means a host that kept its benchmark processes is passed over in silence,
+# which the next suite discovers by failing to bind their ports.
+CI_CONTROL_EXIT_UNREACHABLE=1
 
+# Sends one request to each host's control server. Tolerates a server that is
+# already gone; reports every other outcome and returns non-zero.
 ci_control_request_hosts() {
   local control_cli=$1
   local control_port=$2
@@ -271,8 +273,17 @@ ci_control_request_hosts() {
   for host in "$@"; do
     command_status=0
     "$control_cli" "$host" "$control_port" "$request" || command_status=$?
-    if [ "$command_status" -eq "$CI_CONTROL_EXIT_SERVER_ERROR" ]; then
-      echo "control server on $host could not clear the host on $request" >&2
+
+    # Tolerating the one documented status rather than rejecting the one
+    # documented failure: a status neither end meant to produce -- a
+    # [control_cli] that could not be executed at all (126, 127), or one killed
+    # by a signal -- is a request that never happened, and a host that was
+    # never cleaned up. Reading those as success is how the caller ends up
+    # launching onto a host it believes is clear.
+    if [ "$command_status" -ne 0 ] &&
+      [ "$command_status" -ne "$CI_CONTROL_EXIT_UNREACHABLE" ]; then
+      echo "control server on $host failed $request:" \
+        "$(ci_describe_exit_status "$command_status")" >&2
       status=1
     fi
   done

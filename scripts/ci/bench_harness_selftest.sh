@@ -127,6 +127,8 @@ case "$1" in
 ok) exit 0 ;;
 gone) exit 1 ;;
 dirty) exit 2 ;;
+notfound) exit 127 ;;
+signalled) exit 137 ;;
 esac
 exit 0
 STUB
@@ -152,7 +154,25 @@ out=$(ci_control_shutdown_hosts "$control_cli_stub" 11111 dirty gone dirty 2>&1)
   status=$?
 check_eq "shutdown reports an uncleared host" "1" "$status"
 check_eq "every uncleared host is named" "2" \
-  "$(grep -c 'could not clear the host' <<<"$out")"
+  "$(grep -c 'failed shutdown' <<<"$out")"
+
+# A status neither end meant to produce is a request that never happened, not a
+# host that came back clear. Tolerating only the documented unreachable status
+# is what keeps these from passing.
+status=0
+out=$(ci_control_stop_hosts "$control_cli_stub" 11111 ok notfound 2>&1) || status=$?
+check_eq "a control_cli that could not run fails" "1" "$status"
+check_contains "the unexpected status is named" "exit status 127" "$out"
+
+status=0
+out=$(ci_control_stop_hosts "$control_cli_stub" 11111 signalled 2>&1) || status=$?
+check_eq "a signalled control_cli fails" "1" "$status"
+check_contains "the signal is named" "SIGKILL" "$out"
+
+# The whole helper missing must not read as every host being clear.
+status=0
+out=$(ci_control_stop_hosts "$work_dir/no_such_control_cli" 11111 ok 2>&1) || status=$?
+check_eq "a missing control_cli fails" "1" "$status"
 
 if ((fail)); then
   echo "bench_harness selftest FAILED"
