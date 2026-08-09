@@ -58,7 +58,12 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
     panic("Invalid coordinator address: {}", coordinator_addr);
   }
 
-  auto client = make_rpc_client<SchedDb1>(host_port, cp, true)();
+  // Use the bulk message cap: a single committed block's aggregated
+  // HogsTransferred deltas can exceed x23's 16 MiB default (the mempool
+  // server on this node already accepts the larger size). Matches the other
+  // bulk DB links (rpc_from_db, rpc_from_coord, auth subscriptions).
+  auto client = make_rpc_client<SchedDb1>(host_port, cp, /*retry=*/true,
+                                          kBulkRpcMaxMessageSize)();
   if (!client)
     panic("hog_db connect to coordinator failed: {}",
           client.error().error_code().message());
