@@ -769,22 +769,50 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     CHECK(missing.empty());
   }
 
+  // Group the deltas by account, preserving source order within each account.
+  // Each parallel worker below owns a contiguous chunk of *accounts*, so all
+  // deltas for a given account are applied by a single worker in source order.
+  // If we instead chunked [transfers.deltas] directly, duplicate same-account
+  // deltas could land in different chunks and be applied in worker-scheduling
+  // order: a debit that ran before its balancing credit would observe an
+  // insufficient balance and abort at the withdrawal check in
+  // [process_transfers_helper]. Honest producers emit one delta per account, so
+  // in the common case each group holds a single delta and this is equivalent
+  // to the previous per-delta chunking.
+  std::unordered_map<ContractAddress, size_t, ByteArrayHasher> account_to_group;
+  std::vector<std::vector<size_t>> delta_groups;
+  account_to_group.reserve(transfers.deltas.size());
+  delta_groups.reserve(transfers.deltas.size());
+  for (size_t delta_idx = 0; delta_idx < transfers.deltas.size(); delta_idx++) {
+    auto [it, inserted] =
+        account_to_group.try_emplace(transfers.deltas[delta_idx].address,
+                                     delta_groups.size());
+    if (inserted) {
+      delta_groups.emplace_back();
+    }
+    delta_groups[it->second].push_back(delta_idx);
+  }
+
   const std::vector<ChunkRange> chunks =
-      make_chunks(transfers.deltas.size(), available_parallelism());
+      make_chunks(delta_groups.size(), available_parallelism());
   x23::CoroGuard cg;
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
+    handles.push_back([](ChunkRange chunk,
+                         const std::vector<std::vector<size_t>> *delta_groups,
+                         const HogsTransferred *transfers,
                          Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
-      for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
-        scheduler->process_transfers_helper(transfers->deltas[delta_idx],
-                                            transfers->block);
+      for (size_t group_idx = chunk.start; group_idx < chunk.end; group_idx++) {
+        for (size_t delta_idx : (*delta_groups)[group_idx]) {
+          scheduler->process_transfers_helper(transfers->deltas[delta_idx],
+                                              transfers->block);
+        }
       }
       co_return;
-    }(chunk, &transfers, this));
+    }(chunk, &delta_groups, &transfers, this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

@@ -508,6 +508,45 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
 }
 
+// A batch may carry more than one delta for the same account. The listed order
+// is balance-safe (the credit precedes the debit), but the credit and debit
+// must be applied in source order: applying the debit first would observe the
+// pre-credit balance. [process_transfers] must keep same-account deltas on a
+// single worker so they never get reordered across parallel chunks.
+TEST(Scheduler, ProcessTransfersAppliesSameAccountDeltasInSourceOrder)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/10);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = 5;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(20))});
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(-25))});
+
+  scheduler->process_transfers(transfer)();
+
+  // 10 + 20 - 25 = 5. The debit drains the received group (20), then takes the
+  // remaining 5 from the to-schedule group (10 -> 5).
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+            static_cast<uint128_t>(5));
+}
+
 TEST(Scheduler, CycleAccountWhenGasInsufficient)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
