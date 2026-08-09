@@ -8,6 +8,30 @@
 
 namespace x23::detail {
 
+namespace {
+
+// epoll_event::data payload: the file descriptor number in the low 32
+// bits, the generation of its registration in the high 32 bits.
+constexpr std::uint64_t
+fd_tag(int fd, std::uint32_t gen) noexcept
+{
+  return std::uint64_t(gen) << 32 | std::uint32_t(fd);
+}
+
+constexpr int
+tag_fd(std::uint64_t tag) noexcept
+{
+  return int(std::uint32_t(tag));
+}
+
+constexpr std::uint32_t
+tag_gen(std::uint64_t tag) noexcept
+{
+  return std::uint32_t(tag >> 32);
+}
+
+} // namespace
+
 CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   : pool_(pool), epollfd_(epoll_create1(EPOLL_CLOEXEC))
 {
@@ -17,7 +41,7 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   if (!eventfd_)
     Errno{}.raise("eventfd failed");
   set_nonblock(eventfd_);
-  epoll_event ev{.events = EPOLLIN, .data = {.fd = eventfd_.get()}};
+  epoll_event ev{.events = EPOLLIN, .data = {.u64 = fd_tag(eventfd_.get(), 0)}};
   if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, eventfd_.get(), &ev))
     Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
   sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
@@ -155,6 +179,16 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 
   unlock_mode = mode;
 
+  // The registration is changing, so any event epoll_wait() has
+  // already handed out for this file descriptor number describes a
+  // state that no longer applies.  Retire the generation those events
+  // carry, and drop the readiness they contributed -- EPOLLERR is
+  // sticky (neither read_clear() nor write_clear() clears it), so a
+  // bit left over from the previous occupant of this number would make
+  // every subsequent wait on it return immediately.
+  std::uint32_t gen = fdp->gen_.fetch_add(1, std::memory_order_relaxed) + 1;
+  fdp->ready_ = 0;
+
   if (mode == kActive) {
 #if X23_FD_TRACE
     *fdp->info_.take() =
@@ -162,14 +196,13 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 #endif // X23_FD_TRACE
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-    ev.data.fd = fd;
+    ev.data.u64 = fd_tag(fd, gen);
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0)
       return;
     debug.err("EPOLL_CTL_ADD fd {}: {}", fd, Errno{});
     unlock_mode = mode = kPoisoned;
   }
 
-  fdp->ready_ = 0; // because EPOLLERR is sticky
   if (old_mode == kActive) {
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
       if (errno != ENOENT && errno != EBADF)
@@ -269,7 +302,7 @@ CoroPollImpl::check(int timeout)
   std::vector<ThreadPool::Job> coroqueue;
   Errno err = stop_requested() ? EBADF : 0;
   for (int i = 0; i < n; ++i) {
-    int fd = evs[i].data.fd;
+    int fd = tag_fd(evs[i].data.u64);
     if (fd < 0)
       continue;
     if (fd == eventfd_.get()) {
@@ -277,6 +310,12 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
+    // Queued before this file descriptor number was reset (and
+    // possibly recycled by an unrelated socket); it says nothing about
+    // whoever holds the number now.
+    if (state_[fd].gen_.load(std::memory_order_relaxed) !=
+        tag_gen(evs[i].data.u64))
+      continue;
     state_[fd].ready_ |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {

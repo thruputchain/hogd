@@ -359,6 +359,14 @@ private:
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
     std::atomic<std::uint32_t> ready_{0};
+    // Bumped by setmode() every time the epoll registration for this
+    // file descriptor number changes.  epoll_wait() hands check()
+    // events that were queued before the registration went away, and
+    // by the time check() looks at them the number may already have
+    // been recycled by an unrelated socket, so events are tagged with
+    // the generation they were registered under and check() drops the
+    // ones that no longer match.
+    std::atomic<std::uint32_t> gen_{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
 #if X23_FD_TRACE
@@ -394,6 +402,7 @@ private:
     {
       mode_ = other.mode();
       ready_ = other.ready_.load();
+      gen_ = other.gen_.load();
       for (size_t i = 0; i < callbacks_.size(); ++i) {
         callbacks_[i].value = other.callbacks_[i].value.load();
         callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();
