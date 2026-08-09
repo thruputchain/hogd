@@ -339,6 +339,8 @@ public:
     return exit_code_;
   }
 
+  pid_t pid() const { return pid_; }
+
   // Signals the launch. Addresses the whole process group when the child leads
   // one, so helpers it spawned are signalled too.
   void signal_process(int sig)
@@ -353,12 +355,41 @@ public:
     kill(pid_, sig); // NOLINT(misc-include-cleaner)
   }
 
-  // True once the child has been reaped. False if it is still running when the
-  // timeout expires.
-  bool wait_for_exit(std::chrono::steady_clock::duration timeout)
+  // True once nothing this launch put on the host is left. The forked leader
+  // being reaped is not enough: a helper it spawned holds its sockets just the
+  // same, and [chuckd.dev] exits on SIGTERM well before the [scpd.dev] it
+  // started does.
+  bool is_stopped()
   {
-    std::unique_lock lock(exit_code_mutex_);
-    return exited_.wait_for(lock, timeout, [this] { return reaped_; });
+    {
+      std::lock_guard lock(exit_code_mutex_);
+      if (!reaped_) {
+        return false;
+      }
+    }
+    return group_is_empty();
+  }
+
+  // Waits until [is_stopped] holds or the deadline passes. Reports whether the
+  // launch is gone.
+  bool wait_until_stopped(std::chrono::steady_clock::time_point deadline)
+  {
+    {
+      std::unique_lock lock(exit_code_mutex_);
+      if (!exited_.wait_until(lock, deadline, [this] { return reaped_; })) {
+        return false;
+      }
+    }
+    // The group has no equivalent of [waitpid], so this is a poll. It only
+    // runs after the leader is gone, which for a launch with no helpers means
+    // one check that passes immediately.
+    while (!group_is_empty()) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        return false;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return true;
   }
 
   void wait_for_shutdown()
@@ -370,6 +401,23 @@ public:
   }
 
 private:
+  // Whether anything is left in the launch's process group. A group we cannot
+  // signal is treated as still populated: the one answer this must never
+  // invent is "nothing is there".
+  bool group_is_empty() const
+  {
+    if (!pgid_.has_value()) {
+      // No group was established, so the pid is all this launch ever tracked
+      // and the caller has already established that it was reaped.
+      return true;
+    }
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    if (kill(-*pgid_, 0) == 0) {
+      return false;
+    }
+    return errno == ESRCH;
+  }
+
   void wait_for_child_process(pid_t child_pid)
   {
     info("waiting for child process: {}", child_pid);
@@ -466,47 +514,65 @@ public:
 
     std::lock_guard lock(running_pid_mutex_);
 
+    // Sending SIGTERM is not the same as the launch being gone, and the caller
+    // of [stop] launches the next benchmark suite onto the same ports the
+    // moment this returns. A process that ignores SIGTERM, or that is simply
+    // slower to leave than the caller is to move on, keeps its listening
+    // sockets: the next suite then dies with "Address already in use", and the
+    // readiness wait that eventually reports it names the first port nothing
+    // happened to be holding rather than the host that was busy. Wait for each
+    // launch to actually leave, escalate to SIGKILL if it does not, and tell
+    // the caller when even that was not enough.
+    //
+    // The two graces are deadlines for the whole stop rather than budgets per
+    // launch, so the wall-clock cost does not scale with the number of
+    // processes. That bound is load-bearing: a stop reached through SIGTERM is
+    // racing the caller's own escalation, and a server killed part way through
+    // orphans exactly the processes it was clearing.
+    std::vector<Subprocess *> pending;
+
     // Anything a previous stop could not kill is still this host's problem, so
     // re-signal it and re-check it here rather than reporting a clear host on
     // the second call.
     std::erase_if(unstoppable_, [](Subprocess *subprocess) {
-      return subprocess->get_exit_code().has_value();
+      return subprocess->is_stopped();
     });
     for (auto *subprocess : unstoppable_) {
       subprocess->signal_process(SIGKILL); // NOLINT(misc-include-cleaner)
+      pending.push_back(subprocess);
     }
 
-    // Sending SIGTERM is not the same as the process being gone, and the
-    // caller of [stop] launches the next benchmark suite onto the same ports
-    // the moment this returns. A process that ignores SIGTERM, or that is
-    // simply slower to leave than the caller is to move on, keeps its
-    // listening sockets: the next suite then dies with "Address already in
-    // use", and the readiness wait that eventually reports it names the first
-    // port nothing happened to be holding rather than the host that was busy.
-    // Wait for the process to actually leave, escalate to SIGKILL if it does
-    // not, and tell the caller when even that was not enough.
-    std::vector<pid_t> survivors;
     for (auto &[pid, subprocess] : subprocesses_) {
-      if (subprocess->get_exit_code().has_value()) {
+      if (subprocess->is_stopped()) {
         continue;
       }
-
       info("stopping running process: {}", pid);
       subprocess->signal_process(SIGTERM); // NOLINT(misc-include-cleaner)
-      if (subprocess->wait_for_exit(kStopTermGrace)) {
-        continue;
-      }
+      pending.push_back(subprocess.get());
+    }
 
-      error("process {} is still running {}s after SIGTERM; sending SIGKILL",
-            pid, kStopTermGrace.count());
-      subprocess->signal_process(SIGKILL); // NOLINT(misc-include-cleaner)
-      if (subprocess->wait_for_exit(kStopKillGrace)) {
-        continue;
-      }
+    auto term_deadline = std::chrono::steady_clock::now() + kStopTermGrace;
+    std::erase_if(pending, [term_deadline](Subprocess *subprocess) {
+      return subprocess->wait_until_stopped(term_deadline);
+    });
 
-      error("process {} is still running {}s after SIGKILL", pid,
+    if (!pending.empty()) {
+      for (auto *subprocess : pending) {
+        error("process {} is still running {}s after SIGTERM; sending SIGKILL",
+              subprocess->pid(), kStopTermGrace.count());
+        subprocess->signal_process(SIGKILL); // NOLINT(misc-include-cleaner)
+      }
+      auto kill_deadline = std::chrono::steady_clock::now() + kStopKillGrace;
+      std::erase_if(pending, [kill_deadline](Subprocess *subprocess) {
+        return subprocess->wait_until_stopped(kill_deadline);
+      });
+    }
+
+    std::vector<pid_t> survivors;
+    for (auto *subprocess : pending) {
+      error("process {} is still running {}s after SIGKILL", subprocess->pid(),
             kStopKillGrace.count());
-      survivors.push_back(pid);
+      survivors.push_back(subprocess->pid());
     }
 
     for (auto it = subprocesses_.begin(); it != subprocesses_.end();) {
@@ -525,6 +591,12 @@ public:
     }
 
     most_recent_pid_.reset();
+
+    // A launch this stop finally cleared is no longer a reason to report the
+    // host dirty.
+    std::erase_if(unstoppable_, [](Subprocess *subprocess) {
+      return subprocess->is_stopped();
+    });
 
     if (!unstoppable_.empty()) {
       error("could not stop {} process(es) on this host", unstoppable_.size());

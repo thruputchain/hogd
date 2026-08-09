@@ -39,7 +39,17 @@ echo 'reap any control_server left over from a previous run'
 # the benchmark scripts already use. Fail loudly if killall is missing, so a
 # stale server can't silently slip through and recreate the bind failure.
 command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
-killall -TERM control_server 2>/dev/null && sleep 3 || true
+# A server that is going down stops the benchmark processes it launched on the
+# way out, and that takes as long as the slowest of them. Escalating on a fixed
+# timer kills it part way through and orphans exactly the processes it was
+# clearing -- which is how a hog-exec ends up holding 8040 for the next run.
+# Wait for it to actually go, then escalate whatever would not.
+if killall -TERM control_server 2>/dev/null; then
+    for _ in $(seq 1 30); do
+        killall -q -s 0 control_server 2>/dev/null || break
+        sleep 1
+    done
+fi
 killall -KILL control_server 2>/dev/null || true
 
 echo 'run bench server'
@@ -135,7 +145,17 @@ echo 'reap any control_server left over from a previous run'
 # the benchmark scripts already use. Fail loudly if killall is missing, so a
 # stale server can't silently slip through and recreate the bind failure.
 command -v killall >/dev/null || { echo 'killall not found (install psmisc)'; exit 1; }
-killall -TERM control_server 2>/dev/null && sleep 3 || true
+# A server that is going down stops the benchmark processes it launched on the
+# way out, and that takes as long as the slowest of them. Escalating on a fixed
+# timer kills it part way through and orphans exactly the processes it was
+# clearing -- which is how a hog-exec ends up holding 8040 for the next run.
+# Wait for it to actually go, then escalate whatever would not.
+if killall -TERM control_server 2>/dev/null; then
+    for _ in $(seq 1 30); do
+        killall -q -s 0 control_server 2>/dev/null || break
+        sleep 1
+    done
+fi
 killall -KILL control_server 2>/dev/null || true
 
 echo 'run local bench server for hog10-hosted services'
