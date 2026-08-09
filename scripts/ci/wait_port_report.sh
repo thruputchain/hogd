@@ -85,8 +85,10 @@ wait_port_or_report() {
       waited=$((waited + SECONDS - probe_started))
       [ "$answered" -eq 1 ] || continue
 
-      echo "readiness: $ip:$port is not going to come up; the last process" \
-        "launched on $host has already exited ($reason)" >&2
+      echo "readiness: giving up on $ip:$port;" \
+        "$(last_control_log_label_for_host "$host") on $host has already" \
+        "exited ($reason), so this suite cannot come up whatever happens on" \
+        "this port" >&2
       replay_control_logs_for_ip "$ip"
       return 1
     done
@@ -111,11 +113,25 @@ wait_port_or_report() {
 # launched. Only the first is grounds for giving up on a port, and the four are
 # told apart by what the command printed rather than by its status.
 #
-# The server answers for the most recent process it launched, so a host running
-# more than one -- hog5 runs both hog-exec shards -- is only reported once its
-# last launch has gone. That covers the case this exists for, where the whole
-# host is dead, and leaves a longer wait for the case where one of several
-# processes died and the others are healthy.
+# The server answers for the most recent process it launched and for no other,
+# so this is a verdict on the host rather than on the port being waited for. A
+# host runs more than one -- hog5 runs both hog-exec shards -- and the answer
+# cuts both ways:
+#
+#   - a launch that died is not reported while a later one on the same host is
+#     still running, which only costs a longer wait; and
+#   - the last launch dying ends the waits for the earlier ones too, even where
+#     one of those could still have bound its port.
+#
+# The second is deliberate. Everything this suite launches is a server that has
+# to stay up for the whole run, and the script has no way to restart one, so a
+# host that has lost any of them cannot produce a passing run -- an earlier
+# launch going on to bind its port would only move the failure to the next wait,
+# which is the ten-minute stall this exists to remove. What the second case must
+# not do is misattribute: the report names the launch the server answered for,
+# and every process on the host is replayed, so the one that actually died is in
+# the output whether or not it owns the port that was being waited on.
+#
 # $2 caps the probe at what is left of the caller's budget, with 0 meaning it
 # has none of its own to spend against.
 launched_process_exited() {
@@ -153,6 +169,25 @@ hosts_with_control_logs_for_ip() {
   done
 
   [ "${#seen[@]}" -eq 0 ] || printf '%s\n' "${seen[@]}"
+}
+
+# The label of the last thing launched on a host, which is the launch the
+# control server answers about. Naming it keeps a host-level verdict from
+# reading as one about the port: on hog5 the answer is about
+# [node0_hog_exec_slot_b] whether the wait that asked was for slot B's port or
+# slot A's.
+last_control_log_label_for_host() {
+  local wanted_host=$1
+  local record host label stdout_path stderr_path
+  local found='the last process launched'
+
+  for record in ${CONTROL_LOG_RECORDS[@]+"${CONTROL_LOG_RECORDS[@]}"}; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    [[ $host == "$wanted_host" ]] || continue
+    found=$label
+  done
+
+  printf '%s' "$found"
 }
 
 # Replays every process launched on the host behind an address. What is wrong

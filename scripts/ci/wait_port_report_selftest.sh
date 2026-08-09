@@ -207,13 +207,35 @@ echo NOT REACHED
 expect_status 'dead launch ends the script' 1 "$status"
 expect_lacks 'dead launch stops the script' 'NOT REACHED' "$out"
 expect_slices 'dead launch is not waited out' 1 "$out"
-expect_contains 'dead launch names the port and host' \
-  'readiness: 10.100.0.5:8042 is not going to come up; the last process launched on hog5 has already exited (exit code 134)' \
+expect_contains 'dead launch names the port and the launch that died' \
+  'readiness: giving up on 10.100.0.5:8042; node0_hog_exec_slot_b on hog5 has already exited (exit code 134), so this suite cannot come up whatever happens on this port' \
   "$out"
 expect_contains 'dead launch replays the process that died' \
   'REMOTE(hog5): tail -n 80 /tmp/a.out /tmp/a.err' "$out"
 expect_contains 'dead launch replays the other process on the host' \
   '/tmp/b.out' "$out"
+
+# The control server answers for the last launch on a host and no other, so the
+# verdict is about the host. Waiting on slot A's port while slot B is the one
+# that died still ends the wait -- nothing this suite launches may exit, so slot
+# A binding later would only move the failure to the next wait -- but the report
+# has to name the launch the server actually answered for rather than pin it on
+# slot A, and both processes are replayed either way.
+out=$(UNREACHABLE_PORT=8040 EXITED_HOSTS=hog5 CI_WAIT_PORT_TIMEOUT_SEC=600 run_case '
+record hog5 node0_hog_exec_slot_a /tmp/a.out /tmp/a.err
+record hog5 node0_hog_exec_slot_b /tmp/b.out /tmp/b.err
+wait_port_or_report 10.100.0.5 8040
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'a later launch dying ends an earlier wait' 1 "$status"
+expect_lacks 'a later launch dying stops the script' 'NOT REACHED' "$out"
+expect_slices 'a later launch dying is not waited out' 1 "$out"
+expect_contains 'the verdict names the launch that was answered for' \
+  'node0_hog_exec_slot_b on hog5 has already exited' "$out"
+expect_lacks 'the verdict is not pinned on the port being waited for' \
+  'node0_hog_exec_slot_a on hog5 has already exited' "$out"
+expect_contains 'the process owning the port is still replayed' \
+  'REMOTE(hog5): tail -n 80 /tmp/a.out /tmp/a.err' "$out"
 
 # A host whose launch is still running gets the whole budget: a process can be
 # slow to bind, and this must not turn a slow start into a failure.
