@@ -112,6 +112,48 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_control_stop_hosts / ci_control_shutdown_hosts
+#
+# A server that could not be reached is the ordinary case -- the schedule shuts
+# each host down twice -- while a server that answers and reports it could not
+# clear the host must not be passed over in silence.
+
+control_cli_stub="$work_dir/control_cli"
+cat >"$control_cli_stub" <<'STUB'
+#!/usr/bin/env bash
+# Exits with whatever $1 (the host name) says to, so each case can pick a
+# status per host: "ok" 0, "gone" 1 (unreachable), "dirty" 2 (server error).
+case "$1" in
+ok) exit 0 ;;
+gone) exit 1 ;;
+dirty) exit 2 ;;
+esac
+exit 0
+STUB
+chmod +x "$control_cli_stub"
+
+status=0
+out=$(ci_control_stop_hosts "$control_cli_stub" 11111 ok ok 2>&1) || status=$?
+check_eq "every host clear succeeds" "0" "$status"
+check_eq "a clear run says nothing" "" "$out"
+
+status=0
+out=$(ci_control_shutdown_hosts "$control_cli_stub" 11111 ok gone 2>&1) || status=$?
+check_eq "an unreachable server is tolerated" "0" "$status"
+check_eq "an unreachable server is not reported" "" "$out"
+
+status=0
+out=$(ci_control_stop_hosts "$control_cli_stub" 11111 ok dirty 2>&1) || status=$?
+check_eq "a host that could not be cleared fails" "1" "$status"
+check_contains "the uncleared host is named" "dirty" "$out"
+
+status=0
+out=$(ci_control_shutdown_hosts "$control_cli_stub" 11111 dirty gone dirty 2>&1) ||
+  status=$?
+check_eq "shutdown reports an uncleared host" "1" "$status"
+check_eq "every uncleared host is named" "2" \
+  "$(grep -c 'could not clear the host' <<<"$out")"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

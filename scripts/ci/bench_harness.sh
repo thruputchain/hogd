@@ -250,26 +250,50 @@ ci_remote_run() {
   ssh "${CI_SSH_OPTS[@]}" "$host" "$@"
 }
 
+# [stop] and [shutdown] exit CI_CONTROL_EXIT_SERVER_ERROR when the server
+# answered and said it could not clear the host, and 1 when it could not be
+# reached at all. Only the first is a failure: the schedule shuts its hosts
+# down twice -- once to release them mid-run, once from the EXIT trap -- so a
+# server that is already gone is the ordinary case and the outcome the caller
+# wanted. A blanket [|| true] cannot tell them apart, and swallowing both means
+# a host that kept its benchmark processes is passed over in silence, which the
+# next suite discovers by failing to bind their ports.
+CI_CONTROL_EXIT_SERVER_ERROR=2
+
+ci_control_request_hosts() {
+  local control_cli=$1
+  local control_port=$2
+  local request=$3
+  local host command_status
+  local status=0
+  shift 3
+
+  for host in "$@"; do
+    command_status=0
+    "$control_cli" "$host" "$control_port" "$request" || command_status=$?
+    if [ "$command_status" -eq "$CI_CONTROL_EXIT_SERVER_ERROR" ]; then
+      echo "control server on $host could not clear the host on $request" >&2
+      status=1
+    fi
+  done
+
+  return "$status"
+}
+
 ci_control_stop_hosts() {
   local control_cli=$1
   local control_port=$2
-  local host
   shift 2
 
-  for host in "$@"; do
-    "$control_cli" "$host" "$control_port" stop || true
-  done
+  ci_control_request_hosts "$control_cli" "$control_port" stop "$@"
 }
 
 ci_control_shutdown_hosts() {
   local control_cli=$1
   local control_port=$2
-  local host
   shift 2
 
-  for host in "$@"; do
-    "$control_cli" "$host" "$control_port" shutdown || true
-  done
+  ci_control_request_hosts "$control_cli" "$control_port" shutdown "$@"
 }
 
 ci_control_clear_work_dirs() {

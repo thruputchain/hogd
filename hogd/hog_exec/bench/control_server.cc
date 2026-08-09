@@ -558,7 +558,7 @@ public:
 
     if (!pending.empty()) {
       for (auto *subprocess : pending) {
-        error("process {} is still running {}s after SIGTERM; sending SIGKILL",
+        error("process {} did not leave within {}s; sending SIGKILL",
               subprocess->pid(), kStopTermGrace.count());
         subprocess->signal_process(SIGKILL); // NOLINT(misc-include-cleaner)
       }

@@ -185,7 +185,14 @@ ci_run_bench_step mempool_multi_node_bench \
   ./scripts/ci/mempool_multi_node_bench.sh
 
 echo 'release hog4, hog5, hog6, hog7, and hog9'
-ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9
+# The suites below run on these hosts. One that reports it could not stop what
+# it launched is about to be launched onto anyway, so this is a failure of the
+# run rather than a line in the log: a benchmark process that keeps its ports
+# past this point is what the next suite trips over, on a host nothing in its
+# own output points at.
+release_failed=0
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog7 hog9 ||
+    release_failed=1
 
 echo 'run event server benchmarks'
 kill_stale_benchmark_processes
@@ -211,6 +218,11 @@ bench_failed=0
 ci_report_failed_bench_steps || bench_failed=1
 
 ci_report_bench_failures
+
+if [ "$release_failed" -ne 0 ]; then
+    echo "FAILED: a host could not be cleared when released after mempool_multi_node_bench"
+    bench_failed=1
+fi
 
 if [ "$bench_failed" -ne 0 ]; then
     echo "one or more benchmark steps failed"

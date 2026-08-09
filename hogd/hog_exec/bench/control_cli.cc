@@ -14,6 +14,23 @@
 
 namespace {
 
+// [stop], [shutdown] and [clear_work_dir] exist to leave the host in a known
+// state, and the CI scripts branch on their exit status. Reporting success for
+// a request the server refused -- a version mismatch, a work directory it
+// could not remove, a benchmark process it could not kill -- hands the caller
+// a clear host that is not clear, and the failure resurfaces later as a bind
+// or readiness failure somewhere else.
+//
+// A server that could not be reached and a server that answered and said it
+// could not clear the host are both failures of the request, but they are not
+// the same thing to a caller. The schedule shuts its hosts down twice -- once
+// to release them mid-run, once from the EXIT trap -- so a server that is
+// already gone is the ordinary case and the outcome the caller wanted. Only
+// the second status means a host still has benchmark processes on it, so they
+// are kept apart and the scripts can tolerate one without ignoring the other.
+constexpr int kExitUnreachable = 1;
+constexpr int kExitServerError = 2;
+
 void
 usage(char *argv[])
 {
@@ -65,14 +82,14 @@ handle_shutdown_command(std::string const &host, std::string const &port)
     if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
       hogd::info("Error: shutdown of {}:{} reported {}", host, port,
                  error_code);
-      return 1;
+      return kExitServerError;
     }
     hogd::info("Shutdown command sent successfully");
 
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
-    return 1;
+    return kExitUnreachable;
   }
 }
 
@@ -114,12 +131,6 @@ handle_start_command(std::string const &host, std::string const &port,
   }
 }
 
-// [stop], [shutdown] and [clear_work_dir] exist to leave the host in a known
-// state, and the CI scripts branch on their exit status. Reporting success for
-// a request the server refused -- a version mismatch, a work directory it
-// could not remove, a benchmark process it could not kill -- hands the caller
-// a clear host that is not clear, and the failure resurfaces later as a bind
-// or readiness failure somewhere else. Give back what the server said.
 int
 handle_stop_command(std::string const &host, std::string const &port)
 {
@@ -128,12 +139,12 @@ handle_stop_command(std::string const &host, std::string const &port)
     auto error_code = client.stop_server();
     if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
       hogd::info("Error: stop on {}:{} reported {}", host, port, error_code);
-      return 1;
+      return kExitServerError;
     }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
-    return 1;
+    return kExitUnreachable;
   }
 }
 
@@ -146,12 +157,12 @@ handle_clear_work_dir_command(std::string const &host, std::string const &port)
     if (error_code != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
       hogd::info("Error: clear_work_dir on {}:{} reported {}", host, port,
                  error_code);
-      return 1;
+      return kExitServerError;
     }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
-    return 1;
+    return kExitUnreachable;
   }
 }
 
