@@ -430,6 +430,23 @@ private:
   std::string showfd(const FdPtr &fdp);
   void debug_dump();
 
+  // Take/release the per-descriptor lock, which serializes changes to
+  // an fd's epoll registration (setmode) against the readiness that
+  // check() attributes to it.  lock_fd returns the mode it displaced,
+  // which unlock_fd must restore unless the holder is changing it.
+  static FdState::Mode lock_fd(FdState *p) noexcept
+  {
+    FdState::Mode m;
+    while ((m = p->mode_.exchange(FdState::kLocked)) == FdState::kLocked)
+      p->mode_.wait(FdState::kLocked);
+    return m;
+  }
+  static void unlock_fd(FdState *p, FdState::Mode m) noexcept
+  {
+    p->mode_ = m;
+    p->mode_.notify_all();
+  }
+
   void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {

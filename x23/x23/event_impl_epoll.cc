@@ -163,15 +163,11 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
   if (mode == old_mode || (mode == kActive && old_mode == kPoisoned))
     return;
 
-  while ((old_mode = fdp->mode_.exchange(kLocked)) == kLocked)
-    fdp->mode_.wait(kLocked);
+  old_mode = lock_fd(fdp.get());
 
   int fd = fdp.get() - state_;
   FdState::Mode unlock_mode = old_mode;
-  Defer unlock([&] {
-    fdp->mode_ = unlock_mode;
-    fdp->mode_.notify_all();
-  });
+  Defer unlock([&] { unlock_fd(fdp.get(), unlock_mode); });
 
   if (mode == old_mode ||
       (mode == kActive && (old_mode == kPoisoned || stop_requested())))
@@ -310,16 +306,22 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
+    FdState *st = state_ + fd;
+    // Hold the descriptor's lock across both the generation test and
+    // the update it guards: otherwise setmode() could retire the
+    // registration in between, and the readiness we are trying to
+    // discard would land on its replacement anyway.
+    FdState::Mode mode = lock_fd(st);
+    Defer unlock([&] { unlock_fd(st, mode); });
     // Queued before this file descriptor number was reset (and
     // possibly recycled by an unrelated socket); it says nothing about
     // whoever holds the number now.
-    if (state_[fd].gen_.load(std::memory_order_relaxed) !=
-        tag_gen(evs[i].data.u64))
+    if (st->gen_.load(std::memory_order_relaxed) != tag_gen(evs[i].data.u64))
       continue;
-    state_[fd].ready_ |= evs[i].events;
+    st->ready_ |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
-        if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
+        if (WorkItem wi = st->callbacks_[write].exchange({})) {
           --numcoro_;
           if (CoroHandle h = wi->set_result_without_resuming(err))
             coroqueue.emplace_back(h, wi.cpuhint);
