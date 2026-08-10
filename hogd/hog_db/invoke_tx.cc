@@ -550,10 +550,11 @@ InvokeTX::request_consume_uniquifier(Address const &addr, Uniquifier uniquifier,
                                      StorageDeltaFlagSet flags)
 {
   // We do not support setting exclusive locks on replay cache items;
-  // consuming a nonce is already a unique event.
+  // consuming a nonce is already a unique event. An honest executor never
+  // sets ExclusiveLock on a replay cache delta, so this is a buggy or
+  // dishonest executor rather than a recoverable transaction conflict.
   if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
-    last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
-    return HogDbError(HogDbCode::kConflict);
+    return HogDbError(HogDbCode::kInvalidExecutorBehavior);
   }
 
   return request_change(make_replay_cache_item_key(addr),

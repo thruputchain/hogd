@@ -3627,6 +3627,32 @@ TEST_F(HogDbTest, ConflictReasonExclusiveLockBalanceFlag)
   invoke_tx.abort();
 }
 
+// Regression test for #1080: there is no situation in which an honest executor
+// sets ExclusiveLock on a replay cache delta (consuming a nonce is already a
+// unique event), so InvokeTX must reject it as executor misbehavior rather
+// than report a recoverable conflict.
+TEST_F(HogDbTest, ExclusiveLockOnReplayCacheIsInvalidExecutorBehavior)
+{
+  Address addr = make_address(kAddress + 306);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  auto r = invoke_tx.request_consume_uniquifier(
+      addr, Uniquifier(5, 42),
+      std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDbCode::kInvalidExecutorBehavior, r.error().code());
+  // Not a conflict, so no conflict diagnostic is recorded.
+  EXPECT_FALSE(invoke_tx.last_conflict_reason().has_value());
+
+  invoke_tx.abort();
+}
+
 TEST_F(HogDbTest, InvalidateSiblingBlockTX)
 {
   PerThreadARC<BlockTX> block_a(
