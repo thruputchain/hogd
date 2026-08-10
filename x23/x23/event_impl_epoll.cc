@@ -277,7 +277,18 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
-    state_[fd].ready_ |= evs[i].events;
+    // Both directions watch EPOLLERR, so clear() -- which keeps the
+    // flags the other direction is still watching -- never takes it
+    // back out of ready_.  Latching it would make every later
+    // {read,write}_wait on the fd return immediately, and a coroutine
+    // whose syscall keeps returning EAGAIN because the error has
+    // already been consumed would spin forever.  Latch the error as
+    // ordinary readiness in each direction instead, so each direction
+    // consumes its own copy through its own clear().
+    std::uint32_t events = evs[i].events;
+    if (events & EPOLLERR)
+      events |= EPOLLIN | EPOLLOUT;
+    state_[fd].ready_ |= events & ~std::uint32_t(EPOLLERR);
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
         if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
