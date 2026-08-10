@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <initializer_list>
 #include <new>
@@ -286,7 +287,7 @@ constexpr size_t variant_index =
 template<typename... T>
 using merged_return_t = decltype([] {
   if constexpr (requires { typename std::common_type_t<T...>; })
-    return [] -> std::common_type_t<T...> { throw; }();
+    return [] -> std::common_type_t<T...> { std::unreachable(); }();
   else
     return;
 }());
@@ -314,8 +315,18 @@ with_n_impl(size_t n, F &&f)
     }
     return with_n_impl<R, Min + 1, Max>(n, std::forward<F>(f));
   }
-  else
-    throw std::out_of_range("with_n: n out of range");
+  else {
+    // Callers must guarantee n is in [Min, Max), so this is
+    // unreachable in correct code.  (x23::panic would be the natural
+    // spelling, but debug.h includes this header.)  In constant
+    // evaluation an out-of-range n is a compile-time error on either
+    // branch.
+#ifdef NDEBUG
+    std::unreachable();
+#else
+    std::abort();
+#endif
+  }
 }
 } // namespace detail
 
@@ -324,8 +335,9 @@ with_n_impl(size_t n, F &&f)
 // constant.  You must supply a Max value of N (one greater than the
 // maximum n you could ask for at runtime), and may supply a Min value
 // (the lowest you would ask for).  You can optionally supply a return
-// type R, or if R is auto_t, it will infer the return type.  Throws
-// std::out_of_range if n is not in [Min, Max).
+// type R, or if R is auto_t, it will infer the return type.  n outside
+// [Min, Max) is a precondition violation: it aborts in debug builds
+// and is undefined behavior under NDEBUG.
 //
 // Make sure f takes the std::integral_constant argument by value and
 // not by reference so that it can convert to a compile-time constant.
