@@ -312,6 +312,7 @@ concept implements_async_rpc =
 
 namespace detail {
 class RpcStreamImpl : public RefCount {
+  std::atomic_size_t mapref_{1};
 public:
   static constexpr bool kAllowRefPtrConversion = true;
   size_t max_message_size = default_max_message_size;
@@ -321,6 +322,9 @@ public:
   int get_fd() const { return fd_.get(); }
 
 protected:
+  struct MapRefOps;
+  using MapRef = RefPtr<RpcStreamImpl, MapRefOps>;
+
   UniqueFd fd_;
   std::stop_source ss_;
   std::atomic<unsigned> nclients_{0};
@@ -331,12 +335,6 @@ protected:
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
   Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
-
-  // XXX - shouldn't be necessary
-  void finalize(this auto &self) noexcept
-  {
-    self.cp_->pool_.on_quiesce([self = &self] noexcept { delete self; });
-  }
 
 private:
   struct ClientState {
@@ -354,6 +352,26 @@ private:
   Async<Errno> read_record(Buf *b SLOC_DECL);
 
   friend class RefCount;
+};
+
+struct RpcStreamImpl::MapRefOps : RefOps<RpcStreamImpl *> {
+  using super = RefOps<RpcStreamImpl *>;
+
+  static void incref(RpcStreamImpl *p)
+  {
+    super::incref(p);
+    p->mapref_.fetch_add(1, std::memory_order_relaxed);
+  }
+  static void decmapref(RpcStreamImpl *p)
+  {
+    if (p->mapref_.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      p->srvmap_.clear();
+  }
+  static void decref(RpcStreamImpl *p)
+  {
+    decmapref(p);
+    super::decref(p);
+  }
 };
 } // namespace detail
 

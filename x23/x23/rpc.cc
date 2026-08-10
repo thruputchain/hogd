@@ -45,8 +45,8 @@ RpcStreamImpl::fail()
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
-  srvmap_.clear();
   cp_->poison(fd_);
+  MapRefOps::decmapref(this);
 }
 
 Async<std::expected<std::uint32_t, Errno>>
@@ -164,10 +164,11 @@ RpcStreamImpl::reader(SLOC_ARG0)
         if (awaiter.await_ready())
           cp_->dwrite(fd_, awaiter.await_resume());
         else
-          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
-            if (!self->ss_.stop_requested())
-              // XXX - above if shouldn't be necessary
-              self->cp_->dwrite(self->fd_, co_await awaitable);
+          [](MapRef self, auto awaitable) -> Detached {
+            bool srvmap_ok = !self->ss_.stop_requested();
+            Buf data = co_await awaitable;
+            if (srvmap_ok)
+              self->cp_->dwrite(self->fd_, data);
           }(*this, std::move(awaitable));
       }
       else
