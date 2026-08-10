@@ -268,33 +268,49 @@ write_coordinator_output() {
   COORDINATOR_OUTPUT_WRITTEN=1
 }
 
+# Whether this run launched anything, and so has anything to publish at all. A
+# run with nothing to publish is not the same as a publication that broke, and
+# only the caller knows which of the two it can carry on from -- so this is
+# asked separately rather than folded into a return status below.
+multi_node_has_results() {
+  [[ ${#CONTROL_LOG_RECORDS[@]} -gt 0 ]]
+}
+
 # Copies what this run left on the benchmark hosts into the metrics history,
 # under the [..._logs] directory beside the run's metric file rather than into
 # the metric file itself. Worth doing whether or not the run succeeded: for one
 # that died part way through, these are the only surviving account of what the
 # processes it launched actually did, and the job log holds only a bounded tail.
 #
-# Returns non-zero when nothing was launched, so the caller knows the metrics
-# history was never even cloned.
+# Fails if the clone or the copy does. The [|| return] are not redundant: this
+# is called from a conditional too, where [errexit] does not apply inside it,
+# and a clone that failed must not be followed by a copy into nothing.
 publish_multi_node_diagnostics() {
   if [[ $PUBLISHED_LOGS -eq 1 ]]; then
     return 0
   fi
-
-  if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
-    echo 'no control log records captured; skipping metrics_history publication'
-    return 1
-  fi
   # Set before the copy rather than after it, so a copy that dies part way
-  # through is not repeated from the EXIT trap. The trap's own publication is
-  # logs-only, and it would have nothing to add.
+  # through is not repeated from the EXIT trap.
   PUBLISHED_LOGS=1
 
   echo 'clone metrics history # This is idempotent'
-  "$REPO_ROOT/scripts/clone_metrics_history.sh"
+  "$REPO_ROOT/scripts/clone_metrics_history.sh" || return 1
 
   echo 'copy full remote logs into metrics history'
-  publish_multi_node_logs
+  publish_multi_node_logs || return 1
+}
+
+# Commits whatever has been written to the metrics history, unless the caller is
+# going to make a single commit of its own at the end of the job. Without a
+# commit, what was written stays in the workspace and goes away with it.
+commit_metrics_history() {
+  if [[ ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} -ne 0 ]]; then
+    echo 'skipping metrics history commit'
+    return 0
+  fi
+
+  echo 'commit metrics history updates'
+  "$REPO_ROOT/scripts/commit_metrics.sh" || return 1
 }
 
 # The run's numbers, plus its logs. Only ever reached for a run that got all the
@@ -305,7 +321,16 @@ publish_results() {
   fi
   PUBLISHED_RESULTS=1
 
-  publish_multi_node_diagnostics || return 0
+  if ! multi_node_has_results; then
+    echo 'no control log records captured; skipping metrics_history publication'
+    return 0
+  fi
+
+  # Called plainly, so [errexit] carries a broken metrics history out of here.
+  # A clone or copy that failed is not a run without a data point: this suite's
+  # numbers are the reason it ran, and losing them quietly is the failure mode
+  # worth being loudest about.
+  publish_multi_node_diagnostics
 
   if write_coordinator_output; then
     echo 'log integration metrics'
@@ -314,12 +339,25 @@ publish_results() {
     echo 'failed to collect coordinator output; skipping summary metric file' >&2
   fi
 
-  if [[ ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} -eq 0 ]]; then
-    echo 'commit metrics history updates'
-    "$REPO_ROOT/scripts/commit_metrics.sh"
-  else
-    echo 'skipping metrics history commit'
+  commit_metrics_history
+}
+
+# A failed run's logs, published and committed, without its numbers. The commit
+# matters as much as the copy: [e2e_payment_multi_node] runs this suite on its
+# own with commits not deferred and nothing after it to commit, so logs left
+# uncommitted there are discarded with the workspace.
+#
+# Reports whether that worked rather than failing outright. The caller is the
+# EXIT trap of a run that has already failed, and a metrics-history problem must
+# not stand in for the benchmark failure being cleaned up after.
+publish_failed_run_logs() {
+  if ! multi_node_has_results; then
+    echo 'no control log records captured; skipping metrics_history publication'
+    return 0
   fi
+
+  publish_multi_node_diagnostics || return 1
+  commit_metrics_history || return 1
 }
 
 kill_stale_processes() {
@@ -344,7 +382,9 @@ cleanup() {
   else
     echo "suite failed ($(ci_describe_exit_status "$exit_code")); publishing" \
       'its logs without a summary metric' >&2
-    publish_multi_node_diagnostics || true
+    if ! publish_failed_run_logs; then
+      echo "failed to publish this run's logs to the metrics history" >&2
+    fi
   fi
   kill_stale_processes
   exit "$exit_code"
