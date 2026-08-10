@@ -3,6 +3,19 @@
 - Core dumps are saved to `../core_dumps`
 	- On the hogN machines: this is `$WORK_DIR/hogd/core_dumps`.  Usually `$WORK_DIR=/home/hogci/actions-runner/_work`, although on `hog11` this is `/home/hogci/general_runner/_work`
 
+- `check_bench_hosts: 1 of 8 hosts cannot run combined_metrics.toml: hog5` means
+  the named host answered ssh but gave the session no forwarded ssh-agent. Every
+  `hog_sched` job begins with a prologue that runs `hog_fwd`, which needs that
+  agent to map the private groundhogchain repos to an identity, so such a host
+  fails every job it is given with `Could not open a connection to your
+  authentication agent.` and takes the schedule down with it. It is a fault on
+  that host, not in the commit under test; `ssh -A <host> ssh-add -l` reproduces
+  it, and the host needs an operator (agent forwarding disabled in its `sshd`
+  config, or a `/tmp` too full for `sshd` to create the forwarding socket, will
+  both do it). `scripts/ci/check_bench_hosts.sh` reports this before a run
+  starts, since afterwards the one line that says so is buried among the ~800
+  the eight hosts emit while forwarding keys.
+
 # CI runner setup instructions
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
 - Log in as the `hogci` user before completing the remaining steps in this file. You should add you SSH public key to `~hogci/.ssh/authorized_keys` and then ssh in as `hogci`.

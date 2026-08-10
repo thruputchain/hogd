@@ -57,6 +57,9 @@ jobs:
         with:
           submodules: false
 
+      - name: Check bench hosts
+        run: ./scripts/ci/check_bench_hosts.sh ./scripts/schedules/ccache_warmup.toml
+
       - name: Run hog schedule
         run: |
           BRANCH_NAME="${{ github.head_ref || github.ref_name }}"

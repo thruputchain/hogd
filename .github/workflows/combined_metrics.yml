@@ -43,6 +43,8 @@ jobs:
                       ${{ secrets.HOGD_TO_XDR_RPC }}
                       ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
                       ${{ secrets.HOGD_TO_HOGX_KEY }}
+            - name: Check bench hosts
+              run: ./scripts/ci/check_bench_hosts.sh ./scripts/schedules/combined_metrics.toml
             - name: Run hog schedule
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
