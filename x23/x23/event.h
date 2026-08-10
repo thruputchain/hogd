@@ -349,9 +349,20 @@ private:
   void setcb(BorrowedFd fd, bool write, WorkItem h);
 
 #if USE_EPOLL
+  // EPOLLERR is readiness for both directions, but each direction has
+  // to be able to consume its copy independently (see clear()), so we
+  // give the writer its own bit.  EPOLLONESHOT is an input-only flag
+  // that epoll_wait never reports, so its bit is free for us to use.
+  static constexpr std::uint32_t kWriteErr = EPOLLONESHOT;
   static inline constexpr std::uint32_t epflags[2] = {EPOLLIN | EPOLLHUP |
                                                           EPOLLERR,
-                                                      EPOLLOUT | EPOLLERR};
+                                                      EPOLLOUT | kWriteErr};
+
+  // Turn what epoll_wait reported into the bits we cache in ready_.
+  static constexpr std::uint32_t ready_bits(std::uint32_t events)
+  {
+    return events & EPOLLERR ? events | kWriteErr : events;
+  }
 
   // epoll_event user data is a file descriptor number in the low 32
   // bits and the registration generation (see FdState::gen_) in the

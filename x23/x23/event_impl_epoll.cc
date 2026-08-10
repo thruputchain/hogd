@@ -39,15 +39,16 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   auto fdp = getfd(fd);
   x23assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  // Clear every bit this direction waits on, EPOLLERR included.  The
-  // caller is about to make the system call, and the system call is
-  // the authority on whether the file descriptor is in error: if it
-  // returns EAGAIN, there is no error left to report and a remembered
-  // EPOLLERR is stale.  Keeping such a bit (which is what re-ORing
-  // epflags[!write] used to do, since EPOLLERR is in both entries)
-  // makes the following {read,write}_wait return ready immediately,
-  // forever, spinning a thread instead of sleeping.  A real error
-  // that arrives later still shows up as a fresh epoll event.
+  // Clear every bit this direction waits on, its copy of the error
+  // condition included.  The caller is about to make the system call,
+  // and the system call is the authority on whether the file
+  // descriptor is in error: if it comes back EAGAIN, there is no error
+  // left to report and the remembered bit is stale.  Keeping it (which
+  // is what re-ORing epflags[!write] used to do, back when EPOLLERR
+  // was in both entries) makes the following {read,write}_wait return
+  // ready immediately, forever, spinning a thread instead of sleeping.
+  // The other direction keeps its own copy, and a real error arriving
+  // later still shows up as a fresh epoll event.
   fdp->ready_ &= ~epflags[write];
 }
 
@@ -298,9 +299,10 @@ CoroPollImpl::check(int timeout)
     if (size_t(fd) >= state_size_ ||
         state_[fd].gen_.load() != event_key_gen(evs[i].data.u64))
       continue;
-    state_[fd].ready_ |= evs[i].events;
+    std::uint32_t events = ready_bits(evs[i].events);
+    state_[fd].ready_ |= events;
     for (unsigned write = 0; write < 2; ++write)
-      if (evs[i].events & epflags[write]) {
+      if (events & epflags[write]) {
         if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
           --numcoro_;
           if (CoroHandle h = wi->set_result_without_resuming(err))
