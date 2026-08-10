@@ -112,6 +112,59 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_wait_port
+
+# A wait that times out has to name itself in the digest. The suite it aborts
+# dies several frames up at a bare [return 1], so this line is the only thing
+# in the surviving end-of-job report that says which port never came up.
+CI_BENCH_FAILURE_LOG="$work_dir/failures.log"
+rm -f "$CI_BENCH_FAILURE_LOG"
+# Port 1 is privileged and nothing in CI binds it, so the wait is guaranteed to
+# reach its timeout rather than racing a real listener.
+if ci_wait_port 127.0.0.1 1 1 >/dev/null 2>&1; then
+  echo "FAIL wait on a dead port should fail"
+  fail=1
+else
+  echo "ok   wait on a dead port fails"
+fi
+check_contains "timed-out wait names host and port in the digest" \
+  "nothing listening on 127.0.0.1:1 after 1s" "$(cat "$CI_BENCH_FAILURE_LOG")"
+check_contains "timed-out wait names the suite in the digest" \
+  "bench_harness_selftest.sh" "$(cat "$CI_BENCH_FAILURE_LOG")"
+
+# A wait that is satisfied leaves the digest alone -- the combined-metrics job
+# runs hundreds of them against one digest, and a note from a wait that came up
+# would read as this run's failure.
+rm -f "$CI_BENCH_FAILURE_LOG"
+listener_port=$((20000 + RANDOM % 10000))
+nc -l 127.0.0.1 "$listener_port" >/dev/null 2>&1 &
+listener_pid=$!
+if ci_wait_port 127.0.0.1 "$listener_port" 10 >/dev/null 2>&1; then
+  echo "ok   wait on a live port succeeds"
+else
+  echo "FAIL wait on a live port should succeed"
+  fail=1
+fi
+kill "$listener_pid" 2>/dev/null || true
+wait "$listener_pid" 2>/dev/null || true
+if [[ -e "$CI_BENCH_FAILURE_LOG" ]]; then
+  echo "FAIL a satisfied wait wrote a digest entry"
+  sed 's/^/     | /' "$CI_BENCH_FAILURE_LOG"
+  fail=1
+else
+  echo "ok   a satisfied wait leaves no digest"
+fi
+
+# A digest that cannot be written must not turn the wait's failure into a
+# failure of its own.
+CI_BENCH_FAILURE_LOG=/proc/nonexistent/failures.log
+if ci_wait_port 127.0.0.1 1 1 >/dev/null 2>&1; then
+  echo "FAIL wait on a dead port should fail"
+  fail=1
+else
+  echo "ok   unwritable digest still fails the wait, and nothing else"
+fi
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

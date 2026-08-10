@@ -202,6 +202,19 @@ ci_report_error_trace() {
   return 0
 }
 
+# Adds a line to the digest for a failure that has no aborting command behind
+# it to name. The ERR trap can only report what bash hands it, which for a
+# helper that ends in [return 1] is the string "return 1" -- true, and useless:
+# the digest is the one report guaranteed to reach the end of a job whose log
+# GitHub truncates, so whatever the failure actually was has to be written into
+# it at the point the script still knows.
+#
+# Best effort, on the same terms as the ERR trap's own write: a digest that
+# cannot be written must not turn a benchmark failure into a reporting failure.
+ci_note_bench_failure() {
+  printf '%s\n' "$*" >>"$CI_BENCH_FAILURE_LOG" 2>/dev/null || true
+}
+
 # Start a run with no digest, so a file left by an earlier run on the same
 # host is never reported as this run's failure.
 ci_reset_bench_failures() {
@@ -220,9 +233,24 @@ ci_report_bench_failures() {
   echo "===== end of benchmark failure digest ====="
 }
 
+# A readiness wait, plus a digest line when it gives up. Every suite reaches a
+# port through here, and a timeout is how the recurring stale-process failure
+# surfaces: the ports a leftover process still holds answer, and the wait that
+# ends the run is the first one nothing happens to be listening on. The suite
+# then dies at [return 1] several frames up, which is all the ERR trap has to
+# report -- naming neither the host nor the port, so the digest that survives
+# to the end of the job says nothing about which wait timed out.
 ci_wait_port() {
-  CI_WAIT_PORT_TIMEOUT_SEC=$CI_WAIT_PORT_TIMEOUT_SEC \
-    "$CI_BENCH_REPO_ROOT/scripts/wait-port.sh" "$@"
+  local host=${1:-} port=${2:-} timeout=${3:-$CI_WAIT_PORT_TIMEOUT_SEC}
+
+  if CI_WAIT_PORT_TIMEOUT_SEC=$CI_WAIT_PORT_TIMEOUT_SEC \
+    "$CI_BENCH_REPO_ROOT/scripts/wait-port.sh" "$@"; then
+    return 0
+  fi
+
+  ci_note_bench_failure \
+    "$0: readiness timeout: nothing listening on $host:$port after ${timeout}s"
+  return 1
 }
 
 ci_wait_port_hosts() {
