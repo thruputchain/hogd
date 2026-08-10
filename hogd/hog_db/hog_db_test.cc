@@ -3653,6 +3653,213 @@ TEST_F(HogDbTest, ExclusiveLockOnReplayCacheIsInvalidExecutorBehavior)
   invoke_tx.abort();
 }
 
+// The next four tests cover hogd issue #1641 (filed against the legacy
+// db_interface, wontfixed there because db_interface is replaced by hog_db).
+// In db_interface, the ExclusiveLock reservation path skipped NNInt semantic
+// validation; the deferred check then failed during the commit-time lock
+// downgrade and crashed the node (assert(res) in Debug,
+// std::bad_variant_access surfacing as an unrecoverable executor failure in
+// Release). All four contract-reachable variants from the issue are pinned
+// here against hog_db's contract: InvokeTX::request_nnint128 validates the
+// delta up front, before the ExclusiveLock flag is even consulted, so an
+// invalid NNInt write is a deterministic reservation-time error and nothing
+// unreplayable is ever deferred to commit. The commit-side safety net for
+// the same class is pinned by
+// ItemLockTest.ExclusiveNNIntFailedCommitAdmissionReturnsError.
+
+// Issue #1641, original finding: a contract first persists a negative NNInt
+// snapshot (set -1, add 0 -- legal, matching legacy semantics), then submits
+// an add-only -1 with ExclusiveLock against that negative base.
+TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
+{
+  Address addr = make_address(kAddress + 320);
+  ItemKey key = make_key(kAddress + 320, 1);
+  setup_contract_address(addr);
+
+  // Block 1: persist the negative snapshot. set(-1) with add 0 is accepted,
+  // as in db_interface (a negative base is a legal committed state; only
+  // subtracting below the base is not).
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
+    ASSERT_TRUE(
+        itx.request_nnint128(key, /*base=*/-1, /*delta=*/0,
+                             std::to_underlying(StorageDeltaFlags::None)));
+  });
+  auto committed = db_.read_nnint128(key);
+  ASSERT_TRUE(committed);
+  EXPECT_EQ(*committed, -1);
+
+  // Block 2: the exclusive add-only -1 must fail at reservation time with a
+  // structured conflict. In db_interface this reservation succeeded and the
+  // node crashed at commit.
+  {
+    PerThreadARC<BlockTX> block_tx(
+        db_, cost_model_, background_commit_worker_, 2,
+        BlockExecutionMode::kBlockExecutionModeProposal);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx(block_tx);
+
+    auto add_only = itx.request_nnint128(key, /*delta=*/-1,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::ExclusiveLock));
+    ASSERT_FALSE(add_only.has_value());
+    EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    ASSERT_TRUE(itx.last_conflict_reason().has_value());
+    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
+              *itx.last_conflict_reason());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+
+    // The explicit set-add form of the same delta is rejected identically.
+    auto set_add = itx.request_nnint128(key, /*base=*/-1, /*delta=*/-1,
+                                        std::to_underlying(
+                                            StorageDeltaFlags::ExclusiveLock));
+    ASSERT_FALSE(set_add.has_value());
+    EXPECT_EQ(HogDbCode::kConflict, set_add.error().code());
+
+    itx.abort();
+  }
+
+  // Positive control: a valid exclusive add against the same negative base
+  // reserves and commits cleanly.
+  commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &itx) {
+    ASSERT_TRUE(itx.request_nnint128(key, /*delta=*/1,
+                                     std::to_underlying(
+                                         StorageDeltaFlags::ExclusiveLock)));
+  });
+  auto after = db_.read_nnint128(key);
+  ASSERT_TRUE(after);
+  EXPECT_EQ(*after, 0);
+}
+
+// Issue #1641, "fresh key" amendment: an add-only -1 with ExclusiveLock on a
+// key with no committed item resolves against implicit base 0 and must be
+// rejected at reservation, not deferred to a crashing commit.
+TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
+{
+  Address addr = make_address(kAddress + 321);
+  ItemKey key = make_key(kAddress + 321, 1);
+  setup_contract_address(addr);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx(block_tx);
+
+  auto add_only = itx.request_nnint128(key, /*delta=*/-1,
+                                       std::to_underlying(
+                                           StorageDeltaFlags::ExclusiveLock));
+  ASSERT_FALSE(add_only.has_value());
+  EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(itx.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
+            *itx.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // The rejection is independent of the flag: the non-exclusive form fails
+  // the same way (validation runs before the flag is consulted).
+  auto non_exclusive =
+      itx.request_nnint128(key, /*delta=*/-1,
+                           std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_FALSE(non_exclusive.has_value());
+  EXPECT_EQ(HogDbCode::kConflict, non_exclusive.error().code());
+
+  itx.abort();
+}
+
+// Issue #1641, overflow amendment: set INT128_MAX with add 1 under
+// ExclusiveLock must be a deterministic kOverflow at reservation. Boundary
+// control: set INT128_MAX-1 with add 1 (the largest valid sum) commits.
+TEST_F(HogDbTest, ExclusiveNNIntOverflowRejectedAtReservation)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  Address addr = make_address(kAddress + 322);
+  ItemKey key = make_key(kAddress + 322, 1);
+  setup_contract_address(addr);
+
+  // Boundary control from the issue's PoC: the last valid set-add commits,
+  // including under ExclusiveLock.
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
+    ASSERT_TRUE(itx.request_nnint128(key, /*base=*/kMax - 1, /*delta=*/1,
+                                     std::to_underlying(
+                                         StorageDeltaFlags::ExclusiveLock)));
+  });
+  auto committed = db_.read_nnint128(key);
+  ASSERT_TRUE(committed);
+  EXPECT_EQ(*committed, kMax);
+
+  {
+    PerThreadARC<BlockTX> block_tx(
+        db_, cost_model_, background_commit_worker_, 2,
+        BlockExecutionMode::kBlockExecutionModeProposal);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx(block_tx);
+
+    // Explicit set-add overflow.
+    auto set_add = itx.request_nnint128(key, /*base=*/kMax, /*delta=*/1,
+                                        std::to_underlying(
+                                            StorageDeltaFlags::ExclusiveLock));
+    ASSERT_FALSE(set_add.has_value());
+    EXPECT_EQ(HogDbCode::kOverflow, set_add.error().code());
+
+    // Add-only overflow against the committed INT128_MAX base.
+    auto add_only = itx.request_nnint128(key, /*delta=*/1,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::ExclusiveLock));
+    ASSERT_FALSE(add_only.has_value());
+    EXPECT_EQ(HogDbCode::kOverflow, add_only.error().code());
+
+    itx.abort();
+  }
+
+  auto after = db_.read_nnint128(key);
+  ASSERT_TRUE(after);
+  EXPECT_EQ(*after, kMax);
+}
+
+// Issue #1641, bytestring amendment: an add-only negative NNInt write with
+// ExclusiveLock against a key holding a committed bytestring resolves the
+// base as 0 (matching db_interface's treatment of non-NNInt committed items)
+// and must be rejected at reservation.
+TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
+{
+  Address addr = make_address(kAddress + 323);
+  ItemKey key = make_key(kAddress + 323, 1);
+  setup_contract_address(addr);
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
+    std::string data("bytestring base for nnint add");
+    ASSERT_TRUE(itx.request_bytes(key, std::as_bytes(std::span(data)),
+                                  std::to_underlying(StorageDeltaFlags::None)));
+  });
+
+  {
+    PerThreadARC<BlockTX> block_tx(
+        db_, cost_model_, background_commit_worker_, 2,
+        BlockExecutionMode::kBlockExecutionModeProposal);
+    ASSERT_TRUE(block_tx.try_acquire_reference());
+    InvokeTX itx(block_tx);
+
+    auto add_only = itx.request_nnint128(key, /*delta=*/-1,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::ExclusiveLock));
+    ASSERT_FALSE(add_only.has_value());
+    EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    ASSERT_TRUE(itx.last_conflict_reason().has_value());
+    EXPECT_EQ(DbConflictCode::kDbConflictBoundsExceeded,
+              *itx.last_conflict_reason());
+    // NOLINTEND(bugprone-unchecked-optional-access)
+
+    itx.abort();
+  }
+
+  // The committed bytestring is untouched.
+  auto bytes = db_.read_bytes(key);
+  ASSERT_TRUE(bytes);
+}
+
 TEST_F(HogDbTest, InvalidateSiblingBlockTX)
 {
   PerThreadARC<BlockTX> block_a(
