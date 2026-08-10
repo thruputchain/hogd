@@ -23,18 +23,29 @@
 //               ordering (pool first, CoroPoll first, or clean).  Targets
 //               ThreadPool/CoroPoll shutdown races.
 //
+// Each scenario is bounded by a watchdog that reports and dumps x23 state if
+// the scenario stops making progress, rather than leaving ctest to kill the
+// process silently; see the Watchdog comment below.
+//
 // Usage:
 //   test_rpcstress -d 60 -t 8 -v          # all scenarios, 60s each
 //   test_rpcstress -s fanout -d 300 -t 8   # soak one scenario
 //   test_rpcstress -s shutdown -d 10 -t 2  # quick shutdown probe
+//   test_rpcstress -s teardown -d 300 -w 0 # soak with the watchdog off
+//   test_rpcstress -s bare -d 1 -w 3 -H 60 # see what the watchdog reports
 
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <condition_variable>
+#include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <print>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <netinet/in.h>
@@ -45,6 +56,7 @@
 #include <x23/event.h>
 #include <x23/refcnt.h>
 #include <x23/rpc.h>
+#include <x23/signal.h>
 #include <x23/sockio.h>
 #include <x23/threadpool.h>
 
@@ -56,6 +68,14 @@ using namespace std::chrono;
 std::string progname;
 unsigned opt_threads;
 unsigned opt_seconds = 60;
+// Seconds a scenario may spend past its own duration before the watchdog
+// calls it hung.  0 disables the watchdog.
+unsigned opt_watchdog_grace = 20;
+// Stall this many seconds on entering the shutdown phase.  Nothing in a real
+// run sets this: it exists so the watchdog's own reporting path can be
+// exercised on demand, which a real hang -- rare, and rare on CI machines
+// specifically -- offers no way to do.
+unsigned opt_hang_shutdown;
 bool opt_verbose;
 
 #if NDEBUG
@@ -96,6 +116,125 @@ int stress_bare(unsigned threads, unsigned seconds, bool verbose);
 int stress_teardown(unsigned threads, unsigned seconds, bool verbose);
 int stress_writebuf(unsigned threads, unsigned seconds, bool verbose);
 int stress_shutdown(unsigned threads, unsigned seconds, bool verbose);
+
+// ============================================================
+// Hang watchdog
+// ============================================================
+
+// A scenario that stops making progress is the failure this test exists to
+// catch, and it is also the one it reports worst.  ctest kills the process
+// with SIGKILL at its 60s TIMEOUT, so the job log keeps the scenario's header
+// line and nothing after it: no summary, no state, no core.  That is the whole
+// of what CI has ever said about issue #1334 --
+//
+//     The following tests FAILED:
+//          14 - rpcstress_teardown (Timeout)
+//
+// -- which is why the bug outlived several months of hits.
+//
+// So bound each scenario here, inside the ctest timeout, and spend the margin
+// on saying something.  When the bound passes, name the phase that did not
+// finish and then hand SIGUSR1 to x23's own handlers: CoroPollImpl::debug_dump
+// prints every live file descriptor with the coroutine parked on it, and
+// ThreadPool::debug_dump prints the worker and queue state.  Between them they
+// identify the stuck connection and what it is waiting for, which is exactly
+// the evidence a hang here needs.  Then abort, so there is a core to attach a
+// debugger to as well (CI collects those via scripts/save_core_dumps.sh).
+//
+// A watchdog that fires early costs nothing: the alternative outcome was a
+// ctest timeout on the same run, so a false positive replaces a silent failure
+// with a described one rather than creating a failure of its own.
+class Watchdog {
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  const char *phase_ = "startup";
+  bool finished_ = false;
+
+  std::string name_;
+  seconds budget_;
+  steady_clock::time_point start_ = steady_clock::now();
+  std::thread thread_;
+
+  [[noreturn]] void fire(const char *phase) const
+  {
+    auto waited = duration<double>(steady_clock::now() - start_).count();
+    std::println(stderr,
+                 "{}: {}: WATCHDOG: phase '{}' still running {:.1f}s in, past "
+                 "a {}s budget -- treating as hung",
+                 progname, name_, phase, waited, budget_.count());
+    std::println(stderr,
+                 "{}: {}: dumping x23 fd/coroutine and thread pool state, "
+                 "then aborting for a core dump",
+                 progname, name_);
+    std::fflush(nullptr);
+
+    // Runs the debug_dump callbacks CoroPoll and ThreadPool register for
+    // SIGUSR1.  Calling the handler directly rather than raise()ing keeps this
+    // independent of the process signal mask; either way the dumps happen on
+    // x23's signal service thread, so give them a moment to land before the
+    // abort cuts them off.
+    signal_handler(SIGUSR1);
+    std::this_thread::sleep_for(seconds(2));
+    std::fflush(nullptr);
+    abort();
+  }
+
+public:
+  Watchdog(std::string name, seconds budget)
+    : name_(std::move(name)), budget_(budget)
+  {
+    if (budget_ <= seconds(0))
+      return;
+    thread_ = std::thread([this] {
+      std::unique_lock lk(mtx_);
+      if (cv_.wait_for(lk, budget_, [this] { return finished_; }))
+        return;
+      // Fire while still holding the lock.  A scenario that finishes at
+      // exactly the budget must not be aborted: the destructor sets finished_
+      // under this lock, so having observed it false here means the decision
+      // to fire cannot be overtaken by one to stand down.
+      fire(phase_);
+    });
+  }
+
+  Watchdog(const Watchdog &) = delete;
+  Watchdog &operator=(const Watchdog &) = delete;
+
+  ~Watchdog()
+  {
+    {
+      std::lock_guard _lk(mtx_);
+      finished_ = true;
+    }
+    cv_.notify_all();
+    if (thread_.joinable())
+      thread_.join();
+  }
+
+  // Label what the scenario is doing, so a hang is attributed rather than just
+  // reported.  Shutdown is the phase issue #1334 hangs in, and telling it apart
+  // from a hang during the run is most of the diagnosis.
+  void phase(const char *p)
+  {
+    std::lock_guard _lk(mtx_);
+    phase_ = p;
+  }
+};
+
+// The armed watchdog for the scenario now running, so scenarios can label
+// their phase without every one of them taking a parameter for it.  Only the
+// thread running the scenarios touches this; the watchdog thread reaches the
+// phase through the Watchdog's own lock.
+Watchdog *cur_watchdog;
+
+void
+watchdog_phase(const char *phase)
+{
+  if (cur_watchdog)
+    cur_watchdog->phase(phase);
+  if (opt_hang_shutdown && !strcmp(phase, "shutdown"))
+    std::this_thread::sleep_for(seconds(opt_hang_shutdown));
+}
 
 // ============================================================
 // Shared infrastructure
@@ -264,6 +403,7 @@ stress_bare(unsigned threads, unsigned seconds, bool verbose)
                    duration<double>(steady_clock::now() - start).count());
   }
 
+  watchdog_phase("shutdown");
   stop.store(true, std::memory_order_relaxed);
   di.destroy_wait();
 
@@ -329,6 +469,7 @@ stress_fanout(unsigned threads, unsigned seconds, bool verbose)
     }
   }
 
+  watchdog_phase("shutdown");
   stop.store(true, std::memory_order_relaxed);
   cp.poison(lfd);
   di.destroy_wait();
@@ -427,6 +568,7 @@ stress_teardown(unsigned threads, unsigned seconds, bool verbose)
     }
   }
 
+  watchdog_phase("shutdown");
   stop.store(true, std::memory_order_relaxed);
   cp.poison(lfd);
   di.destroy_wait();
@@ -535,6 +677,7 @@ stress_writebuf(unsigned threads, unsigned seconds, bool verbose)
     }
   }
 
+  watchdog_phase("shutdown");
   stop.store(true, std::memory_order_relaxed);
   cp.poison(lfd);
   di.destroy_wait();
@@ -561,6 +704,7 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
     unsigned destruction_mode = rng.range(0, 2);
 
     // Phase 1: Create infrastructure
+    watchdog_phase("run");
     auto pool = std::make_unique<ThreadPool>(threads);
     auto cp = std::make_unique<CoroPoll>(*pool);
     std::atomic<bool> stop{false};
@@ -600,6 +744,7 @@ stress_shutdown(unsigned threads, unsigned seconds, bool verbose)
     poll(nullptr, 0, run_ms);
 
     // Phase 4: Tear down (varied ordering)
+    watchdog_phase("shutdown");
     stop.store(true, std::memory_order_relaxed);
 
     if (destruction_mode == 0) {
@@ -651,7 +796,8 @@ void
 usage(int err)
 {
   std::println(err ? stderr : stdout,
-               "usage: {} [-t threads] [-d seconds] [-s scenario] [-v]",
+               "usage: {} [-t threads] [-d seconds] [-s scenario] "
+               "[-w watchdog_grace_seconds] [-H hang_shutdown_seconds] [-v]",
                progname);
   exit(err);
 }
@@ -665,7 +811,7 @@ main(int argc, char **argv)
   const char *opt_scenario = nullptr;
 
   int opt;
-  while ((opt = getopt(argc, argv, "t:d:s:vh")) != -1)
+  while ((opt = getopt(argc, argv, "t:d:s:w:H:vh")) != -1)
     switch (opt) {
     case 't':
       parse_int_opt(opt_threads);
@@ -675,6 +821,12 @@ main(int argc, char **argv)
       break;
     case 's':
       opt_scenario = optarg;
+      break;
+    case 'w':
+      parse_int_opt(opt_watchdog_grace);
+      break;
+    case 'H':
+      parse_int_opt(opt_hang_shutdown);
       break;
     case 'v':
       opt_verbose = true;
@@ -702,12 +854,24 @@ main(int argc, char **argv)
       {"shutdown", stress_shutdown},
   };
 
+  // A scenario runs for opt_seconds and then shuts down, so anything past
+  // opt_seconds plus the grace is not slow, it is stuck.  Armed per scenario
+  // rather than per process, so the bound holds whether one scenario was
+  // selected or all of them run back to back.
+  seconds budget(opt_seconds + opt_watchdog_grace);
+  if (!opt_watchdog_grace)
+    budget = seconds(0);
+
   int ret = 0;
   for (auto &[name, fn] : scenarios) {
     if (opt_scenario && strcmp(opt_scenario, name) != 0)
       continue;
     std::println("=== {} ({} threads, {}s) ===", name, opt_threads,
                  opt_seconds);
+    Watchdog wd(name, budget);
+    cur_watchdog = &wd;
+    Defer _disarm{[] { cur_watchdog = nullptr; }};
+    wd.phase("run");
     ret |= fn(opt_threads, opt_seconds, opt_verbose);
   }
   return ret;
