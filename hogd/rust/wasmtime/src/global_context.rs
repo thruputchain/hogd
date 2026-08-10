@@ -157,6 +157,29 @@ impl WasmtimeGlobalContext {
             .debug_info(false)
             .cranelift_opt_level(wasmtime::OptLevel::Speed)
             .cranelift_nan_canonicalization(true) // deterministic nan on cranelift
+            // Deny wasm proposals by default. Config::default() is a synonym
+            // for Config::new(), and neither takes an "everything off" form:
+            // it initializes enabled_features/disabled_features to empty and
+            // the real defaults (WASM2 | MULTI_MEMORY | TAIL_CALL | ...) are
+            // computed later, in Config::features(), at Engine::new time.
+            // The only lever is that override pair, which features() applies
+            // last as `features &= !disabled; features |= enabled`.
+            //
+            // Clearing every bit here makes that a deny-list: a proposal is
+            // reachable only if something below names it. Without this line
+            // the baseline is "wasm 2.0, plus whatever upstream turned on by
+            // default since the last bump", so a version bump can widen the
+            // accepted contract set without any change on our side. Every
+            // enable/disable below still stands on its own and is the record
+            // of what we actually decided.
+            //
+            // Note that features() applies `|= enabled_features` AFTER
+            // subtracting compiler_panicking_wasm_features(), so an explicit
+            // enable overrides wasmtime's own backend-panic guard. The enable
+            // list therefore deserves more scrutiny than the disable list;
+            // everything in it is core wasm 2.0 that Winch compiles on both
+            // x86_64 and aarch64.
+            .wasm_features(WasmFeatures::all(), false)
             // Note: nan canonicalization is not currently available on winch,
             // so we disable floats entirely. wasmtime's Config has no
             // high-level helper for this; the supported path is the
@@ -192,8 +215,15 @@ impl WasmtimeGlobalContext {
             // and which was the production strategy until #2208 — silently
             // made tail-call contracts deployable. See issue #2535.
             //
-            // Proposals kept ENABLED. These are already part of the accepted
-            // contract set; pinning records that and prevents silent removal.
+            // Proposals kept ENABLED. Under the blanket clear above these are
+            // no longer optional documentation — they are the entire set of
+            // wasm features contracts may use. Everything here is core wasm
+            // 2.0; nothing post-2.0 is enabled.
+            //
+            // REFERENCE_TYPES subsumes CALL_INDIRECT_OVERLONG and BULK_MEMORY
+            // subsumes BULK_MEMORY_OPT (wasmparser defines the parent bits to
+            // include the child), so those two are listed only to keep the
+            // set readable as a complete enumeration.
             //
             // The typed `wasm_reference_types` setter is `#[cfg(feature =
             // "gc")]`, which this crate does not enable, so REFERENCE_TYPES
@@ -204,6 +234,7 @@ impl WasmtimeGlobalContext {
                 WasmFeatures::REFERENCE_TYPES
                     | WasmFeatures::MUTABLE_GLOBAL
                     | WasmFeatures::SIGN_EXTENSION
+                    | WasmFeatures::SATURATING_FLOAT_TO_INT
                     | WasmFeatures::CALL_INDIRECT_OVERLONG
                     | WasmFeatures::BULK_MEMORY_OPT,
                 true,

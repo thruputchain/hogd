@@ -1451,3 +1451,66 @@ fn test_production_config_rejects_extended_const_at_validation() {
              constant expressions is rejected at validation",
         );
 }
+
+#[test]
+fn test_production_config_accepted_proposal_surface_is_locked() {
+    // The complete set of wasm proposals the production engine accepts. The
+    // config denies every feature bit and then names what it re-enables, so
+    // this table is the observable form of that decision: a proposal can only
+    // move columns if someone edits new_config().
+    //
+    // This locks the surface against all three ways it has drifted or could
+    // drift: an upstream default flipping on a wasmtime bump (memory64 was
+    // enabled by default and gated only by wasm-meter), a compiler strategy
+    // change (tail calls were rejected only because Strategy::Winch subtracts
+    // TAIL_CALL), and an ordinary editing mistake in the config chain.
+    let accepted: &[(&str, &str)] = &[
+        ("reference_types", r#"(module (memory (export "memory") 1) (table 1 funcref) (func (export "call1") i32.const 0 ref.null func table.set 0))"#),
+        ("bulk_memory", r#"(module (memory (export "memory") 1) (func (export "call1") i32.const 0 i32.const 0 i32.const 1 memory.copy))"#),
+        ("multi_value", r#"(module (memory (export "memory") 1) (func (export "call1") (result i32) (block (result i32 i32) i32.const 1 i32.const 2) drop))"#),
+        ("sign_extension", r#"(module (memory (export "memory") 1) (func (export "call1") (result i32) i32.const 1 i32.extend8_s))"#),
+        ("call_indirect", r#"(module (memory (export "memory") 1) (table 1 funcref) (type $t (func)) (func (export "call1") i32.const 0 call_indirect (type $t)))"#),
+        ("mutable_global", r#"(module (memory (export "memory") 1) (global $g (mut i32) (i32.const 0)) (func (export "call1") i32.const 1 global.set $g))"#),
+    ];
+    let rejected: &[(&str, &str)] = &[
+        ("floats", r#"(module (memory (export "memory") 1) (func (export "call1") (result f32) f32.const 1))"#),
+        ("simd", r#"(module (memory (export "memory") 1) (func (export "call1") v128.const i32x4 0 0 0 0 drop))"#),
+        ("tail_call", r#"(module (memory (export "memory") 1) (func $t) (func (export "call1") return_call $t))"#),
+        ("memory64", r#"(module (memory (export "memory") i64 1) (func (export "call1") (result i32) i64.const 0 i32.load))"#),
+        ("extended_const", r#"(module (memory (export "memory") 1) (global i32 (i32.add (i32.const 1) (i32.const 2))) (func (export "call1")))"#),
+        ("custom_page_sizes", r#"(module (memory (export "memory") 1 (pagesize 1)) (func (export "call1")))"#),
+        ("multi_memory", r#"(module (memory (export "memory") 1) (memory 1) (func (export "call1")))"#),
+        ("threads", r#"(module (memory (export "memory") 1) (func (export "call1") (result i32) i32.const 0 i32.atomic.load))"#),
+        ("wide_arithmetic", r#"(module (memory (export "memory") 1) (func (export "call1") (result i64) i64.const 1 i64.const 1 i64.const 1 i64.const 1 i64.add128 drop))"#),
+        ("gc", r#"(module (memory (export "memory") 1) (type $s (struct (field i32))) (func (export "call1") i32.const 1 struct.new $s drop))"#),
+        ("function_references", r#"(module (memory (export "memory") 1) (type $s (func)) (func $t) (elem declare func $t) (func (export "call1") ref.func $t call_ref $s))"#),
+        ("exceptions", r#"(module (memory (export "memory") 1) (tag $e) (func (export "call1") try_table (catch_all 0) end))"#),
+    ];
+
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    for (name, src) in accepted {
+        let bytes = wat::parse_str(src)
+            .unwrap_or_else(|e| panic!("{name}: wat should parse: {e}"));
+        wasmtime::Module::validate(&engine, &bytes).unwrap_or_else(|e| {
+            panic!(
+                "{name} is part of the accepted contract set but the \
+                 production config now rejects it: {e:#}"
+            )
+        });
+    }
+
+    for (name, src) in rejected {
+        let bytes = wat::parse_str(src)
+            .unwrap_or_else(|e| panic!("{name}: wat should parse: {e}"));
+        assert!(
+            wasmtime::Module::validate(&engine, &bytes).is_err(),
+            "{name} is not part of the accepted contract set, but the \
+             production config now admits it — deployment admission is \
+             consensus-visible, so this must be a deliberate change"
+        );
+    }
+}
