@@ -1234,4 +1234,67 @@ TEST(ItemLockTest, ExclusiveNNIntFailedCommitAdmissionReturnsError)
   }
 }
 
+// Companion to the issue #1641 coverage above: the pre-commit downgrade path.
+// Within a transaction an NNInt reservation can go regular -> exclusive
+// (narrow() promotes on a conflicting base, as a savepoint's writes can) and
+// back to regular when rollback_to_savepoint restores the pre-savepoint
+// change via modify_lock(exclusive_before, regular_after). This is the hog_db
+// analog of db_interface's revert_exclusive_lock_to_set_typeclass, whose
+// unvalidated replay was the #1641 crash site. Pins that the downgrade
+// replaces the ExclusiveLock variant with a fresh typed lock, re-admits the
+// restored change from scratch, and leaves a fully regular lock: a second
+// holder can reserve alongside and the change commits non-exclusively.
+TEST(ItemLockTest, ExclusiveNNIntDowngradeToRegularRevalidates)
+{
+  auto ctx = make_dummy_context();
+  ItemLock lock(0);
+
+  auto regular = make_nnint_change(100, 10);
+  auto r1 = lock.try_atomic_change_lock(nullptr, &regular, ctx);
+  ASSERT_TRUE(r1.has_value());
+
+  // A conflicting base forces narrow() to promote to exclusive -- the same
+  // implicit promotion a savepoint's later writes produce.
+  auto exclusive = make_nnint_change(200, 20);
+  EXPECT_TRUE(exclusive.narrow(regular).has_value());
+  ASSERT_TRUE(exclusive.is_exclusive());
+  auto r2 = lock.try_atomic_change_lock(&regular, &exclusive, ctx);
+  ASSERT_TRUE(r2.has_value());
+
+  // While exclusive, no other transaction can reserve.
+  auto peer = make_nnint_change(100, 5);
+  {
+    std::optional<DbConflictCode> reason;
+    auto peer_ctx = make_dummy_context();
+    peer_ctx.conflict_reason = &reason;
+    auto blocked = lock.try_atomic_change_lock(nullptr, &peer, peer_ctx);
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+  }
+
+  // Downgrade: restore the original regular change, as rollback_to_savepoint
+  // does. The re-admission runs from scratch and returns a fresh cost bound.
+  auto r3 = lock.try_atomic_change_lock(&exclusive, &regular, ctx);
+  ASSERT_TRUE(r3.has_value());
+  EXPECT_EQ(r3.value(), kTestCostModel.kBaseItemCost);
+
+  // The lock is a regular NNInt lock again: a second holder with the same
+  // base can now reserve alongside, which the ExclusiveLock variant would
+  // have rejected.
+  auto r4 = lock.try_atomic_change_lock(nullptr, &peer, ctx);
+  ASSERT_TRUE(r4.has_value());
+  auto released = lock.try_atomic_change_lock(&peer, nullptr, ctx);
+  ASSERT_TRUE(released.has_value());
+
+  // The restored change commits through the ordinary non-exclusive path.
+  auto commit_res = lock.commit_change(regular, ctx);
+  ASSERT_TRUE(commit_res.has_value());
+  EXPECT_EQ(*commit_res, kTestCostModel.kBaseItemCost);
+
+  auto const *inner = lock.get_inner<NNInt128Lock>();
+  ASSERT_TRUE(inner != nullptr);
+  EXPECT_EQ(inner->get_base_and_delta(),
+            (std::pair<int128_t, int128_t>(100, 10)));
+}
+
 } // namespace hogd
