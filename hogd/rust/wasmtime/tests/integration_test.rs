@@ -1422,3 +1422,32 @@ fn test_production_config_rejects_memory64_at_validation() {
         "expected a memory64 validation rejection, got: {err:#}"
     );
 }
+
+fn extended_const_module_bytes() -> Vec<u8> {
+    let wat = r#"(module
+        (memory (export "memory") 1)
+        (global i32 (i32.add (i32.const 1) (i32.const 2)))
+        (func (export "call1")))"#;
+    wat::parse_str(wat).expect("extended const wat should parse")
+}
+
+#[test]
+fn test_production_config_rejects_extended_const_at_validation() {
+    // The extended-const proposal adds i32/i64 add/sub/mul to the constant
+    // expression grammar used by global initializers and data/element segment
+    // offsets. It exists for dynamic linking (computing a segment offset as
+    // __memory_base + N), which contracts have no use for. wasm-meter's
+    // allowlist only classifies operators in function bodies, so constant
+    // expressions never reach it — the engine is the only gate.
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    wasmtime::Module::validate(&engine, &extended_const_module_bytes())
+        .err()
+        .expect(
+            "production config must disable extended const so arithmetic in \
+             constant expressions is rejected at validation",
+        );
+}

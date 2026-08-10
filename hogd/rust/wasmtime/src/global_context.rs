@@ -210,17 +210,27 @@ impl WasmtimeGlobalContext {
             )
             .wasm_bulk_memory(true)
             .wasm_multi_value(true)
-            .wasm_extended_const(true)
             // Proposals kept DISABLED. wasm-meter's opcode allowlist rejects
             // most of these independently, but it does not cover all of them
             // (tail calls are allowlisted; custom page sizes are a memory
-            // definition, not an opcode), and defense in depth is cheap here.
+            // definition and extended const lives in constant expressions,
+            // neither of which is an opcode in a function body), and defense
+            // in depth is cheap here.
             //
             // memory64 deserves specific mention: wasmtime enables it by
             // default and Winch does not subtract it, so wasm-meter was the
             // sole gate. A 64-bit memory index type would change
             // contract-visible pointer width out from under the
             // marmot::syscall ABI (i32 pointers since #2422).
+            //
+            // extended_const adds i32/i64 add/sub/mul to the constant
+            // expression grammar used by global initializers and data/element
+            // segment offsets. It exists for dynamic linking — computing a
+            // segment offset as __memory_base + N — which contracts have no
+            // use for. wasm-meter's allowlist only classifies operators in
+            // function bodies, so constant expressions never reach it and the
+            // engine is the sole gate.
+            .wasm_extended_const(false)
             .wasm_tail_call(false)
             .wasm_memory64(false)
             .wasm_custom_page_sizes(false)
