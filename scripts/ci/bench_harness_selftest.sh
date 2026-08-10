@@ -135,25 +135,57 @@ check_contains "timed-out wait names the suite in the digest" \
 # A wait that is satisfied leaves the digest alone -- the combined-metrics job
 # runs hundreds of them against one digest, and a note from a wait that came up
 # would read as this run's failure.
+#
+# The fixture binds port 0 and reports back whichever port the kernel gave it,
+# rather than guessing one: a guessed port can already be taken, and then the
+# wait is answered by a listener the test knows nothing about -- a pass that
+# means nothing, or a timeout blamed on the helper. It prints only once the
+# socket is listening, so the wait below cannot race the fixture's startup.
 rm -f "$CI_BENCH_FAILURE_LOG"
-listener_port=$((20000 + RANDOM % 10000))
-nc -l 127.0.0.1 "$listener_port" >/dev/null 2>&1 &
+listener_out="$work_dir/listener_port"
+: >"$listener_out"
+python3 -c '
+import socket, sys, time
+
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(1)
+sys.stdout.write("%d\n" % s.getsockname()[1])
+sys.stdout.flush()
+time.sleep(60)
+' >"$listener_out" 2>/dev/null &
 listener_pid=$!
-if ci_wait_port 127.0.0.1 "$listener_port" 10 >/dev/null 2>&1; then
-  echo "ok   wait on a live port succeeds"
-else
-  echo "FAIL wait on a live port should succeed"
+
+listener_port=""
+for _ in $(seq 1 100); do
+  listener_port=$(head -n 1 "$listener_out")
+  [[ -n "$listener_port" ]] && break
+  kill -0 "$listener_pid" 2>/dev/null || break
+  sleep 0.1
+done
+
+if [[ -z "$listener_port" ]]; then
+  # Without a listener there is nothing to assert, and asserting anyway would
+  # report the helper as broken when it is the fixture that never came up.
+  echo "FAIL live-port fixture never started listening"
   fail=1
+else
+  if ci_wait_port 127.0.0.1 "$listener_port" 10 >/dev/null 2>&1; then
+    echo "ok   wait on a live port succeeds"
+  else
+    echo "FAIL wait on a live port should succeed"
+    fail=1
+  fi
+  if [[ -e "$CI_BENCH_FAILURE_LOG" ]]; then
+    echo "FAIL a satisfied wait wrote a digest entry"
+    sed 's/^/     | /' "$CI_BENCH_FAILURE_LOG"
+    fail=1
+  else
+    echo "ok   a satisfied wait leaves no digest"
+  fi
 fi
 kill "$listener_pid" 2>/dev/null || true
 wait "$listener_pid" 2>/dev/null || true
-if [[ -e "$CI_BENCH_FAILURE_LOG" ]]; then
-  echo "FAIL a satisfied wait wrote a digest entry"
-  sed 's/^/     | /' "$CI_BENCH_FAILURE_LOG"
-  fail=1
-else
-  echo "ok   a satisfied wait leaves no digest"
-fi
 
 # A digest that cannot be written must not turn the wait's failure into a
 # failure of its own.
