@@ -107,6 +107,25 @@ msg_set_reply_stat(rpc_msg *msg, auth_stat stat)
 
 std::string msg_show_stat(const rpc_msg &msg);
 
+// An ONC RPC record marker is a 32-bit big-endian word whose high bit flags
+// the final fragment, leaving 31 bits for the fragment payload length.  A
+// single-fragment record therefore cannot carry more than this many payload
+// bytes.
+constexpr inline size_t kMaxRecordPayloadSize = 0x7fffffffUZ;
+
+// Reject a message-size cap that a single-fragment record marker cannot
+// represent.  Checked once when a stream/client is created (not on the hot
+// path) so an unsupported cap fails loudly at setup rather than silently
+// truncating a record marker at send time.
+inline void
+check_max_message_size(size_t max_message_size)
+{
+  if (max_message_size > kMaxRecordPayloadSize) [[unlikely]]
+    throw XdrBadInput("max_message_size {} exceeds ONC RPC single-fragment "
+                      "record limit {}",
+                      max_message_size, kMaxRecordPayloadSize);
+}
+
 template<is_xdr_serializable... X>
 Buf
 make_record(const rpc_msg &msg, const X &...x)

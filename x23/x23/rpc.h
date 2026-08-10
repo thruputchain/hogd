@@ -384,6 +384,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   requires requires { typename VersMeta::template client<ClientRef>; }
   typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
+    check_max_message_size(max_message_size);
     go();
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
