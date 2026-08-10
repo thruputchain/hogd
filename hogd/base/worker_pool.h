@@ -269,6 +269,15 @@ public:
     requires std::is_void_v<std::invoke_result_t<std::decay_t<Func>>>
     void submit(Func &&func)
     {
+      // Grow the vector *before* queuing the job so the push_back below cannot
+      // allocate. Otherwise a reallocation failure would throw after the job
+      // is already queued, dropping its future -- the scope could then never
+      // join that job, defeating the whole guarantee in exactly the
+      // allocation-failure case this type exists to handle. Moving a
+      // std::future is noexcept, so once capacity exists the push_back cannot
+      // throw.
+      if (futures_.size() == futures_.capacity())
+        futures_.reserve(std::max<size_t>(1, futures_.capacity() * 2));
       futures_.push_back(pool_.submit(std::forward<Func>(func)));
     }
 

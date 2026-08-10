@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
-#include <future>
 #include <optional>
 #include <print>
 #include <span>
