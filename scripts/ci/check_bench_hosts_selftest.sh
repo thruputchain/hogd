@@ -159,26 +159,67 @@ expect_status 'an empty local agent is not fatal' 0 "$status"
 expect_contains 'an empty local agent still checks the hosts' \
   '3 hosts ready' "$out"
 
-# A transient failure is not a broken host: the retry decides.
+# A transient failure is not a broken host: the retry decides. The first attempt
+# for each host fails with $FLAKY_STATUS and the rest succeed.
 cat >"$work/flaky-ssh" <<'FAKE'
 #!/usr/bin/env bash
-marker=$FLAKY_MARKER
+host=""
+for arg in "$@"; do
+  case $arg in
+  -*) continue ;;
+  hog*)
+    host=$arg
+    break
+    ;;
+  esac
+done
+marker="$FLAKY_DIR/$host"
 if [ ! -e "$marker" ]; then
   : >"$marker"
-  exit 255
+  exit "${FLAKY_STATUS:-255}"
 fi
 exit 0
 FAKE
 chmod +x "$work/flaky-ssh"
-out=$(env CHECK_BENCH_HOSTS_SSH="$work/flaky-ssh" \
-  CHECK_BENCH_HOSTS_SSH_ADD="$work/ssh-add" \
-  CHECK_BENCH_HOSTS_RETRY_DELAY_SEC=0 \
-  FLAKY_MARKER="$work/flaky.marker" \
-  CHECK_BENCH_HOSTS_ATTEMPTS=2 \
-  "$CHECK" "$work/schedule.toml" 2>&1)
+
+run_flaky() {
+  local dir
+  dir=$(mktemp -d "$work/flaky.XXXXXX")
+  env CHECK_BENCH_HOSTS_SSH="$work/flaky-ssh" \
+    CHECK_BENCH_HOSTS_SSH_ADD="$work/ssh-add" \
+    CHECK_BENCH_HOSTS_RETRY_DELAY_SEC=0 \
+    CHECK_BENCH_HOSTS_ATTEMPTS=2 \
+    FLAKY_DIR="$dir" \
+    FLAKY_STATUS="$1" \
+    "$CHECK" "$work/schedule.toml" 2>&1
+}
+
+out=$(run_flaky 255)
 status=$?
-expect_status 'a first-attempt failure is retried' 0 "$status"
+expect_status 'a first-attempt ssh failure is retried' 0 "$status"
 expect_contains 'the retry clears the host' '3 hosts ready' "$out"
+
+# The verdict that fails the run is the one that most needs a second opinion:
+# agent forwarding that fails once and works on the retry is not a broken host.
+out=$(run_flaky 2)
+status=$?
+expect_status 'a first-attempt missing agent is retried' 0 "$status"
+expect_contains 'the retry clears a transient missing agent' '3 hosts ready' "$out"
+expect_lacks 'a transient missing agent is not reported' 'cannot run' "$out"
+
+# An empty agent on the first attempt only is likewise not a verdict.
+out=$(run_flaky 1)
+status=$?
+expect_status 'a first-attempt empty agent is retried' 0 "$status"
+expect_lacks 'the retry clears a transient empty agent' 'holds no identities' "$out"
+
+# A host that answers with no agent on every attempt is still fatal: retrying
+# must not turn the real failure into a pass.
+out=$(run_check STATUS_hog5=2 CHECK_BENCH_HOSTS_ATTEMPTS=3)
+status=$?
+expect_status 'a persistent missing agent still fails' 1 "$status"
+expect_contains 'a persistent missing agent is still named' \
+  '1 of 3 hosts cannot run schedule.toml: hog5' "$out"
 
 # Usage errors are usage errors, not host verdicts.
 out=$(env CHECK_BENCH_HOSTS_SSH="$work/ssh" CHECK_BENCH_HOSTS_SSH_ADD="$work/ssh-add" \

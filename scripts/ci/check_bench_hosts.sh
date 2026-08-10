@@ -43,8 +43,8 @@ set -uo pipefail
 
 CHECK_SSH_OPTS=(-A -n -T -o BatchMode=yes -o ConnectTimeout=10 -o VisualHostKey=no)
 
-# A single dropped connection is not a broken host, so each host gets more than
-# one look before it is called bad.
+# A single failed session is not a broken host, so no host is called bad until
+# every attempt has failed to find it a usable agent.
 CHECK_ATTEMPTS=${CHECK_BENCH_HOSTS_ATTEMPTS:-2}
 CHECK_RETRY_DELAY_SEC=${CHECK_BENCH_HOSTS_RETRY_DELAY_SEC:-2}
 
@@ -108,9 +108,15 @@ schedule_wildcard_count() {
 # own. [ssh-add -l] exits 0 with identities, 1 when it reached an agent that
 # holds none, and 2 when it could not reach an agent at all -- the case that
 # kills hog_fwd.
+#
+# Only [ok] ends the attempts. Every other verdict stays provisional until they
+# are all spent, so a host is called bad only if no attempt ever found it a
+# usable agent -- including the [no-agent] verdict, which is the one that fails
+# the run and so is the one that most needs a second opinion. The verdict
+# reported is the last one seen.
 host_agent_state() {
   local host=$1
-  local attempt status
+  local attempt status state=unreachable
 
   for ((attempt = 1; attempt <= CHECK_ATTEMPTS; attempt++)); do
     [ "$attempt" -eq 1 ] || sleep "$CHECK_RETRY_DELAY_SEC"
@@ -123,18 +129,13 @@ host_agent_state() {
       echo ok
       return 0
       ;;
-    1)
-      echo no-identities
-      return 0
-      ;;
-    2)
-      echo no-agent
-      return 0
-      ;;
+    1) state=no-identities ;;
+    2) state=no-agent ;;
+    *) state=unreachable ;;
     esac
   done
 
-  echo unreachable
+  echo "$state"
 }
 
 describe_state() {
