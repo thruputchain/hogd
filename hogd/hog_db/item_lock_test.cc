@@ -1187,10 +1187,11 @@ TEST(ItemLockTest, ExclusiveNNIntFailedCommitAdmissionReturnsError)
     int128_t delta;
   };
   const Case cases[] = {
-      {"fresh key: implicit base 0, add -1", 0, -1},
-      {"negative base -1, add -1", -1, -1},
-      {"set INT128_MAX, add 1 overflows", std::numeric_limits<int128_t>::max(),
-       1},
+      {.name = "fresh key: implicit base 0, add -1", .base = 0, .delta = -1},
+      {.name = "negative base -1, add -1", .base = -1, .delta = -1},
+      {.name = "set INT128_MAX, add 1 overflows",
+       .base = std::numeric_limits<int128_t>::max(),
+       .delta = 1},
   };
 
   for (const auto &c : cases) {
