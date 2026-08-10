@@ -17,7 +17,10 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   if (!eventfd_)
     Errno{}.raise("eventfd failed");
   set_nonblock(eventfd_);
-  epoll_event ev{.events = EPOLLIN, .data = {.fd = eventfd_.get()}};
+  // Generation 0 is never handed out to a real file descriptor, and
+  // the eventfd is recognized by number before the generation check.
+  epoll_event ev{.events = EPOLLIN,
+                 .data = {.u64 = event_key(eventfd_.get(), 0)}};
   if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, eventfd_.get(), &ev))
     Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
   sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
@@ -36,7 +39,16 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   auto fdp = getfd(fd);
   x23assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  fdp->ready_ &= ~epflags[write] | epflags[!write];
+  // Clear every bit this direction waits on, EPOLLERR included.  The
+  // caller is about to make the system call, and the system call is
+  // the authority on whether the file descriptor is in error: if it
+  // returns EAGAIN, there is no error left to report and a remembered
+  // EPOLLERR is stale.  Keeping such a bit (which is what re-ORing
+  // epflags[!write] used to do, since EPOLLERR is in both entries)
+  // makes the following {read,write}_wait return ready immediately,
+  // forever, spinning a thread instead of sleeping.  A real error
+  // that arrives later still shows up as a fresh epoll event.
+  fdp->ready_ &= ~epflags[write];
 }
 
 void
@@ -162,7 +174,9 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 #endif // X23_FD_TRACE
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-    ev.data.fd = fd;
+    // Tag the registration so that check() can throw away events that
+    // epoll_wait reported for a previous occupant of this fd number.
+    ev.data.u64 = event_key(fd, fdp->gen_.fetch_add(1) + 1);
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0)
       return;
     debug.err("EPOLL_CTL_ADD fd {}: {}", fd, Errno{});
@@ -269,7 +283,7 @@ CoroPollImpl::check(int timeout)
   std::vector<ThreadPool::Job> coroqueue;
   Errno err = stop_requested() ? EBADF : 0;
   for (int i = 0; i < n; ++i) {
-    int fd = evs[i].data.fd;
+    int fd = event_key_fd(evs[i].data.u64);
     if (fd < 0)
       continue;
     if (fd == eventfd_.get()) {
@@ -277,6 +291,13 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
+    // Drop events left over from a file descriptor number that was
+    // closed and recycled while this batch was in flight.  Their bits
+    // belong to a socket that no longer exists, and a stale EPOLLERR
+    // would stick in ready_ forever, spinning the new socket's reader.
+    if (size_t(fd) >= state_size_ ||
+        state_[fd].gen_.load() != event_key_gen(evs[i].data.u64))
+      continue;
     state_[fd].ready_ |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {

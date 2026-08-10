@@ -353,12 +353,40 @@ private:
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
 
+  // epoll_event user data is a file descriptor number in the low 32
+  // bits and the registration generation (see FdState::gen_) in the
+  // high 32 bits.  Note we always write the whole u64 member, since
+  // writing only the fd member would leave the rest indeterminate.
+  static constexpr std::uint64_t event_key(int fd, std::uint32_t gen)
+  {
+    return (std::uint64_t{gen} << 32) | std::uint32_t(fd);
+  }
+  static constexpr int event_key_fd(std::uint64_t key)
+  {
+    return int(std::uint32_t(key));
+  }
+  static constexpr std::uint32_t event_key_gen(std::uint64_t key)
+  {
+    return std::uint32_t(key >> 32);
+  }
+
   struct FdPtr;
   struct FdState : BufHolder {
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
     std::atomic<std::uint32_t> ready_{0};
+    // Bumped every time this file descriptor is added to the epoll
+    // set, and stored in the epoll_event's user data.  A file
+    // descriptor number can be closed and recycled by a different
+    // socket while check() is still working through a batch of events
+    // that epoll_wait already returned, so events have to be matched
+    // against the generation that was current when they were
+    // requested.  Applying an event from the previous occupant is not
+    // harmless: EPOLLERR is never cleared from ready_, so a stale one
+    // makes every subsequent read_wait/write_wait on the new socket
+    // return immediately and spin forever.
+    std::atomic<std::uint32_t> gen_{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
 #if X23_FD_TRACE
@@ -394,6 +422,7 @@ private:
     {
       mode_ = other.mode();
       ready_ = other.ready_.load();
+      gen_ = other.gen_.load();
       for (size_t i = 0; i < callbacks_.size(); ++i) {
         callbacks_[i].value = other.callbacks_[i].value.load();
         callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();
