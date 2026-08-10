@@ -3680,9 +3680,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
   // as in db_interface (a negative base is a legal committed state; only
   // subtracting below the base is not).
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
-    ASSERT_TRUE(itx.request_nnint128(
-        key, /*base=*/-1, /*delta=*/0,
-        std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(
+        itx.request_nnint128(key, /*base=*/-1, /*delta=*/0,
+                             std::to_underlying(StorageDeltaFlags::None)));
   });
   auto committed = db_.read_nnint128(key);
   ASSERT_TRUE(committed);
@@ -3698,8 +3698,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
-    auto add_only = itx.request_nnint128(
-        key, /*delta=*/-1, std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+    auto add_only = itx.request_nnint128(key, /*delta=*/-1,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::ExclusiveLock));
     ASSERT_FALSE(add_only.has_value());
     EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -3709,9 +3710,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
     // NOLINTEND(bugprone-unchecked-optional-access)
 
     // The explicit set-add form of the same delta is rejected identically.
-    auto set_add = itx.request_nnint128(
-        key, /*base=*/-1, /*delta=*/-1,
-        std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+    auto set_add = itx.request_nnint128(key, /*base=*/-1, /*delta=*/-1,
+                                        std::to_underlying(
+                                            StorageDeltaFlags::ExclusiveLock));
     ASSERT_FALSE(set_add.has_value());
     EXPECT_EQ(HogDbCode::kConflict, set_add.error().code());
 
@@ -3721,9 +3722,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnNegativeBaseRejectedAtReservation)
   // Positive control: a valid exclusive add against the same negative base
   // reserves and commits cleanly.
   commit_block_expect_db_hash_matches_full(2, [&](InvokeTX &itx) {
-    ASSERT_TRUE(itx.request_nnint128(
-        key, /*delta=*/1,
-        std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+    ASSERT_TRUE(itx.request_nnint128(key, /*delta=*/1,
+                                     std::to_underlying(
+                                         StorageDeltaFlags::ExclusiveLock)));
   });
   auto after = db_.read_nnint128(key);
   ASSERT_TRUE(after);
@@ -3745,8 +3746,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx(block_tx);
 
-  auto add_only = itx.request_nnint128(
-      key, /*delta=*/-1, std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+  auto add_only = itx.request_nnint128(key, /*delta=*/-1,
+                                       std::to_underlying(
+                                           StorageDeltaFlags::ExclusiveLock));
   ASSERT_FALSE(add_only.has_value());
   EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -3757,8 +3759,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnFreshKeyRejectedAtReservation)
 
   // The rejection is independent of the flag: the non-exclusive form fails
   // the same way (validation runs before the flag is consulted).
-  auto non_exclusive = itx.request_nnint128(
-      key, /*delta=*/-1, std::to_underlying(StorageDeltaFlags::None));
+  auto non_exclusive =
+      itx.request_nnint128(key, /*delta=*/-1,
+                           std::to_underlying(StorageDeltaFlags::None));
   ASSERT_FALSE(non_exclusive.has_value());
   EXPECT_EQ(HogDbCode::kConflict, non_exclusive.error().code());
 
@@ -3778,9 +3781,9 @@ TEST_F(HogDbTest, ExclusiveNNIntOverflowRejectedAtReservation)
   // Boundary control from the issue's PoC: the last valid set-add commits,
   // including under ExclusiveLock.
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
-    ASSERT_TRUE(itx.request_nnint128(
-        key, /*base=*/kMax - 1, /*delta=*/1,
-        std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+    ASSERT_TRUE(itx.request_nnint128(key, /*base=*/kMax - 1, /*delta=*/1,
+                                     std::to_underlying(
+                                         StorageDeltaFlags::ExclusiveLock)));
   });
   auto committed = db_.read_nnint128(key);
   ASSERT_TRUE(committed);
@@ -3794,15 +3797,16 @@ TEST_F(HogDbTest, ExclusiveNNIntOverflowRejectedAtReservation)
     InvokeTX itx(block_tx);
 
     // Explicit set-add overflow.
-    auto set_add = itx.request_nnint128(
-        key, /*base=*/kMax, /*delta=*/1,
-        std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+    auto set_add = itx.request_nnint128(key, /*base=*/kMax, /*delta=*/1,
+                                        std::to_underlying(
+                                            StorageDeltaFlags::ExclusiveLock));
     ASSERT_FALSE(set_add.has_value());
     EXPECT_EQ(HogDbCode::kOverflow, set_add.error().code());
 
     // Add-only overflow against the committed INT128_MAX base.
-    auto add_only = itx.request_nnint128(
-        key, /*delta=*/1, std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+    auto add_only = itx.request_nnint128(key, /*delta=*/1,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::ExclusiveLock));
     ASSERT_FALSE(add_only.has_value());
     EXPECT_EQ(HogDbCode::kOverflow, add_only.error().code());
 
@@ -3826,9 +3830,8 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
 
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
     std::string data("bytestring base for nnint add");
-    ASSERT_TRUE(
-        itx.request_bytes(key, std::as_bytes(std::span(data)),
-                          std::to_underlying(StorageDeltaFlags::None)));
+    ASSERT_TRUE(itx.request_bytes(key, std::as_bytes(std::span(data)),
+                                  std::to_underlying(StorageDeltaFlags::None)));
   });
 
   {
@@ -3838,8 +3841,9 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
     ASSERT_TRUE(block_tx.try_acquire_reference());
     InvokeTX itx(block_tx);
 
-    auto add_only = itx.request_nnint128(
-        key, /*delta=*/-1, std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+    auto add_only = itx.request_nnint128(key, /*delta=*/-1,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::ExclusiveLock));
     ASSERT_FALSE(add_only.has_value());
     EXPECT_EQ(HogDbCode::kConflict, add_only.error().code());
     // NOLINTBEGIN(bugprone-unchecked-optional-access)

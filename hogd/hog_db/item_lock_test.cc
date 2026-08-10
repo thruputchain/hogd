@@ -1189,8 +1189,8 @@ TEST(ItemLockTest, ExclusiveNNIntFailedCommitAdmissionReturnsError)
   const Case cases[] = {
       {"fresh key: implicit base 0, add -1", 0, -1},
       {"negative base -1, add -1", -1, -1},
-      {"set INT128_MAX, add 1 overflows",
-       std::numeric_limits<int128_t>::max(), 1},
+      {"set INT128_MAX, add 1 overflows", std::numeric_limits<int128_t>::max(),
+       1},
   };
 
   for (const auto &c : cases) {
