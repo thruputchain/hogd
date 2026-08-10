@@ -321,7 +321,7 @@ with_n_impl(size_t n, F &&f)
     // spelling, but debug.h includes this header.)  In constant
     // evaluation an out-of-range n is a compile-time error on either
     // branch.
-#ifdef NDEBUG
+#if NDEBUG
     std::unreachable();
 #else
     std::abort();
