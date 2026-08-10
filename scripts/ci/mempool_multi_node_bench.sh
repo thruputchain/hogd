@@ -5,7 +5,10 @@ set -Eeuo pipefail
 : "${WORK_DIR:?WORK_DIR must be set}"
 : "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# [BASH_SOURCE] rather than [$0]: identical when this file is run, and still
+# this file when the self-test sources it -- [$0] would be the sourcing script,
+# and the helpers below would be looked for beside that instead.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 . "$SCRIPT_DIR/bench_harness.sh"
 ci_enable_error_trace
@@ -108,6 +111,7 @@ EOF
 declare -a CONTROL_LOG_RECORDS=()
 declare -a LIVE_TAIL_PIDS=()
 PUBLISHED_RESULTS=0
+PUBLISHED_LOGS=0
 COORDINATOR_OUTPUT_WRITTEN=0
 
 record_control_logs() {
@@ -264,21 +268,44 @@ write_coordinator_output() {
   COORDINATOR_OUTPUT_WRITTEN=1
 }
 
-publish_results() {
-  if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
+# Copies what this run left on the benchmark hosts into the metrics history,
+# under the [..._logs] directory beside the run's metric file rather than into
+# the metric file itself. Worth doing whether or not the run succeeded: for one
+# that died part way through, these are the only surviving account of what the
+# processes it launched actually did, and the job log holds only a bounded tail.
+#
+# Returns non-zero when nothing was launched, so the caller knows the metrics
+# history was never even cloned.
+publish_multi_node_diagnostics() {
+  if [[ $PUBLISHED_LOGS -eq 1 ]]; then
     return 0
   fi
 
   if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
     echo 'no control log records captured; skipping metrics_history publication'
-    return 0
+    return 1
   fi
+  # Set before the copy rather than after it, so a copy that dies part way
+  # through is not repeated from the EXIT trap. The trap's own publication is
+  # logs-only, and it would have nothing to add.
+  PUBLISHED_LOGS=1
 
   echo 'clone metrics history # This is idempotent'
   "$REPO_ROOT/scripts/clone_metrics_history.sh"
 
   echo 'copy full remote logs into metrics history'
   publish_multi_node_logs
+}
+
+# The run's numbers, plus its logs. Only ever reached for a run that got all the
+# way through; see [cleanup] for why.
+publish_results() {
+  if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
+    return 0
+  fi
+  PUBLISHED_RESULTS=1
+
+  publish_multi_node_diagnostics || return 0
 
   if write_coordinator_output; then
     echo 'log integration metrics'
@@ -293,7 +320,6 @@ publish_results() {
   else
     echo 'skipping metrics history commit'
   fi
-  PUBLISHED_RESULTS=1
 }
 
 kill_stale_processes() {
@@ -304,10 +330,33 @@ cleanup() {
   local exit_code=$1
   ci_enter_cleanup
   stop_live_log_streams
-  publish_results
+  # A failed run's logs belong in the metrics history; its numbers do not. This
+  # trap runs for a run that died part way through as well as for one that
+  # finished, and publishing unconditionally recorded a throughput data point
+  # either way -- from a coordinator output half of which is a node that never
+  # came up. The commit is not the guard it looks like: the combined-metrics job
+  # sets MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS to make one commit of its
+  # own at the end, and [commit_metrics.sh] stages every file under [metrics/],
+  # so a metric file written here is committed and pushed whatever this suite's
+  # status was. Deciding here is what keeps it out.
+  if [[ $exit_code -eq 0 ]]; then
+    publish_results
+  else
+    echo "suite failed ($(ci_describe_exit_status "$exit_code")); publishing" \
+      'its logs without a summary metric' >&2
+    publish_multi_node_diagnostics || true
+  fi
   kill_stale_processes
   exit "$exit_code"
 }
+
+# Everything above is definitions; everything below runs the benchmark. The
+# self-test sources this file to exercise the publication decision against the
+# real functions, and stops here so it does not launch a benchmark or inherit
+# the traps installed below. Never set in CI.
+if [[ -n ${MEMPOOL_MULTI_NODE_BENCH_SOURCE_ONLY:-} ]]; then
+  return 0
+fi
 
 trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
