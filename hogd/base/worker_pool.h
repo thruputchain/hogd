@@ -214,6 +214,98 @@ public:
     }
   }
 
+  // JobScope collects the futures for jobs submitted to a WorkerPool and
+  // guarantees every submitted job is joined before the scope is destroyed.
+  //
+  // This makes it safe for submitted jobs to capture locals (including
+  // stack-local objects) by reference: the destructor drains all in-flight
+  // jobs on *every* exit path -- normal fall-through, an early return, or an
+  // exception unwinding through the scope, including a std::bad_alloc thrown
+  // by submit() itself partway through a submit loop. A worker therefore can
+  // never dereference a captured local after that local has left scope.
+  //
+  // It is the reusable form of the scope-exit drain in for_each_parallel();
+  // prefer it over a hand-rolled vector<future<void>> + wait loop, which
+  // leaves the captured locals exposed if an exception (e.g. an allocation
+  // failure in submit()) escapes before the wait loop runs.
+  //
+  // Typical use:
+  //
+  //   WorkerPool::JobScope scope(pool);
+  //   scope.reserve(chunks.size());
+  //   for (const ChunkRange &chunk : chunks)
+  //     scope.submit([&trie, &hashes, chunk] { ... });
+  //   scope.wait();   // join all jobs, rethrowing the first worker exception
+  //
+  // Calling wait() is optional but recommended: without it, worker exceptions
+  // are swallowed by the destructor drain (there is no path left to surface
+  // them). With it, the first worker exception is rethrown after every job has
+  // been joined.
+  class JobScope {
+  public:
+    explicit JobScope(WorkerPool &pool = WorkerPool::get_default_pool())
+      : pool_(pool)
+    {}
+
+    // Draining on destruction is the whole point of this type, so it must run
+    // even while unwinding from an exception.
+    ~JobScope() { drain(); }
+
+    JobScope(const JobScope &) = delete;
+    JobScope &operator=(const JobScope &) = delete;
+    JobScope(JobScope &&) = delete;
+    JobScope &operator=(JobScope &&) = delete;
+
+    // reserve pre-sizes the future vector so that submit() in a loop does not
+    // reallocate. A reallocation could throw after jobs are already queued;
+    // the drain still covers that, but reserving avoids the churn.
+    void reserve(size_t n) { futures_.reserve(n); }
+
+    // submit enqueues a void-returning job on the pool and retains its future
+    // so the scope can join it. If the pool's submit() throws (e.g.
+    // std::bad_alloc while building the job), the exception propagates and any
+    // already-submitted jobs are drained when the scope unwinds.
+    template<typename Func>
+    requires std::is_void_v<std::invoke_result_t<std::decay_t<Func>>>
+    void submit(Func &&func)
+    {
+      futures_.push_back(pool_.submit(std::forward<Func>(func)));
+    }
+
+    // wait joins every submitted job and rethrows the first exception raised
+    // by a worker. All jobs are joined even if one throws, so no worker
+    // outlives the scope. After wait() returns (or throws) the futures are
+    // satisfied and the destructor drain becomes a no-op.
+    void wait()
+    {
+      std::exception_ptr eptr;
+      for (std::future<void> &f : futures_) {
+        if (!f.valid())
+          continue;
+        try {
+          // Rethrows the worker's exception, if any.
+          f.get();
+        } catch (...) {
+          if (!eptr)
+            eptr = std::current_exception();
+        }
+      }
+      if (eptr) [[unlikely]]
+        std::rethrow_exception(eptr);
+    }
+
+  private:
+    void drain() noexcept
+    {
+      for (std::future<void> &f : futures_)
+        if (f.valid())
+          f.wait();
+    }
+
+    WorkerPool &pool_;
+    std::vector<std::future<void>> futures_;
+  };
+
   // adjust_workers changes the number of active worker threads. By setting it
   // low or to zero, one can reduce background activity during periods of
   // high-priority work. Setting n to INT_MAX will re-enable all available

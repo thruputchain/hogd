@@ -540,15 +540,14 @@ public:
   {
     if (tries_[0]->allocator_.type() != Allocator<Node>::Type::kBump) {
       try {
-        WorkerPool &worker_pool = WorkerPool::get_default_pool();
-        std::vector<std::future<void>> futures;
-        futures.reserve(tries_.size());
+        // JobScope drains all reset() jobs before tries_ is destroyed, on
+        // every path -- including a submit() failure partway through the loop.
+        WorkerPool::JobScope scope;
+        scope.reserve(tries_.size());
         for (std::optional<MerkleTrie> &trie : tries_) {
-          futures.push_back(worker_pool.submit([&trie] { trie.reset(); }));
+          scope.submit([&trie] { trie.reset(); });
         }
-        for (std::future<void> &future : futures) {
-          future.get();
-        }
+        scope.wait();
       } catch (...) {
         // Unexpected exception thrown.
         CHECK(false);
@@ -690,7 +689,6 @@ public:
 
     const std::vector<ChunkRange> thread_allocations =
         make_chunks(std::max(num_threads, tries_.size()), tries_.size());
-    std::vector<std::future<void>> futures;
     std::array<std::vector<Node *>, 16> frontiers;
 
     for (size_t i = 0; i < tries_.size(); i++) {
@@ -705,19 +703,20 @@ public:
     for (size_t i = 0; i < tries_.size(); i++) {
       total_jobs += frontiers[i].size();
     }
-    futures.reserve(total_jobs);
 
+    // JobScope joins every worker before the frontier subtree roots (owned by
+    // this->tries_) can be touched again, even if a submit() fails mid-loop.
+    WorkerPool::JobScope scope;
+    scope.reserve(total_jobs);
     for (size_t i = 0; i < tries_.size(); i++) {
       for (Node *subtree_root : frontiers[i]) {
-        futures.push_back(WorkerPool::get_default_pool().submit([subtree_root] {
+        scope.submit([subtree_root] {
           MerkleTrie::generate_all_hashes_serial(subtree_root);
-        }));
+        });
       }
     }
+    scope.wait();
 
-    for (std::future<void> &future : futures) {
-      future.get();
-    }
     for (size_t i = 0; i < tries_.size(); i++) {
       std::unordered_set<Node *> frontier(frontiers[i].begin(),
                                           frontiers[i].end());

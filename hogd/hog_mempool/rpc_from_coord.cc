@@ -607,22 +607,26 @@ MempoolCoordinatorRpc::get_txset_hash(
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   const size_t num_threads = available_parallelism();
-  std::vector<std::future<void>> futures;
   const std::vector<ChunkRange> chunks =
       make_chunks(hashes.size(), num_threads);
-  futures.reserve(chunks.size());
 
-  for (const ChunkRange &chunk : chunks) {
-    futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
-      for (size_t j = chunk.start; j < chunk.end; j++) {
-        // We add each tx hash to the Merkle trie as a key with an empty value.
-        // So in essence, we are using the Merkle trie as a set.
-        CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
-      }
-    }));
-  }
-  for (std::future<void> &future : futures) {
-    future.get();
+  // JobScope joins every submitted insertion job before `trie` and `hashes`
+  // can leave scope, even if a later submit() throws mid-loop. Without it, an
+  // allocation failure while queuing a chunk would let this frame unwind while
+  // an earlier worker still holds `&trie`, producing a use-after-return.
+  {
+    WorkerPool::JobScope scope(worker_pool);
+    scope.reserve(chunks.size());
+    for (const ChunkRange &chunk : chunks) {
+      scope.submit([chunk, &trie, &hashes] {
+        for (size_t j = chunk.start; j < chunk.end; j++) {
+          // We add each tx hash to the Merkle trie as a key with an empty
+          // value. So in essence, we are using the Merkle trie as a set.
+          CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
+        }
+      });
+    }
+    scope.wait();
   }
   trie.generate_all_hashes(num_threads);
   return trie.get_root_hash();
@@ -1054,20 +1058,19 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           const size_t num_threads = std::max(available_parallelism() / 2, 1UL);
           const std::vector<ChunkRange> chunks =
               make_chunks(tx_hashes.size(), num_threads);
-          std::vector<std::future<void>> futures;
-          futures.reserve(chunks.size());
+          // JobScope joins every insertion job before `tx_hashes` leaves scope,
+          // even if a later submit() throws mid-loop.
+          WorkerPool::JobScope scope(worker_pool);
+          scope.reserve(chunks.size());
           for (const ChunkRange &chunk : chunks) {
-            futures.push_back(
-                worker_pool.submit([chunk, &tx_hashes, txset_trie] {
-                  for (size_t j = chunk.start; j < chunk.end; j++) {
-                    CHECK(txset_trie->insert(HexArray(tx_hashes[j]),
-                                             std::span<const std::byte>()));
-                  }
-                }));
+            scope.submit([chunk, &tx_hashes, txset_trie] {
+              for (size_t j = chunk.start; j < chunk.end; j++) {
+                CHECK(txset_trie->insert(HexArray(tx_hashes[j]),
+                                         std::span<const std::byte>()));
+              }
+            });
           }
-          for (std::future<void> &future : futures) {
-            future.get();
-          }
+          scope.wait();
           return;
         });
     nodes.txset_insert_chunks.push_back(txset_insert_node);

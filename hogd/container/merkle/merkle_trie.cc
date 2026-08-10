@@ -1477,15 +1477,14 @@ MerkleTrie::generate_all_hashes(size_t num_threads)
     return;
   }
 
-  std::vector<std::future<void>> futures;
-  futures.reserve(frontier.size());
+  // JobScope joins every worker before this frame returns, so a submit()
+  // failure mid-loop cannot leave a worker hashing a subtree we no longer own.
+  WorkerPool::JobScope scope;
+  scope.reserve(frontier.size());
   for (Node *subtree_root : frontier) {
-    futures.push_back(WorkerPool::get_default_pool().submit(
-        [subtree_root] { generate_all_hashes_serial(subtree_root); }));
+    scope.submit([subtree_root] { generate_all_hashes_serial(subtree_root); });
   }
-  for (std::future<void> &future : futures) {
-    future.get();
-  }
+  scope.wait();
 
   std::unordered_set<Node *> frontier_set(frontier.begin(), frontier.end());
   generate_all_hashes_above_frontier(&root_, frontier_set);
