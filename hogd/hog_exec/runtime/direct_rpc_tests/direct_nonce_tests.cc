@@ -87,6 +87,9 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
 }
 
 // Exclusive lock on ConsumeUniquifier should be rejected by both backends.
+// Consuming a nonce is already a unique event, so there is no situation in
+// which an honest executor sets ExclusiveLock on a replay cache delta: this is
+// executor misbehavior, not a recoverable transaction conflict (issue #1080).
 TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
 {
   auto contract_addr = make_contract_address(0);
@@ -98,11 +101,11 @@ TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
                    Uniquifier{.block_expiry_height = 1000, .nonce = 42}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   auto r = tx.try_push_current_subtransaction();
-  ASSERT_TRUE(r.has_value());
-  EXPECT_FALSE(r.value())
-      << "ConsumeUniquifier with exclusive lock should be rejected";
+  ASSERT_FALSE(r.has_value())
+      << "ConsumeUniquifier with exclusive lock should be rejected as "
+         "executor misbehavior, not as a conflict";
+  EXPECT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
   ASSERT_TRUE(tx.abort_transaction().has_value());
-  advance_block();
 }
 
 // The initial token claim precompile is exempt from the replay cache (it
