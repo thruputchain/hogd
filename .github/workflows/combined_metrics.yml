@@ -60,5 +60,5 @@ jobs:
               if: always()
               uses: ./.github/actions/print-log-instructions
             - name: File failure issue
-              if: failure()
+              if: failure() && github.ref == 'refs/heads/main'
               uses: ./.github/actions/file-failure-issue
