@@ -177,6 +177,74 @@ impl WasmtimeGlobalContext {
             .wasm_relaxed_simd(false)
             .relaxed_simd_deterministic(true)
             .wasm_multi_memory(false)
+            // Every remaining wasm proposal is pinned explicitly below, even
+            // where the value matches wasmtime's default. Deployment
+            // admission is consensus-visible, so the accepted contract set
+            // must not be able to shift underneath us because an upstream
+            // default flipped on a version bump, or because the compiler
+            // strategy changed.
+            //
+            // The latter is not hypothetical: Config::validate subtracts
+            // TAIL_CALL (among others) for Strategy::Winch, so tail calls
+            // were rejected only as a side effect of the backend choice
+            // while wasm-meter allowlists ReturnCall/ReturnCallIndirect.
+            // Selecting Cranelift — which this file already supports below,
+            // and which was the production strategy until #2208 — silently
+            // made tail-call contracts deployable. See issue #2535.
+            //
+            // Proposals kept ENABLED. These are already part of the accepted
+            // contract set; pinning records that and prevents silent removal.
+            //
+            // The typed `wasm_reference_types` setter is `#[cfg(feature =
+            // "gc")]`, which this crate does not enable, so REFERENCE_TYPES
+            // goes through the same low-level `wasm_features` hatch used for
+            // FLOATS above. Enabling the `gc` crate feature purely to reach
+            // the setter would flip GC_TYPES on by default — strictly worse.
+            .wasm_features(
+                WasmFeatures::REFERENCE_TYPES
+                    | WasmFeatures::MUTABLE_GLOBAL
+                    | WasmFeatures::SIGN_EXTENSION
+                    | WasmFeatures::CALL_INDIRECT_OVERLONG
+                    | WasmFeatures::BULK_MEMORY_OPT,
+                true,
+            )
+            .wasm_bulk_memory(true)
+            .wasm_multi_value(true)
+            .wasm_extended_const(true)
+            // Proposals kept DISABLED. wasm-meter's opcode allowlist rejects
+            // most of these independently, but it does not cover all of them
+            // (tail calls are allowlisted; custom page sizes are a memory
+            // definition, not an opcode), and defense in depth is cheap here.
+            //
+            // memory64 deserves specific mention: wasmtime enables it by
+            // default and Winch does not subtract it, so wasm-meter was the
+            // sole gate. A 64-bit memory index type would change
+            // contract-visible pointer width out from under the
+            // marmot::syscall ABI (i32 pointers since #2422).
+            .wasm_tail_call(false)
+            .wasm_memory64(false)
+            .wasm_custom_page_sizes(false)
+            .wasm_shared_everything_threads(false)
+            .wasm_stack_switching(false)
+            .wasm_wide_arithmetic(false)
+            // THREADS / EXCEPTIONS / GC / GC_TYPES / FUNCTION_REFERENCES /
+            // COMPONENT_MODEL have typed setters gated behind `gc`,
+            // `threads`, and `component-model` crate features this crate does
+            // not enable, so they are off at compile time already. Pin them
+            // anyway: a future dependency edit that turns a crate feature on
+            // must not quietly widen the accepted contract set as a side
+            // effect. LEGACY_EXCEPTIONS is here rather than on its typed
+            // setter, which is deprecated.
+            .wasm_features(
+                WasmFeatures::THREADS
+                    | WasmFeatures::EXCEPTIONS
+                    | WasmFeatures::LEGACY_EXCEPTIONS
+                    | WasmFeatures::GC
+                    | WasmFeatures::GC_TYPES
+                    | WasmFeatures::FUNCTION_REFERENCES
+                    | WasmFeatures::COMPONENT_MODEL,
+                false,
+            )
             .epoch_interruption(false)
             // Wasmtime 42.0.0 sync stack notes:
             // - max_wasm_stack is a per-Store wasm limit, not a separate native

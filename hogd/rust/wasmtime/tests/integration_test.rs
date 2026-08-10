@@ -1341,3 +1341,84 @@ fn test_h001_runtime_creation_on_float_returns_system_unrecoverable() {
         let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
+
+// The production config must pin every wasm proposal it depends on, rather
+// than inheriting a wasmtime default or relying on a side effect of the
+// selected compiler strategy. Deployment admission is consensus-visible: if
+// the accepted contract set can shift because an upstream default flipped or
+// because someone swapped Strategy::Winch for Strategy::Cranelift, nodes can
+// disagree on whether a contract is deployable. See issue #2535.
+
+fn tail_call_module_bytes() -> Vec<u8> {
+    let wat = r#"(module
+        (memory (export "memory") 1)
+        (func $tail)
+        (func (export "call1") return_call $tail))"#;
+    let raw = wat::parse_str(wat).expect("tail call wat should parse");
+    groundhog_wasm_meter::instrument(
+        &raw,
+        &groundhog_wasm_meter::Config::default(),
+    )
+    .expect("wasm-meter allowlists tail calls, so instrumentation succeeds")
+}
+
+fn memory64_module_bytes() -> Vec<u8> {
+    let wat = r#"(module
+        (memory (export "memory") i64 1)
+        (func (export "call1") (result i32) i64.const 0 i32.load))"#;
+    wat::parse_str(wat).expect("memory64 wat should parse")
+}
+
+#[test]
+fn test_production_config_rejects_tail_calls_under_any_strategy() {
+    // wasm-meter allowlists ReturnCall/ReturnCallIndirect, so the engine is
+    // the only gate. Before #2535 that gate was Strategy::Winch subtracting
+    // WasmFeatures::TAIL_CALL in Config::validate rather than an explicit
+    // policy, so selecting Cranelift silently made tail-call contracts
+    // deployable. Pin the feature so the rejection survives a strategy change.
+    let mut config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    config.strategy(wasmtime::Strategy::Cranelift);
+    config.signals_based_traps(false);
+    config.table_lazy_init(true);
+
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    let err = wasmtime::Module::validate(&engine, &tail_call_module_bytes())
+        .err()
+        .expect(
+            "production config must explicitly disable tail calls, so they \
+             are rejected regardless of the compiler strategy",
+        );
+
+    assert!(
+        format!("{err:#}").contains("tail calls"),
+        "expected a tail-call validation rejection, got: {err:#}"
+    );
+}
+
+#[test]
+fn test_production_config_rejects_memory64_at_validation() {
+    // wasmtime enables WasmFeatures::MEMORY64 by default and Winch does not
+    // subtract it, so wasm-meter was the sole gate rejecting 64-bit memories.
+    // The engine must reject them too: a 64-bit memory index type would change
+    // contract-visible pointer width out from under the marmot::syscall ABI
+    // (i32 pointers since #2422).
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    let err = wasmtime::Module::validate(&engine, &memory64_module_bytes())
+        .err()
+        .expect(
+            "production config must explicitly disable memory64 so 64-bit \
+             memories are rejected at validation, not only by wasm-meter",
+        );
+
+    assert!(
+        format!("{err:#}").contains("memory64"),
+        "expected a memory64 validation rejection, got: {err:#}"
+    );
+}
