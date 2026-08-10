@@ -220,6 +220,15 @@ impl WasmtimeGlobalContext {
             // wasm features contracts may use. Everything here is core wasm
             // 2.0; nothing post-2.0 is enabled.
             //
+            // SATURATING_FLOAT_TO_INT is deliberately absent even though it is
+            // part of WASM2 and was therefore on before the blanket clear. It
+            // gates i32/i64.trunc_sat_f32/f64_s/u, every one of which takes a
+            // float operand, and FLOATS above makes float values
+            // unconstructible — no f32/f64 const, load, local, global, param
+            // or result survives validation. The feature is unreachable, so it
+            // stays out of the enable list rather than being carried as dead
+            // surface area.
+            //
             // REFERENCE_TYPES subsumes CALL_INDIRECT_OVERLONG and BULK_MEMORY
             // subsumes BULK_MEMORY_OPT (wasmparser defines the parent bits to
             // include the child), so those two are listed only to keep the
@@ -234,7 +243,6 @@ impl WasmtimeGlobalContext {
                 WasmFeatures::REFERENCE_TYPES
                     | WasmFeatures::MUTABLE_GLOBAL
                     | WasmFeatures::SIGN_EXTENSION
-                    | WasmFeatures::SATURATING_FLOAT_TO_INT
                     | WasmFeatures::CALL_INDIRECT_OVERLONG
                     | WasmFeatures::BULK_MEMORY_OPT,
                 true,
