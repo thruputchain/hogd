@@ -182,6 +182,22 @@ CoroPollImpl::poison(BorrowedFd fd)
 }
 
 void
+CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
+{
+  auto s = state_.take();
+  if (stop_requested())
+    return;
+  auto &f = (*s)[fd.get()];
+  if (f.generation != genno)
+    return;
+  f.poisoned = true;
+  f.generation = 0;
+  auto work = report_badfd(f);
+  s.reset();
+  pool_.go(std::move(work));
+}
+
+void
 CoroPollImpl::reset(BorrowedFd fd)
 {
   auto ptr = state_.take();

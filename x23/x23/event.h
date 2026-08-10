@@ -297,8 +297,6 @@ public:
     return std::move(async);
   }
 
-  uint64_t generation(BorrowedFd fd, bool make = false);
-
   // You must reset a file descriptor before closing it if you have
   // ever called read_clear(), write_clear(), or poison() on it, even
   // if there are not any currently active callbacks.  This is
@@ -315,10 +313,21 @@ public:
     ::close(fd.get());
   }
 
+  // The generation number (if non-zero) changes every time a file
+  // descriptor is recycled.  If a file descriptor is in a reset state
+  // and make is true (the default), generation will activate the file
+  // descriptor (which may involve memory allocation or setting edge
+  // triggered modes in epoll).  make can be set to false to read the
+  // generation number without activating the file descriptor.
+  uint64_t generation(BorrowedFd fd, bool make = true);
+
   // Make any pending and future callbacks return with EBADF until
   // reset() is called.  Pending callbacks are made asynchronously, so
-  // may still be running after poison() returns.
+  // may still be running after poison() returns.  The second version
+  // poisons the file descriptor only if generation() is still
+  // generation_number.
   void poison(BorrowedFd fd);
+  void poison(BorrowedFd fd, uint64_t generation_number);
 
   // If there's a callback for reading (write == false) or writing
   // (write == true) on file descriptor fd, then immediately make the

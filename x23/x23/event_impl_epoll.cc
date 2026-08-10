@@ -317,6 +317,39 @@ CoroPollImpl::poison(BorrowedFd fd)
   setmode(fdp, FdState::Mode::kPoisoned);
 }
 
+void
+CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
+{
+  auto fdp = getfd(fd);
+#if X23_FD_TRACE
+  *fdp->info_.take() =
+      std::format("fd {} poison stack trace\n{}", fd.get(), stacktrace());
+#endif // X23_FD_TRACE
+
+  using enum FdState::Mode;
+  if (fdp->generation_.load(std::memory_order_relaxed) != genno)
+    return;
+  FdState::Mode m = kActive;
+  if (!fdp->mode_.compare_exchange_strong(m, kLocked))
+    return;
+  if (fdp->generation_.load(std::memory_order_relaxed) != genno) {
+    fdp->mode_ = kActive;
+    return;
+  }
+
+  Defer unlock([&] {
+    fdp->generation_.fetch_add(1, std::memory_order_relaxed);
+    fdp->mode_ = kPoisoned;
+  });
+
+  fdp->ready_ = 0; // because EPOLLERR is sticky
+  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd.get(), nullptr) == -1)
+    if (errno != ENOENT && errno != EBADF)
+      debug.err("EPOLL_CTL_DEL fd {}: {}", fd.get(), Errno{}, stacktrace());
+  unlock.reset();
+  docbs(fdp);
+}
+
 uint64_t
 CoroPollImpl::generation(BorrowedFd fd, bool make)
 {
