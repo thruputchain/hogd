@@ -243,6 +243,12 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
+// invoke_flags must contain only defined, implemented InvokeFlag bits
+// (TryInvoke | ReadOnly), the same set production's SystemCallHandler::invoke()
+// admits. Anything else -- an undefined bit, a negative value, or the
+// defined-but-unimplemented DelegateCall -- is rejected with
+// kTestFFIErrorCodeInvalidArgument, and the rejected call is a complete no-op:
+// no frame is opened and the handler stays usable.
 enum TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,

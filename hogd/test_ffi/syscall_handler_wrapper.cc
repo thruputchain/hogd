@@ -251,6 +251,28 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
+  // Mirror production's flag precondition. SystemCallHandler::invoke() opens
+  // with CHECK(validate_invoke_flags(flags)), admitting only
+  // TryInvoke | ReadOnly -- DelegateCall is defined but not yet implemented, so
+  // it is not in the valid set. Without this, a mock frame could carry bits no
+  // production frame can, which nothing reads today but would silently become a
+  // live divergence the moment DelegateCall or a new flag lands (#3302).
+  //
+  // The FFI boundary reports the rejection rather than aborting the way
+  // production's CHECK does: an undefined bit is a caller-supplied scalar
+  // violating a documented precondition, which is what
+  // kTestFFIErrorCodeInvalidArgument exists for (see
+  // setup_grant_contract_storage_tokens' negative-token rejection). Aborting
+  // here would defeat the point of returning structured errors to an honest
+  // caller. This runs before any state is touched, so a rejected open is a
+  // complete no-op.
+  if (!SystemCallHandler::validate_invoke_flags(invoke_flags)) {
+    error("invalid argument: start_mock_invocation_frame called with undefined "
+          "InvokeFlag bits: {}",
+          invoke_flags);
+    return kTestFFIErrorCodeInvalidArgument;
+  }
+
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
   if (auto *runtime = get_mock_runtime()) {
     auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
