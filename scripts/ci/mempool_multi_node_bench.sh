@@ -516,6 +516,11 @@ done
 # every readiness wait has already passed, so nothing else in this script has
 # anything to say about it. Name the status and replay the mempool's own log
 # before exiting on it.
+#
+# A mempool killed by a signal says even less: its log ends wherever it happened
+# to be, with no report of its own, so the log replay alone leaves the crash
+# unattributed. Pull a backtrace off its host too, while the core the kernel
+# just wrote is still there.
 await_mempool() {
   local label=$1
   local pid=$2
@@ -525,6 +530,7 @@ await_mempool() {
   if [ "$status" -ne 0 ]; then
     echo "$label $(ci_describe_exit_status "$status")" >&2
     replay_control_log_for_label "$label"
+    replay_crash_backtrace_for_label "$label" "$status"
     return "$status"
   fi
   echo "$label wait completed"
