@@ -22,7 +22,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -433,7 +433,7 @@ private:
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
   const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                           ByteArrayHasher>
+                           SipHash24Hasher>
       newly_created_contracts_;
 
   // Per-transaction cache of translated rv32 contracts for transaction-local
@@ -442,7 +442,7 @@ private:
   // non-translatable artifact so we never retranslate. Entries are node-stable
   // and borrowed by Rv32Runtime, so they must outlive the runtimes -- they live
   // for the whole transaction.
-  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, ByteArrayHasher>
+  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
       local_rv32_translations_;
 
   ExecutionModeData execution_mode_data_;

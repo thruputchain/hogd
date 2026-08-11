@@ -15,7 +15,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/thread_checked_mutex.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/x23.h"
@@ -124,12 +124,12 @@ private:
     }
   }
 
-  std::unordered_map<ContractAddress, AddressAuthData, ByteArrayHasher>
+  std::unordered_map<ContractAddress, AddressAuthData, SipHash24Hasher>
       current_auth_state_;
-  std::unordered_map<ContractAddress, KeyChange, ByteArrayHasher>
+  std::unordered_map<ContractAddress, KeyChange, SipHash24Hasher>
       current_key_changes_;
 
-  std::unordered_set<ContractAddress, ByteArrayHasher>
+  std::unordered_set<ContractAddress, SipHash24Hasher>
       addresses_that_should_be_cached_;
 
   // Map from block height to the key changes made at that height

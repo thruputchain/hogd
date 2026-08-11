@@ -8,7 +8,6 @@
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "types.hh"
@@ -50,9 +49,9 @@ TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
   auto c1_hash = sha256(c1);
   auto c2_hash = sha256(c2);
 
-  std::unordered_set<SHA256Hash, ByteArrayHasher> hashes{c1_hash, c2_hash};
+  std::unordered_set<SHA256Hash, SipHash24Hasher> hashes{c1_hash, c2_hash};
   std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                     ByteArrayHasher>
+                     SipHash24Hasher>
       contracts;
   contracts.emplace(c1_hash, std::make_unique<const Contract>(c1));
   contracts.emplace(c2_hash, std::make_unique<const Contract>(c2));
@@ -65,9 +64,9 @@ TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
 
 TEST(BorrowedContractBatchTest, SerializesEmptyBatch)
 {
-  std::unordered_set<SHA256Hash, ByteArrayHasher> hashes;
+  std::unordered_set<SHA256Hash, SipHash24Hasher> hashes;
   std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                     ByteArrayHasher>
+                     SipHash24Hasher>
       contracts;
   BorrowedContractBatch borrowed(hashes, contracts);
 
@@ -83,9 +82,9 @@ TEST(BorrowedContractBatchTest, SkipsMissingHashes)
   Contract missing_contract = make_wasm_contract({0x10, 0x20});
   auto missing_hash = sha256(missing_contract);
 
-  std::unordered_set<SHA256Hash, ByteArrayHasher> hashes{c1_hash, missing_hash};
+  std::unordered_set<SHA256Hash, SipHash24Hasher> hashes{c1_hash, missing_hash};
   std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                     ByteArrayHasher>
+                     SipHash24Hasher>
       contracts;
   contracts.emplace(c1_hash, std::make_unique<const Contract>(c1));
 
