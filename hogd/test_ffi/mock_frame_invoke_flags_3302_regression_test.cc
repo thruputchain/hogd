@@ -3,14 +3,15 @@
 //
 // Production SystemCallHandler::invoke() opens with
 // CHECK(validate_invoke_flags(flags)), which admits only TryInvoke | ReadOnly
-// (DelegateCall is defined but not yet implemented). start_mock_invocation_frame()
-// stored the caller's flags verbatim, so a mock frame could carry bits that
-// cannot exist on any production frame -- inert today, since only the TryInvoke
-// and ReadOnly bits are ever read back, but a trap for whenever DelegateCall or
-// a new flag lands. The mock pathway now validates against the same predicate
-// and reports kTestFFIErrorCodeInvalidArgument instead of aborting the way
-// production's CHECK does, since the point of the FFI error codes is to hand an
-// honest caller a structured failure.
+// (DelegateCall is defined but not yet implemented).
+// start_mock_invocation_frame() stored the caller's flags verbatim, so a mock
+// frame could carry bits that cannot exist on any production frame -- inert
+// today, since only the TryInvoke and ReadOnly bits are ever read back, but a
+// trap for whenever DelegateCall or a new flag lands. The mock pathway now
+// validates against the same predicate and reports
+// kTestFFIErrorCodeInvalidArgument instead of aborting the way production's
+// CHECK does, since the point of the FFI error codes is to hand an honest
+// caller a structured failure.
 
 #include <array>
 #include <cstdint>
@@ -61,6 +62,14 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   auto handler = make_mocked_handler(db, rc);
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(handler.syscall_handler, nullptr);
+  // Close through a scope guard rather than a trailing statement: if an
+  // assertion below aborts the test body, an unclosed handler leaves free_db()
+  // waiting on the open-handler guard and the binary hangs instead of
+  // reporting the failure.
+  x23::Defer d3([&] {
+    EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+              kTestFFIErrorCodeNone);
+  });
 
   auto invocation = test_invocation();
 
@@ -80,9 +89,19 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   };
 
   for (int32_t flags : kRejectedFlags) {
-    EXPECT_EQ(open_frame(handler.syscall_handler, invocation, flags),
-              kTestFFIErrorCodeInvalidArgument)
-        << "flags = " << flags;
+    auto res = open_frame(handler.syscall_handler, invocation, flags);
+    EXPECT_EQ(res, kTestFFIErrorCodeInvalidArgument) << "flags = " << flags;
+    if (res == kTestFFIErrorCodeNone) {
+      // A regression admitted the frame. Finish it so the rest of this test and
+      // the handler teardown still run: an unfinished mock frame blocks close,
+      // which would turn a clear assertion failure into a hung test binary.
+      auto stray = finish_mock_invocation_frame(handler.syscall_handler,
+                                                std::to_underlying(
+                                                    InvokeErrorCode::None));
+      free_ffi_data_buffer(stray.serialized_output);
+      free_ffi_data_buffer(stray.serialized_trace);
+      free_ffi_data_buffer(stray.serialized_events);
+    }
   }
 
   // The rejection happens before any state is touched, so no frame was pushed:
@@ -92,7 +111,8 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   auto no_frame_finish =
       finish_mock_invocation_frame(handler.syscall_handler,
                                    std::to_underlying(InvokeErrorCode::None));
-  EXPECT_EQ(no_frame_finish.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(no_frame_finish.ffi_error_code,
+            kTestFFIErrorCodeUnrecoverableError);
   free_ffi_data_buffer(no_frame_finish.serialized_output);
   free_ffi_data_buffer(no_frame_finish.serialized_trace);
   free_ffi_data_buffer(no_frame_finish.serialized_events);
@@ -111,9 +131,6 @@ TEST(TestBindingsTest, MockFrameOpenRejectsUndefinedInvokeFlagBits)
   free_ffi_data_buffer(finish.serialized_output);
   free_ffi_data_buffer(finish.serialized_trace);
   free_ffi_data_buffer(finish.serialized_events);
-
-  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
-            kTestFFIErrorCodeNone);
 }
 
 // The flag set production admits must keep working: the new check narrows the
@@ -142,6 +159,11 @@ TEST(TestBindingsTest, MockFrameOpenAcceptsProductionValidInvokeFlags)
     auto handler = make_mocked_handler(db, rc);
     ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
     ASSERT_NE(handler.syscall_handler, nullptr);
+    x23::Defer d3([&] {
+      EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+                kTestFFIErrorCodeNone)
+          << "flags = " << flags;
+    });
 
     auto invocation = test_invocation();
     EXPECT_EQ(open_frame(handler.syscall_handler, invocation, flags),
@@ -151,15 +173,11 @@ TEST(TestBindingsTest, MockFrameOpenAcceptsProductionValidInvokeFlags)
     auto finish =
         finish_mock_invocation_frame(handler.syscall_handler,
                                      std::to_underlying(InvokeErrorCode::None));
-    EXPECT_EQ(finish.ffi_error_code, kTestFFIErrorCodeNone) << "flags = "
-                                                            << flags;
+    EXPECT_EQ(finish.ffi_error_code, kTestFFIErrorCodeNone)
+        << "flags = " << flags;
     free_ffi_data_buffer(finish.serialized_output);
     free_ffi_data_buffer(finish.serialized_trace);
     free_ffi_data_buffer(finish.serialized_events);
-
-    EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
-              kTestFFIErrorCodeNone)
-        << "flags = " << flags;
   }
 }
 
