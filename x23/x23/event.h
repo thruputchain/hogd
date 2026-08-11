@@ -406,6 +406,7 @@ private:
     {
       mode_ = other.mode();
       ready_ = other.ready_.load();
+      generation_ = other.generation_.load();
       for (size_t i = 0; i < callbacks_.size(); ++i) {
         callbacks_[i].value = other.callbacks_[i].value.load();
         callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();

@@ -20,7 +20,7 @@ using std::move_only_function;
 
 #else // std::move_only_function unimplemented
 
-template<typename F> struct move_only_function;
+template<typename F> class move_only_function;
 
 template<typename R, typename... Args, bool NE>
 class move_only_function<R(Args...) noexcept(NE)> {
