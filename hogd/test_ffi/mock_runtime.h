@@ -89,8 +89,28 @@ public:
       return true;
     }
     gas_remaining_ = 0;
+    out_of_gas_ = true;
     return false;
   }
+
+  // True once any debit against this frame has failed. Both paths that can
+  // exhaust a frame set it:
+  //
+  //   * a syscall that outspends the frame's own budget (wrap_after_parse()'s
+  //     gas epilogue), and
+  //   * the charge for a child frame the frame could not pay for (the parent
+  //     debit in finish_mock_invocation_frame).
+  //
+  // Production has no "keep running after out of gas" state: the OutOfGas host
+  // error traps the frame's guest execution, so the frame always faults,
+  // whichever path exhausted it. The mock pathway has no guest execution to
+  // trap and instead lets its caller declare each frame's outcome, so the frame
+  // records the fact here and its finish overrides that declaration (#2725).
+  //
+  // The syscall path does also return panic == OutOfGas to the harness caller,
+  // but that only helps a caller that acts on it: a caller that ignored it
+  // still finished the frame Return and committed ExecResultOK.
+  bool is_out_of_gas() const { return out_of_gas_; }
 
 protected:
   explicit MockGasRuntime(
@@ -107,6 +127,7 @@ protected:
 private:
   GasAmount initial_gas_;
   GasAmount gas_remaining_;
+  bool out_of_gas_{false};
 };
 
 class MockRuntime : public MockGasRuntime {

@@ -20,6 +20,7 @@
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include <algorithm>
 #include <expected>
 #include <limits>
 #include <memory>
@@ -274,6 +275,20 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     }
   }
 
+  // Clamp the child's budget to what the parent still has, mirroring
+  // production kInvoke: syscall_Invoke_inner() hands
+  // SystemCallHandler::invoke() min(requested gas_limit, remaining_gas), so a
+  // child frame can never be admitted with a larger budget than its caller can
+  // pay for. Without the clamp a mock child could spend past the parent's
+  // budget and the parent's debit in finish_mock_invocation_frame() would then
+  // fail (issue #2725). current_gas is GasAmount max on the root frame (no
+  // parent mock runtime), where the clamp is a no-op. The syscall trace inputs
+  // above deliberately keep the *requested* limit: production records the raw
+  // syscall arguments there, before this clamp.
+  Invocation frame_invocation = invocation;
+  frame_invocation.gas_limit =
+      std::min<GasAmount>(invocation.gas_limit, current_gas);
+
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
   //
@@ -281,16 +296,20 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // trace-stack and mock-runtime bookkeeping that pairs with it must not be
   // able to throw afterward, or the handler would be left with an active frame
   // that has no backing mock runtime and can be neither finished nor closed
-  // (issue #2507). Perform the throwing allocations -- the EmptyRuntime and the
-  // two stacks' capacity -- before start_frame() so the publish step below is
-  // non-throwing.
-  auto mock_runtime = std::make_unique<EmptyRuntime>(invocation);
+  // (issue #2507). Perform the throwing allocations -- the clamped Invocation
+  // copy above, the EmptyRuntime, and the two stacks' capacity -- before
+  // start_frame() so the publish step below is non-throwing.
+  auto mock_runtime = std::make_unique<EmptyRuntime>(frame_invocation);
   invocation_frame_trace_stack_.reserve(invocation_frame_trace_stack_.size() +
                                         1);
   mock_runtime_stack_.reserve(mock_runtime_stack_.size() + 1);
 
-  auto stashed_parent_trace = handler_.start_frame(invocation, invoke_flags,
-                                                   std::span<uint32_t const>{});
+  // Moved, never copied: start_frame() takes the Invocation by value and the
+  // copy would allocate its Calldata again after the throwing-allocation window
+  // closed above.
+  auto stashed_parent_trace =
+      handler_.start_frame(std::move(frame_invocation), invoke_flags,
+                           std::span<uint32_t const>{});
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back, so the handler has no new frame; skip publishing the mock-runtime
@@ -385,6 +404,28 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   uint64_t consumed_gas = gas_runtime->gas_consumed();
   x23::Defer _([runtime]() { delete runtime; });
 
+  // This frame ran out of gas: either one of its own syscalls outspent its
+  // budget, or it was charged for a child frame it could not pay for (the
+  // parent debit at the bottom of this function). Either way production gives
+  // the caller no say in what happens next -- the OutOfGas host error traps the
+  // frame's guest execution, so it faults no matter what its code would rather
+  // have returned. The mock pathway has no guest execution to trap, so the
+  // caller-supplied status is overridden here. Without this the frame still
+  // finished Return and try_commit_transaction() still reported ExecResultOK --
+  // committing a transaction production would have faulted (issue #2725).
+  //
+  // Only a frame-level status is overridden. A SystemError-class code
+  // (Unrecoverable / ValidationFailure / Abandon) ends the whole transaction
+  // and outranks OutOfGas, so it is never downgraded -- the same exclusion
+  // wrap_after_parse() makes via its is_handleable_error guard, and the same
+  // one the synthetic kInvoke status below makes.
+  if (gas_runtime->is_out_of_gas() &&
+      (invoke_error_code == InvokeErrorCode::None ||
+       invoke_error_code == InvokeErrorCode::Deterministic ||
+       invoke_error_code == InvokeErrorCode::OutOfGas)) {
+    status_code = InvokeStatus<void>{InvokeError{InvokeErrorCode::OutOfGas}};
+  }
+
   auto result =
       InvokeResult{.result_ = status_code, .gas_consumed_ = consumed_gas};
 
@@ -412,23 +453,45 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   result += frame_result;
   GasAmount total_gas_consumed = result.gas_consumed_;
 
+  // Debit the parent for the child frame. MockGasRuntime::consume_gas() reports
+  // false exactly when the charge meets or exceeds what the parent had left,
+  // which is production's `gas_consumed >= gas_remaining` out-of-gas condition
+  // in wrap_after_parse()'s gas epilogue. Remember it rather than discarding
+  // it: the synthetic kInvoke below used to be recorded as a success on a
+  // parent that could not pay for its own child (issue #2725).
   GasAmount gas_remaining = std::numeric_limits<GasAmount>::max();
+  bool parent_out_of_gas = false;
   if (auto *runtime = get_mock_runtime()) {
     auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
     CHECK(gas_runtime != nullptr);
-    gas_runtime->consume_gas(total_gas_consumed);
+    // A failed debit also latches MockGasRuntime::is_out_of_gas() on the
+    // parent, so the parent's own finish faults the way production's trapped
+    // guest execution would (see the override at the top of this function).
+    // parent_out_of_gas is the local copy used for the synthetic kInvoke status
+    // just below.
+    parent_out_of_gas = !gas_runtime->consume_gas(total_gas_consumed);
     gas_remaining = gas_runtime->gas_remaining();
   }
 
   if (handler_.is_running()) {
     auto status = [&]() -> HostFnStatus<SyscallErrorCode> {
       auto frame_status = result.to_frame_status().first;
+      // A SystemError (Unrecoverable / Abandon / ValidationFailure) ends the
+      // whole transaction and must never be turned into an out-of-gas error;
+      // production makes the same exclusion via wrap_after_parse()'s
+      // is_handleable_error check, so test the SystemError channel first.
+      if (!frame_status.has_value()) {
+        return frame_status.error().to_host_fn_error();
+      }
+      // The child ran, but the parent could not pay for it. Production rewrites
+      // a handleable syscall result to OutOfGas here, so the mock synthetic
+      // kInvoke has to be classified the same way (issue #2725).
+      if (parent_out_of_gas) {
+        return HostFnError{HostFnErrorCode::OutOfGas};
+      }
       // A child frame that ran (any outcome) makes the Invoke syscall return
       // None; only a SystemError surfaces as a host-function error.
-      if (frame_status.has_value()) {
-        return SyscallErrorCode::kSyscallErrorCodeNone;
-      }
-      return frame_status.error().to_host_fn_error();
+      return SyscallErrorCode::kSyscallErrorCodeNone;
     }();
     handler_.finish_syscall_trace(status, gas_remaining);
   }
