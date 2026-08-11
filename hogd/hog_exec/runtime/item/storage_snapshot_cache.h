@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
@@ -95,14 +96,14 @@ private:
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
   SynchronizedMap<SHA256Hash, std::optional<ContractCacheEntry>,
-                  ByteArrayHasher, std::equal_to<>,
+                  SipHash24Hasher, std::equal_to<>,
                   std::allocator<std::pair<const SHA256Hash,
                                            std::optional<ContractCacheEntry>>>,
                   std::shared_mutex>
       contract_cache_;
   // Neither does the deployment cache
   SynchronizedMap<ContractAddress, std::optional<DeployedContract>,
-                  ByteArrayHasher, std::equal_to<>,
+                  SipHash24Hasher, std::equal_to<>,
                   std::allocator<std::pair<const ContractAddress,
                                            std::optional<DeployedContract>>>,
                   std::shared_mutex>

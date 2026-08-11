@@ -2426,7 +2426,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         // into the nominated block. [nominated_block_cache_.tx_hashes] includes
         // every tx we attempted during scheduling, including txs that later
         // failed proposal and were added to [failed_tx_hashes].
-        static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+        static std::unordered_set<SignedTransactionHash, SipHash24Hasher>
             return_to_runqueue;
         return_to_runqueue.clear();
 

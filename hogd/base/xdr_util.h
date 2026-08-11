@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <functional>
 #include <span>
-#include <string_view>
 #include <type_traits>
 #include <vector>
 #include <version>
@@ -403,15 +402,6 @@ t_to_parallel_batch(const x23::XdrVec<T> &objs)
   co_await t_to_parallel_batch(x23::span<const T>(objs), parallel);
   co_return parallel;
 }
-
-struct ByteArrayHasher {
-  template<std::size_t N>
-  static std::size_t operator()(const std::array<uint8_t, N> &array) noexcept
-  {
-    return std::hash<std::string_view>{}(
-        std::string_view(reinterpret_cast<const char *>(array.data()), N));
-  }
-};
 
 template<std::size_t N>
 auto
