@@ -142,6 +142,10 @@ private:
         mmap(/*addr=*/nullptr, kMmapLength, /*prot=*/PROT_READ | PROT_WRITE,
              /*flags=*/MAP_PRIVATE | MAP_ANONYMOUS, /*fildes=*/-1, /*off=*/0);
     CHECK_NE(addr, MAP_FAILED);
+    // A successful mmap() with addr=nullptr returns page-aligned memory, and on
+    // the Linux gcc/clang targets we support reinterpret_cast<uintptr_t> yields
+    // the numeric address. This is therefore a well-defined sanity check on
+    // those platforms, not a reliance on arbitrary pointer-integer layout.
     CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
 
 #ifdef __cpp_lib_start_lifetime_as
