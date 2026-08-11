@@ -311,6 +311,28 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   frame_invocation.gas_limit =
       std::min<GasAmount>(invocation.gas_limit, current_gas);
 
+  // Inherit the parent frame's ReadOnly bit, mirroring the admission step in
+  // SystemCallHandler::invoke(): a frame opened under a read-only ancestor is
+  // itself read-only, so wrap_after_parse()'s read-only gate rejects
+  // state-modifying syscalls inside it. Without this, a mock child opened with
+  // flags = 0 beneath a ReadOnly parent ran read-write, and syscalls production
+  // clamps with kSyscallErrorCodeInvalidSyscallInput (e.g. kLogEvent) succeeded
+  // and produced real state changes (issue #3300).
+  //
+  // is_read_only() reads the active frame, so it may only be consulted while a
+  // frame is open; the is_running() guard mirrors production's
+  // !invocation_frame_stack_.empty() check and leaves a root mock frame with
+  // exactly the flags the caller asked for.
+  //
+  // As with the gas clamp above, the syscall trace inputs deliberately keep the
+  // caller-supplied flags: production records the raw syscall arguments in
+  // wrap_after_parse(), before invoke() ORs the inherited bit into the flags it
+  // hands to start_frame().
+  InvokeFlagSet frame_flags = invoke_flags;
+  if (handler_.is_running() && handler_.is_read_only()) {
+    frame_flags |= std::to_underlying(InvokeFlag::ReadOnly);
+  }
+
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
   //
@@ -330,7 +352,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // copy would allocate its Calldata again after the throwing-allocation window
   // closed above.
   auto stashed_parent_trace =
-      handler_.start_frame(std::move(frame_invocation), invoke_flags,
+      handler_.start_frame(std::move(frame_invocation), frame_flags,
                            std::span<uint32_t const>{});
   if (!stashed_parent_trace.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
