@@ -648,17 +648,10 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     auto promoted_record =
         co_await indexer_outbox_store_.lookup_validated_committed_record(
             tip_height);
-    const auto &promoted_payload = (**promotion).committed;
-    const IndexerOutboxCommittedRecordInfo expected_promoted_record{
-        .block_height = tip_height,
-        .protocol = current_protocol,
-        .payload_byte_length = x23::xdr_size(promoted_payload),
-        .payload_digest = sha256(promoted_payload),
-        .consensus_hash = tip_hash,
-        .prev_hash = consensus_value.prev_hash,
-    };
     if (!promoted_record || !*promoted_record ||
-        **promoted_record != expected_promoted_record) {
+        (**promoted_record).protocol != current_protocol ||
+        (**promoted_record).consensus_hash != tip_hash ||
+        (**promoted_record).prev_hash != consensus_value.prev_hash) {
       error("promoted retained candidate is not the committed outbox tip");
       co_return EventError{EventErrorCode::kInternal};
     }
@@ -944,6 +937,8 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox identity is invalid");
   }
+  // The loaded record has already validated payload/header hashes, so preserve
+  // that durable identity instead of hashing the payload again.
   IndexerCommittedBlock block{
       .payload = std::move(loaded->payload),
       .identity =

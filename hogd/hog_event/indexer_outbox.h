@@ -155,7 +155,8 @@ public:
   // Reconciliation validates the whole immutable namespace before enabling
   // this lookup. Thereafter the singleton flock and no-clobber publication let
   // the latest identity come from the append cache and older identities from
-  // one bounded header read without re-hashing payload bytes.
+  // one bounded header read without re-hashing payload bytes. Previously
+  // acknowledged records are not continuously scrubbed for external mutation.
   x23::Async<
       IndexerOutboxStatus<std::optional<IndexerOutboxCommittedRecordInfo>>>
   lookup_validated_committed_record(BlockHeight block_height) const;
@@ -215,6 +216,8 @@ private:
       BlockHeight first_height, ConsensusValueHash first_prev_hash) const;
   x23::Async<IndexerOutboxStatus<void>>
   initialize_committed_append_cache_unlocked() const;
+  x23::Async<IndexerOutboxStatus<void>>
+  fail_committed_publication_unlocked(std::string error) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxValidatedHistory>>
   validate_committed_history_unlocked(
       std::optional<BlockHeight> max_height = std::nullopt) const;

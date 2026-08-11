@@ -272,6 +272,19 @@ make_header(const IndexerOutboxCommittedPayload &payload, size_t payload_size,
   return header;
 }
 
+IndexerOutboxCommittedRecordInfo
+committed_record_info_from_header(const IndexerOutboxRecordHeader &header)
+{
+  return {
+      .block_height = header.block_height,
+      .protocol = std::string(header.protocol),
+      .payload_byte_length = header.payload_byte_length,
+      .payload_digest = header.payload_digest,
+      .consensus_hash = header.consensus_hash,
+      .prev_hash = header.prev_hash,
+  };
+}
+
 IndexerOutboxRecordHeader
 make_header(const IndexerOutboxEpochOrigin &payload, size_t payload_size,
             SHA256Hash digest)
@@ -673,8 +686,8 @@ IndexerOutboxStore::publish_committed(
     auto published = publish_bytes(committed_filename(height),
                                    std::as_bytes(std::span(*bytes)));
     if (!published) {
-      committed_append_cache_.reset();
-      co_return published;
+      co_return co_await fail_committed_publication_unlocked(
+          std::move(published.error()));
     }
     // A prior attempt may have linked this exact record and then failed a
     // close/unlink/directory-fsync step. Rebuild once so this retry repairs the
@@ -751,24 +764,16 @@ IndexerOutboxStore::publish_committed(
   auto published = publish_bytes(committed_filename(height),
                                  std::as_bytes(std::span(*bytes)));
   if (!published) {
-    committed_append_cache_.reset();
-    co_return published;
+    co_return co_await fail_committed_publication_unlocked(
+        std::move(published.error()));
   }
   auto header = load_header(committed_filename(height));
   if (!header) {
-    committed_append_cache_.reset();
-    co_return std::unexpected(std::format(
+    co_return co_await fail_committed_publication_unlocked(std::format(
         "committed record published but append cache update failed: {}",
         header.error()));
   }
-  cache.latest = IndexerOutboxCommittedRecordInfo{
-      .block_height = header->block_height,
-      .protocol = std::string(header->protocol),
-      .payload_byte_length = header->payload_byte_length,
-      .payload_digest = header->payload_digest,
-      .consensus_hash = header->consensus_hash,
-      .prev_hash = header->prev_hash,
-  };
+  cache.latest = committed_record_info_from_header(*header);
   if (header->block_height == INT64_MAX) {
     cache.canonical_boundary.reset();
   }
@@ -834,15 +839,7 @@ IndexerOutboxStore::load_committed_record(
         "committed outbox header/payload metadata mismatch");
   }
   co_return IndexerOutboxLoadedCommittedRecord{
-      .info =
-          IndexerOutboxCommittedRecordInfo{
-              .block_height = header->block_height,
-              .protocol = std::string(header->protocol),
-              .payload_byte_length = header->payload_byte_length,
-              .payload_digest = header->payload_digest,
-              .consensus_hash = header->consensus_hash,
-              .prev_hash = header->prev_hash,
-          },
+      .info = committed_record_info_from_header(*header),
       .payload = std::move(*payload),
   };
 }
@@ -855,18 +852,21 @@ IndexerOutboxStore::lookup_validated_committed_record(
     co_return std::unexpected("committed outbox height is negative");
   }
 
-  x23::CoroGuard publication_guard;
-  co_await publication_guard(*committed_publication_lock_);
-  if (!committed_append_cache_) {
-    co_return std::unexpected(
-        "committed outbox history has not been validated");
+  std::optional<IndexerOutboxCommittedRecordInfo> latest;
+  {
+    x23::CoroGuard publication_guard;
+    co_await publication_guard(*committed_publication_lock_);
+    if (!committed_append_cache_) {
+      co_return std::unexpected(
+          "committed outbox history has not been validated");
+    }
+    latest = committed_append_cache_->latest;
   }
-  if (!committed_append_cache_->latest ||
-      block_height > committed_append_cache_->latest->block_height) {
+  if (!latest || block_height > latest->block_height) {
     co_return std::optional<IndexerOutboxCommittedRecordInfo>{};
   }
-  if (block_height == committed_append_cache_->latest->block_height) {
-    co_return committed_append_cache_->latest;
+  if (block_height == latest->block_height) {
+    co_return latest;
   }
 
   auto exists = has_committed(block_height);
@@ -1114,8 +1114,10 @@ IndexerOutboxStore::validate_committed_history_unlocked(
            (*records)[record_index].protocol == origin.protocol) {
       const auto &record = (*records)[record_index];
       if (max_height && record.block_height > *max_height) {
-        co_return std::unexpected(
-            "committed indexer outbox record exceeds canonical height");
+        co_return std::unexpected(std::format(
+            "committed indexer outbox record at height {} exceeds canonical "
+            "height {}",
+            record.block_height, *max_height));
       }
       if ((first_record && (record.block_height != origin.first_height ||
                             record.prev_hash != origin.first_prev_hash)) ||
@@ -1183,6 +1185,20 @@ IndexerOutboxStore::initialize_committed_append_cache_unlocked() const
       .canonical_boundary = std::move(history->canonical_boundary),
   };
   co_return IndexerOutboxStatus<void>{};
+}
+
+x23::Async<IndexerOutboxStatus<void>>
+IndexerOutboxStore::fail_committed_publication_unlocked(std::string error) const
+{
+  committed_append_cache_.reset();
+  auto restored = co_await initialize_committed_append_cache_unlocked();
+  if (!restored) {
+    co_return std::unexpected(
+        std::format("{}; failed to revalidate committed outbox after ambiguous "
+                    "publication: {}",
+                    error, restored.error()));
+  }
+  co_return std::unexpected(std::move(error));
 }
 
 x23::Async<IndexerOutboxStatus<void>>
@@ -1302,14 +1318,7 @@ IndexerOutboxStore::load_committed_record_info_raw(
   if (auto valid = validate_payload_digest(filename, *header); !valid) {
     return std::unexpected(valid.error());
   }
-  return IndexerOutboxCommittedRecordInfo{
-      .block_height = header->block_height,
-      .protocol = std::string(header->protocol),
-      .payload_byte_length = header->payload_byte_length,
-      .payload_digest = header->payload_digest,
-      .consensus_hash = header->consensus_hash,
-      .prev_hash = header->prev_hash,
-  };
+  return committed_record_info_from_header(*header);
 }
 
 IndexerOutboxStatus<std::vector<IndexerOutboxCommittedRecordInfo>>
@@ -1338,12 +1347,7 @@ IndexerOutboxStore::enumerate_committed_records_raw() const
     if (auto valid = validate_payload_digest(name, *header); !valid) {
       return std::unexpected(valid.error());
     }
-    records.push_back({.block_height = header->block_height,
-                       .protocol = std::string(header->protocol),
-                       .payload_byte_length = header->payload_byte_length,
-                       .payload_digest = header->payload_digest,
-                       .consensus_hash = header->consensus_hash,
-                       .prev_hash = header->prev_hash});
+    records.push_back(committed_record_info_from_header(*header));
   }
   std::ranges::sort(records, [](const auto &lhs, const auto &rhs) {
     return lhs.block_height < rhs.block_height;
@@ -1731,14 +1735,7 @@ IndexerOutboxStore::load_committed_record_info_header(
       header->block_height != block_height) {
     return std::unexpected("committed outbox filename/header mismatch");
   }
-  return IndexerOutboxCommittedRecordInfo{
-      .block_height = header->block_height,
-      .protocol = std::string(header->protocol),
-      .payload_byte_length = header->payload_byte_length,
-      .payload_digest = header->payload_digest,
-      .consensus_hash = header->consensus_hash,
-      .prev_hash = header->prev_hash,
-  };
+  return committed_record_info_from_header(*header);
 }
 
 IndexerOutboxStatus<std::vector<uint8_t>>

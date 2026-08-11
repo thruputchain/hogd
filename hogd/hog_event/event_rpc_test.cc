@@ -493,6 +493,55 @@ TEST_F(EventRpcTest, CommittedRecordBecomesPullableOnlyAfterConfirmation)
             EventIndexerPullOutcome::EventIndexerPullBlock);
 }
 
+TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
+{
+  constexpr std::array kFaults{
+      IndexerOutboxFaultPoint::kVerifyPublishedInode,
+      IndexerOutboxFaultPoint::kClosePublishedTemp,
+      IndexerOutboxFaultPoint::kUnlinkPublishedTemp,
+      IndexerOutboxFaultPoint::kFsyncPublishedDirectory,
+  };
+  for (size_t i = 0; i < kFaults.size(); ++i) {
+    TmpDir dir;
+    EventRPCContext ctx(dir.directory());
+    EventMempoolRpc event_rpc(ctx);
+    ConsensusValue genesis{};
+    genesis.proposal_header.block_height = 0;
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    ConsensusValue block_one =
+        commit_empty_block(ctx, 870 + i * 2, 1, sha256(genesis));
+    EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+    ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+    IndexerProgress first_progress = progress_at(first.pulled_block());
+
+    const BlockID block_two_id = 871 + i * 2;
+    ASSERT_EQ(event_rpc.eventsched_open_block(block_two_id)(),
+              RPCError::kRPCNone);
+    EventBlockResult closed =
+        event_rpc.eventsched_close_block(block_two_id, 2, ProposalTxs{})();
+    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+    ConsensusValue block_two =
+        make_consensus_value(2, closed.root_hash(), ProposalTxs{});
+    block_two.prev_hash = sha256(block_one);
+
+    fail_next_indexer_outbox_operation_for_test(kFaults[i]);
+    EXPECT_EQ(event_rpc.eventsched_commit_block(block_two_id, block_two)(),
+              RPCError::kRPCUnrecoverable);
+    ASSERT_TRUE(ctx.indexer_outbox_store().has_committed(2).value_or(false));
+    EXPECT_EQ(ctx.pull_indexer_next(pull_request(first_progress))().outcome(),
+              EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+    ASSERT_EQ(event_rpc.eventsched_commit_block(block_two_id, block_two)(),
+              RPCError::kRPCNone);
+    ASSERT_EQ(event_rpc.eventsched_confirm_committed_block(block_two)(),
+              RPCError::kRPCNone);
+    EventIndexerPullResult second =
+        ctx.pull_indexer_next(pull_request(first_progress))();
+    ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+    EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
+  }
+}
+
 TEST_F(EventRpcTest, ConfirmationRaceCannotLeaveAStaleCaughtUpOmission)
 {
   EventRPCContext ctx(temp_dir());
