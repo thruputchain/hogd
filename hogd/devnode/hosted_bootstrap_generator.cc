@@ -215,7 +215,7 @@ build_genesis_json(GenesisConfiguration const &genesis)
       w.field("contract_size",
               static_cast<std::int64_t>(genesis.default_wallet.contract_size));
       w.field("contract_type",
-              static_cast<std::int64_t>(genesis.default_wallet.contract_type));
+              std::format("{}", genesis.default_wallet.contract_type));
     });
   });
   return buffer;
