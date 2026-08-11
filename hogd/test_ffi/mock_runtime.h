@@ -92,6 +92,20 @@ public:
     return false;
   }
 
+  // Records that this frame was charged for a child frame it could not pay for
+  // (see the parent debit in finish_mock_invocation_frame). Production has no
+  // "keep going after out of gas" state: syscall_Invoke's OutOfGas host error
+  // traps the parent's guest execution, so the parent frame always faults. The
+  // mock pathway has no guest execution to trap, so the frame carries the fact
+  // here and its finish coerces the outcome instead (issue #2725).
+  //
+  // Deliberately not set from consume_gas() itself. A syscall that exhausts its
+  // own frame already returns panic == OutOfGas to the harness caller, which is
+  // that caller's signal to stop and finish the frame as OutOfGas; the parent
+  // debit is the one path that has no such signal.
+  void mark_out_of_gas() { out_of_gas_ = true; }
+  bool is_out_of_gas() const { return out_of_gas_; }
+
 protected:
   explicit MockGasRuntime(
       GasAmount initial_gas = std::numeric_limits<GasAmount>::max())
@@ -107,6 +121,7 @@ protected:
 private:
   GasAmount initial_gas_;
   GasAmount gas_remaining_;
+  bool out_of_gas_{false};
 };
 
 class MockRuntime : public MockGasRuntime {

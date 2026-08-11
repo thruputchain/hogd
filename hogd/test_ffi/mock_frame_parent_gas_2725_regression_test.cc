@@ -34,11 +34,22 @@
 //   3. UnderBudgetChildFinishesParentInvokeAsSuccess: the ordinary case is
 //      untouched -- a child that stays strictly under the parent's budget still
 //      traces a successful kInvoke and leaves the parent the difference.
+//   4. ExactBudgetChildFaultsParentFrameAndCommit: the out-of-gas parent must
+//      also *end* out of gas. Production traps the parent's guest execution on
+//      the OutOfGas host error, so the parent frame faults whatever its code
+//      would have returned; the mock pathway has no execution to trap, so the
+//      caller's frame-level status is overridden. Otherwise the fix would stop
+//      at the trace -- diagnostics only -- and a caller finishing the parent
+//      with None would still commit ExecResultOK.
+//   5. ExactBudgetChildDoesNotDowngradeParentSystemError: that override is
+//      frame-level only. A SystemError ends the whole transaction and outranks
+//      out-of-gas, so it is never downgraded.
 
 #include <utility>
 
 #include <gtest/gtest.h>
 
+#include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -292,6 +303,120 @@ TEST(TestBindingsTest, UnderBudgetChildFinishesParentInvokeAsSuccess)
   ASSERT_NE(invoke_body.outputs->child_trace, nullptr);
   EXPECT_EQ(invoke_body.outputs->child_trace->status.status_code(),
             InvocationFrameStatusCode::Return);
+
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+}
+
+// Recording the out-of-gas synthetic kInvoke in the trace is not enough on its
+// own: the trace is diagnostics, so a caller that goes on to finish the parent
+// with InvokeErrorCode::None would still hand back a Return frame and commit
+// ExecResultOK -- a transaction production would have faulted.
+//
+// Production never offers that choice. syscall_Invoke's OutOfGas host error
+// traps the parent's guest execution, so the parent frame faults regardless of
+// what its code would have returned. The mock pathway has no guest execution to
+// trap, so finish_mock_invocation_frame() overrides the caller's frame-level
+// status instead. This test pins the observable end state: Fault, and a commit
+// that is not OK.
+TEST(TestBindingsTest, ExactBudgetChildFaultsParentFrameAndCommit)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  ASSERT_EQ(open_frame(handler.syscall_handler,
+                       make_invocation(ContractAddress{0xA0}, 0x1111, kShaGas)),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+
+  ASSERT_EQ(open_frame(handler.syscall_handler,
+                       make_invocation(ContractAddress{0xB0}, 0x2222,
+                                       kShaGas + 1)),
+            kTestFFIErrorCodeNone);
+
+  // Spends the parent's entire remaining budget.
+  (void)run_sha256_syscall();
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  auto child_finish = finish_frame_ok(handler.syscall_handler);
+  x23::Defer free_child([&] { free_finish_result(child_finish); });
+
+  // The caller asks for a successful parent frame. It must not get one.
+  auto parent_finish = finish_frame_ok(handler.syscall_handler);
+  x23::Defer free_parent([&] { free_finish_result(parent_finish); });
+  ASSERT_NE(parent_finish.serialized_output.data, nullptr);
+
+  InvocationFrameOutput parent_output;
+  x23::deserialize(&parent_output,
+                   x23::BufView{parent_finish.serialized_output.data,
+                                parent_finish.serialized_output.len});
+  EXPECT_EQ(parent_output.status_code(), InvocationFrameStatusCode::Fault);
+
+  auto commit = try_commit_transaction(handler.syscall_handler);
+  x23::Defer free_conflict(
+      [&] { free_ffi_data_buffer(commit.serialized_conflict); });
+  // An out-of-gas root frame is a deterministic failure, so the transaction is
+  // still block-includable -- but it is emphatically not ExecResultOK.
+  EXPECT_EQ(commit.result_code,
+            std::to_underlying(ExecResult::ExecResultTxDeterministicError));
+
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+}
+
+// The system-error channel outranks out-of-gas and must survive the override: a
+// caller that reports Unrecoverable on a frame that also ran out of gas still
+// gets the system error, not a downgrade to a merely deterministic Fault. This
+// is the same exclusion wrap_after_parse() makes via is_handleable_error.
+TEST(TestBindingsTest, ExactBudgetChildDoesNotDowngradeParentSystemError)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  ASSERT_EQ(open_frame(handler.syscall_handler,
+                       make_invocation(ContractAddress{0xA0}, 0x1111, kShaGas)),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+
+  ASSERT_EQ(open_frame(handler.syscall_handler,
+                       make_invocation(ContractAddress{0xB0}, 0x2222,
+                                       kShaGas + 1)),
+            kTestFFIErrorCodeNone);
+
+  (void)run_sha256_syscall();
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  auto child_finish = finish_frame_ok(handler.syscall_handler);
+  x23::Defer free_child([&] { free_finish_result(child_finish); });
+
+  // The parent is out of gas, but the caller reports a system error. Finishing
+  // the root frame with a SystemError surfaces as a structured FFI error (see
+  // the root-frame branch in finish_mock_invocation_frame), which is precisely
+  // what an OutOfGas downgrade would have hidden.
+  auto parent_finish =
+      finish_mock_invocation_frame(handler.syscall_handler,
+                                   std::to_underlying(
+                                       InvokeErrorCode::Unrecoverable));
+  x23::Defer free_parent([&] { free_finish_result(parent_finish); });
+  EXPECT_EQ(parent_finish.ffi_error_code, kTestFFIErrorCodeUnrecoverableError);
 
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
