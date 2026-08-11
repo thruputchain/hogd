@@ -404,15 +404,15 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   uint64_t consumed_gas = gas_runtime->gas_consumed();
   x23::Defer _([runtime]() { delete runtime; });
 
-  // An earlier child frame exhausted this frame's budget (the parent debit at
-  // the bottom of this function marked it). Production gives the caller no say
-  // in what happens next: the OutOfGas host error from syscall_Invoke traps the
-  // parent's guest execution, so the parent frame faults no matter what its
-  // code would rather have returned. The mock pathway has no guest execution to
-  // trap, so the caller-supplied status is overridden here. Without this the
-  // frame still finished Return and try_commit_transaction() still reported
-  // ExecResultOK -- committing a transaction production would have faulted
-  // (issue #2725).
+  // This frame ran out of gas: either one of its own syscalls outspent its
+  // budget, or it was charged for a child frame it could not pay for (the
+  // parent debit at the bottom of this function). Either way production gives
+  // the caller no say in what happens next -- the OutOfGas host error traps the
+  // frame's guest execution, so it faults no matter what its code would rather
+  // have returned. The mock pathway has no guest execution to trap, so the
+  // caller-supplied status is overridden here. Without this the frame still
+  // finished Return and try_commit_transaction() still reported ExecResultOK --
+  // committing a transaction production would have faulted (issue #2725).
   //
   // Only a frame-level status is overridden. A SystemError-class code
   // (Unrecoverable / ValidationFailure / Abandon) ends the whole transaction
@@ -464,14 +464,13 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   if (auto *runtime = get_mock_runtime()) {
     auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
     CHECK(gas_runtime != nullptr);
+    // A failed debit also latches MockGasRuntime::is_out_of_gas() on the
+    // parent, so the parent's own finish faults the way production's trapped
+    // guest execution would (see the override at the top of this function).
+    // parent_out_of_gas is the local copy used for the synthetic kInvoke status
+    // just below.
     parent_out_of_gas = !gas_runtime->consume_gas(total_gas_consumed);
     gas_remaining = gas_runtime->gas_remaining();
-    // Remember it on the parent too, not just in the synthetic kInvoke trace
-    // below: the parent's own finish has to fault, the way production's trapped
-    // guest execution would (see the override at the top of this function).
-    if (parent_out_of_gas) {
-      gas_runtime->mark_out_of_gas();
-    }
   }
 
   if (handler_.is_running()) {

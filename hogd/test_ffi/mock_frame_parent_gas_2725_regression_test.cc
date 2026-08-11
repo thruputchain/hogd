@@ -41,7 +41,12 @@
 //      caller's frame-level status is overridden. Otherwise the fix would stop
 //      at the trace -- diagnostics only -- and a caller finishing the parent
 //      with None would still commit ExecResultOK.
-//   5. ExactBudgetChildDoesNotDowngradeParentSystemError: that override is
+//   5. FrameExhaustingOwnGasCannotFinishAsSuccess: the same override covers a
+//      frame that exhausts itself with no child involved. That path does return
+//      panic == OutOfGas to the harness caller, but a caller that ignored it
+//      reached the identical end state, so the frame latches the condition
+//      rather than relying on the caller to act on the signal.
+//   6. ExactBudgetChildDoesNotDowngradeParentSystemError: the override is
 //      frame-level only. A SystemError ends the whole transaction and outranks
 //      out-of-gas, so it is never downgraded.
 
@@ -366,6 +371,63 @@ TEST(TestBindingsTest, ExactBudgetChildFaultsParentFrameAndCommit)
       [&] { free_ffi_data_buffer(commit.serialized_conflict); });
   // An out-of-gas root frame is a deterministic failure, so the transaction is
   // still block-includable -- but it is emphatically not ExecResultOK.
+  EXPECT_EQ(commit.result_code,
+            std::to_underlying(ExecResult::ExecResultTxDeterministicError));
+
+  EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
+            kTestFFIErrorCodeNone);
+}
+
+// The override is not specific to the parent-debit path. A frame can also
+// exhaust itself, with no child involved at all: one of its own syscalls
+// outspends its budget. wrap_after_parse() returns panic == OutOfGas to the
+// harness caller there, but that only protects a caller that acts on it -- a
+// caller that ignored the panic and finished the frame with None still got a
+// Return frame and an ExecResultOK commit, exactly the end state the
+// parent-debit case produced before the fix.
+//
+// Production draws no distinction between the two: the OutOfGas host error
+// traps the frame's guest execution either way. MockGasRuntime latches
+// is_out_of_gas() on any failed debit, so the mock pathway does not either.
+TEST(TestBindingsTest, FrameExhaustingOwnGasCannotFinishAsSuccess)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(handler.syscall_handler, nullptr);
+
+  // A single frame with exactly enough gas for one kSHA256. No child frame is
+  // opened, so the parent debit never runs.
+  ASSERT_EQ(open_frame(handler.syscall_handler,
+                       make_invocation(ContractAddress{0xA0}, 0x1111, kShaGas)),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+
+  // Spends the frame's entire budget on itself.
+  auto sha_res = run_sha256_syscall();
+  EXPECT_EQ(sha_res.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+
+  // The caller ignores that panic and claims the frame succeeded anyway.
+  auto finish = finish_frame_ok(handler.syscall_handler);
+  x23::Defer free_finish([&] { free_finish_result(finish); });
+  ASSERT_NE(finish.serialized_output.data, nullptr);
+
+  InvocationFrameOutput frame_output;
+  x23::deserialize(&frame_output, x23::BufView{finish.serialized_output.data,
+                                               finish.serialized_output.len});
+  EXPECT_EQ(frame_output.status_code(), InvocationFrameStatusCode::Fault);
+
+  auto commit = try_commit_transaction(handler.syscall_handler);
+  x23::Defer free_conflict(
+      [&] { free_ffi_data_buffer(commit.serialized_conflict); });
   EXPECT_EQ(commit.result_code,
             std::to_underlying(ExecResult::ExecResultTxDeterministicError));
 
