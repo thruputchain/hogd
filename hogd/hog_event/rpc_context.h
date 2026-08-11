@@ -93,8 +93,6 @@ private:
   enum class BlockOperation { kClosing, kCommitting, kAbandoning };
 
   struct CandidatePromotion {
-    BlockID block_id;
-    IndexerOutboxCandidatePayload candidate;
     IndexerOutboxCommittedPayload committed;
   };
 

@@ -128,8 +128,7 @@ make_consensus_value(BlockHeight height, SHA256Hash event_root,
 }
 
 IndexerOutboxCommittedPayload
-make_empty_committed(BlockID /*commit_alias*/, BlockHeight height,
-                     ConsensusValueHash prev_hash)
+make_empty_committed(BlockHeight height, ConsensusValueHash prev_hash)
 {
   ProposalTxs proposal_txs;
   TxEventLogBatch event_logs;
@@ -587,6 +586,8 @@ TEST_F(EventRpcTest, ConfirmationRejectsConflictingAndOutOfOrderValues)
             RPCError::kRPCNone);
   EXPECT_EQ(event_rpc.eventsched_confirm_committed_block(block_one)(),
             RPCError::kRPCUnrecoverable);
+  EXPECT_EQ(event_rpc.eventsched_confirm_committed_block(block_two)(),
+            RPCError::kRPCNone);
 }
 
 TEST_F(EventRpcTest, TxFailureMailboxDrainsIsBoundedAndDoesNotBlockIngress)
@@ -641,7 +642,7 @@ TEST_F(EventRpcTest, MissingOrCorruptPullableRecordIsInternalFailure)
 
 TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
 {
-  auto archival = make_empty_committed(94, 20, ConsensusValueHash{});
+  auto archival = make_empty_committed(20, ConsensusValueHash{});
   SHA256Hash archival_digest;
   {
     EventRPCContext previous(temp_dir());
@@ -705,7 +706,7 @@ TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
   const ConsensusValueHash boundary = sha256(genesis);
-  auto archival = make_empty_committed(96, 1, boundary);
+  auto archival = make_empty_committed(1, boundary);
   {
     EventRPCContext previous(temp_dir());
     initialize_test_origin(previous, archival.consensus_value);
@@ -2219,6 +2220,58 @@ TEST_F(EventRpcTest, GenesisRestartReconcilesBeforeEventActivation)
       EventActivationOutcome::EventActivationOK);
 }
 
+TEST_F(EventRpcTest, ChangedStartupTipReconcilesAgainBeforeActivation)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
+  EventCard card{.protocol = version::kHogdProtocol(),
+                 .address_for_exec = "127.0.0.1:1",
+                 .address_for_sched = "127.0.0.1:2"};
+  EventPrepareResult prepared = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+
+  EventRPCContext ctx(temp_dir());
+  ASSERT_TRUE(
+      ctx.reconcile_outbox_tip(prepared.snapshot().tip.block_id,
+                               prepared.snapshot().tip.consensus_value)()
+          .has_value());
+
+  constexpr BlockID kBlockOne = 591;
+  EventMempoolRpc event_rpc(ctx);
+  ASSERT_EQ(event_rpc.eventsched_open_block(kBlockOne)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      event_rpc.eventsched_close_block(kBlockOne, 1, ProposalTxs{})();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(event_rpc.eventsched_commit_block(kBlockOne, block_one)(),
+            RPCError::kRPCNone);
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = kBlockOne, .consensus_value = block_one});
+
+  EventActivationResult activation =
+      MempoolEventRpc::schedevent_activate_event(prepared.snapshot());
+  ASSERT_EQ(activation.outcome(), EventActivationOutcome::EventActivationRetry);
+  EXPECT_EQ(activation.current_tip().block_id, kBlockOne);
+
+  prepared = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+  ASSERT_TRUE(
+      ctx.reconcile_outbox_tip(prepared.snapshot().tip.block_id,
+                               prepared.snapshot().tip.consensus_value)()
+          .has_value());
+  EXPECT_EQ(
+      MempoolEventRpc::schedevent_activate_event(prepared.snapshot()).outcome(),
+      EventActivationOutcome::EventActivationOK);
+  EXPECT_TRUE(registration.event_registered(nullptr));
+}
+
 TEST_F(EventRpcTest,
        GenesisOriginRejectsMismatchedFirstCommitWithoutResolvingCandidate)
 {
@@ -2404,9 +2457,9 @@ TEST_F(EventRpcTest,
   Registration &registration = Registration::registration();
   registration.clear();
   x23::Defer cleanup([&registration] { registration.clear(); });
-  auto archival_first = make_empty_committed(700, 20, ConsensusValueHash{});
+  auto archival_first = make_empty_committed(20, ConsensusValueHash{});
   auto archival_tip =
-      make_empty_committed(701, 21, sha256(archival_first.consensus_value));
+      make_empty_committed(21, sha256(archival_first.consensus_value));
   {
     EventRPCContext ctx(temp_dir());
     initialize_test_origin(ctx, archival_first.consensus_value);
@@ -2497,7 +2550,7 @@ TEST_F(EventRpcTest,
 
 TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)
 {
-  auto archival = make_empty_committed(740, 20, ConsensusValueHash{});
+  auto archival = make_empty_committed(20, ConsensusValueHash{});
   {
     EventRPCContext epoch_a(temp_dir());
     initialize_test_origin(epoch_a, archival.consensus_value);
@@ -2526,8 +2579,7 @@ TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)
                             sha256(archival.consensus_value),
                             /*epoch_sequence=*/1);
 
-  auto current =
-      make_empty_committed(741, 21, sha256(archival.consensus_value));
+  auto current = make_empty_committed(21, sha256(archival.consensus_value));
   {
     EventRPCContext epoch_c(temp_dir());
     ASSERT_TRUE(epoch_c.reconcile_outbox_tip(740, archival.consensus_value)()
@@ -2652,7 +2704,7 @@ TEST_F(EventRpcTest, AllEmptyEpochBoundaryRejectsDisconnectedCandidatePromotion)
 
 TEST_F(EventRpcTest, MultipleEmptyArchivalEpochsPreserveCanonicalBoundary)
 {
-  auto archival = make_empty_committed(750, 20, ConsensusValueHash{});
+  auto archival = make_empty_committed(20, ConsensusValueHash{});
   {
     EventRPCContext epoch_a(temp_dir());
     initialize_test_origin(epoch_a, archival.consensus_value);
@@ -2684,7 +2736,7 @@ TEST_F(EventRpcTest, MultipleEmptyArchivalEpochsPreserveCanonicalBoundary)
 
 TEST_F(EventRpcTest, MalformedEmptyArchivalEpochOriginIsRejected)
 {
-  auto archival = make_empty_committed(760, 20, ConsensusValueHash{});
+  auto archival = make_empty_committed(20, ConsensusValueHash{});
   {
     EventRPCContext epoch_a(temp_dir());
     initialize_test_origin(epoch_a, archival.consensus_value);
@@ -2715,8 +2767,8 @@ TEST_F(EventRpcTest,
 {
   auto verify = [&](bool corrupt_payload) {
     TmpDir dir;
-    auto first = make_empty_committed(710, 20, ConsensusValueHash{});
-    auto tip = make_empty_committed(711, 21, sha256(first.consensus_value));
+    auto first = make_empty_committed(20, ConsensusValueHash{});
+    auto tip = make_empty_committed(21, sha256(first.consensus_value));
     constexpr BlockID kCandidate = 712;
     {
       EventRPCContext ctx(dir.directory());
@@ -2776,7 +2828,7 @@ TEST_F(EventRpcTest,
 TEST_F(EventRpcTest,
        InvalidArchivalPrefixDoesNotPromoteCanonicalRetainedCandidate)
 {
-  auto archival = make_empty_committed(720, 20, ConsensusValueHash{});
+  auto archival = make_empty_committed(20, ConsensusValueHash{});
   constexpr BlockID kCandidate = 721;
   ConsensusValue canonical;
   {
@@ -2819,9 +2871,9 @@ TEST_F(EventRpcTest,
 
 TEST_F(EventRpcTest, ReconciliationRejectsArchivalProtocolReentry)
 {
-  auto first = make_empty_committed(730, 20, ConsensusValueHash{});
-  auto second = make_empty_committed(731, 21, sha256(first.consensus_value));
-  auto third = make_empty_committed(732, 22, sha256(second.consensus_value));
+  auto first = make_empty_committed(20, ConsensusValueHash{});
+  auto second = make_empty_committed(21, sha256(first.consensus_value));
+  auto third = make_empty_committed(22, sha256(second.consensus_value));
   {
     EventRPCContext ctx(temp_dir());
     initialize_test_origin(ctx, first.consensus_value);
@@ -2979,9 +3031,9 @@ TEST_F(EventRpcTest, ReconciliationRejectsInvalidPreparedCurrentEpochOrigin)
 TEST_F(EventRpcTest, ReconciliationValidatesCompleteMultiRecordArchivalEpoch)
 {
   EventRPCContext ctx(temp_dir());
-  auto first = make_empty_committed(330, 20, ConsensusValueHash{});
-  auto second = make_empty_committed(331, 21, sha256(first.consensus_value));
-  auto current = make_empty_committed(332, 22, sha256(second.consensus_value));
+  auto first = make_empty_committed(20, ConsensusValueHash{});
+  auto second = make_empty_committed(21, sha256(first.consensus_value));
+  auto current = make_empty_committed(22, sha256(second.consensus_value));
   initialize_test_origin(ctx, first.consensus_value);
   ASSERT_TRUE(
       ctx.indexer_outbox_store().publish_committed(first)().has_value());
@@ -3010,11 +3062,11 @@ TEST_F(EventRpcTest, ReconciliationValidatesCompleteMultiRecordArchivalEpoch)
 TEST_F(EventRpcTest, ReconciliationRejectsArchivalInternalDisconnect)
 {
   EventRPCContext ctx(temp_dir());
-  auto first = make_empty_committed(333, 20, ConsensusValueHash{});
+  auto first = make_empty_committed(20, ConsensusValueHash{});
   ConsensusValueHash disconnected{};
   disconnected[0] = 0xff;
-  auto second = make_empty_committed(334, 21, sha256(first.consensus_value));
-  auto current = make_empty_committed(335, 22, sha256(second.consensus_value));
+  auto second = make_empty_committed(21, sha256(first.consensus_value));
+  auto current = make_empty_committed(22, sha256(second.consensus_value));
   initialize_test_origin(ctx, first.consensus_value);
   ASSERT_TRUE(
       ctx.indexer_outbox_store().publish_committed(first)().has_value());
@@ -3051,9 +3103,9 @@ TEST_F(EventRpcTest, ReconciliationRejectsArchivalInternalDisconnect)
 TEST_F(EventRpcTest, ReconciliationRejectsTruncatedArchivalEpochPrefix)
 {
   EventRPCContext ctx(temp_dir());
-  auto first = make_empty_committed(336, 20, ConsensusValueHash{});
-  auto second = make_empty_committed(337, 21, sha256(first.consensus_value));
-  auto current = make_empty_committed(338, 22, sha256(second.consensus_value));
+  auto first = make_empty_committed(20, ConsensusValueHash{});
+  auto second = make_empty_committed(21, sha256(first.consensus_value));
+  auto current = make_empty_committed(22, sha256(second.consensus_value));
   initialize_test_origin(ctx, first.consensus_value);
   ASSERT_TRUE(
       ctx.indexer_outbox_store().publish_committed(first)().has_value());

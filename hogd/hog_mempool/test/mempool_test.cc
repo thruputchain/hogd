@@ -200,6 +200,108 @@ TEST(Mempool, EventPreparedCardIsUnavailableBeforeActivation)
   EXPECT_FALSE(registration.event_registered(nullptr));
 }
 
+TEST(Mempool, EventSameCardPrepareRetryPreservesPendingSnapshot)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  ConsensusValue value{};
+  value.proposal_header.block_height = 7;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 70, .consensus_value = value});
+  EventCard card{.protocol = version::kHogdProtocol(),
+                 .address_for_exec = "127.0.0.1:1",
+                 .address_for_sched = "127.0.0.1:2"};
+
+  auto first = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(first.outcome(), EventPrepareOutcome::EventPrepareOK);
+  auto idempotent = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(idempotent.outcome(), EventPrepareOutcome::EventPrepareOK);
+  EXPECT_EQ(idempotent.snapshot().token, first.snapshot().token);
+  EXPECT_EQ(idempotent.snapshot().tip, first.snapshot().tip);
+
+  ConsensusValue changed_value = value;
+  changed_value.proposal_header.block_height = 8;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 80, .consensus_value = changed_value});
+  auto lost_reply_retry = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(lost_reply_retry.outcome(), EventPrepareOutcome::EventPrepareOK);
+  EXPECT_EQ(lost_reply_retry.snapshot().token, first.snapshot().token);
+  EXPECT_EQ(lost_reply_retry.snapshot().tip, first.snapshot().tip);
+  auto activation =
+      MempoolEventRpc::schedevent_activate_event(lost_reply_retry.snapshot());
+  ASSERT_EQ(activation.outcome(), EventActivationOutcome::EventActivationRetry);
+  EXPECT_EQ(activation.current_tip().block_id, 80);
+
+  auto refreshed = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(refreshed.outcome(), EventPrepareOutcome::EventPrepareOK);
+  EXPECT_GT(refreshed.snapshot().token, first.snapshot().token);
+  EXPECT_EQ(refreshed.snapshot().tip.block_id, 80);
+  EXPECT_EQ(refreshed.snapshot().tip.consensus_value, changed_value);
+  EXPECT_EQ(
+      MempoolEventRpc::schedevent_activate_event(first.snapshot()).outcome(),
+      EventActivationOutcome::EventActivationError);
+  EXPECT_EQ(MempoolEventRpc::schedevent_activate_event(refreshed.snapshot())
+                .outcome(),
+            EventActivationOutcome::EventActivationOK);
+}
+
+TEST(Mempool, DifferentEventCardDoesNotReplacePendingRegistration)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  ConsensusValue value{};
+  value.proposal_header.block_height = 7;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 70, .consensus_value = value});
+  EventCard first{.protocol = version::kHogdProtocol(),
+                  .address_for_exec = "127.0.0.1:1",
+                  .address_for_sched = "127.0.0.1:2"};
+  EventCard contender{.protocol = version::kHogdProtocol(),
+                      .address_for_exec = "127.0.0.1:3",
+                      .address_for_sched = "127.0.0.1:4"};
+
+  auto prepared = MempoolEventRpc::schedevent_prepare_event(first);
+  ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+  EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(contender).outcome(),
+            EventPrepareOutcome::EventPrepareError);
+  EXPECT_EQ(
+      MempoolEventRpc::schedevent_activate_event(prepared.snapshot()).outcome(),
+      EventActivationOutcome::EventActivationOK);
+  EventCard registered;
+  ASSERT_TRUE(registration.event_registered(&registered));
+  EXPECT_EQ(registered, first);
+}
+
+TEST(Mempool, RetriedEventPrepareSnapshotActivatesOnce)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  ConsensusValue value{};
+  value.proposal_header.block_height = 7;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 70, .consensus_value = value});
+  EventCard card{.protocol = version::kHogdProtocol(),
+                 .address_for_exec = "127.0.0.1:1",
+                 .address_for_sched = "127.0.0.1:2"};
+  auto first = MempoolEventRpc::schedevent_prepare_event(card);
+  auto retry = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(first.outcome(), EventPrepareOutcome::EventPrepareOK);
+  ASSERT_EQ(retry.outcome(), EventPrepareOutcome::EventPrepareOK);
+
+  EXPECT_EQ(
+      MempoolEventRpc::schedevent_activate_event(retry.snapshot()).outcome(),
+      EventActivationOutcome::EventActivationOK);
+  EXPECT_EQ(
+      MempoolEventRpc::schedevent_activate_event(first.snapshot()).outcome(),
+      EventActivationOutcome::EventActivationError);
+  EventCard registered;
+  ASSERT_TRUE(registration.event_registered(&registered));
+  EXPECT_EQ(registered, card);
+}
+
 TEST(Mempool, EventPrepareUsesTypedPreGenesisAndInvalidTipOutcomes)
 {
   Registration &registration = Registration::registration();

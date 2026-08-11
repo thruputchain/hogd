@@ -36,6 +36,7 @@
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/os.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -548,9 +549,9 @@ HogDevnodeNode::HogDevnodeNode(
     auth_db_server_->impl()->set_auth_server(*auth_server_);
     auth_mempool_server_->impl()->set_auth_server(*auth_server_);
 
-    event_sched_server_.max_message_size_ = kDevRpcMaxMessageSize;
+    event_sched_server_.max_message_size_ = kEventSchedulerRpcMaxMessageSize;
     event_exec_server_.max_message_size_ = kDevRpcMaxMessageSize;
-    event_indexer_server_.max_message_size_ = kDevRpcMaxMessageSize;
+    event_indexer_server_.max_message_size_ = kIndexerRpcMaxMessageSize;
     event_sched_server_.start_server(make_bind_host_port(bind_host_,
                                                          /*port=*/0));
     event_exec_server_.start_server(make_bind_host_port(bind_host_,
@@ -595,10 +596,6 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Now have all of the subsystems register themselves with the mempool.
     register_db_with_mempool();
-    const DbTip admission_tip = ctx_->get_tip();
-    Registration::registration().publish_event_canonical_tip(
-        EventCanonicalTip{.block_id = admission_tip.id,
-                          .consensus_value = admission_tip.value});
     register_auth_with_mempool();
     register_coordinator_with_mempool()();
     if (recovered_existing_chain_) {

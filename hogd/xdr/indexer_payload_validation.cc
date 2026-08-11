@@ -34,14 +34,17 @@ nondeterministic_data_equal(const NondeterministicProposalData &lhs,
   return x23::serialize(lhs) == x23::serialize(rhs);
 }
 
+} // namespace
+
 x23::Async<IndexerPayloadStatus<ProposalTxsHash>>
-validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
+validate_indexer_canonical_proposal_mapping(
+    const ProposalTxs &proposal_txs, const TxEventLogBatch &event_logs,
+    const ProposedTransactionBatch &tx_bodies)
 {
   x23::XdrVec<SignedTransactionHash> canonical_hashes;
   x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
-  if (!(co_await parallel_batch_to_t(payload.proposal_txs.hash,
-                                     canonical_hashes)) ||
-      !(co_await parallel_batch_to_t(payload.proposal_txs.nondeterministic_data,
+  if (!(co_await parallel_batch_to_t(proposal_txs.hash, canonical_hashes)) ||
+      !(co_await parallel_batch_to_t(proposal_txs.nondeterministic_data,
                                      canonical_nondeterministic_data))) {
     co_return std::unexpected("malformed canonical ProposalTxs parallel batch");
   }
@@ -49,8 +52,8 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
     co_return std::unexpected(
         "canonical ProposalTxs batch cardinalities differ");
   }
-  if (canonical_hashes.size() != payload.event_logs.size() ||
-      canonical_hashes.size() != payload.tx_bodies.size()) {
+  if (canonical_hashes.size() != event_logs.size() ||
+      canonical_hashes.size() != tx_bodies.size()) {
     co_return std::unexpected(
         "canonical proposal and event/body batch cardinalities differ");
   }
@@ -69,11 +72,10 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
   }
 
   std::unordered_set<SignedTransactionHash, ByteArrayHasher> seen_bodies;
-  seen_bodies.reserve(payload.tx_bodies.size());
-  for (size_t i = 0; i < payload.tx_bodies.size(); ++i) {
-    const SignedTransactionHash body_hash =
-        sha256(payload.tx_bodies[i].signed_tx.tx);
-    if (body_hash != payload.event_logs[i].proposed_tx_hash) {
+  seen_bodies.reserve(tx_bodies.size());
+  for (size_t i = 0; i < tx_bodies.size(); ++i) {
+    const SignedTransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
+    if (body_hash != event_logs[i].proposed_tx_hash) {
       co_return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
@@ -86,8 +88,7 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
           "event/body transaction is missing from canonical ProposalTxs");
     }
     if (!nondeterministic_data_equal(
-            payload.tx_bodies[i].nondeterministic_proposal_data,
-            entry->second)) {
+            tx_bodies[i].nondeterministic_proposal_data, entry->second)) {
       co_return std::unexpected(
           "transaction body nondeterministic data differs from canonical "
           "ProposalTxs");
@@ -97,10 +98,8 @@ validate_canonical_proposal_mapping(const IndexerCommittedBlockPayload &payload)
     co_return std::unexpected(
         "canonical ProposalTxs contains extra transactions");
   }
-  co_return proposal_txs_compatibility_hash(payload.proposal_txs);
+  co_return proposal_txs_compatibility_hash(proposal_txs);
 }
-
-} // namespace
 
 SHA256Hash
 compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs)
@@ -144,15 +143,14 @@ validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload)
   if (payload.consensus_value.proposal_header.block_height < 0) {
     co_return std::unexpected("committed outbox height is negative");
   }
-  if (payload.event_logs.size() != payload.tx_bodies.size()) {
-    co_return std::unexpected(
-        "event log and transaction body batch sizes differ");
-  }
   if (compute_indexer_outbox_event_root(payload.event_logs) !=
       payload.consensus_value.proposal_header.events_hash) {
     co_return std::unexpected("event root differs from payload identity");
   }
-  auto proposal_hash = co_await validate_canonical_proposal_mapping(payload);
+  auto proposal_hash =
+      co_await validate_indexer_canonical_proposal_mapping(payload.proposal_txs,
+                                                           payload.event_logs,
+                                                           payload.tx_bodies);
   if (!proposal_hash) {
     co_return std::unexpected(proposal_hash.error());
   }

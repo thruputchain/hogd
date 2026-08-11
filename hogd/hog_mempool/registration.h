@@ -71,8 +71,16 @@ public:
   EventPrepareResult prepare_event(const EventCard &card)
   {
     std::unique_lock lk(event_mutex_);
-    if (event_registered_.load(std::memory_order_acquire) ||
-        pending_event_card_) {
+    if (event_registered_.load(std::memory_order_acquire)) {
+      return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
+    }
+    if (pending_event_card_ && card == *pending_event_card_) {
+      EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+      result.snapshot().tip = *pending_event_tip_;
+      result.snapshot().token = pending_event_token_;
+      return result;
+    }
+    if (pending_event_card_) {
       return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
     }
     if (!event_canonical_tip_) {

@@ -386,13 +386,14 @@ EventRPCContext::confirm_committed_block(ConsensusValue consensus_value)
   }
 
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
-  auto committed = co_await indexer_outbox_store_.load_committed(block_height);
+  auto committed = co_await indexer_outbox_store_.load_committed_record(
+      block_height, version::kHogdProtocol());
   if (!committed) {
     error("cannot confirm missing committed indexer outbox height {}: {}",
           block_height, committed.error());
     co_return EventError{EventErrorCode::kInternal};
   }
-  if (!xdr_equal(committed->consensus_value, consensus_value)) {
+  if (!xdr_equal(committed->payload.consensus_value, consensus_value)) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
 
@@ -429,77 +430,29 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   const ConsensusValueHash tip_hash =
       tip_height == -1 ? ConsensusValueHash{} : sha256(consensus_value);
   const std::string current_protocol(version::kHogdProtocol());
+  const BlockHeight max_allowed_height =
+      tip_height == INT64_MAX ? INT64_MAX : tip_height + 1;
 
   // Validation phase. No durable state is changed until every retained origin
   // and committed record, the protocol sequence, candidate promotion boundary,
   // and scheduler-tip relationship have passed.
-  auto records = indexer_outbox_store_.enumerate_committed_records_raw();
-  if (!records) {
-    error("failed to enumerate committed indexer outbox records: {}",
-          records.error());
+  auto history =
+      co_await indexer_outbox_store_
+          .validate_and_cache_committed_history_snapshot(max_allowed_height);
+  if (!history) {
+    error("failed to validate committed indexer outbox history: {}",
+          history.error());
     co_return EventError{EventErrorCode::kInternal};
   }
+  auto *records = &history->records;
+  auto *origins = &history->origins;
+  auto *current_origin = &history->current_origin;
   auto candidates = indexer_outbox_store_.enumerate_candidate_records_raw();
   if (!candidates) {
     error("failed to enumerate candidate indexer outbox records: {}",
           candidates.error());
     co_return EventError{EventErrorCode::kInternal};
   }
-  auto origins = indexer_outbox_store_.enumerate_epoch_origins_raw();
-  if (!origins) {
-    error("failed to enumerate indexer outbox epoch origins: {}",
-          origins.error());
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  auto current_origin = indexer_outbox_store_.load_current_epoch_origin();
-  if (!current_origin) {
-    error("failed to load current indexer outbox epoch origin: {}",
-          current_origin.error());
-    co_return EventError{EventErrorCode::kInternal};
-  }
-
-  std::unordered_map<std::string, IndexerOutboxEpochOriginInfo>
-      origins_by_protocol;
-  std::optional<size_t> current_origin_index;
-  for (size_t i = 0; i < origins->size(); ++i) {
-    const auto &origin_info = (*origins)[i];
-    if (origin_info.epoch_sequence != i) {
-      error("indexer outbox epoch sequence is discontinuous at {}",
-            origin_info.epoch_sequence);
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (!origins_by_protocol.emplace(origin_info.protocol, origin_info)
-             .second) {
-      error("duplicate indexer outbox epoch origin for protocol {}",
-            origin_info.protocol);
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (origin_info.protocol == current_protocol) {
-      current_origin_index = i;
-    }
-  }
-  if (current_origin_index && *current_origin_index + 1 != origins->size()) {
-    error("archival indexer outbox epoch appears after current epoch");
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  if (current_origin->has_value() != current_origin_index.has_value()) {
-    error("current indexer outbox epoch origin metadata is inconsistent");
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  if (*current_origin) {
-    const auto &current_origin_info = (*origins)[*current_origin_index];
-    if ((*current_origin)->epoch_sequence !=
-            current_origin_info.epoch_sequence ||
-        (*current_origin)->origin.first_height !=
-            current_origin_info.first_height ||
-        (*current_origin)->origin.first_prev_hash !=
-            current_origin_info.first_prev_hash) {
-      error(
-          "current indexer outbox epoch origin payload does not match header");
-      co_return EventError{EventErrorCode::kInternal};
-    }
-  }
-
   const auto is_canonical_candidate = [&](const auto &candidate) {
     return candidate.block_height == tip_height &&
            candidate.event_root ==
@@ -532,93 +485,17 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     co_return EventError{EventErrorCode::kInternal};
   }
 
-  bool saw_current_epoch = false;
-  BlockHeight last_current_height = -1;
   std::optional<IndexerOutboxCommittedRecordInfo> previous_current;
-  std::optional<IndexerOutboxCommittedRecordInfo> previous_record;
-  size_t record_index = 0;
-  std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary;
-  bool boundary_exhausted = false;
-  const BlockHeight max_allowed_height =
-      tip_height == INT64_MAX ? INT64_MAX : tip_height + 1;
-  for (const auto &origin : *origins) {
-    if (boundary_exhausted) {
-      error("indexer outbox epoch {} follows exhausted canonical tail",
-            origin.protocol);
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (canonical_boundary &&
-        (origin.first_height != canonical_boundary->height ||
-         origin.first_prev_hash != canonical_boundary->consensus_hash)) {
-      error("indexer outbox epoch {} does not continue canonical tail",
-            origin.protocol);
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (!canonical_boundary) {
-      canonical_boundary = IndexerOutboxCanonicalBoundary{
-          .height = origin.first_height,
-          .consensus_hash = origin.first_prev_hash,
-      };
-    }
-
-    bool first_record = true;
-    while (record_index < records->size() &&
-           (*records)[record_index].protocol == origin.protocol) {
-      const auto &record = (*records)[record_index];
-      if (record.block_height > max_allowed_height) {
-        error("committed indexer outbox height {} is ahead of canonical tip {}",
-              record.block_height, tip_height);
-        co_return EventError{EventErrorCode::kInternal};
-      }
-      if ((first_record && (record.block_height != origin.first_height ||
-                            record.prev_hash != origin.first_prev_hash)) ||
-          (!first_record &&
-           (previous_record->block_height == INT64_MAX ||
-            record.block_height != previous_record->block_height + 1 ||
-            record.prev_hash != previous_record->consensus_hash))) {
-        error("committed outbox chain is disconnected at {}",
-              record.block_height);
-        co_return EventError{EventErrorCode::kInternal};
-      }
-
-      if (record.protocol == current_protocol) {
-        auto committed =
-            co_await indexer_outbox_store_.load_committed(record.block_height);
-        if (!committed) {
-          error("failed to validate current committed outbox record at {}: {}",
-                record.block_height, committed.error());
-          co_return EventError{EventErrorCode::kInternal};
-        }
-        if (sha256(committed->consensus_value) != record.consensus_hash ||
-            committed->consensus_value.prev_hash != record.prev_hash) {
-          error("current committed outbox header/payload mismatch at {}",
-                record.block_height);
-          co_return EventError{EventErrorCode::kInternal};
-        }
-        saw_current_epoch = true;
-        last_current_height = record.block_height;
-        previous_current = record;
-      }
-
-      previous_record = record;
-      if (record.block_height == INT64_MAX) {
-        canonical_boundary.reset();
-        boundary_exhausted = true;
-      }
-      else {
-        canonical_boundary = IndexerOutboxCanonicalBoundary{
-            .height = record.block_height + 1,
-            .consensus_hash = record.consensus_hash,
-        };
-      }
-      first_record = false;
-      ++record_index;
-    }
+  if (history->latest && history->latest->protocol == current_protocol) {
+    previous_current = history->latest;
   }
-  if (record_index != records->size()) {
-    error("committed outbox records do not follow epoch origin order");
-    co_return EventError{EventErrorCode::kInternal};
-  }
+  const bool saw_current_epoch = previous_current.has_value();
+  const BlockHeight last_current_height =
+      previous_current ? previous_current->block_height : -1;
+  std::optional<IndexerOutboxCommittedRecordInfo> previous_record =
+      history->latest;
+  std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary =
+      history->canonical_boundary;
 
   std::optional<std::pair<BlockHeight, ConsensusValueHash>> planned_origin;
   if (promotion_needed) {
@@ -668,7 +545,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
         co_return EventError{EventErrorCode::kInternal};
       }
     }
-    else if (last_current_height == tip_height + 1) {
+    else if (tip_height != INT64_MAX && last_current_height == tip_height + 1) {
       if (previous_current->prev_hash != tip_hash) {
         error("single outbox-ahead record does not link to scheduler tip");
         co_return EventError{EventErrorCode::kInternal};
@@ -690,7 +567,8 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
                                     canonical_boundary->height ||
                                 (*current_origin)->origin.first_prev_hash !=
                                     canonical_boundary->consensus_hash)) ||
-        (previous_record && ((*current_origin)->origin.first_height !=
+        (previous_record && (previous_record->block_height == INT64_MAX ||
+                             (*current_origin)->origin.first_height !=
                                  previous_record->block_height + 1 ||
                              (*current_origin)->origin.first_prev_hash !=
                                  previous_record->consensus_hash))) {
@@ -745,45 +623,46 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
             initialized.error());
       co_return EventError{EventErrorCode::kInternal};
     }
-    current_origin = indexer_outbox_store_.load_current_epoch_origin();
-    if (!current_origin || !*current_origin) {
+    auto loaded_current_origin =
+        indexer_outbox_store_.load_current_epoch_origin();
+    if (!loaded_current_origin || !*loaded_current_origin) {
       error("current indexer outbox epoch origin was not durably initialized");
       co_return EventError{EventErrorCode::kInternal};
     }
+    *current_origin = std::move(**loaded_current_origin);
     const IndexerOutboxEpochOriginInfo initialized_origin{
         .protocol = current_protocol,
         .epoch_sequence = (**current_origin).origin.epoch_sequence,
         .first_height = (**current_origin).origin.first_height,
         .first_prev_hash = (**current_origin).origin.first_prev_hash,
     };
-    if (!origins_by_protocol
-             .emplace(initialized_origin.protocol, initialized_origin)
-             .second) {
-      error("new current indexer outbox origin duplicates retained protocol");
-      co_return EventError{EventErrorCode::kInternal};
-    }
     origins->push_back(initialized_origin);
   }
 
   if (promotion_needed) {
+    CHECK(promotion->has_value());
     auto promoted = co_await commit_block(block_id, consensus_value);
     if (!promoted) {
       co_return promoted.error();
     }
-    auto committed = co_await indexer_outbox_store_.load_committed(tip_height);
-    if (!committed || sha256(committed->consensus_value) != tip_hash ||
-        committed->consensus_value.prev_hash != consensus_value.prev_hash) {
-      error("promoted retained candidate did not produce the validated outbox "
-            "boundary");
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    auto latest = indexer_outbox_store_.latest_committed_record_raw();
-    if (!latest || !*latest || (*latest)->block_height != tip_height ||
-        (*latest)->consensus_hash != tip_hash) {
+    auto promoted_record =
+        co_await indexer_outbox_store_.lookup_validated_committed_record(
+            tip_height);
+    const auto &promoted_payload = (**promotion).committed;
+    const IndexerOutboxCommittedRecordInfo expected_promoted_record{
+        .block_height = tip_height,
+        .protocol = current_protocol,
+        .payload_byte_length = x23::xdr_size(promoted_payload),
+        .payload_digest = sha256(promoted_payload),
+        .consensus_hash = tip_hash,
+        .prev_hash = consensus_value.prev_hash,
+    };
+    if (!promoted_record || !*promoted_record ||
+        **promoted_record != expected_promoted_record) {
       error("promoted retained candidate is not the committed outbox tip");
       co_return EventError{EventErrorCode::kInternal};
     }
-    previous_record = std::move(**latest);
+    previous_record = std::move(**promoted_record);
     if (previous_record->block_height == INT64_MAX) {
       canonical_boundary.reset();
     }
@@ -797,30 +676,14 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 
   x23::CoroGuard outbox_guard;
   co_await outbox_guard(outbox_commit_lock_);
-  auto durable_tip = indexer_outbox_store_.latest_committed_record_raw();
-  if (!durable_tip) {
-    error("failed to re-read committed indexer outbox tip: {}",
-          durable_tip.error());
+  auto stable =
+      co_await indexer_outbox_store_.cache_validated_committed_append_tip(
+          previous_record, *current_origin, canonical_boundary);
+  if (!stable) {
+    error("committed indexer outbox advanced during reconciliation: {}",
+          stable.error());
     co_return EventError{EventErrorCode::kInternal};
   }
-  const auto same_tip = [](const auto &lhs, const auto &rhs) {
-    if (lhs.has_value() != rhs.has_value()) {
-      return false;
-    }
-    return !lhs || (lhs->block_height == rhs->block_height &&
-                    lhs->protocol == rhs->protocol &&
-                    lhs->payload_byte_length == rhs->payload_byte_length &&
-                    lhs->payload_digest == rhs->payload_digest &&
-                    lhs->consensus_hash == rhs->consensus_hash &&
-                    lhs->prev_hash == rhs->prev_hash);
-  };
-  if (!same_tip(*durable_tip, previous_record)) {
-    error("committed indexer outbox advanced during reconciliation");
-    co_return EventError{EventErrorCode::kInternal};
-  }
-
-  co_await indexer_outbox_store_.cache_validated_committed_append_tip(
-      previous_record, *current_origin, canonical_boundary);
 
   if (previous_record) {
     auto removed =
@@ -935,40 +798,40 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
       }
     }
     else {
+      auto progress_record =
+          co_await indexer_outbox_store_.lookup_validated_committed_record(
+              progress.contiguous_height);
+      if (!progress_record) {
+        error("failed to inspect pulled indexer progress at height {}: {}",
+              progress.contiguous_height, progress_record.error());
+        co_return pull_failure(EventIndexerPullInternalFailure,
+                               "durable outbox progress record is unavailable");
+      }
       const bool empty_epoch_boundary =
           progress.contiguous_height == origin_boundary &&
           progress.last_consensus_hash == progress.origin.first_prev_hash &&
           progress.last_payload_digest == SHA256Hash{};
       bool validate_retained_record = true;
-      if (empty_epoch_boundary) {
-        auto boundary_exists =
-            indexer_outbox_store_.has_committed(origin_boundary);
-        if (!boundary_exists) {
-          error("failed to inspect genesis outbox boundary: {}",
-                boundary_exists.error());
-          co_return pull_failure(EventIndexerPullInternalFailure,
-                                 "failed to inspect durable outbox boundary");
-        }
-        if (!*boundary_exists) {
-          validate_retained_record = false;
-        }
+      if (empty_epoch_boundary && !*progress_record) {
+        validate_retained_record = false;
       }
       if (validate_retained_record) {
-        auto boundary = indexer_outbox_store_.load_committed_record_info_raw(
-            progress.contiguous_height);
-        if (!boundary) {
-          error("failed to validate pulled indexer progress at height {}: {}",
-                progress.contiguous_height, boundary.error());
+        if (!*progress_record) {
+          error("validated indexer progress record is unavailable at height {}",
+                progress.contiguous_height);
           co_return pull_failure(
               EventIndexerPullInternalFailure,
               "durable outbox progress record is unavailable");
         }
-        if (boundary->consensus_hash != progress.last_consensus_hash ||
-            boundary->payload_digest != progress.last_payload_digest ||
+        if ((**progress_record).block_height != progress.contiguous_height ||
+            (**progress_record).consensus_hash !=
+                progress.last_consensus_hash ||
+            (**progress_record).payload_digest !=
+                progress.last_payload_digest ||
             (progress.contiguous_height == origin_boundary &&
              progress.last_consensus_hash != progress.origin.first_prev_hash) ||
             (progress.contiguous_height > origin_boundary &&
-             boundary->protocol !=
+             (**progress_record).protocol !=
                  std::string_view(progress.origin.protocol))) {
           co_return pull_failure(
               EventIndexerPullProgressConflict,
@@ -1037,14 +900,20 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
   }
 
   auto record =
-      indexer_outbox_store_.load_committed_record_info_raw(next_height);
+      co_await indexer_outbox_store_.lookup_validated_committed_record(
+          next_height);
   if (!record) {
-    error("pullable committed outbox record {} is unavailable: {}", next_height,
-          record.error());
+    error("failed to inspect pullable committed outbox record {}: {}",
+          next_height, record.error());
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox record is unavailable");
   }
-  if (record->protocol != std::string_view(response_origin.protocol)) {
+  if (!*record) {
+    error("pullable committed outbox record {} is missing", next_height);
+    co_return pull_failure(EventIndexerPullInternalFailure,
+                           "pullable durable outbox record is unavailable");
+  }
+  if ((**record).protocol != std::string_view(response_origin.protocol)) {
     if (response_origin != current_origin) {
       x23::CoroGuard guard;
       co_await guard(outbox_commit_lock_);
@@ -1061,22 +930,28 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox record has wrong epoch");
   }
-  auto payload = co_await indexer_outbox_store_.load_committed(
+  auto loaded = co_await indexer_outbox_store_.load_committed_record(
       next_height, std::string_view(response_origin.protocol));
-  if (!payload) {
+  if (!loaded) {
     error("failed to load pullable committed outbox record {}: {}", next_height,
-          payload.error());
+          loaded.error());
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox payload is invalid");
   }
-  auto block = co_await make_indexer_committed_block(*payload);
-  if (!block || block->identity.consensus_hash != record->consensus_hash ||
-      block->identity.payload_digest != record->payload_digest) {
+  if (loaded->info != **record) {
     error("pullable committed outbox record {} failed identity validation",
           next_height);
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox identity is invalid");
   }
+  IndexerCommittedBlock block{
+      .payload = std::move(loaded->payload),
+      .identity =
+          IndexerCommittedBlockIdentity{
+              .consensus_hash = loaded->info.consensus_hash,
+              .payload_digest = loaded->info.payload_digest,
+          },
+  };
 
   {
     x23::CoroGuard guard;
@@ -1089,7 +964,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
                              "event outbox state changed during pull");
     }
   }
-  co_return pull_block(std::move(response_origin), std::move(*block));
+  co_return pull_block(std::move(response_origin), std::move(block));
 }
 
 void
@@ -1296,9 +1171,9 @@ EventRPCContext::find_canonical_candidate(
     IndexerOutboxCommittedPayload committed{
         .format_version = kIndexerOutboxFormatVersion,
         .consensus_value = consensus_value,
-        .proposal_txs = candidate->proposal_txs,
-        .event_logs = candidate->event_logs,
-        .tx_bodies = candidate->tx_bodies,
+        .proposal_txs = std::move(candidate->proposal_txs),
+        .event_logs = std::move(candidate->event_logs),
+        .tx_bodies = std::move(candidate->tx_bodies),
     };
     if (auto valid = co_await validate_indexer_committed_payload(committed);
         !valid) {
@@ -1312,9 +1187,7 @@ EventRPCContext::find_canonical_candidate(
           "multiple distinct candidates match the canonical consensus value");
     }
     if (!selected) {
-      selected = CandidatePromotion{.block_id = record.block_id,
-                                    .candidate = std::move(*candidate),
-                                    .committed = std::move(committed)};
+      selected = CandidatePromotion{.committed = std::move(committed)};
       selected_bytes = std::move(bytes);
     }
   }

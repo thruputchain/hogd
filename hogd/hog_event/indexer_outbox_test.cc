@@ -639,6 +639,33 @@ TEST_F(IndexerOutboxTest, CommittedAppendScansHistoryOnceAndRebuildsOnReopen)
   EXPECT_EQ(reopened.committed_history_scan_count_for_test()(), 1UL);
 }
 
+TEST_F(IndexerOutboxTest, ValidatedHistorySnapshotInstallsMatchingAppendCache)
+{
+  auto first = make_committed(1, {}, {});
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, first);
+    ASSERT_TRUE(store.publish_committed(first)().has_value());
+  }
+
+  IndexerOutboxStore reopened = open_store(dir_);
+  auto history = reopened.validate_and_cache_committed_history_snapshot()();
+  ASSERT_TRUE(history.has_value()) << history.error();
+  ASSERT_EQ(history->records.size(), 1UL);
+  ASSERT_TRUE(history->latest.has_value());
+  EXPECT_EQ(*history->latest, history->records.front());
+
+  auto cached = reopened.lookup_validated_committed_record(1)();
+  ASSERT_TRUE(cached.has_value()) << cached.error();
+  ASSERT_TRUE(cached->has_value());
+  EXPECT_EQ(**cached, *history->latest);
+
+  auto second = make_committed(2, {}, {});
+  second.consensus_value.prev_hash = sha256(first.consensus_value);
+  ASSERT_TRUE(reopened.publish_committed(second)().has_value());
+  EXPECT_EQ(reopened.committed_history_scan_count_for_test()(), 1UL);
+}
+
 TEST_F(IndexerOutboxTest, PostLinkFailureRetryRepairsAppendCache)
 {
   constexpr std::array kFaults{
@@ -1209,7 +1236,8 @@ TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
                                                 });
   auto batch_mismatch = store.load_candidate(48)();
   ASSERT_FALSE(batch_mismatch.has_value());
-  EXPECT_NE(batch_mismatch.error().find("batch sizes"), std::string::npos);
+  EXPECT_NE(batch_mismatch.error().find("cardinalities differ"),
+            std::string::npos);
 }
 
 TEST_F(IndexerOutboxTest, NondeterministicDataMutationIsRejected)

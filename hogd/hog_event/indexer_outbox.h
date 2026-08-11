@@ -51,6 +51,8 @@ struct IndexerOutboxCommittedRecordInfo {
   SHA256Hash payload_digest;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
+
+  bool operator==(const IndexerOutboxCommittedRecordInfo &) const = default;
 };
 
 struct IndexerOutboxCandidateRecordInfo {
@@ -75,6 +77,19 @@ struct IndexerOutboxEpochOriginInfo {
 struct IndexerOutboxCanonicalBoundary {
   BlockHeight height;
   ConsensusValueHash consensus_hash;
+};
+
+struct IndexerOutboxLoadedCommittedRecord {
+  IndexerOutboxCommittedRecordInfo info;
+  IndexerOutboxCommittedPayload payload;
+};
+
+struct IndexerOutboxValidatedHistory {
+  std::vector<IndexerOutboxCommittedRecordInfo> records;
+  std::vector<IndexerOutboxEpochOriginInfo> origins;
+  std::optional<IndexerOutboxEpochOrigin> current_origin;
+  std::optional<IndexerOutboxCommittedRecordInfo> latest;
+  std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary;
 };
 
 enum class IndexerOutboxFaultPoint {
@@ -127,8 +142,6 @@ public:
   load_candidate(BlockID block_id) const;
   IndexerOutboxStatus<bool> has_candidate(BlockID block_id) const;
   IndexerOutboxStatus<void> remove_candidate(BlockID block_id) const;
-  IndexerOutboxStatus<std::vector<BlockID>>
-  enumerate_candidate_block_ids_raw() const;
   IndexerOutboxStatus<std::vector<IndexerOutboxCandidateRecordInfo>>
   enumerate_candidate_records_raw() const;
 
@@ -136,9 +149,16 @@ public:
   publish_committed(const IndexerOutboxCommittedPayload &payload) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
-  x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
-  load_committed(BlockHeight block_height,
-                 std::string_view expected_protocol) const;
+  x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
+  load_committed_record(BlockHeight block_height,
+                        std::string_view expected_protocol) const;
+  // Reconciliation validates the whole immutable namespace before enabling
+  // this lookup. Thereafter the singleton flock and no-clobber publication let
+  // the latest identity come from the append cache and older identities from
+  // one bounded header read without re-hashing payload bytes.
+  x23::Async<
+      IndexerOutboxStatus<std::optional<IndexerOutboxCommittedRecordInfo>>>
+  lookup_validated_committed_record(BlockHeight block_height) const;
   IndexerOutboxStatus<bool> has_committed(BlockHeight block_height) const;
   IndexerOutboxStatus<std::optional<IndexerOutboxCommittedRecordInfo>>
   latest_committed_record_raw() const;
@@ -154,6 +174,12 @@ public:
   enumerate_committed_records_raw() const;
   IndexerOutboxStatus<std::vector<IndexerOutboxEpochOriginInfo>>
   enumerate_epoch_origins_raw() const;
+  // Under the publication lock, validates immutable file/digest identities,
+  // epoch ordering and origins, canonical continuity, and current-protocol
+  // payload semantics, then installs the matching append cache.
+  x23::Async<IndexerOutboxStatus<IndexerOutboxValidatedHistory>>
+  validate_and_cache_committed_history_snapshot(
+      std::optional<BlockHeight> max_height = std::nullopt) const;
   IndexerOutboxStatus<std::optional<IndexerOutboxEpochOrigin>>
   load_current_epoch_origin() const;
   x23::Async<IndexerOutboxStatus<void>>
@@ -167,11 +193,10 @@ public:
     return recognized_residue_on_open_;
   }
 
-  // Reconciliation has already performed the O(N) integrity scan, so seed the
-  // O(1) append state from that validated snapshot. The process-wide flock and
-  // committed_publication_lock_ make this cache valid: no external writer can
-  // change the namespace while this store is open.
-  x23::Async<void> cache_validated_committed_append_tip(
+  // Recheck the expected append tip and absence of its successor after
+  // reconciliation mutations, then update the cache under the publication
+  // lock.
+  x23::Async<IndexerOutboxStatus<void>> cache_validated_committed_append_tip(
       std::optional<IndexerOutboxCommittedRecordInfo> latest,
       std::optional<IndexerOutboxEpochOrigin> current_origin,
       std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary) const;
@@ -190,6 +215,9 @@ private:
       BlockHeight first_height, ConsensusValueHash first_prev_hash) const;
   x23::Async<IndexerOutboxStatus<void>>
   initialize_committed_append_cache_unlocked() const;
+  x23::Async<IndexerOutboxStatus<IndexerOutboxValidatedHistory>>
+  validate_committed_history_unlocked(
+      std::optional<BlockHeight> max_height = std::nullopt) const;
   IndexerOutboxStatus<std::vector<std::string>> list_names() const;
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
@@ -198,6 +226,8 @@ private:
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
   load_header(std::string_view filename) const;
+  IndexerOutboxStatus<IndexerOutboxCommittedRecordInfo>
+  load_committed_record_info_header(BlockHeight block_height) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_payload(std::string_view filename,
                const IndexerOutboxRecordHeader &header) const;
