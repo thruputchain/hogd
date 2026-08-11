@@ -333,6 +333,38 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     frame_flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
+  // Reentrance guard, the last admission step before the frame is started, as
+  // in SystemCallHandler::invoke(): a frame may not be opened for an address
+  // that already has a frame on the stack. Production rejects such a kInvoke
+  // with kSyscallErrorCodeReentrance before creating any child frame, so
+  // without this check the harness can build a frame stack production could
+  // never produce (issue #3301). There is no bypass here and none in
+  // production either -- the per-test escape hatch invoke() used to consult was
+  // removed in #3346, so a test that wants a reentrant stack has no way to ask
+  // for one.
+  //
+  // The rejection is reported the way production reports it, in two places: the
+  // caller's synthetic kInvoke is traced as kSyscallErrorCodeReentrance with
+  // its gas untouched (production charges nothing for an invoke it refuses --
+  // syscall_Invoke_inner() returns the SyscallError with a zero gas amount),
+  // and the caller gets a structured error rather than an opened frame. The
+  // steps between the trace and here only compute locals (frame_invocation,
+  // frame_flags), so the rejected open leaves no trace of itself in the
+  // handler: start_frame() has not run, and neither stack below has been
+  // pushed. The caller therefore owes no matching finish.
+  //
+  // has_active_frame_for() is false on an empty stack, so this can only fire
+  // with a caller frame running: the trace started above is always the one
+  // finished here, and finish_syscall_trace() tolerates a trace that
+  // start_syscall_trace() dropped under memory pressure (#2644).
+  if (handler_.has_active_frame_for(invocation.invoked_address)) {
+    handler_.finish_syscall_trace(SyscallErrorCode::kSyscallErrorCodeReentrance,
+                                  current_gas);
+    error("invalid argument: start_mock_invocation_frame called for an address "
+          "that already has an active invocation frame (reentrance)");
+    return kTestFFIErrorCodeInvalidArgument;
+  }
+
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
   //

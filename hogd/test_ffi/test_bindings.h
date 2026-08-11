@@ -54,8 +54,10 @@ enum TestFFIErrorCode {
   kTestFFIErrorCodeUnrecoverableError = 5,
   // Contract failed wasm verification (e.g., memory exceeds limits)
   kTestFFIErrorCodeContractVerificationFailed = 6,
-  // A scalar argument violated a documented precondition (e.g. a negative
-  // storage-token grant, which would persist an invalid native-token balance).
+  // An argument violated a documented precondition (e.g. a negative
+  // storage-token grant, which would persist an invalid native-token balance,
+  // or a mock invocation frame opened for an address that already has an active
+  // frame, which production rejects as reentrance).
   kTestFFIErrorCodeInvalidArgument = 7,
 };
 
@@ -250,6 +252,14 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
 // defined-but-unimplemented DelegateCall -- is rejected with
 // kTestFFIErrorCodeInvalidArgument, and the rejected call is a complete no-op:
 // no frame is opened and the handler stays usable.
+//
+// Frames are also admitted under production's reentrance rule: an address that
+// already has a frame on the stack cannot be invoked again, and a frame opened
+// for one is rejected the same way (production returns
+// kSyscallErrorCodeReentrance from the equivalent kInvoke). That rejection is
+// likewise a no-op, so the caller owes no matching
+// finish_mock_invocation_frame() call. Callers nesting frames must give each
+// level a distinct invoked_address.
 enum TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,

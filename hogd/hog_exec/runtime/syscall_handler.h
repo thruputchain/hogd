@@ -139,6 +139,16 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // True if any frame on the active invocation stack is running the given
+  // address, i.e. invoking it would be reentrant. invoke() applies this itself;
+  // the accessor exists for the test FFI mock frame path, which pushes frames
+  // through start_frame() and so has to apply invoke()'s admission checks
+  // itself (#3301). Trivially false while no frame is running.
+  bool has_active_frame_for(ContractAddress const &address) const noexcept
+  {
+    return invocation_frame_stack_.has_active_frame_for(address);
+  }
+
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
   {
