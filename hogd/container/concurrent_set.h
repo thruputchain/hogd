@@ -108,6 +108,14 @@ public:
           // deeper level without ever seeing the concurrent insert, and could
           // insert a duplicate there. The remaining TOCTOU (value inserted
           // after this re-read) is covered by the stale-level check below.
+          //
+          // The fence pairs with the one after a successful claim: a claim
+          // whose stale-level recheck did not observe the level this thread
+          // is about to descend past must be observed by this re-read
+          // ([atomics.order] p4.4 through the resizer's level-count store),
+          // so one of the two inserts always sees the other. Without it this
+          // load/claim pair is store-buffering that RCpc arm64 reorders.
+          std::atomic_thread_fence(std::memory_order_seq_cst);
           v = l[index].load(std::memory_order_acquire);
           if (v == Traits::kInserting) {
             v = cancel_claim(l[index]);
@@ -132,6 +140,17 @@ public:
           // Count the claim, not the publication: the slot is consumed either
           // way, and try_resize() derives the load factor from inserts_.
           inserts_.fetch_add(1, std::memory_order_relaxed);
+
+          // The claim store must be globally visible before we sample the
+          // level count below, or a same-value insert that probed this slot
+          // while it was still empty can publish into a deeper level while
+          // our stale recheck lets us publish here (store-buffering: claim
+          // CAS release + level-count acquire load order nothing). Pairs
+          // with the fence before the descend-path re-read above; seq_cst
+          // on the claim CAS alone would not do it, since no other
+          // participating operation is seq_cst. x86 RMWs are full fences so
+          // this only changes arm64 RCpc behavior.
+          std::atomic_thread_fence(std::memory_order_seq_cst);
 
           // A resize may have added a deeper level between our levels() check
           // and the claim. If so, a concurrent inserter of the same value could
