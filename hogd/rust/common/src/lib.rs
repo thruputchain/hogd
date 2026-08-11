@@ -78,10 +78,16 @@ pub fn verify_contract_meter(
         max_imported_functions: 1,
         max_table_initial_size: MAX_TABLE_ELEMENTS,
         reject_floats: true,
+        // The raw spec section carries its wire-format version in the section
+        // name (sdk_rs `groundhog-contract-spec::RAW_SECTION_NAME`). Bump the
+        // suffix here in lockstep with the SDK; format 0 is unsupported there
+        // (two incompatible encodings shipped under that name), so hogd does
+        // not accept it either. The final section (`groundhogspecv0`) is
+        // separately versioned and unchanged.
         allowed_custom_sections: vec![
             "name".to_string(),
             "groundhogspecv0".to_string(),
-            "groundhogspecrawv0".to_string(),
+            "groundhogspecrawv1".to_string(),
         ],
         ..groundhog_wasm_meter::Config::default()
     };
