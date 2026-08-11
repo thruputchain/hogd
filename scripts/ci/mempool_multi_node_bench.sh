@@ -520,7 +520,9 @@ done
 # A mempool killed by a signal says even less: its log ends wherever it happened
 # to be, with no report of its own, so the log replay alone leaves the crash
 # unattributed. Pull a backtrace off its host too, while the core the kernel
-# just wrote is still there.
+# just wrote is still there. Each mempool shares its host with a hog_db, so the
+# binary is named: on a cascading crash it is what picks this process's core out
+# of the two.
 await_mempool() {
   local label=$1
   local pid=$2
@@ -530,7 +532,7 @@ await_mempool() {
   if [ "$status" -ne 0 ]; then
     echo "$label $(ci_describe_exit_status "$status")" >&2
     replay_control_log_for_label "$label"
-    replay_crash_backtrace_for_label "$label" "$status"
+    replay_crash_backtrace_for_label "$label" "$status" "$MEMPOOL_BINARY"
     return "$status"
   fi
   echo "$label wait completed"

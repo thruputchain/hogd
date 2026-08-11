@@ -86,35 +86,45 @@ replay_control_log_for_label() {
   echo "no control log record for $wanted_label" >&2
 }
 
+# How many candidate cores to identify before giving up on finding the one that
+# belongs to the crashed process. Each costs one gdb read of the core's note
+# section, so this bounds the work on a host littered with cores.
+CRASH_MAX_CANDIDATE_CORES=${CRASH_MAX_CANDIDATE_CORES:-8}
+
 # The shell fragment that turns a core file into a backtrace, run on the host
 # that produced it. The search directories arrive as positional parameters and
-# the line cap as an assignment, so the body itself stays single-quoted and
+# everything else as assignments, so the body itself stays single-quoted and
 # nothing in it is expanded here on the way through ssh.
 #
-# Usage: crash_backtrace_remote_script <max lines> <search dir>...
+# Usage: crash_backtrace_remote_script <binary> <max lines> <max cores> \
+#            <search dir>...
 crash_backtrace_remote_script() {
-  local max_lines=$1
-  local quoted_dirs
-  shift
+  local binary=$1
+  local max_lines=$2
+  local max_cores=$3
+  local quoted_binary quoted_dirs
+  shift 3
 
+  printf -v quoted_binary '%q' "$binary"
   printf -v quoted_dirs '%q ' "$@"
-  printf 'CRASH_MAX_LINES=%s\nset -- %s\n%s\n' \
-    "$max_lines" "${quoted_dirs% }" '
-# The kernel names the core after kernel.core_pattern, which is a bare "core"
-# on some hosts and "core.<pid>" on others, and a stale core from an earlier
-# run can sit beside this one, so take the newest match in the first directory
-# that has one. "$HOME" comes last because only this shell knows what it is.
-core=
+  printf 'CRASH_BINARY=%s\nCRASH_MAX_LINES=%s\nCRASH_MAX_CORES=%s\nset -- %s\n%s\n' \
+    "$quoted_binary" "$max_lines" "$max_cores" "${quoted_dirs% }" '
+# Collect every candidate across every directory, newest first. Not
+# first-directory-wins: a stale core left in the job directory by an earlier
+# run must not hide the fresh one the kernel just wrote somewhere else.
+# "$HOME" comes last because only this shell knows what it is.
+patterns=
 for dir in "$@" "$HOME"; do
   [ -d "$dir" ] || continue
-  found=$(cd "$dir" && ls -1t core core.* *.core 2>/dev/null | head -n 1)
-  if [ -n "$found" ]; then
-    core=$dir/$found
-    break
-  fi
+  # The kernel names the core after kernel.core_pattern, which is a bare "core"
+  # on some hosts and "core.<pid>" on others.
+  patterns="$patterns $dir/core $dir/core.* $dir/*.core"
 done
+# Unquoted on purpose: this is where the globs above are expanded. Patterns
+# that match nothing stay literal and ls rejects them into /dev/null.
+candidates=$(ls -1td $patterns 2>/dev/null | head -n "$CRASH_MAX_CORES")
 
-if [ -z "$core" ]; then
+if [ -z "$candidates" ]; then
   pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null || echo unknown)
   echo "no core file under $* or $HOME (kernel.core_pattern=$pattern)"
   # A pattern beginning with "|" hands the core to a helper rather than writing
@@ -127,24 +137,60 @@ if [ -z "$core" ]; then
   exit 0
 fi
 
-echo "core file: $core"
 if ! command -v gdb >/dev/null 2>&1; then
-  echo "(gdb is not installed on this host; the core is left in place)"
+  echo "(gdb is not installed on this host; cores left in place:"
+  echo "$candidates" | sed "s/^/  /"
+  echo ")"
   exit 0
 fi
 
 # The core records the path the process was launched from, which is how
-# [save_core_dumps.sh] pairs a core with its binary. Without the binary gdb
-# still unwinds, but the frames have no symbols.
-exe=$(gdb -batch -q -c "$core" -ex "info auxv" 2>/dev/null |
-  sed -n "s/.*AT_EXECFN[^\"]*\"\(.*\)\"$/\1/p")
-# AT_EXECFN is the path as the process was invoked, so it is relative when the
-# process was started that way. It is relative to the directory the process ran
-# in, which is the directory the kernel wrote the core into.
-case $exe in
-/* | "") ;;
-*) exe=${core%/*}/${exe#./} ;;
-esac
+# [save_core_dumps.sh] pairs a core with its binary. Here it also says which
+# core is ours: this benchmark puts a hog-db on the same host as each mempool,
+# so a cascading crash leaves more than one, and the newest is not necessarily
+# the one being reported on.
+core_exe() {
+  found=$(gdb -batch -q -c "$1" -ex "info auxv" 2>/dev/null |
+    sed -n "s/.*AT_EXECFN[^\"]*\"\(.*\)\"$/\1/p")
+  # AT_EXECFN is the path as the process was invoked, so it is relative when
+  # the process was started that way -- relative to the directory it ran in,
+  # which is the directory the kernel wrote the core into.
+  case $found in
+  /* | "") ;;
+  *) found=${1%/*}/${found#./} ;;
+  esac
+  printf "%s" "$found"
+}
+
+want=${CRASH_BINARY##*/}
+core= exe= newest= newest_exe=
+for candidate in $candidates; do
+  candidate_exe=$(core_exe "$candidate")
+  if [ -z "$newest" ]; then
+    newest=$candidate
+    newest_exe=$candidate_exe
+  fi
+  if [ -n "$want" ] && [ "${candidate_exe##*/}" = "$want" ]; then
+    core=$candidate
+    exe=$candidate_exe
+    break
+  fi
+done
+
+if [ -n "$core" ]; then
+  echo "core file: $core (from $exe)"
+else
+  # Say so rather than passing an unrelated crash off as this one.
+  core=$newest
+  exe=$newest_exe
+  if [ -n "$want" ]; then
+    echo "no core among the newest $CRASH_MAX_CORES on this host came from" \
+      "$want; the newest core is shown instead and may be an unrelated crash"
+  fi
+  echo "core file: $core (from ${exe:-an unidentified binary})"
+fi
+
+# Without the binary gdb still unwinds, but the frames have no symbols.
 if [ -z "$exe" ] || [ ! -f "$exe" ]; then
   echo "(could not identify the binary for $core; frames will be unsymbolized)"
   exe=
@@ -168,9 +214,16 @@ exit 0
 #
 # Best effort throughout: this runs while a failure is already being reported
 # and must not replace it with a failure of its own.
+#
+# Usage: replay_crash_backtrace_for_label <label> <exit status> [binary]
+#
+# The binary is the one the label was launched as. Pass it wherever it is
+# known: bench hosts run more than one service each, so on a cascading crash it
+# is what tells this process's core apart from its neighbour's.
 replay_crash_backtrace_for_label() {
   local wanted_label=$1
   local status=$2
+  local binary=${3:-}
   local record host label stdout_path stderr_path signal
 
   # Only a fatal signal leaves a core. A process that chose its own exit status
@@ -185,8 +238,8 @@ replay_crash_backtrace_for_label() {
     [[ $label == "$wanted_label" ]] || continue
     echo "===== backtrace for $label on $host (signal $signal) ====="
     remote_run "$host" \
-      "$(crash_backtrace_remote_script "$CRASH_BACKTRACE_MAX_LINES" \
-        "${CRASH_CORE_SEARCH_DIRS[@]}")" ||
+      "$(crash_backtrace_remote_script "$binary" "$CRASH_BACKTRACE_MAX_LINES" \
+        "$CRASH_MAX_CANDIDATE_CORES" "${CRASH_CORE_SEARCH_DIRS[@]}")" ||
       echo "(could not reach $host for a backtrace)"
     echo "===== end of backtrace for $label on $host ====="
     return 0

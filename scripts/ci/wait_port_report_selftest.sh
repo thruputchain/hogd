@@ -187,49 +187,96 @@ expect_contains 'crash for an unknown label says so' \
   'no control log record for node1_mempool' "$out"
 expect_contains 'crash for an unknown label runs on' 'REACHED' "$out"
 
-# End to end over a real core: the fragment that runs on the crashed process's
-# host must find the core, pair it with its binary, and print the crashing
-# frame. Skipped where the toolchain or the kernel's core handling is not there
-# to test against, which must not be reported as a failure.
-crash_dir=$(mktemp -d)
-trap 'rm -rf "$crash_dir"' EXIT
+# End to end over real cores: the fragment that runs on the crashed process's
+# host must find the core the named binary produced, pair it with that binary,
+# and print the crashing frame. Skipped where the toolchain or the kernel's core
+# handling is not there to test against, which must not be reported as a
+# failure.
+#
+# Two cores are staged, in the shape a cascading crash leaves on hog7 or hog11:
+# [decoy] stands in for the hog_db beside the mempool. It is put in the first
+# search directory and made the newer of the two, so picking by directory order
+# or by mtime alone would pick it, and only matching on the binary picks
+# [mempool].
+crash_root=$(mktemp -d)
+trap 'rm -rf "$crash_root"' EXIT
+decoy_dir="$crash_root/decoy_dir"
+mempool_dir="$crash_root/mempool_dir"
+
+# Builds $2 in directory $1 with a crashing function named after it, runs it
+# there, and leaves the core beside it. The crash runs under its own shell: the
+# shell that reaps a signalled child announces it, and that announcement would
+# otherwise be this script's output. The trailing [:] keeps that shell from
+# exec'ing into the program, which would put the crash back under this script.
+stage_core() {
+  local dir=$1 name=$2
+  mkdir -p "$dir"
+  cat >"$dir/$name.c" <<EOF
+static void ${name}_frame(void) { *(volatile int *)0 = 1; }
+int main(void) { ${name}_frame(); return 0; }
+EOF
+  cc -g -O0 -o "$dir/$name" "$dir/$name.c"
+  bash -c "cd '$dir' && ulimit -c unlimited && { ./$name; :; }" \
+    >/dev/null 2>&1 || true
+}
+
+# Runs the fragment against the staged cores, standing in for ssh: it is meant
+# to run on the crashed process's host, and here that host is this one.
+run_backtrace_case() {
+  bash -c "
+set -Eeuo pipefail
+declare -a CONTROL_LOG_RECORDS=()
+. '$HELPERS'
+remote_run() { bash -c \"\$2\"; }
+CONTROL_LOG_RECORDS+=('hog11|node1_mempool|/tmp/out|/tmp/err')
+CRASH_CORE_SEARCH_DIRS=('$decoy_dir' '$mempool_dir')
+replay_crash_backtrace_for_label node1_mempool 139 ${1:+\"$1\"}
+" 2>&1
+}
+
 if ! command -v gdb >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
   echo "skip end-to-end backtrace (need cc and gdb)"
 elif [[ $(cat /proc/sys/kernel/core_pattern 2>/dev/null) == '|'* ]]; then
   echo "skip end-to-end backtrace (cores are piped to a handler on this host)"
 else
-  cat >"$crash_dir/boom.c" <<'EOF'
-static void crashing_frame(void) { *(volatile int *)0 = 1; }
-int main(void) { crashing_frame(); return 0; }
-EOF
-  cc -g -O0 -o "$crash_dir/boom" "$crash_dir/boom.c"
-  # Run the crash under its own shell: the shell that reaps a signalled child
-  # announces it, and that announcement is this script's output otherwise. The
-  # trailing [:] keeps that shell from exec'ing into ./boom, which would put
-  # the crash back under this script and reinstate the announcement.
-  bash -c "cd '$crash_dir' && ulimit -c unlimited && { ./boom; :; }" \
-    >/dev/null 2>&1 || true
+  stage_core "$mempool_dir" mempool
+  stage_core "$decoy_dir" decoy
+  # ls sorts by mtime, so make the decoy unambiguously the newer of the two
+  # rather than relying on the order they were staged in.
+  find "$decoy_dir" -maxdepth 1 -name 'core*' -exec touch {} +
   # shellcheck disable=SC2012
-  if [ -z "$(cd "$crash_dir" && ls -1t core core.* ./*.core 2>/dev/null)" ]; then
+  if [ -z "$(ls -1t "$mempool_dir"/core "$mempool_dir"/core.* 2>/dev/null)" ] ||
+    [ -z "$(ls -1t "$decoy_dir"/core "$decoy_dir"/core.* 2>/dev/null)" ]; then
     echo "skip end-to-end backtrace (no core was written)"
   else
-    out=$(bash -c "
-set -Eeuo pipefail
-declare -a CONTROL_LOG_RECORDS=()
-. '$HELPERS'
-# Stand in for ssh: the fragment is meant to run on the crashed process's host,
-# and here that host is this one.
-remote_run() { bash -c \"\$2\"; }
-CONTROL_LOG_RECORDS+=('hog11|node1_mempool|/tmp/out|/tmp/err')
-CRASH_CORE_SEARCH_DIRS=('$crash_dir')
-replay_crash_backtrace_for_label node1_mempool 139
-" 2>&1) && status=0 || status=$?
+    # Named binary: the older core in the second directory is still the one
+    # reported, because it is the one that binary produced.
+    out=$(run_backtrace_case "$mempool_dir/mempool") && status=0 || status=$?
     expect_status 'end-to-end backtrace' 0 "$status"
-    expect_contains 'end-to-end finds the core' "core file: $crash_dir/" "$out"
-    expect_contains 'end-to-end names the crashing frame' 'crashing_frame' "$out"
+    expect_contains 'end-to-end picks the named binary'"'"'s core' \
+      "core file: $mempool_dir/core" "$out"
+    expect_contains 'end-to-end names the crashing frame' 'mempool_frame' "$out"
     expect_contains 'end-to-end reports the signal' 'SIGSEGV' "$out"
+    expect_lacks 'end-to-end ignores the newer unrelated core' \
+      'decoy_frame' "$out"
     expect_lacks 'end-to-end resolves the binary' \
       'could not identify the binary' "$out"
+
+    # A binary that left no core: the newest is shown, but as what it is.
+    out=$(run_backtrace_case "$mempool_dir/absent") && status=0 || status=$?
+    expect_status 'end-to-end with no matching core' 0 "$status"
+    expect_contains 'end-to-end says the core is unmatched' \
+      'may be an unrelated crash' "$out"
+    expect_contains 'end-to-end falls back to the newest core' \
+      "core file: $decoy_dir/core" "$out"
+
+    # No binary named: the newest core, with no claim that it is the right one.
+    out=$(run_backtrace_case "") && status=0 || status=$?
+    expect_status 'end-to-end with no binary named' 0 "$status"
+    expect_contains 'end-to-end without a binary takes the newest' \
+      "core file: $decoy_dir/core" "$out"
+    expect_lacks 'end-to-end without a binary claims no mismatch' \
+      'may be an unrelated crash' "$out"
   fi
 fi
 
