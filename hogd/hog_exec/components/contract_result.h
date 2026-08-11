@@ -22,6 +22,17 @@
 
 namespace hogd {
 
+// The C++ mirror of the SDK's `Signed<T>` auth token (spec kind
+// `signed_token`). A `Signed<T>` contributes *no bytes* to the serialized
+// payload -- its u32 handle travels out-of-band on the auth-token channel, and
+// the guest fills it in from the handles the host supplies -- so the mirror is
+// an empty marker rather than a uint32_t. (Specs before sdk_rs 0.18 described
+// `Signed<T>` as a bare u32, which was wrong on the wire.)
+//
+// Deliberately has no serializer: no C++ test invokes an entrypoint carrying
+// one yet, and a zero-byte codec should be written against a real caller.
+struct SignedToken {};
+
 template<typename T, uint64_t Selector> struct ContractException {
   constexpr static uint64_t kSelector = Selector;
   T exn;
