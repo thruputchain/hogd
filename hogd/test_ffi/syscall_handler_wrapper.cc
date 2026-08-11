@@ -276,15 +276,15 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   // Clamp the child's budget to what the parent still has, mirroring
-  // production kInvoke: syscall_Invoke_inner() hands SystemCallHandler::invoke()
-  // min(requested gas_limit, remaining_gas), so a child frame can never be
-  // admitted with a larger budget than its caller can pay for. Without the
-  // clamp a mock child could spend past the parent's budget and the parent's
-  // debit in finish_mock_invocation_frame() would then fail (issue #2725).
-  // current_gas is GasAmount max on the root frame (no parent mock runtime),
-  // where the clamp is a no-op. The syscall trace inputs above deliberately
-  // keep the *requested* limit: production records the raw syscall arguments
-  // there, before this clamp.
+  // production kInvoke: syscall_Invoke_inner() hands
+  // SystemCallHandler::invoke() min(requested gas_limit, remaining_gas), so a
+  // child frame can never be admitted with a larger budget than its caller can
+  // pay for. Without the clamp a mock child could spend past the parent's
+  // budget and the parent's debit in finish_mock_invocation_frame() would then
+  // fail (issue #2725). current_gas is GasAmount max on the root frame (no
+  // parent mock runtime), where the clamp is a no-op. The syscall trace inputs
+  // above deliberately keep the *requested* limit: production records the raw
+  // syscall arguments there, before this clamp.
   Invocation frame_invocation = invocation;
   frame_invocation.gas_limit =
       std::min<GasAmount>(invocation.gas_limit, current_gas);
@@ -434,9 +434,9 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   // Debit the parent for the child frame. MockGasRuntime::consume_gas() reports
   // false exactly when the charge meets or exceeds what the parent had left,
   // which is production's `gas_consumed >= gas_remaining` out-of-gas condition
-  // in wrap_after_parse()'s gas epilogue. Remember it rather than discarding it:
-  // the synthetic kInvoke below used to be recorded as a success on a parent
-  // that could not pay for its own child (issue #2725).
+  // in wrap_after_parse()'s gas epilogue. Remember it rather than discarding
+  // it: the synthetic kInvoke below used to be recorded as a success on a
+  // parent that could not pay for its own child (issue #2725).
   GasAmount gas_remaining = std::numeric_limits<GasAmount>::max();
   bool parent_out_of_gas = false;
   if (auto *runtime = get_mock_runtime()) {

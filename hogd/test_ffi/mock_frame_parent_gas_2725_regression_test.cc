@@ -23,10 +23,10 @@
 //
 // The tests below pin the mock pathway to the production behavior:
 //
-//   1. ChildFrameGasIsClampedToParentRemaining: a child asking for more gas than
-//      the parent has left runs on the parent's remaining budget, so a syscall
-//      that costs exactly that budget is itself rewritten to OutOfGas by
-//      wrap_after_parse() -- the same result the syscall would get under
+//   1. ChildFrameGasIsClampedToParentRemaining: a child that asks for more
+//      gas than the parent has left runs on the parent's remaining budget, so
+//      a syscall costing exactly that budget is itself rewritten to OutOfGas
+//      by wrap_after_parse() -- the same result the syscall would get under
 //      production kInvoke.
 //   2. ExactBudgetChildFinishesParentInvokeAsOutOfGas: when the child's total
 //      gas meets the parent's remaining budget, the parent's synthetic kInvoke
@@ -35,21 +35,23 @@
 //      untouched -- a child that stays strictly under the parent's budget still
 //      traces a successful kInvoke and leaves the parent the difference.
 
-#include <cstdint>
 #include <utility>
 
 #include <gtest/gtest.h>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 namespace {
@@ -127,8 +129,7 @@ TEST(TestBindingsTest, ChildFrameGasIsClampedToParentRemaining)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   ASSERT_EQ(open_frame(handler.syscall_handler,
-                       make_invocation(ContractAddress{0xA0}, 0x1111,
-                                       kShaGas)),
+                       make_invocation(ContractAddress{0xA0}, 0x1111, kShaGas)),
             kTestFFIErrorCodeNone);
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
@@ -177,8 +178,7 @@ TEST(TestBindingsTest, ExactBudgetChildFinishesParentInvokeAsOutOfGas)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   ASSERT_EQ(open_frame(handler.syscall_handler,
-                       make_invocation(ContractAddress{0xA0}, 0x1111,
-                                       kShaGas)),
+                       make_invocation(ContractAddress{0xA0}, 0x1111, kShaGas)),
             kTestFFIErrorCodeNone);
   ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
 
