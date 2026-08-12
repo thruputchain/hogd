@@ -90,15 +90,12 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
     shutdown_done.release();
   });
 
-  // Record the current drain semantics. Whether waiting here is desirable is a
-  // shutdown-policy question by itself; the stronger correctness question is
-  // whether a disconnected/aborted RPC can become unable to make progress.
+  // Record the graceful-drain semantics: destruction remains blocked while the
+  // handler is live, then completes once application-level work finishes.
   const bool completed = shutdown_done.try_acquire_for(std::chrono::seconds(1));
-  EXPECT_TRUE(completed)
-      << "RpcServer destruction waits for the suspended RPC handler";
+  EXPECT_FALSE(completed)
+      << "RpcServer destruction stopped waiting for the suspended handler";
 
-  // Rescue the current behavior so this is a bounded red test rather than a
-  // CI job that hangs forever.
   if (!completed) {
     state->resume(EventIndexerIntroOutcome::EventIntroSuccess);
     shutdown_done.acquire();
