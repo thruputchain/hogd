@@ -36,8 +36,7 @@ public:
     : state_(std::move(state))
   {}
 
-  x23::Async<EventIndexerIntroOutcome>
-  event_indexer_intro(IndexerCard /*card*/)
+  x23::Async<EventIndexerIntroOutcome> event_indexer_intro(IndexerCard /*card*/)
   {
     state_->invoked.release();
     co_return co_await state_->response;
@@ -71,7 +70,8 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
 {
   auto state = std::make_shared<SuspendedIndexerIntroState>();
   x23::CoroPoll &cp = default_coropoll();
-  auto server = std::make_unique<RpcServer<SuspendedIndexerIntroRpc>>(cp, state);
+  auto server =
+      std::make_unique<RpcServer<SuspendedIndexerIntroRpc>>(cp, state);
   const uint16_t port = server->start_server(0);
 
   auto fd = cp.tcpconnect("127.0.0.1", std::to_string(port))();
