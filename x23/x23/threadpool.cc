@@ -52,10 +52,11 @@ ThreadPool::~ThreadPool()
     ptr->nonempty.notify_all();
   }
   threads_.clear(); // Join all threads before destroying fields
+
+  std::unique_lock lk{qcbq_lock_};
   qcbq_nonempty_.notify_all();
   // qcbq_service might exit after ss_.request_stop(), so purge final
   // quiescent callbacks after workers have exited.
-  std::unique_lock lk{qcbq_lock_};
   qcbq_do_service(lk);
 }
 
