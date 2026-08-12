@@ -329,9 +329,13 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
   using enum FdState::Mode;
   if (fdp->generation_.load(std::memory_order_relaxed) != genno)
     return;
-  FdState::Mode m = kActive;
-  if (!fdp->mode_.compare_exchange_strong(m, kLocked))
-    return;
+  for (;;) {
+    FdState::Mode m = kActive;
+    if (fdp->mode_.compare_exchange_strong(m, kLocked))
+      break;
+    if (m != kLocked)
+      return;
+  }
   if (fdp->generation_.load(std::memory_order_relaxed) != genno) {
     fdp->mode_ = kActive;
     return;
