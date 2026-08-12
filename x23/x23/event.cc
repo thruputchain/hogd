@@ -227,7 +227,8 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
       co_return Errno{err};
     }
 
-    co_await write_wait(tok);
+    if (auto e = co_await write_wait(tok); e)
+      co_return e;
     tok = write_clear(fd);
 
     len = sizeof(err);
