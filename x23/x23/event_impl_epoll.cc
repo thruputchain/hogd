@@ -335,15 +335,18 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
       break;
     if (m != kLocked)
       return;
+    fdp->mode_.wait(kLocked);
   }
   if (fdp->generation_.load(std::memory_order_relaxed) != genno) {
     fdp->mode_ = kActive;
+    fdp->mode_.notify_all();
     return;
   }
 
   Defer unlock([&] {
     fdp->generation_.fetch_add(1, std::memory_order_relaxed);
     fdp->mode_ = kPoisoned;
+    fdp->mode_.notify_all();
   });
 
   fdp->ready_ = 0; // because EPOLLERR is sticky
