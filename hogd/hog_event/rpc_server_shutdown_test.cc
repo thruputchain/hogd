@@ -72,7 +72,7 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
   x23::CoroPoll &cp = default_coropoll();
   auto server =
       std::make_unique<RpcServer<SuspendedIndexerIntroRpc>>(cp, state);
-  const uint16_t port = server->start_server(0);
+  const std::uint16_t port = server->start_server(0);
 
   auto fd = cp.tcpconnect("127.0.0.1", std::to_string(port))();
   ASSERT_TRUE(fd.has_value());
