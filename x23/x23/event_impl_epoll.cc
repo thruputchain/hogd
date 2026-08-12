@@ -37,7 +37,7 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   auto fdp = getfd(fd);
   x23assert(!fdp->callbacks_[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  fdp->ready_ &= ~epflags[write] | epflags[!write];
+  fdp->ready_ &= ~epflags[write];
 }
 
 void
@@ -279,7 +279,14 @@ CoroPollImpl::check(int timeout)
       ::read(eventfd_.get(), &buf, sizeof(buf));
       continue;
     }
-    state_[fd].ready_ |= evs[i].events;
+    uint32_t events = evs[i].events;
+    if (events & epflags[0] & epflags[1])
+      // Common flags (currently EPOLLERR) will get cleared by either
+      // read_clear or write_clear.  Hence, in the event that a common
+      // flag is set, mark the file descriptor both readable and
+      // writable to ensure we wake both directions.
+      events |= EPOLLIN | EPOLLOUT;
+    state_[fd].ready_ |= events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
         if (WorkItem wi = state_[fd].callbacks_[write].exchange({})) {
