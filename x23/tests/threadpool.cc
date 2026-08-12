@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -78,4 +79,20 @@ TEST(ThreadPoolOnQuiesce, DestructionRunsPendingCallbacks)
     pool.on_quiesce([&]() noexcept { ++callbacks; });
   }
   EXPECT_EQ(callbacks, 1);
+}
+
+TEST(ThreadPoolOnQuiesce, DestructionWakeupStress)
+{
+  for (unsigned i = 0; i < 10000; ++i) {
+    std::atomic_bool callback_ran{false};
+    auto pool = std::make_unique<ThreadPool>(0);
+
+    pool->on_quiesce([&]() noexcept {
+      callback_ran.store(true, std::memory_order_release);
+    });
+    while (!callback_ran.load(std::memory_order_acquire))
+      std::this_thread::yield();
+
+    pool.reset();
+  }
 }

@@ -107,7 +107,7 @@ add_x23_gtest(xdr)
 add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
-set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+set_tests_properties(shutdown threadpool PROPERTIES TIMEOUT 10)
 endif()
 
 if(BENCHMARK_PATH)
