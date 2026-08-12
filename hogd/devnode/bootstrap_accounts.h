@@ -17,11 +17,13 @@ namespace hogd {
 class GenesisConfigurationBuilder;
 
 inline constexpr std::uint32_t kMaxBootstrapAccounts = 1000;
+inline constexpr std::uint64_t kDefaultBootstrapAccountStorageTokens =
+    10'000'000'000'000;
 
 struct BootstrapAccountConfig {
   std::uint32_t count = 0;
   std::string seed = "groundhog-dev-accounts";
-  std::uint64_t storage_tokens = 1'000'000'000;
+  std::uint64_t storage_tokens = kDefaultBootstrapAccountStorageTokens;
   std::string dev_wallet_profile = std::string(kDefaultDevWalletProfile);
 };
 

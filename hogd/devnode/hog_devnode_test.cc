@@ -1497,6 +1497,7 @@ TEST(HogDevnode, BootstrapAccountDerivationMatchesRustGoldens)
 TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
   BootstrapAccountConfig config{.count = 3};
+  EXPECT_EQ(config.storage_tokens, 10'000'000'000'000ULL);
 
   BootstrapAccountArtifact first = build_bootstrap_account_artifact(config);
   BootstrapAccountArtifact second = build_bootstrap_account_artifact(config);

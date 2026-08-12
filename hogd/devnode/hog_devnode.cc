@@ -276,7 +276,7 @@ Options:
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
-                                 [default: 1000000000]
+                                 [default: 10000000000000]
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
   --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.

@@ -398,7 +398,7 @@ jobs:
             --readiness stdout \
             --dev-accounts 1 \
             --dev-account-seed groundhog-dev-accounts \
-            --dev-account-tokens 1000000000 \
+            --dev-account-tokens 10000000000000 \
             >"$readiness_file" 2>"$log_file" &
           devnode_pid=$!
           cleanup_devnode() {

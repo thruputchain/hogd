@@ -32,7 +32,7 @@ struct HostedBootstrapGeneratorConfig {
   BootstrapAccountConfig bootstrap_config{
       .count = 10,
       .seed = "groundhog-dev-accounts",
-      .storage_tokens = 1'000'000'000,
+      .storage_tokens = kDefaultBootstrapAccountStorageTokens,
       .dev_wallet_profile = std::string(kDefaultDevWalletProfile),
   };
   std::optional<HostedFaucetConfig> faucet;
