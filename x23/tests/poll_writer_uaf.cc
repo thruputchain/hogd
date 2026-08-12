@@ -11,6 +11,8 @@
 #include <x23/threadpool.h>
 #include <x23/vec.h>
 
+using namespace x23;
+
 // Sibling of poll_writer_zombie.cc, for the other end of the writer
 // shutdown path: not a zombie fd entry, but a use-after-free of the
 // WriteBuffer that a parked writer coroutine is servicing.
@@ -41,7 +43,7 @@ main() // NOLINT(bugprone-exception-escape)
 {
   signal(SIGALRM, [](int) {
     const char msg[] = "TEST INCONCLUSIVE: writer never finished\n";
-    ssize_t n = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    ssize_t n = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
     (void)n;
     _exit(1);
   });
@@ -49,27 +51,27 @@ main() // NOLINT(bugprone-exception-escape)
 
   int fds[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds))
-    x23::Errno{}.raise("socketpair");
-  x23::set_nonblock(fds[0]);
+    Errno{}.raise("socketpair");
+  set_nonblock(fds[0]);
 
   // Shrink both ends so that the write below cannot possibly drain
   // into the socket, and nothing ever reads fds[1].
   int bufsz = 4096;
   if (setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz)) ||
       setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz)))
-    x23::Errno{}.raise("setsockopt");
+    Errno{}.raise("setsockopt");
 
-  x23::ThreadPool pool(2);
+  ThreadPool pool(2);
   {
-    x23::CoroPoll cp(pool);
+    CoroPoll cp(pool);
 
     // Far more than the socket buffers can hold, so writev returns a
     // short count: flush() spawns Service::worker, which parks in
     // write_wait() still holding wb->service_lock_.
-    x23::Buf big;
+    Buf big;
     big.resize(4 << 20, 'x');
-    if (x23::Errno err = cp.awrite(fds[0], std::move(big)))
-      x23::panic("awrite: {}", err);
+    if (Errno err = cp.awrite(fds[0], std::move(big)))
+      panic("awrite: {}", err);
 
     std::println(stderr, "writer parked; resetting fd "
                          "(aborts in TestLock::unlock if bug present)...");
@@ -85,8 +87,8 @@ main() // NOLINT(bugprone-exception-escape)
   }
 
   alarm(0);
-  close(fds[0]);
-  close(fds[1]);
+  ::close(fds[0]);
+  ::close(fds[1]);
   std::println(stderr, "OK -- writer unlocked before releasing its buffer");
   return 0;
 }
