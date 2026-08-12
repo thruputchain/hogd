@@ -300,8 +300,12 @@ namespace detail {
 // every arm a direct call the optimizer can inline and constant-fold
 // (and can still turn into a jump table for large ranges), unlike a
 // table of function pointers, which is an opaque indirect call.
+// always_inline guarantees the chain flattens at every optimization
+// level: each level is a distinct instantiation (not true recursion),
+// so without it an uninlined chain would cost Max - Min nested calls
+// per dispatch.
 template<typename R, size_t Min, size_t Max, typename F>
-constexpr R
+[[gnu::always_inline]] constexpr R
 with_n_impl(size_t n, F &&f)
 {
   if constexpr (Min < Max) {
