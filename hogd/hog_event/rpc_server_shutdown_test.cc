@@ -46,7 +46,7 @@ private:
 };
 static_assert(is_EventIndexer1<SuspendedIndexerIntroRpc *, x23::MaybeAsync>);
 
-// Reproduction for the RpcServer lifetime changes in #3307.
+// Characterizes the RpcServer lifetime behavior after #3307.
 //
 // A suspended server handler keeps the RpcStream alive. The stream owns its
 // RpcDispatcher, and RpcServer's dispatcher wrapper owns an ImplPtr reference
@@ -54,6 +54,12 @@ static_assert(is_EventIndexer1<SuspendedIndexerIntroRpc *, x23::MaybeAsync>);
 // fd stops the stream reader but does not cancel the suspended handler, so the
 // ImplPtr remains live and destroy_wait() cannot return until application code
 // independently resumes the handler.
+//
+// This is not necessarily a bug if RpcServer destruction intentionally drains
+// all outstanding RPC handlers. It is useful coverage for the lifetime
+// contract introduced by #3307 and a building block for the stronger case
+// where the requesting peer has disconnected but unrelated async work still
+// prevents the handler from completing.
 //
 // Use EventIndexer1::event_indexer_intro because the production implementation
 // is itself an async handler and can suspend while dialing the indexer's
@@ -84,11 +90,12 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
     shutdown_done.release();
   });
 
-  // Shutdown should not remain pinned solely because application-level RPC
-  // work is suspended. Current #3307 behavior remains blocked here.
+  // Record the current drain semantics. Whether waiting here is desirable is a
+  // shutdown-policy question by itself; the stronger correctness question is
+  // whether a disconnected/aborted RPC can become unable to make progress.
   const bool completed = shutdown_done.try_acquire_for(1s);
   EXPECT_TRUE(completed)
-      << "RpcServer destruction is pinned by the suspended RPC handler";
+      << "RpcServer destruction waits for the suspended RPC handler";
 
   // Rescue the current behavior so this is a bounded red test rather than a
   // CI job that hangs forever.
