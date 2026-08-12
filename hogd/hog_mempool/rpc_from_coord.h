@@ -412,6 +412,11 @@ private:
         transaction_nomination_chunks;
     x23::XdrVec<SignedTransactionHash> failed_tx_hashes;
   };
+  struct JointCommitResult {
+    DbBlockResult db;
+    RPCError event_commit = RPCError::kRPCUnrecoverable;
+    RPCError event_confirmation = RPCError::kRPCUnrecoverable;
+  };
 
   struct NominationTelemetry {
     bool succeeded = false;
@@ -581,7 +586,7 @@ private:
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
-  x23::Async<void> commit_block(const PendingBlock &cache);
+  x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
 
   x23::Async<bool>
   validate_batch_chunk(BlockID block_id,

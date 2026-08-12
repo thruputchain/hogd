@@ -21,6 +21,7 @@
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/init.h"
@@ -599,7 +600,8 @@ make_event_for_body(ProposedTransaction const &body, uint8_t marker)
 }
 } // namespace
 
-TEST_F(EventBlockContextTest, CandidatePreservesPerThreadEventBodyPairing)
+TEST_F(EventBlockContextTest,
+       CandidateSerializesEventBodiesInCanonicalProposalOrder)
 {
   EventBlockContext context(temp_dir_, 1);
   PerThread<TxEventLogBatch> event_registration_probe;
@@ -670,8 +672,17 @@ TEST_F(EventBlockContextTest, CandidatePreservesPerThreadEventBodyPairing)
   context.executor_close_block();
   finish_file(context);
 
+  x23::XdrVec<SignedTransactionHash> canonical_hashes{
+      sha256(body_b.signed_tx.tx), sha256(body_a.signed_tx.tx)};
+  x23::XdrVec<NondeterministicProposalData> canonical_data{
+      body_b.nondeterministic_proposal_data,
+      body_a.nondeterministic_proposal_data};
+  ProposalTxs proposal_txs{
+      .hash = t_to_parallel_batch(canonical_hashes)(),
+      .nondeterministic_data = t_to_parallel_batch(canonical_data)(),
+  };
   auto candidate = context.snapshot_indexer_outbox_candidate(
-      /*block_height=*/7, context.get_root_hash(), ProposalTxs{});
+      /*block_height=*/7, context.get_root_hash(), std::move(proposal_txs))();
 
   release_workers.set_value();
   worker_a.join();
@@ -680,7 +691,8 @@ TEST_F(EventBlockContextTest, CandidatePreservesPerThreadEventBodyPairing)
   ASSERT_EQ(candidate.event_logs.size(), 2);
   ASSERT_EQ(candidate.tx_bodies.size(), 2);
 
-  // Event logs and transaction bodies must remain index-aligned.
+  EXPECT_EQ(candidate.event_logs[0].proposed_tx_hash, canonical_hashes[0]);
+  EXPECT_EQ(candidate.event_logs[1].proposed_tx_hash, canonical_hashes[1]);
   for (size_t i = 0; i < candidate.event_logs.size(); i++) {
     EXPECT_EQ(sha256(candidate.tx_bodies[i].signed_tx.tx),
               candidate.event_logs[i].proposed_tx_hash);

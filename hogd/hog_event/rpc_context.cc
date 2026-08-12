@@ -253,9 +253,8 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
     co_await context->get().finish_file_write();
     out_hash = context->get().get_root_hash();
     IndexerOutboxCandidatePayload candidate =
-        context->get().snapshot_indexer_outbox_candidate(block_height, out_hash,
-                                                         std::move(
-                                                             proposal_txs));
+        co_await context->get().snapshot_indexer_outbox_candidate(
+            block_height, out_hash, std::move(proposal_txs));
     if (auto published =
             co_await indexer_outbox_store_.publish_candidate(candidate);
         !published) {

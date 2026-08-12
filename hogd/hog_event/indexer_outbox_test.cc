@@ -874,10 +874,10 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   ASSERT_GE(proposal_txs.hash.segment_tokens.size(), 2);
   ASSERT_GE(proposal_txs.nondeterministic_data.segment_tokens.size(), 2);
 
-  ProposedTransactionBatch arrival_bodies{body_c, body_a, body_b};
-  TxEventLogBatch arrival_events{make_event(body_c, 0x13),
-                                 make_event(body_a, 0x11),
-                                 make_event(body_b, 0x12)};
+  ProposedTransactionBatch arrival_bodies{body_a, body_b, body_c};
+  TxEventLogBatch arrival_events{make_event(body_a, 0x11),
+                                 make_event(body_b, 0x12),
+                                 make_event(body_c, 0x13)};
   auto candidate = make_candidate_with_proposal(42, 7, proposal_txs,
                                                 arrival_bodies, arrival_events);
   auto committed = make_committed_with_proposal(7, proposal_txs, arrival_bodies,
@@ -915,6 +915,26 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
                    .initialize_current_epoch_origin(
                        8, committed.consensus_value.prev_hash)()
                    .has_value());
+}
+
+TEST_F(IndexerOutboxTest, NoncanonicalEventBodyOrderIsRejected)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  ProposedTransaction body_a = make_body(31);
+  ProposedTransaction body_b = make_body(32);
+  ProposedTransactionBatch canonical_bodies{body_a, body_b};
+  ProposalTxs proposal_txs = make_canonical_proposal_txs(canonical_bodies);
+  ProposedTransactionBatch reversed_bodies{body_b, body_a};
+  TxEventLogBatch reversed_events{make_event(body_b, 0x32),
+                                  make_event(body_a, 0x31)};
+  auto candidate =
+      make_candidate_with_proposal(43, 8, proposal_txs, reversed_bodies,
+                                   reversed_events);
+
+  auto result = store.publish_candidate(candidate)();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("order"), std::string::npos);
 }
 
 TEST_F(IndexerOutboxTest, DurableSemanticValidationAwaitsOnPoolWorker)

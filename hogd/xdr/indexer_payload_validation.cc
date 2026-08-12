@@ -4,7 +4,6 @@
 #include <expected>
 #include <format>
 #include <span>
-#include <unordered_map>
 #include <unordered_set>
 
 #include "hogd/base/log.h"
@@ -58,45 +57,32 @@ validate_indexer_canonical_proposal_mapping(
         "canonical proposal and event/body batch cardinalities differ");
   }
 
-  std::unordered_map<SignedTransactionHash, NondeterministicProposalData,
-                     ByteArrayHasher>
-      canonical;
+  std::unordered_set<SignedTransactionHash, SipHash24Hasher> canonical;
   canonical.reserve(canonical_hashes.size());
-  for (size_t i = 0; i < canonical_hashes.size(); ++i) {
-    if (!canonical
-             .emplace(canonical_hashes[i], canonical_nondeterministic_data[i])
-             .second) {
+  for (const SignedTransactionHash &hash : canonical_hashes) {
+    if (!canonical.insert(hash).second) {
       co_return std::unexpected(
           "canonical ProposalTxs contains duplicate hashes");
     }
   }
 
-  std::unordered_set<SignedTransactionHash, ByteArrayHasher> seen_bodies;
-  seen_bodies.reserve(tx_bodies.size());
   for (size_t i = 0; i < tx_bodies.size(); ++i) {
     const SignedTransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
     if (body_hash != event_logs[i].proposed_tx_hash) {
       co_return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
-    if (!seen_bodies.insert(body_hash).second) {
-      co_return std::unexpected("event/body batches contain duplicate hashes");
-    }
-    auto entry = canonical.find(body_hash);
-    if (entry == canonical.end()) {
+    if (body_hash != canonical_hashes[i]) {
       co_return std::unexpected(
-          "event/body transaction is missing from canonical ProposalTxs");
+          "event/body order differs from canonical ProposalTxs");
     }
     if (!nondeterministic_data_equal(
-            tx_bodies[i].nondeterministic_proposal_data, entry->second)) {
+            tx_bodies[i].nondeterministic_proposal_data,
+            canonical_nondeterministic_data[i])) {
       co_return std::unexpected(
           "transaction body nondeterministic data differs from canonical "
           "ProposalTxs");
     }
-  }
-  if (seen_bodies.size() != canonical.size()) {
-    co_return std::unexpected(
-        "canonical ProposalTxs contains extra transactions");
   }
   co_return proposal_txs_compatibility_hash(proposal_txs);
 }

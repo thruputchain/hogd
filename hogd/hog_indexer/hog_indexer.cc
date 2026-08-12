@@ -54,8 +54,6 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
         block_explorer_port == 0);
   info("PORT indexer.block_explorer={}", actual_block_explorer_port);
 
-  Health::instance().set_status(Health::Status::kOk)();
-
   // The indexer is initialized. Now block forever.
   info("indexer initialization complete.");
   std::promise<void>().get_future().wait();

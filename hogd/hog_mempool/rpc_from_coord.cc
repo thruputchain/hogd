@@ -1257,36 +1257,47 @@ MempoolCoordinatorRpc::abandon_block(const PendingBlock &cache)
            RPCError::kRPCNone);
 }
 
-x23::Async<void>
+x23::Async<MempoolCoordinatorRpc::JointCommitResult>
 MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 {
   x23::Async<DbBlockResult> commit_snapshot_handle =
       commit_snapshot(cache.block_id, cache.db_tip.value);
-  x23::Async<RPCError> event_commit_handle =
-      eventsched_commit_block(cache.block_id, cache.db_tip.value);
+  std::optional<x23::Async<RPCError>> event_commit_handle;
   std::exception_ptr first_exception;
-  DbBlockResult db_result;
-  RPCError event_result = RPCError::kRPCUnrecoverable;
-  // Keep these awaits separate so a failure cannot skip draining its sibling.
   try {
-    db_result = co_await commit_snapshot_handle;
+    event_commit_handle.emplace(
+        eventsched_commit_block(cache.block_id, cache.db_tip.value));
   } catch (...) {
     first_exception = std::current_exception();
   }
+  JointCommitResult result;
+  // Keep launch and awaits separate so a failure cannot skip draining a
+  // sibling operation that has already started.
   try {
-    event_result = co_await event_commit_handle;
+    result.db = co_await commit_snapshot_handle;
   } catch (...) {
     if (!first_exception) {
       first_exception = std::current_exception();
     }
   }
+  if (event_commit_handle) {
+    try {
+      result.event_commit = co_await *event_commit_handle;
+    } catch (...) {
+      if (!first_exception) {
+        first_exception = std::current_exception();
+      }
+    }
+  }
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  CHECK_EQ(db_result.result(), DbSchedResult::DbSchedResultOK);
-  CHECK_EQ(event_result, RPCError::kRPCNone);
-  CHECK_EQ(co_await eventsched_confirm_committed_block(cache.db_tip.value),
-           RPCError::kRPCNone);
+  if (result.db.result() == DbSchedResult::DbSchedResultOK &&
+      result.event_commit == RPCError::kRPCNone) {
+    result.event_confirmation =
+        co_await eventsched_confirm_committed_block(cache.db_tip.value);
+  }
+  co_return result;
 }
 
 x23::Async<SchedulerProposalResult>
@@ -2373,18 +2384,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         co_return;
       });
 
-  auto commit_block_node =
-      commit_dag.async<void>("commit block",
-                             commit_dag.after(prepare_node, lock_hog_age_node),
-                             [&]() -> x23::Async<void> {
-                               if (invalid_consensus_value) {
-                                 co_return;
-                               }
-                               CHECK_PTR(commit_plan.committed_cache);
-                               co_await commit_block(
-                                   *commit_plan.committed_cache);
-                               co_return;
-                             });
+  auto commit_block_node = commit_dag.async<JointCommitResult>(
+      "commit block", commit_dag.after(prepare_node, lock_hog_age_node),
+      [&]() -> x23::Async<JointCommitResult> {
+        if (invalid_consensus_value) {
+          co_return JointCommitResult{};
+        }
+        CHECK_PTR(commit_plan.committed_cache);
+        co_return co_await commit_block(*commit_plan.committed_cache);
+      });
 
   auto abandon_snapshots_node = commit_dag.async<void>(
       "abandon snapshots", commit_dag.after(prepare_node),
@@ -2562,6 +2570,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         if (invalid_consensus_value) {
           co_return;
         }
+        const JointCommitResult &joint_commit = commit_block_node.get();
+        CHECK_EQ(joint_commit.db.result(), DbSchedResult::DbSchedResultOK);
+        CHECK_EQ(joint_commit.event_commit, RPCError::kRPCNone);
+        CHECK_EQ(joint_commit.event_confirmation, RPCError::kRPCNone);
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later

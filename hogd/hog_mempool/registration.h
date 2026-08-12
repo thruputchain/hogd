@@ -72,7 +72,23 @@ public:
   {
     std::unique_lock lk(event_mutex_);
     if (event_registered_.load(std::memory_order_acquire)) {
-      return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
+      CHECK(active_event_snapshot_.has_value());
+      if (card != event_card_) {
+        return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
+      }
+      if (pending_event_card_) {
+        CHECK(*pending_event_card_ == event_card_);
+        EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+        result.snapshot().tip = *pending_event_tip_;
+        result.snapshot().token = pending_event_token_;
+        return result;
+      }
+      CHECK(event_canonical_tip_.has_value());
+      if (*event_canonical_tip_ == active_event_snapshot_->tip) {
+        EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+        result.snapshot() = *active_event_snapshot_;
+        return result;
+      }
     }
     if (pending_event_card_ && card == *pending_event_card_) {
       EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
@@ -106,6 +122,12 @@ public:
   activate_event(const EventRegistrationSnapshot &snapshot)
   {
     std::unique_lock lk(event_mutex_);
+    if (event_registered_.load(std::memory_order_acquire)) {
+      CHECK(active_event_snapshot_.has_value());
+      if (snapshot == *active_event_snapshot_) {
+        return EventActivationResult{EventActivationOutcome::EventActivationOK};
+      }
+    }
     if (!event_canonical_tip_ || !pending_event_card_ || !pending_event_tip_ ||
         pending_event_token_ != snapshot.token) {
       return EventActivationResult{
@@ -124,7 +146,13 @@ public:
       pending_event_token_ = 0;
       return result;
     }
-    event_card_ = std::move(*pending_event_card_);
+    if (event_registered_.load(std::memory_order_acquire)) {
+      CHECK(event_card_ == *pending_event_card_);
+    }
+    else {
+      event_card_ = *pending_event_card_;
+    }
+    active_event_snapshot_ = snapshot;
     pending_event_card_.reset();
     pending_event_tip_.reset();
     pending_event_token_ = 0;
@@ -198,6 +226,7 @@ public:
       std::unique_lock lk(event_mutex_);
       event_registered_ = false;
       event_card_ = EventCard{};
+      active_event_snapshot_.reset();
       pending_event_card_.reset();
       pending_event_tip_.reset();
       pending_event_token_ = 0;
@@ -228,6 +257,7 @@ private:
   std::atomic<bool> event_registered_ = false;
   mutable std::mutex event_mutex_;
   EventCard event_card_;
+  std::optional<EventRegistrationSnapshot> active_event_snapshot_;
   std::optional<EventCard> pending_event_card_;
   std::optional<EventCanonicalTip> pending_event_tip_;
   uint64_t pending_event_token_ = 0;

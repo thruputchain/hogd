@@ -59,8 +59,20 @@ public:
     co_return std::move(*ret);
   }
 
-  static EventCard wait_for_registration(
-      std::chrono::milliseconds timeout = std::chrono::seconds(30))
+  static EventCard wait_for_registration()
+  {
+    EventCard card;
+    while (true) {
+      const auto tip = Registration::registration().event_canonical_tip();
+      if (tip && tip->consensus_value.proposal_header.block_height >= 0 &&
+          Registration::registration().event_registered(&card)) {
+        return card;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+
+  static EventCard wait_for_registration_for(std::chrono::milliseconds timeout)
   {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     bool saw_canonical_tip = false;

@@ -18,7 +18,6 @@ class RecentTxFailureCache;
 struct IndexerOutboxOrigin;
 
 struct IndexerPullControllerOptions {
-  std::chrono::milliseconds startup_timeout = std::chrono::seconds(30);
   std::chrono::milliseconds retry_delay = std::chrono::milliseconds(100);
   std::chrono::milliseconds caught_up_poll_delay =
       std::chrono::milliseconds(100);
@@ -46,6 +45,8 @@ private:
   bool initialize_origin_if_needed(const IndexerOutboxOrigin &origin);
   bool wait(std::stop_token stop, std::chrono::milliseconds delay);
   void fail_event_client();
+  void mark_caught_up();
+  void mark_not_ready();
   void reset_event_client();
 
   std::string event_server_addr_;
@@ -57,6 +58,7 @@ private:
   std::mutex wait_mutex_;
   std::condition_variable_any wake_;
   bool caught_up_ = false;
+  bool ever_caught_up_ = false;
   std::atomic<bool> stopping_ = false;
   std::jthread thread_;
 };

@@ -469,7 +469,6 @@ TEST(IndexerPullController,
   IndexerPullControllerOptions options;
   options.retry_delay = std::chrono::milliseconds(1);
   options.caught_up_poll_delay = std::chrono::milliseconds(1);
-  options.startup_timeout = std::chrono::seconds(5);
 
   {
     auto db = IndexDB::make_new(indexer_path);
@@ -538,11 +537,16 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   options.retry_delay = std::chrono::milliseconds(1);
   options.caught_up_poll_delay = std::chrono::milliseconds(1);
   options.rpc_timeout = std::chrono::seconds(1);
-  options.startup_timeout = std::chrono::seconds(5);
   IndexerPullController controller(event_addr, *db, failures, options);
   controller.wait_until_caught_up();
 
   event_server.reset();
+  ASSERT_TRUE(wait_for_condition(
+      [&] {
+        return !controller.wait_until_caught_up_for(
+            std::chrono::milliseconds(0));
+      },
+      std::chrono::seconds(5)));
   ConsensusValue block_two = commit_block(event, 2, 2, sha256(block_one));
   event_server = std::make_unique<EventIndexerServer>(event);
   event_server->start_accepting(std::move(replacement_listener));
@@ -553,6 +557,7 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   const IndexerProgress progress = db->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().last_consensus_hash, sha256(block_two));
+  EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
 }
 
 TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
@@ -571,7 +576,6 @@ TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
   options.retry_delay = std::chrono::milliseconds(1);
   options.caught_up_poll_delay = std::chrono::seconds(1);
   options.rpc_timeout = std::chrono::milliseconds(20);
-  options.startup_timeout = std::chrono::seconds(5);
   IndexerPullController controller(
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
       options);
@@ -583,7 +587,7 @@ TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
   EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
 }
 
-TEST(IndexerPullController, StartupTimeoutAndDestructionCancelBlockedPull)
+TEST(IndexerPullController, DestructionCancelsBlockedPull)
 {
   TmpDir indexer_dir;
   auto db = IndexDB::make_new(std::filesystem::path(indexer_dir.directory()) /

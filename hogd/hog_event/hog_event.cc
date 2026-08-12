@@ -95,9 +95,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
       wait_to_retry();
       continue;
     }
-    if (prepared.outcome() != EventPrepareOutcome::EventPrepareOK) {
-      panic("mempool failed to prepare event registration");
-    }
+    CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
     EventRegistrationSnapshot snapshot = prepared.snapshot();
     auto reconciled = ctx.reconcile_outbox_tip(snapshot.tip.block_id,
                                                snapshot.tip.consensus_value)();
@@ -110,9 +108,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
     if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
       break;
     }
-    if (activated.outcome() != EventActivationOutcome::EventActivationRetry) {
-      panic("mempool failed to activate event registration");
-    }
+    CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
     wait_to_retry();
   }
 

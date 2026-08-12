@@ -73,9 +73,11 @@ IndexerPullController::IndexerPullController(
     std::string event_server_addr, IndexDB &db,
     RecentTxFailureCache &failure_cache, IndexerPullControllerOptions options)
   : event_server_addr_(std::move(event_server_addr)), db_(db),
-    failure_cache_(failure_cache), options_(options),
-    thread_([this](const std::stop_token &stop) { run(stop); })
-{}
+    failure_cache_(failure_cache), options_(options)
+{
+  mark_not_ready();
+  thread_ = std::jthread([this](const std::stop_token &stop) { run(stop); });
+}
 
 IndexerPullController::~IndexerPullController()
 {
@@ -91,9 +93,8 @@ IndexerPullController::~IndexerPullController()
 void
 IndexerPullController::wait_until_caught_up()
 {
-  if (!wait_until_caught_up_for(options_.startup_timeout)) {
-    panic("indexer startup pull timed out");
-  }
+  std::unique_lock lock(wait_mutex_);
+  wake_.wait(lock, [this] { return caught_up_; });
 }
 
 bool
@@ -195,6 +196,7 @@ IndexerPullController::run(const std::stop_token &stop)
       client = event_client_;
     }
     if (!client) {
+      mark_not_ready();
       try {
         if (!connect_once()) {
           if (!wait(stop, options_.retry_delay)) {
@@ -240,6 +242,7 @@ IndexerPullController::run(const std::stop_token &stop)
       switch (result.outcome()) {
       case EventIndexerPullOutcome::EventIndexerPullBlock:
       {
+        mark_not_ready();
         EventIndexerPulledBlock pulled = std::move(result.pulled_block());
         initialize_origin_if_needed(pulled.origin);
         const IndexerProgress before_apply = db_.durable_progress();
@@ -286,6 +289,7 @@ IndexerPullController::run(const std::stop_token &stop)
             initialize_origin_if_needed(result.origin());
         const IndexerProgress durable = db_.durable_progress();
         if (progress_changed) {
+          mark_not_ready();
           break;
         }
         if (!xdr_equal(durable, requested_progress) ||
@@ -294,15 +298,12 @@ IndexerPullController::run(const std::stop_token &stop)
             !xdr_equal(durable.initialized().origin, result.origin())) {
           panic("caught-up reply disagrees with current durable progress");
         }
-        {
-          std::lock_guard lock(wait_mutex_);
-          caught_up_ = true;
-        }
-        wake_.notify_all();
+        mark_caught_up();
         caught_up_delay = true;
         break;
       }
       case EventIndexerPullOutcome::EventIndexerPullNotReady:
+        mark_not_ready();
         retry_delay = true;
         break;
       case EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol:
@@ -313,6 +314,7 @@ IndexerPullController::run(const std::stop_token &stop)
       }
 
       if (!pull_tx_failures(*client)) {
+        mark_not_ready();
         reset_event_client();
         retry_delay = true;
       }
@@ -330,6 +332,7 @@ IndexerPullController::run(const std::stop_token &stop)
         return;
       }
       warn("indexer pull transport failed: {}", e.what());
+      mark_not_ready();
       reset_event_client();
       retry_delay = true;
     } catch (const std::exception &e) {
@@ -342,6 +345,31 @@ IndexerPullController::run(const std::stop_token &stop)
       return;
     }
   }
+}
+
+void
+IndexerPullController::mark_caught_up()
+{
+  {
+    std::lock_guard lock(wait_mutex_);
+    caught_up_ = true;
+    ever_caught_up_ = true;
+  }
+  Health::instance().set_status(Health::Status::kOk)();
+  wake_.notify_all();
+}
+
+void
+IndexerPullController::mark_not_ready()
+{
+  Health::Status status;
+  {
+    std::lock_guard lock(wait_mutex_);
+    caught_up_ = false;
+    status =
+        ever_caught_up_ ? Health::Status::kError : Health::Status::kStarting;
+  }
+  Health::instance().set_status(status)();
 }
 
 void

@@ -136,17 +136,21 @@ The first implementation supports the current topology of one event service and
 one indexer. The indexer owns one pull loop and reads progress from its database
 for every request. Connection failures and an event origin that is not yet
 available are retried. Each RPC has a deadline, and initial catch-up must finish
-within a bounded startup window. Protocol mismatch, progress or content
-conflict, corruption, and durable apply failure are fatal. No reverse indexer
-listener, registration generation, or live-delivery worker is required.
+without a wall-clock completion deadline; retained replay can grow with chain
+history. Protocol mismatch, progress or content conflict, corruption, and
+durable apply failure are fatal. No reverse indexer listener, registration
+generation, or live-delivery worker is required.
 
 The validator node is fail-fast after startup. `SchedEvent1` prepare,
-reconciliation, and activation form a one-shot startup barrier. Once activated,
-the mempool and executors retain their original event endpoints for the process
-lifetime; a second prepare or activation is an error. There are no per-block
-event leases, executor endpoint refreshes, or live event-service replacement.
-Any transport exception after a DB/event commit has been selected is ambiguous
-and terminates the process after already-launched coroutines have drained.
+reconciliation, and activation form a startup barrier with no correctness
+deadline. Once activated, the mempool and executors retain their original event
+endpoints for the process lifetime. Repeating the exact activation, or preparing
+the same card to reconcile a later canonical tip, is idempotent; a different
+card is an error. There are no per-block event leases, endpoint refreshes, or
+live event-service replacement. Any transport exception after a DB/event commit
+has been selected is ambiguous and terminates the process after already-launched
+coroutines have drained. Trusted commit and confirmation result checks run only
+at the commit DAG join, after all sibling operations have settled.
 
 An outbox publication coroutine lock serializes origin selection, durable
 promotion, scheduler-admissible-tail advancement, and pull snapshots. A pull
@@ -156,10 +160,12 @@ only advance the admissible tail; they perform no indexer network work, so
 indexer latency cannot block consensus commit. Shutdown fails the active client
 stream and joins the indexer's owned pull thread.
 
-The indexer stays in its startup state until initial replay succeeds. Missing
-origins, missing records, chain conflicts, and corrupt records are fatal, never
-healthy lag. The rollout requires a clean chain; a legacy or truncated chain
-cannot infer a new origin from its current tip.
+The indexer stays in its startup state until initial replay succeeds. After its
+first caught-up reply, transport loss, `NotReady`, or known unapplied work marks
+readiness as error until a later consistent caught-up reply. Missing origins,
+missing records, chain conflicts, and corrupt records are fatal, never healthy
+lag. The rollout requires a clean chain; a legacy or truncated chain cannot
+infer a new origin from its current tip.
 
 This work does not add a block product API. The existing block-by-height RPC
 continues to return `BlockNotFound`; the indexer persists only the per-height
@@ -174,7 +180,8 @@ separate work.
 
 1. A committed block is recoverable after the event service has acknowledged
    commit, even if no indexer was connected.
-2. Event logs and transaction bodies retain their positional association.
+2. Event logs and transaction bodies retain their positional association and
+   are serialized in canonical `ProposalTxs` hash order.
 3. Empty blocks advance the same contiguous sequence as non-empty blocks.
 4. One indexer pull loop applies records serially in exact height order.
 5. The indexer watermark advances only in strict height order.
@@ -199,9 +206,11 @@ event, indexer, and devnode suites.
 | Durable progress and indexed rows reopen atomically, then resume from the exact next height | `StrictIndexerTest.SuccessfulStrictApplyReopensAllRowsAndProgressTogether`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
 | A lost reply repeats the same immutable block and duplicate application is idempotent | `EventRpcTest.ExactProgressReturnsNextAndUnchangedProgressRepeatsIt`; `StrictIndexerTest.DuplicateLedgerAndFutureGapWriteNothing` |
 | Scheduler confirmation gates pull eligibility | `EventRpcTest.CommittedRecordBecomesPullableOnlyAfterConfirmation` |
-| A dropped event connection is retried and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
+| A dropped event connection clears readiness, is retried, and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
 | A blocked pull is bounded by its RPC deadline and reconnects | `IndexerPullController.RpcTimeoutReconnectsAfterBlockedPull` |
-| Initial catch-up has a bounded wait, and shutdown cancels an in-flight pull before joining | `IndexerPullController.StartupTimeoutAndDestructionCancelBlockedPull` |
+| Initial catch-up has no wall-clock deadline, and shutdown cancels an in-flight pull before joining | `IndexerPullController.DestructionCancelsBlockedPull` |
+| Event/body candidate bytes follow canonical proposal order | `EventBlockContextTest.CandidateSerializesEventBodiesInCanonicalProposalOrder`; `IndexerOutboxTest.NoncanonicalEventBodyOrderIsRejected` |
+| Lost activation replies and same-card restart reconciliation are idempotent | `Mempool.EventActivationRetryAfterLostSuccessReplyIsIdempotent`; `Mempool.RegisteredEventSameCardRepreparesAtAdvancedCanonicalTip` |
 | Origin, identity, corruption, and gap conflicts fail closed | `EventRpcTest.ForgedAndUnknownProgressConflict`; `EventRpcTest.ReconciliationRejectsDisconnectedArchivalPrefix`; `StrictIndexerTest.RejectsPrevProposalBodyEventRootAndDigestConflicts` |
 
 The archived-to-current integration fixture rewrites current-format test records

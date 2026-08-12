@@ -163,7 +163,7 @@ TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
   registration.clear();
   x23::Defer cleanup([&registration] { registration.clear(); });
 
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(
+  ASSERT_DEATH(MempoolEventRpc::wait_for_registration_for(
                    std::chrono::milliseconds(20)),
                "event startup timed out waiting for canonical tip");
 }
@@ -178,7 +178,7 @@ TEST(Mempool, EventStartupTimesOutWithoutActivation)
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 70, .consensus_value = value});
 
-  ASSERT_DEATH(MempoolEventRpc::wait_for_registration(
+  ASSERT_DEATH(MempoolEventRpc::wait_for_registration_for(
                    std::chrono::milliseconds(20)),
                "event startup timed out waiting for activation");
 }
@@ -275,7 +275,7 @@ TEST(Mempool, DifferentEventCardDoesNotReplacePendingRegistration)
   EXPECT_EQ(registered, first);
 }
 
-TEST(Mempool, RetriedEventPrepareSnapshotActivatesOnce)
+TEST(Mempool, EventActivationRetryAfterLostSuccessReplyIsIdempotent)
 {
   Registration &registration = Registration::registration();
   registration.clear();
@@ -297,7 +297,7 @@ TEST(Mempool, RetriedEventPrepareSnapshotActivatesOnce)
       EventActivationOutcome::EventActivationOK);
   EXPECT_EQ(
       MempoolEventRpc::schedevent_activate_event(first.snapshot()).outcome(),
-      EventActivationOutcome::EventActivationError);
+      EventActivationOutcome::EventActivationOK);
   EventCard registered;
   ASSERT_TRUE(registration.event_registered(&registered));
   EXPECT_EQ(registered, card);
@@ -351,7 +351,7 @@ TEST(Mempool, EventPrepareRejectsMismatchedProtocol)
   EXPECT_FALSE(registration.event_registered(nullptr));
 }
 
-TEST(Mempool, ActivatedEventRejectsFurtherPrepareAndActivate)
+TEST(Mempool, ActivatedEventRejectsDifferentCardAndAcceptsSameSnapshot)
 {
   Registration &registration = Registration::registration();
   registration.clear();
@@ -382,10 +382,42 @@ TEST(Mempool, ActivatedEventRejectsFurtherPrepareAndActivate)
   EXPECT_EQ(MempoolEventRpc::schedevent_activate_event(
                 first_prepared.snapshot())
                 .outcome(),
-            EventActivationOutcome::EventActivationError);
+            EventActivationOutcome::EventActivationOK);
   EventCard registered;
   ASSERT_TRUE(registration.event_registered(&registered));
   EXPECT_EQ(registered, first);
+}
+
+TEST(Mempool, RegisteredEventSameCardRepreparesAtAdvancedCanonicalTip)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  ConsensusValue first_value{};
+  first_value.proposal_header.block_height = 7;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 70, .consensus_value = first_value});
+  EventCard card{.protocol = version::kHogdProtocol(),
+                 .address_for_exec = "127.0.0.1:1",
+                 .address_for_sched = "127.0.0.1:2"};
+  auto first = MempoolEventRpc::schedevent_prepare_event(card);
+  ASSERT_EQ(first.outcome(), EventPrepareOutcome::EventPrepareOK);
+  ASSERT_EQ(
+      MempoolEventRpc::schedevent_activate_event(first.snapshot()).outcome(),
+      EventActivationOutcome::EventActivationOK);
+
+  ConsensusValue next_value = first_value;
+  next_value.proposal_header.block_height = 8;
+  registration.publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = 80, .consensus_value = next_value});
+  auto refreshed = MempoolEventRpc::schedevent_prepare_event(card);
+
+  ASSERT_EQ(refreshed.outcome(), EventPrepareOutcome::EventPrepareOK);
+  EXPECT_GT(refreshed.snapshot().token, first.snapshot().token);
+  EXPECT_EQ(refreshed.snapshot().tip.block_id, 80);
+  EXPECT_EQ(MempoolEventRpc::schedevent_activate_event(refreshed.snapshot())
+                .outcome(),
+            EventActivationOutcome::EventActivationOK);
 }
 
 TEST(Mempool, EventActivationRejectsChangedCanonicalTip)

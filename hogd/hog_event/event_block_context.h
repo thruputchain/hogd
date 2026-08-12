@@ -119,7 +119,7 @@ public:
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
-  IndexerOutboxCandidatePayload
+  x23::Async<IndexerOutboxCandidatePayload>
   snapshot_indexer_outbox_candidate(BlockHeight block_height,
                                     SHA256Hash event_root,
                                     ProposalTxs proposal_txs);
