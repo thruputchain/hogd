@@ -46,7 +46,12 @@ add_x23_test(poll_writer_zombie)
 set_tests_properties(poll_writer_zombie PROPERTIES TIMEOUT 10)
 
 add_x23_test(writebuf_unlock_uaf)
-set_tests_properties(writebuf_unlock_uaf PROPERTIES TIMEOUT 30)
+# The bug this catches is a write into a freed WriteBuffer, so make the
+# allocator fill freed memory: in a non-sanitizer debug build that is what
+# turns the stray unlock into an x23assert failure.  Ignored by asan,
+# which reports the use-after-free directly.
+set_tests_properties(writebuf_unlock_uaf PROPERTIES TIMEOUT 30
+  ENVIRONMENT "MALLOC_PERTURB_=85;MallocScribble=1")
 
 add_x23_test(abort_zombie)
 set_tests_properties(abort_zombie PROPERTIES TIMEOUT 10)
