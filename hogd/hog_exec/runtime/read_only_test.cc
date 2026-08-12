@@ -16,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
@@ -54,9 +55,18 @@ protected:
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
+  // A second deployment of `contract_`, so that a test can have the contract
+  // invoke its own entrypoints without tripping the reentrance guard.
+  void deploy_callee()
+  {
+    write_deployment(callee_addr_, contract_);
+    setup_grant_storage_token(callee_addr_, 1'000'000'000);
+  }
+
   std::shared_ptr<Contract> contract_ =
       hogd::load_contract("read_only_test.wasm");
   ContractAddress const contract_addr_ = make_contract_address(0);
+  ContractAddress const callee_addr_ = make_contract_address(2);
   using read_only_test_client_t =
       ContractTraitClient<read_only_test::ReadOnlyTest>;
   read_only_test_client_t client_ = read_only_test_client_t(contract_addr_);
@@ -586,27 +596,24 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
   }
 }
 
-// Verifies that when a contract self-invokes in read-only mode and the
-// inner frame tries to deploy a contract, the output address is not zeroed.
+// Verifies that when a read-only frame tries to deploy a contract, the deploy
+// is rejected and the output address is not zeroed.  The contract hash handed
+// to the inner frame is a real, deployable contract, so read-only mode is the
+// only thing that can make the deploy fail.
 TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 {
-  using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
+  deploy_callee();
 
   auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
 
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
           .invocation =
-              Invocation{
-                  .invoked_address = contract_addr_,
-                  .entrypoint =
-                      meta::entrypoint<u8"read_only_deploy_output_preserved">(),
-                  .gas_limit = UINT64_MAX,
-                  .calldata = {}},
+              client_.make_invocation<u8"read_only_deploy_output_preserved">(
+                  UINT64_MAX, callee_addr_, sha256(*contract_)),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
@@ -616,22 +623,18 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 // only guard
 TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
-  using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
+  deploy_callee();
 
   auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
 
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
-          .invocation =
-              Invocation{.invoked_address = contract_addr_,
-                         .entrypoint = meta::entrypoint<
-                             u8"read_only_aliasing_before_read_only_check">(),
-                         .gas_limit = UINT64_MAX,
-                         .calldata = {}},
+          .invocation = client_.make_invocation<
+              u8"read_only_aliasing_before_read_only_check">(UINT64_MAX,
+                                                             callee_addr_),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
