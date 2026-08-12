@@ -19,7 +19,9 @@ namespace {
 
 class ManualCoroPoll : public CoroPoll {
 public:
-  explicit ManualCoroPoll(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{}) {}
+  explicit ManualCoroPoll(ThreadPool &pool)
+    : CoroPoll(pool, no_loop_thread{})
+  {}
 };
 
 void
