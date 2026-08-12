@@ -110,7 +110,17 @@ add_x23_gtest(xdr)
 add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
-set_tests_properties(shutdown threadpool PROPERTIES TIMEOUT 10)
+set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+# threadpool gets the same budget as the other stress tests here rather
+# than shutdown's 10s.  DestructionWakeupStress creates and destroys
+# 10000 thread pools, and its cost tracks the host's CPU count (a pool
+# allocates one run queue per LLC bucket and always starts a qcbq
+# service thread), so on a big CI host under `ctest --parallel` it takes
+# a few seconds even without sanitizers -- 4.5s on the asyncio schedule,
+# and past 10s under ASAN.  It is checking for a lost wakeup, which
+# hangs rather than merely running slowly, so the larger budget still
+# catches what the test is for.
+set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
 endif()
 
 if(BENCHMARK_PATH)
