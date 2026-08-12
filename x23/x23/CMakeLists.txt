@@ -23,6 +23,7 @@ add_library(x23
   format.h
   heap.h
   iter.h
+  move_only_function.h
   mvar.h
   nmvec.h
   nodestroy.h

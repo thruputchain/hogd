@@ -30,7 +30,8 @@ ThreadPool::ThreadPool(size_t nthreads)
   : nthreads_(nthreads), nqueues_((init_cpumaps(), llc_map->nbuckets())),
     queue_nthreads_(new std::atomic_uint[nqueues_]{}),
     runqueues_(std::make_unique<RunQueue[]>(nqueues_)),
-    tstate_(std::make_unique<ThreadState[]>(nthreads))
+    tstate_(std::make_unique<ThreadState[]>(nthreads)),
+    qcbq_service_thread_(&ThreadPool::qcbq_service, this)
 {
   fastclock::get_ns(); // Calibrate the clock early
   workers_.reserve(nthreads_);
@@ -51,6 +52,11 @@ ThreadPool::~ThreadPool()
     ptr->nonempty.notify_all();
   }
   threads_.clear(); // Join all threads before destroying fields
+  qcbq_nonempty_.notify_all();
+  // qcbq_service might exit after ss_.request_stop(), so purge final
+  // quiescent callbacks after workers have exited.
+  std::unique_lock lk{qcbq_lock_};
+  qcbq_do_service(lk);
 }
 
 // Find and lock a runqueue for a job with cpuhint.  If the "affinity
@@ -170,6 +176,34 @@ ThreadPool::drain() noexcept
   // Now also wait for all running threads to yield, since some of
   // those might still have been enqueued before drain was called.
   quiesce();
+}
+
+void
+ThreadPool::qcbq_service()
+{
+  std::unique_lock lk(qcbq_lock_);
+  for (;;) {
+    qcbq_do_service(lk);
+    if (ss_.stop_requested())
+      return;
+    qcbq_nonempty_.wait(lk);
+  }
+}
+
+void
+ThreadPool::qcbq_do_service(std::unique_lock<std::mutex> &lk)
+{
+  assert(lk);
+  for (;;) {
+    auto v = std::exchange(qcbq_, {});
+    if (v.empty())
+      return;
+    lk.unlock();
+    quiesce();
+    for (auto &f : v)
+      std::invoke(f);
+    lk.lock();
+  }
 }
 
 std::string

@@ -1,5 +1,9 @@
 
+#include <cerrno>
+#include <cstdint>
 #include <print>
+#include <semaphore>
+#include <stdexcept>
 #include <thread>
 
 #include <sys/socket.h>
@@ -10,6 +14,68 @@
 
 using namespace x23;
 using std::string_literals::operator""s;
+
+void
+test_matching_poison_generation(CoroPoll &cp)
+{
+  int fds[2];
+  if (pipe(fds) == -1)
+    Errno{}.raise("pipe");
+  UniqueFd readfd(fds[0]);
+  UniqueFd writefd(fds[1]);
+  set_nonblock(readfd);
+
+  uint64_t generation = cp.generation(readfd);
+  auto token = cp.read_clear(readfd);
+  std::binary_semaphore done(0);
+  int result = -1;
+  cp.read_wait(token)([&](Errno err) {
+    result = err.raw_code();
+    done.release();
+  });
+
+  cp.poison(readfd, generation);
+  done.acquire();
+  if (result != EBADF)
+    throw std::runtime_error("matching generation did not poison fd");
+  cp.reset(readfd);
+}
+
+void
+test_stale_poison_generation(CoroPoll &cp)
+{
+  int fds[2];
+  if (pipe(fds) == -1)
+    Errno{}.raise("pipe");
+  UniqueFd readfd(fds[0]);
+  UniqueFd writefd(fds[1]);
+  set_nonblock(readfd);
+
+  uint64_t stale_generation = cp.generation(readfd);
+  cp.reset(readfd);
+  uint64_t generation = cp.generation(readfd);
+  if (generation == stale_generation)
+    throw std::runtime_error("fd generation did not change after reset");
+
+  auto token = cp.read_clear(readfd);
+  std::binary_semaphore done(0);
+  int result = -1;
+  cp.read_wait(token)([&](Errno err) {
+    result = err.raw_code();
+    done.release();
+  });
+
+  cp.poison(readfd, stale_generation);
+  char c = 'x';
+  if (write(writefd.get(), &c, sizeof(c)) != sizeof(c))
+    Errno{}.raise("write");
+  done.acquire();
+  if (result != 0)
+    throw std::runtime_error("stale generation poisoned recycled fd");
+  if (cp.generation(readfd, false) != generation)
+    throw std::runtime_error("stale poison changed fd generation");
+  cp.reset(readfd);
+}
 
 int
 main()
@@ -47,4 +113,7 @@ main()
   writeok.release();
 
   exitok.acquire();
+
+  test_matching_poison_generation(cp);
+  test_stale_poison_generation(cp);
 }
