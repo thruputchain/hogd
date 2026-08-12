@@ -15,6 +15,62 @@
 using namespace x23;
 using std::string_literals::operator""s;
 
+namespace {
+
+class ManualPoll : public CoroPoll {
+public:
+  explicit ManualPoll(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{}) {}
+};
+
+void
+test_poisoned_connect_propagates_error()
+{
+  ThreadPool pool(2);
+  ManualPoll cp(pool);
+
+  auto bind_addr = HostPort{"127.0.0.1", uint16_t{0}}.to_addr(false);
+  if (!bind_addr)
+    throw std::runtime_error("could not construct loopback address");
+  UniqueFd listenfd = stcplisten(*bind_addr);
+  sockaddr_storage server_addr = local_addr(listenfd);
+
+  UniqueFd fd(socket(server_addr.ss_family, SOCK_STREAM, 0));
+  if (!fd)
+    Errno{}.raise("socket");
+
+  // ManualPoll has no polling thread. connect() therefore starts the
+  // nonblocking TCP handshake and parks in write_wait(), but cannot observe the
+  // writable edge on its own.
+  auto pending = cp.connect(fd, &server_addr);
+  if (pending.operator co_await().await_ready())
+    throw std::runtime_error(
+        "test connect completed before it could be poisoned");
+
+  // A successful accept proves that the TCP handshake itself has completed.
+  // The client coroutine is nevertheless still parked because no CoroPoll loop
+  // has run to deliver EPOLLOUT/POLLOUT.
+  UniqueFd accepted(::accept(listenfd.get(), nullptr, nullptr));
+  if (!accepted)
+    Errno{}.raise("accept");
+
+  // Simulate teardown aborting the pending network wait. poison() completes the
+  // registered write_wait() with EBADF. connect() must propagate that error
+  // rather than continuing and treating the already-established socket as a
+  // successful connect.
+  cp.poison(fd);
+  auto result = pending();
+  cp.reset(fd);
+
+  if (result)
+    throw std::runtime_error(
+        "CoroPoll::connect returned success after its wait was poisoned");
+  if (result.error().raw_code() != EBADF)
+    throw std::runtime_error(
+        "CoroPoll::connect did not propagate EBADF from poisoned wait");
+}
+
+} // namespace
+
 void
 test_matching_poison_generation(CoroPoll &cp)
 {
@@ -82,6 +138,8 @@ main()
 {
   setlinebuf(stdout);
   Buf b;
+
+  test_poisoned_connect_propagates_error();
 
   ThreadPool pool(2);
   CoroPoll cp(pool);

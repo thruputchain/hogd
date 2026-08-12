@@ -47,6 +47,7 @@ endif()
 add_library(hog_event_test_objects OBJECT
   event_block_context_test.cc
   event_rpc_test.cc
+  rpc_server_shutdown_test.cc
   topic_layout_test.cc
 )
 target_link_libraries(
