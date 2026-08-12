@@ -601,13 +601,19 @@ class WriteBuffer::Service {
 public:
   [[nodiscard]]
   Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
-    : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+    : wb_(wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
   {}
 
   Errno go();
 
 private:
-  WriteBuffer *wb_;
+  // wb_ is a reference and not a raw pointer because lk_ holds a lock
+  // that lives *inside* the WriteBuffer, and worker() can be the last
+  // owner of it (the fd's own reference is dropped by reset() before
+  // the parked writer is woken with EBADF).  Declaring it ahead of lk_
+  // means reverse-order member destruction unlocks before the buffer
+  // can go away; otherwise ~unique_lock touches a freed TestLock.
+  RefPtr<WriteBuffer> wb_;
   CoroPoll *cp_;
   BorrowedFd fd_;
   std::unique_lock<TestLock> lk_;

@@ -66,7 +66,10 @@ WriteBuffer::Service::go()
 Detached
 WriteBuffer::Service::worker(Service self, BufVec work)
 {
-  RefPtr<WriteBuffer> wbref(*self.wb_);
+  // self.wb_ keeps the buffer alive for us.  Don't add a RefPtr local
+  // here: a coroutine's parameter copies are destroyed with the frame,
+  // which happens *after* the body's locals, so a local reference would
+  // be released before ~Service unlocks wb_->service_lock_.
   for (;;) {
     while (!work.empty()) {
       if (self.tok_ && co_await self.cp_->write_wait(self.tok_))
