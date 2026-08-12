@@ -52,7 +52,23 @@ protected:
     runtime_context_ = make_hog_exec_context();
   }
 
+  // Deploys a second copy of the contract, for tests whose entrypoint invokes
+  // one of the contract's own `internal_*` helpers: the reentrance guard
+  // rejects an invoke of a contract already on the invocation stack, so the
+  // helper has to run at a different address.
+  void deploy_target()
+  {
+    using syscall_misc_tests_meta =
+        ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+
+    auto contract = syscall_misc_tests_meta::load_wasm();
+    write_contract(contract);
+    write_deployment(kTargetAddress, contract);
+    setup_grant_storage_token(kTargetAddress, 1'000'000'000);
+  }
+
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
+  constexpr static ContractAddress kTargetAddress = make_contract_address(1);
 
   ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client_ =
       ContractTraitClient<syscall_misc_tests::SyscallMiscTests>(
@@ -80,16 +96,17 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
 
 TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_get_return_after_fault">(
-                          UINT64_MAX),
+                          UINT64_MAX, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -128,16 +145,17 @@ TEST_F(SyscallMiscTests, TestInvokeContractNotFound)
 
 TEST_F(SyscallMiscTests, TestInvokeFrameReverted)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_invoke_frame_reverted">(
-                          UINT64_MAX),
+                          UINT64_MAX, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -590,16 +608,17 @@ TEST_F(SyscallMiscTests, TestDeployContractNotAvailable)
 
 TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_too_long">(
-                          UINT64_MAX),
+                          UINT64_MAX, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -644,16 +663,17 @@ TEST_F(SyscallMiscTests, TestInvokeInvalidFlags)
 
 TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_write_syscall_in_read_only">(
-                  UINT64_MAX),
+                  UINT64_MAX, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
@@ -661,14 +681,7 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
 
 TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 {
-  // Deploy the same wasm at a second address so we can cross-contract
-  // invoke it without reentrance.
-  using syscall_misc_tests_meta =
-      ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
-  constexpr ContractAddress kTargetAddress = make_contract_address(1);
-  auto contract = syscall_misc_tests_meta::load_wasm();
-  write_contract(contract);
-  write_deployment(kTargetAddress, contract);
+  deploy_target();
 
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -686,61 +699,65 @@ TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 
 TEST_F(SyscallMiscTests, TestReturnMisalignedAuthTokens)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_misaligned_auth_tokens">(
-                  UINT64_MAX),
+                  UINT64_MAX, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, TestReturnRevertWithAuthTokens)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_revert_with_auth_tokens">(
-                  UINT64_MAX),
+                  UINT64_MAX, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, TestReturnWithEmptyAuthTokens)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_with_empty_auth_tokens">(
-                  UINT64_MAX),
+                  UINT64_MAX, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 TEST_F(SyscallMiscTests, TestReturnWithAuthTokenIds)
 {
+  deploy_target();
+
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_with_auth_token_ids">(
-                  UINT64_MAX),
+                  UINT64_MAX, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 

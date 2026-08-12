@@ -39,8 +39,10 @@ WriteBuffer::Service::write(BufVec &work)
     if (*res != IoResult::kAgain)
       tok_.reset();
   }
-  else
+  else {
     cp_->poison(fd_);
+    return res.error();
+  }
   return 0;
 }
 
@@ -67,8 +69,8 @@ WriteBuffer::Service::worker(Service self, BufVec work)
   RefPtr<WriteBuffer> wbref(*self.wb_);
   for (;;) {
     while (!work.empty()) {
-      if (self.tok_)
-        co_await self.cp_->write_wait(self.tok_);
+      if (self.tok_ && co_await self.cp_->write_wait(self.tok_))
+        co_return;
       if (self.write(work))
         co_return;
     }
@@ -225,7 +227,8 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
       co_return Errno{err};
     }
 
-    co_await write_wait(tok);
+    if (auto e = co_await write_wait(tok); e)
+      co_return e;
     tok = write_clear(fd);
 
     len = sizeof(err);

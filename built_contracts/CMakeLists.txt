@@ -276,12 +276,18 @@ add_wasm_builds(
     delegate_call_test
     ed25519_verify_wrapper
     view_gateway_test
+  # RAW_CONTRACTS carry no #[contract] macro, so they embed no spec. They still
+  # export functions, which is what groundhog-cli >= 0.8.0 requires: a module
+  # that exports nothing at all can never be invoked, so the CLI now rejects it
+  # rather than emitting a dead artifact. nocontract_wallet is exactly that case
+  # -- it is a client-stub-only crate (interface + Client for cross-contract
+  # calls, and a compile_error! under `guest` saying it is not a wasm contract),
+  # so it is a workspace member for compile coverage but is not built to wasm.
   RAW_CONTRACTS
     hash_bug
     calldata_raw
     sha256_raw
     fibonacci_raw
-    nocontract_wallet
 )
 
 add_executable(contract_loader_test contract_loader_test.cc)
@@ -296,10 +302,11 @@ gtest_discover_tests(contract_loader_test)
 #
 # A few contracts are intentionally excluded because they cannot be lowered to
 # an RV32 artifact:
-#   - RAW_CONTRACTS (hash_bug, calldata_raw, sha256_raw, fibonacci_raw,
-#     nocontract_wallet): no #[contract] macro -> no gh_* entry symbols, so
-#     rv32-lower rejects the ELF ("no #[contract] entry-point symbols found").
-#     hash_bug additionally has no sdk dep, so the rv32 runtime never links.
+#   - RAW_CONTRACTS (hash_bug, calldata_raw, sha256_raw, fibonacci_raw): no
+#     #[contract] macro -> no gh_* entry symbols, so rv32-lower rejects the ELF
+#     ("no #[contract] entry-point symbols found"). hash_bug additionally has no
+#     sdk dep, so the rv32 runtime never links.
+#   - nocontract_wallet: client-stub-only crate, not built for either target.
 #   - cxs_roundtrip, txs_roundtrip: their image overflows the rv32 RAM region
 #     (rust-lld: "section will not fit in region 'RAM'").
 message(STATUS "RV32 contracts: building 27 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
@@ -390,6 +397,7 @@ add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
+add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)

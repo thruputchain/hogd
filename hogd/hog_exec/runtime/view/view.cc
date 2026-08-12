@@ -55,8 +55,11 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     };
 
     auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
-    // r is only non-null if tracing is on
-    CHECK(!r);
+    if (!r.has_value()) {
+      return ExpectedViewResult{TransactionViewStatus::InternalError};
+    }
+    // the stashed parent trace is only non-null if tracing is on
+    CHECK(!r.value());
   }
 
   try {

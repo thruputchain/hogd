@@ -14,12 +14,15 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -153,12 +156,34 @@ public:
         [f = std::forward<decltype(lambda)>(lambda)](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
       try {
+        // Mirror the sdk entrypoint glue: an args-decode failure (parse
+        // error, trailing bytes) or unconsumed forwarded auth handles
+        // (builder contracts take no Signer args) aborts the frame with
+        // LibraryExn::Handling(DecodingArgs), byte-identical to a wasm
+        // contract's wrapper — not a plain frame fault. See
+        // default_wallet_parity_test.cc's malformed-calldata cases.
+        auto decoding_args_abort = [&ctx]() -> InvokeStatus<void> {
+          ctx.consume_gas(kErrorGas);
+          LibraryExn exn(LibraryExn::kLibraryExnHandling);
+          exn.handling() = HandlingError(HandlingError::kHandlingDecodingArgs);
+          auto buf = x23::serialize_cxs(kLibraryExceptionSelector, exn);
+          if (!buf) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          ctx.handler().set_return_buffer(ReturnBuffer(buf->begin(),
+                                                       buf->end()),
+                                          true, {});
+          return {};
+        };
+
         auto const &calldata = ctx.handler().get_calldata();
         auto args = Serializer<Format>::template deserialize<args_t>(
             std::as_bytes(std::span(calldata)));
         if (!args.has_value()) {
-          ctx.consume_gas(kErrorGas);
-          return InvokeError{InvokeErrorCode::Deterministic};
+          return decoding_args_abort();
+        }
+        if (!ctx.handler().get_parent_supplied_auth_tokens().empty()) {
+          return decoding_args_abort();
         }
 
         // invoke the lambda, and return the error if there is one

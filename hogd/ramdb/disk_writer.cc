@@ -127,9 +127,15 @@ DiskWriter::write_worker(const std::stop_token &stoken)
         crc = 0;
 
         // write the commit record and sync everything to disk.
-        if (!write_full(w, std::as_writable_bytes(std::span(commit_buf)))
-                 .and_then([&w] { return w.flush_and_sync(); })) [[unlikely]] {
-          warn("couldn't sync buffer to disk");
+        if (ErrnoStatus<void> commit_status =
+                write_full(w, std::as_writable_bytes(std::span(commit_buf)))
+                    .and_then([&w] { return w.flush_and_sync(); });
+            !commit_status) [[unlikely]] {
+          // Report the errno: without it an ENOSPC on the log directory is
+          // indistinguishable from a hardware EIO, and the sync failure
+          // surfaces to callers as an undifferentiated DBCode::kIO (#3206).
+          warn("couldn't sync commit record to disk: {}",
+               commit_status.error());
           signal_ioerror();
           return;
         }
@@ -168,7 +174,7 @@ DiskWriter::write_worker(const std::stop_token &stoken)
       crc = crc32c_append(crc, ll->get_bytes());
       ErrnoStatus<void> ret = write_full(w, ll->get_bytes());
       if (!ret) [[unlikely]] {
-        warn("couldn't sync buffer to disk");
+        warn("couldn't write change record to disk: {}", ret.error());
         signal_ioerror();
         return;
       }

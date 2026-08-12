@@ -30,6 +30,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_db.h"
@@ -765,7 +766,7 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
   using FailedAuthenticationTxSet =
-      SynchronizedMap<SignedTransactionHash, char, ByteArrayHasher>;
+      SynchronizedMap<SignedTransactionHash, char, SipHash24Hasher>;
   SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
       failed_authentication_txs_;
 

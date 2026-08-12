@@ -31,6 +31,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/db_interface/db_sched_server.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/block_id_manager.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -134,6 +135,15 @@ public:
   const StorageCostModel *get_default_cost_model() const
   {
     return block_manager_.get_cost_model();
+  }
+
+  // For testing only: removes a previously-written contract record from the
+  // in-memory store so subsequent lookups see it as absent. Call before any
+  // test that exercises the "wallet record missing" code path, and only after
+  // genesis has run (to avoid losing the cost model or other genesis state).
+  void erase_contract_by_hash(SHA256Hash const &hash)
+  {
+    in_memory_db_.erase_contract(hash);
   }
 
 private:
@@ -643,6 +653,16 @@ public:
         db_wrapper_);
   }
 
+  // For testing only: erases a contract record from the in-memory store
+  // (kMockInMemory only) so subsequent lookups treat it as absent. Must be
+  // called BEFORE any transaction runs (so the snapshot cache has not yet
+  // cached the entry). Use to simulate an absent wallet record without
+  // skipping genesis (which is needed for the cost model and block state).
+  void erase_contract_from_mock_db(SHA256Hash const &hash)
+  {
+    std::get<MockDBWrapper>(db_wrapper_).erase_contract_by_hash(hash);
+  }
+
   // Only valid when test_db == kHogDb. Returns the underlying HogDb DAO
   // for direct storage inspection in tests.
   HogDbDAO &get_hog_db_dao()
@@ -700,6 +720,8 @@ private:
       GenesisConfiguration genesis_configuration{
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
+          .default_wallet =
+              GenesisConfigurationLoader::native_default_wallet_hash(),
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;

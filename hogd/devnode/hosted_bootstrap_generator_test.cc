@@ -20,12 +20,14 @@
 #include <unistd.h>
 #include <vector>
 
+#include "contract.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 #include "hogd/devnode/manifest_hex.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
 #include "types.hh"
 
@@ -144,6 +146,17 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
                 require_field(require_field(*genesis, "storage_cost_model"),
                               "bytestring_cost_per_byte")),
             "10");
+  const json::Value &default_wallet = require_field(*genesis, "default_wallet");
+  // Genesis-JSON hashes are unprefixed hex (see contract_hash above);
+  // hex_string prepends 0x.
+  EXPECT_EQ(std::format("0x{}",
+                        require_string(require_field(default_wallet, "hash"))),
+            hex_string(
+                GenesisConfigurationLoader::native_default_wallet_hash().hash));
+  EXPECT_EQ(require_field(default_wallet, "contract_size").as_integer(),
+            std::optional<std::int64_t>{0});
+  EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),
+            "kNative");
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);

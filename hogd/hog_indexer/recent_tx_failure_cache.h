@@ -8,8 +8,8 @@
 
 #include "db_conflict.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
+#include "hogd/crypto/crypto.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -136,7 +136,7 @@ private:
 
   // Sharded by tx hash: report()/lookup() lock only the target bucket.
   mutable SynchronizedMap<SignedTransactionHash, TxFailureDiagnostic,
-                          ByteArrayHasher>
+                          SipHash24Hasher>
       entries_;
   // Approximate live-entry count backing size() and the soft cap.  Maintained
   // alongside entries_ under the same per-bucket locks; exact under

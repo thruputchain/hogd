@@ -21,6 +21,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -65,8 +66,11 @@ protected:
 
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
+    GenesisConfiguration genesis_configuration{
+        .default_wallet =
+            GenesisConfigurationLoader::native_default_wallet_hash()};
     auto db_res =
-        db_client_.dbsched_load_genesis_configuration(GenesisConfiguration{},
+        db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
     ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK)
         << "Failed to load genesis configuration";
@@ -562,6 +566,28 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();
+}
+
+// Genesis load with a consensus value carrying a height other than the genesis
+// height (here the -1 bootstrap sentinel) is rejected up front with an RPC
+// error, rather than persisting the invalid height as the db tip and then
+// fatal-checking after the commit (#3246). Uses a fresh HogdbWrapper so the tip
+// is still the pre-genesis sentinel.
+TEST(RpcGenesisTest, RejectsNonGenesisHeight)
+{
+  HogdbWrapper db_wrapper;
+  auto db_client = make_srpc_multiclient<DbSched1>(
+      x23::HostPort{"localhost", db_wrapper.coord_port()}, false);
+
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = -1;
+  GenesisConfiguration genesis_configuration{
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()};
+
+  EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,
+                                                         genesis_value),
+            DbSchedResult::DbSchedResultError);
 }
 
 } // namespace hogd

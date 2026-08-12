@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <future>
 #include <gtest/gtest.h>
 #include <latch>
@@ -489,8 +490,22 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
         throw std::runtime_error("later executor cleanup failure");
       });
 
-  auto cleanup = std::async(std::launch::async, [&] {
-    server.mempool_coord_rpc().test_finish_all_executors(kBlock)();
+  // Run the cleanup on an explicit thread rather than std::async: libc++
+  // detaches the std::async worker, so future::get() can return while the
+  // worker is still tearing down coroutine frames that hold references to the
+  // rethrown exception. That teardown frees the exception's what() buffer via
+  // libc++abi's (TSAN-uninstrumented) refcounting, which TSAN reports as a
+  // race against the EXPECT_STREQ below. Joining the thread before inspecting
+  // the exception makes the ordering explicit.
+  std::promise<void> cleanup_result;
+  std::future<void> cleanup = cleanup_result.get_future();
+  std::thread cleanup_thread([&] {
+    try {
+      server.mempool_coord_rpc().test_finish_all_executors(kBlock)();
+      cleanup_result.set_value();
+    } catch (...) {
+      cleanup_result.set_exception(std::current_exception());
+    }
   });
   failure_started.wait();
   blocked_started.wait();
@@ -498,6 +513,7 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
             std::future_status::timeout);
 
   allow_blocked_cleanup.count_down();
+  cleanup_thread.join();
   bool caught_first_exception = false;
   try {
     cleanup.get();
@@ -1542,6 +1558,48 @@ TEST(Mempool, ValidateCommit)
 
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// Regression test for a validation-gate leak: the
+// [SchedulerValidationUnknownParentBlock] early return in
+// [schedulercoord_validate_block()] used to skip
+// [decrement_num_validations_in_progress()], leaking the gate increment.
+// [close_validation_gate()] then waits forever for the count to reach zero,
+// so every subsequent [schedulercoord_commit_block()] wedges. (The bench
+// harness maps a timeout to success, so a wedged validator is silently
+// masked in CI.) Without the fix this test HANGS at the commit below; with
+// it, it completes in well under a second.
+TEST(Mempool, UnknownParentBlockReleasesValidationGate)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 32);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal proposal = res_nominate.proposed_block().proposal;
+
+  // Validate against a parent id that is not the last committed block.
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id + 1,
+                                                               proposal)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationUnknownParentBlock);
+
+  // The commit must not wedge on a leaked validation-gate increment.
+  auto res_commit = commit_block(server, res_nominate.proposed_block().block_id,
+                                 db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 

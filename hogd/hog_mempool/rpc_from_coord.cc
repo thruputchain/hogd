@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <future>
 #include <ios>
 #include <iterator>
 #include <memory>
@@ -625,22 +624,26 @@ MempoolCoordinatorRpc::get_txset_hash(
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
   const size_t num_threads = available_parallelism();
-  std::vector<std::future<void>> futures;
   const std::vector<ChunkRange> chunks =
       make_chunks(hashes.size(), num_threads);
-  futures.reserve(chunks.size());
 
-  for (const ChunkRange &chunk : chunks) {
-    futures.push_back(worker_pool.submit([chunk, &trie, &hashes] {
-      for (size_t j = chunk.start; j < chunk.end; j++) {
-        // We add each tx hash to the Merkle trie as a key with an empty value.
-        // So in essence, we are using the Merkle trie as a set.
-        CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
-      }
-    }));
-  }
-  for (std::future<void> &future : futures) {
-    future.get();
+  // JobScope joins every submitted insertion job before `trie` and `hashes`
+  // can leave scope, even if a later submit() throws mid-loop. Without it, an
+  // allocation failure while queuing a chunk would let this frame unwind while
+  // an earlier worker still holds `&trie`, producing a use-after-return.
+  {
+    WorkerPool::JobScope scope(worker_pool);
+    scope.reserve(chunks.size());
+    for (const ChunkRange &chunk : chunks) {
+      scope.submit([chunk, &trie, &hashes] {
+        for (size_t j = chunk.start; j < chunk.end; j++) {
+          // We add each tx hash to the Merkle trie as a key with an empty
+          // value. So in essence, we are using the Merkle trie as a set.
+          CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
+        }
+      });
+    }
+    scope.wait();
   }
   trie.generate_all_hashes(num_threads);
   return trie.get_root_hash();
@@ -1072,20 +1075,19 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           const size_t num_threads = std::max(available_parallelism() / 2, 1UL);
           const std::vector<ChunkRange> chunks =
               make_chunks(tx_hashes.size(), num_threads);
-          std::vector<std::future<void>> futures;
-          futures.reserve(chunks.size());
+          // JobScope joins every insertion job before `tx_hashes` leaves scope,
+          // even if a later submit() throws mid-loop.
+          WorkerPool::JobScope scope(worker_pool);
+          scope.reserve(chunks.size());
           for (const ChunkRange &chunk : chunks) {
-            futures.push_back(
-                worker_pool.submit([chunk, &tx_hashes, txset_trie] {
-                  for (size_t j = chunk.start; j < chunk.end; j++) {
-                    CHECK(txset_trie->insert(HexArray(tx_hashes[j]),
-                                             std::span<const std::byte>()));
-                  }
-                }));
+            scope.submit([chunk, &tx_hashes, txset_trie] {
+              for (size_t j = chunk.start; j < chunk.end; j++) {
+                CHECK(txset_trie->insert(HexArray(tx_hashes[j]),
+                                         std::span<const std::byte>()));
+              }
+            });
           }
-          for (std::future<void> &future : futures) {
-            future.get();
-          }
+          scope.wait();
           return;
         });
     nodes.txset_insert_chunks.push_back(txset_insert_node);
@@ -1492,10 +1494,14 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .proposal_txs_hash = proposal_txs_compatibility_hash(
                            proposal.transactions),
                        .upgrades = {}};
+  // default_wallet comes from the committed parent tip: the cache's db_tip
+  // only ever receives storage/event hashes from the scheduler's close
+  // result, never the wallet field.
   nominated_block_cache_.db_tip = DbTip{
       .id = nominated_block_cache_.proposal_result.proposed_block().block_id,
       .storage_long_hash = nominated_block_cache_.db_tip.storage_long_hash,
-      .value = std::move(value)};
+      .value = std::move(value),
+      .default_wallet = last_committed_block_.default_wallet};
   info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
@@ -1753,6 +1759,15 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
            last_committed_block_.value.proposal_header.block_height + 1);
 
   if (last_committed_block_.id != parent_id) {
+    // Release the validation-gate increment taken at the top of this loop.
+    // Without this, the increment leaks: [close_validation_gate()] then waits
+    // forever for the count to reach zero, and every subsequent
+    // [schedulercoord_commit_block()] wedges. (The bench harness maps a
+    // timeout to success, so a wedged validator is silently masked in CI.)
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
+    info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
@@ -2143,10 +2158,13 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                  proposal_txs_compatibility_hash(
                                      proposal.transactions),
                              .upgrades = {}};
+        // default_wallet comes from the committed parent tip (see the
+        // nomination-path comment).
         cache.db_tip =
             DbTip{.id = validation_block_id,
                   .storage_long_hash = cache.db_tip.storage_long_hash,
-                  .value = std::move(value)};
+                  .value = std::move(value),
+                  .default_wallet = last_committed_block_.default_wallet};
         co_await set_result(SchedulerValidationOutcome::SchedulerValidationOK);
         result.block().block_id = cache.db_tip.id;
         result.block().signed_transactions = {};
@@ -2458,7 +2476,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         // into the nominated block. [nominated_block_cache_.tx_hashes] includes
         // every tx we attempted during scheduling, including txs that later
         // failed proposal and were added to [failed_tx_hashes].
-        static std::unordered_set<SignedTransactionHash, ByteArrayHasher>
+        static std::unordered_set<SignedTransactionHash, SipHash24Hasher>
             return_to_runqueue;
         return_to_runqueue.clear();
 

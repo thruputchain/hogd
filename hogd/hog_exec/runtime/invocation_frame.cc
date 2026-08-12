@@ -257,7 +257,7 @@ InvocationFrame::collect_storage_deltas(
   }
 }
 
-void
+SystemStatus<void>
 InvocationFrameStack::start_frame(
     ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
     std::span<uint32_t const> owned_auth_token_ids)
@@ -266,15 +266,40 @@ InvocationFrameStack::start_frame(
 
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
-  if (!frame_stack_.empty()) {
-    frame_stack_.back().remove_auth_tokens(owned_auth_token_ids);
-    frame_stack_.back().set_child_restore_auth_tokens(owned_auth_token_ids);
-  }
   uint32_t parent_depth =
       frame_stack_.empty() ? 0
                            : frame_stack_.back().get_total_try_invoke_depth();
-  frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                            event_count, owned_auth_token_ids, parent_depth);
+
+  // Perform every throwing allocation before mutating parent-owned auth-token
+  // state, and roll back on failure, so this stays a clean no-op under memory
+  // pressure and the noexcept caller can report Unrecoverable instead of
+  // terminating (#3058).
+  //
+  // emplace_back grows the frame stack and builds the child's owned-token set.
+  // InvocationFrame's move ctor is noexcept, so emplace_back has the strong
+  // guarantee: on throw the stack is unchanged.
+  try {
+    frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
+                              event_count, owned_auth_token_ids, parent_depth);
+  } catch (...) {
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  if (frame_stack_.size() >= 2) {
+    InvocationFrame &parent = frame_stack_[frame_stack_.size() - 2];
+    // set_child_restore_auth_tokens only allocates in its initial reserve(), so
+    // a throw leaves the restore list empty; drop the child frame we just
+    // pushed to return to the pre-call state.
+    try {
+      parent.set_child_restore_auth_tokens(owned_auth_token_ids);
+    } catch (...) {
+      frame_stack_.pop_back();
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+    // Non-allocating, so it cannot throw: once here the frame is admitted.
+    parent.remove_auth_tokens(owned_auth_token_ids);
+  }
+  return {};
 }
 
 SystemStatus<std::pair<InvokeResult, bool>>

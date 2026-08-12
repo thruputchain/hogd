@@ -15,6 +15,7 @@
 #include "genesis.hh"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -71,8 +72,11 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  GenesisConfiguration genesis_configuration{.initial_config = {},
-                                             .storage_cost_model = cost_model};
+  GenesisConfiguration genesis_configuration{
+      .initial_config = {},
+      .storage_cost_model = cost_model,
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
   auto res =

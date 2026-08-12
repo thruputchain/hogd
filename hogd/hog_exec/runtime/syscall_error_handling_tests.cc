@@ -95,9 +95,11 @@ public:
     auto context = make_hog_exec_context();
     auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-    handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::None),
-                        std::span<uint32_t>{});
+    ASSERT_TRUE(handler
+                    .start_frame(kPlaceholderInvocation,
+                                 std::to_underlying(InvokeFlag::None),
+                                 std::span<uint32_t>{})
+                    .has_value());
 
     auto [syscall_res, gas_consumed] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
@@ -125,9 +127,11 @@ public:
     auto context = make_hog_exec_context();
     auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-    handler.start_frame(kPlaceholderInvocation,
-                        std::to_underlying(InvokeFlag::None),
-                        std::span<uint32_t>{});
+    ASSERT_TRUE(handler
+                    .start_frame(kPlaceholderInvocation,
+                                 std::to_underlying(InvokeFlag::None),
+                                 std::span<uint32_t>{})
+                    .has_value());
 
     auto [syscall_res, gas_consumed] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10000),
@@ -201,9 +205,11 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoreturnFailingSyscallMeta>(handler, make_null_context(10000),
@@ -243,9 +249,11 @@ TEST_F(SyscallErrorHandlingTest, NoerrorOutOfGas)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoErrorSyscallMeta>(handler, make_null_context(10000),
@@ -280,9 +288,11 @@ TEST_F(SyscallErrorHandlingTest, NoreturnNoErrorOutOfGas)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoReturnNoErrorSyscallMeta>(handler, make_null_context(10000),
@@ -321,9 +331,11 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::ReadOnly),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::ReadOnly),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   auto [syscall_res, gas_consumed] =
       wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10000),
@@ -363,9 +375,11 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   // Create a buffer larger than kMaxReturnBufferLen (1024)
   std::array<std::byte, 1025> oversized_buffer{};
@@ -391,9 +405,11 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::None),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   std::array<std::byte, 10> valid_buffer{};
 
@@ -417,9 +433,11 @@ TEST_F(SyscallErrorHandlingTest,
   auto context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(Transaction{}, *context);
 
-  handler.start_frame(kPlaceholderInvocation,
-                      std::to_underlying(InvokeFlag::ReadOnly),
-                      std::span<uint32_t>{});
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::ReadOnly),
+                               std::span<uint32_t>{})
+                  .has_value());
 
   NativeSyscallContext ctx(handler, 10000);
   auto status = ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});

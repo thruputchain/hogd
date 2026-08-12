@@ -57,7 +57,6 @@ add_library(runtime STATIC
   $<TARGET_OBJECTS:rv32_runtime_objects>
   $<TARGET_OBJECTS:item_objects>
 )
-
 add_library(runtime_test_lib
   native_contract_test_framework.cc
 )
@@ -80,6 +79,8 @@ add_library(runtime_test_objects OBJECT
   cross_call_tests.cc
   cross_contract_revert_test.cc
   delete_recreate_tests.cc
+  default_wallet_fallback_test.cc
+  default_wallet_parity_test.cc
   deserialize_test.cc
   empty_test.cc
   erc20_parity_test.cc

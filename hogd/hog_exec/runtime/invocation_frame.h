@@ -21,6 +21,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -187,10 +188,10 @@ public:
     return std::nullopt;
   }
 
-  std::unordered_set<SHA256Hash, ByteArrayHasher>
+  std::unordered_set<SHA256Hash, SipHash24Hasher>
   get_committed_contracts() const
   {
-    std::unordered_set<SHA256Hash, ByteArrayHasher> committed_contracts;
+    std::unordered_set<SHA256Hash, SipHash24Hasher> committed_contracts;
     committed_contracts.reserve(new_contract_deployments_.size());
     for (auto const &[addr, deployment] : new_contract_deployments_) {
       committed_contracts.insert(deployment.hash);
@@ -260,7 +261,7 @@ private:
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
 
   // newly deployed contracts during the current call frame (and child frames)
-  std::unordered_map<ContractAddress, DeployedContractHash, ByteArrayHasher>
+  std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
       new_contract_deployments_;
 
   std::unordered_set<uint32_t> owned_auth_token_ids_;
@@ -304,9 +305,16 @@ public:
 
   // It MUST be the case that the owned_auth_token_ids are owned by the parent
   // frame. Caller is responsible for checking as much.
-  void start_frame(ContractAddress const &address, Calldata &&calldata,
-                   InvokeFlagSet flags,
-                   std::span<uint32_t const> owned_auth_token_ids);
+  //
+  // Admitting a child frame runs throwing STL allocations. On allocation
+  // failure the call is a clean no-op — any parent state touched is rolled
+  // back — and an Unrecoverable SystemError is returned, so the noexcept caller
+  // (SystemCallHandler::start_frame) never lets the exception terminate the
+  // executor (#3058).
+  [[nodiscard]] SystemStatus<void>
+  start_frame(ContractAddress const &address, Calldata &&calldata,
+              InvokeFlagSet flags,
+              std::span<uint32_t const> owned_auth_token_ids);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode

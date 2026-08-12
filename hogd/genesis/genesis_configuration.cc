@@ -30,11 +30,6 @@
 
 namespace hogd {
 
-GenesisConfigurationLoader::GenesisConfigurationLoader(
-    GenesisConfiguration genesis_configuration)
-  : genesis_configuration_(std::move(genesis_configuration))
-{}
-
 namespace {
 std::shared_ptr<const Contract>
 make_native_contract(HogexecPrecompiledNativeContracts contract_id)
@@ -72,6 +67,18 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
         contract->contract_type());
 }
 } // namespace
+
+DeployedContractHash
+GenesisConfigurationLoader::native_default_wallet_hash()
+{
+  return make_deployed_contract_hash(make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
+}
+
+GenesisConfigurationLoader::GenesisConfigurationLoader(
+    GenesisConfiguration genesis_configuration)
+  : genesis_configuration_(std::move(genesis_configuration))
+{}
 
 int128_t
 GenesisConfigurationLoader::initial_hog_token_supply()
@@ -132,6 +139,12 @@ GenesisConfigurationLoader::load_genesis_configuration(
   write_contract(precompiled_token_contract);
   write_deployment(kPresetNativeTokenAddress,
                    make_deployed_contract_hash(precompiled_token_contract));
+
+  // The default wallet precompile: contract-store record only, no deployment
+  // row. It is reachable solely via root-resolution fallback at addresses
+  // with no deployed contract (SystemCallHandler::resolve_runtime).
+  write_contract(make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
 }
 
 std::vector<SignedTransaction>
@@ -263,6 +276,8 @@ GenesisConfigurationBuilder::build(StorageCostModel const &cost_model) const
   }
 
   genesis_configuration.storage_cost_model = cost_model.to_xdr();
+  genesis_configuration.default_wallet = default_wallet_override_.value_or(
+      GenesisConfigurationLoader::native_default_wallet_hash());
   return genesis_configuration;
 }
 

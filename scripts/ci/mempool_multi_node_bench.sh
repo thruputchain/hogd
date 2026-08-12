@@ -8,7 +8,9 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 . "$SCRIPT_DIR/bench_harness.sh"
-WAIT_PORT=ci_wait_port
+ci_enable_error_trace
+. "$SCRIPT_DIR/wait_port_report.sh"
+WAIT_PORT=wait_port_or_report
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
@@ -310,7 +312,12 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"
+# This gate waits on every host at once and collapses them to one status, so say
+# which gate failed rather than exiting 1 with only the per-host lines above.
+if ! ci_wait_port_hosts "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"; then
+  echo "readiness: a bench control server is not listening on $CI_CONTROL_PORT" >&2
+  exit 1
+fi
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do
@@ -503,9 +510,25 @@ for node in "${NODE_IDS[@]}"; do
   "$WAIT_PORT" "$(hog_ip "${CHUCKD_HOSTS[$node]}")" 7888
 done
 
-wait "$node0_mempool_pid"
-echo 'node0 mempool wait completed'
-wait "$node1_mempool_pid"
-echo 'node1 mempool wait completed'
+# A mempool that dies mid-run takes the suite down with it, and by that point
+# every readiness wait has already passed, so nothing else in this script has
+# anything to say about it. Name the status and replay the mempool's own log
+# before exiting on it.
+await_mempool() {
+  local label=$1
+  local pid=$2
+  local status=0
+
+  wait "$pid" || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "$label $(ci_describe_exit_status "$status")" >&2
+    replay_control_log_for_label "$label"
+    return "$status"
+  fi
+  echo "$label wait completed"
+}
+
+await_mempool node0_mempool "$node0_mempool_pid"
+await_mempool node1_mempool "$node1_mempool_pid"
 
 publish_results

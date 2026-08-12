@@ -22,7 +22,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -114,9 +114,11 @@ public:
   // These should ONLY be used within the testing framework
   // and from the SDK FFI bindings
   //
-  // Returns the parent trace, if any, which should be stashed and restored in
-  // finish_frame
-  std::unique_ptr<InvocationFrameTrace>
+  // On success returns the parent trace, if any, which should be stashed and
+  // restored in finish_frame. Returns an Unrecoverable SystemError if child
+  // frame admission fails under memory pressure; no child frame is pushed in
+  // that case, so finish_frame must not be called (#3058).
+  [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
               std::span<uint32_t const> owned_auth_token_ids) noexcept;
   SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
@@ -431,7 +433,7 @@ private:
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
   const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                           ByteArrayHasher>
+                           SipHash24Hasher>
       newly_created_contracts_;
 
   // Per-transaction cache of translated rv32 contracts for transaction-local
@@ -440,7 +442,7 @@ private:
   // non-translatable artifact so we never retranslate. Entries are node-stable
   // and borrowed by Rv32Runtime, so they must outlive the runtimes -- they live
   // for the whole transaction.
-  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, ByteArrayHasher>
+  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
       local_rv32_translations_;
 
   ExecutionModeData execution_mode_data_;

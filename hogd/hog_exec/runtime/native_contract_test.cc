@@ -942,12 +942,15 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
   // This must NOT throw std::bad_alloc. The zero-copy BufView
   // deserialization path validates the declared size against the
   // actual input buffer via check_size(), which returns a parse error
-  // (caught by serialize_calldata.h), returning a deterministic error.
+  // (caught by serialize_calldata.h). The builder surfaces that as an
+  // sdk-parallel LibraryExn::Handling(DecodingArgs) abort — a frame that
+  // ran and reverted, not a fault or a crash.
   EXPECT_NO_THROW({
     auto res = handler.root_invoke();
-    // Should be a deterministic error (deserialization failure), not a crash
-    EXPECT_FALSE(res.result_.has_value());
+    EXPECT_TRUE(res.result_.has_value());
   });
+  EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
+            InvocationFrameStatusCode::Abort);
 }
 
 // A contract that supplies a buffer shorter than the stored value must be told

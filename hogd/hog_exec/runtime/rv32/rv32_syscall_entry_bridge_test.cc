@@ -146,7 +146,7 @@ protected:
   static std::unique_ptr<InvocationFrameTrace>
   start_frame(SystemCallHandler &handler)
   {
-    return handler.start_frame(
+    auto stashed = handler.start_frame(
         Invocation{
             .invoked_address = make_contract_address(0),
             .entrypoint = ContractEntrypointID{},
@@ -154,6 +154,7 @@ protected:
             .calldata = Calldata{},
         },
         std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+    return std::move(stashed).value();
   }
 
   static void

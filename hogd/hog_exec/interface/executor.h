@@ -29,7 +29,8 @@ public:
 // coordinator.
 class Executor {
 public:
-  static constexpr size_t kMessageSize = 0x7fffffffff;
+  // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
+  static constexpr size_t kMessageSize = 0x7fffffff;
 
   Executor(size_t n_exec_threads = available_parallelism())
     : n_exec_threads_(n_exec_threads)

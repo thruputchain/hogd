@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "consensus.hh"
+#include "contract.hh"
 #include "db_conflict.hh"
 #include "db_sched.hh"
 #include "hogd/base/compiler.h"
@@ -415,6 +416,45 @@ TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
         (void)recovered;
       },
       "CHECK FAILED");
+}
+
+TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(dir.has_value());
+
+  constexpr BlockTXID kBlock = 21;
+  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
+
+  DeployedContractHash wallet{};
+  wallet.hash.fill(0xCD);
+  wallet.contract_size = 0;
+  wallet.contract_type = ContractType::kNative;
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kHeapSize, 0);
+    ASSERT_TRUE(db.has_value());
+    RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
+
+    // Genesis-order operations: install the config, then commit the tip.
+    // update_dbtip only overwrites id/value/hash, so the field must survive.
+    ctx.set_default_wallet(wallet);
+    ConsensusValue value{};
+    value.proposal_header.block_height = 0;
+    ASSERT_TRUE(ctx.update_dbtip(kBlock, std::move(value), StorageLongHash{})
+                    .has_value());
+    EXPECT_EQ(ctx.get_tip().default_wallet.hash, wallet.hash);
+    ASSERT_TRUE(ctx.get_db().commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kHeapSize, 0);
+  ASSERT_TRUE(db.has_value());
+  RPCContext recovered(HogDbDAO(RAMDB(std::move(*db))), nullptr);
+  EXPECT_EQ(recovered.get_tip().default_wallet.hash, wallet.hash);
+  EXPECT_EQ(recovered.get_tip().default_wallet.contract_type,
+            ContractType::kNative);
 }
 
 } // namespace hogd

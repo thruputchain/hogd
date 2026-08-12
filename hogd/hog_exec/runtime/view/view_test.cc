@@ -224,13 +224,19 @@ TEST_F(ViewTest, ViewWithMsgSender)
 
 TEST_F(ViewTest, ViewNonexistentContract)
 {
+  // Behavior change: root-resolve fallback (see
+  // docs/superpowers/specs/2026-08-06-default-wallet-root-fallback-resolution-design.md
+  // §4). With the genesis wallet record present, resolve_runtime returns the
+  // default_wallet frame instead of null. The wallet reverts InvalidAuthClaim
+  // (no pubkey claim in the view query), so the result is Ok (frame ran) rather
+  // than InvalidInput (no frame started).
   ContractAddress bad_address =
       NativeContractTestFramework::make_contract_address(99);
   ContractTraitClient<fibonacci::Fibonacci> client(bad_address);
   auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
 
   auto result = run_view(make_query(invocation));
-  EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
+  EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 }
 
 TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
@@ -246,9 +252,11 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 TEST_F(ViewTest, ViewContractSelfInvokeFaults)
 {
   ContractTraitClient<read_only_test::ReadOnlyTest> client(kReadOnlyAddress);
+  // Pointing the entrypoint's callee at its own address makes the inner invoke
+  // reentrant, which the guard rejects -- faulting the frame.
   auto invocation =
       client.make_invocation<u8"read_only_aliasing_before_read_only_check">(
-          UINT64_MAX);
+          UINT64_MAX, kReadOnlyAddress);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);

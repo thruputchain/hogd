@@ -17,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/db_hash.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
@@ -85,7 +86,13 @@ public:
         static_cast<BlockHeight>(block_id_) - 1;
     value.proposal_header.txs_hash = sha256(block_id_);
     out.db_tip() =
-        DbTip{.id = block_id_ - 1, .storage_long_hash = {}, .value = value};
+        DbTip{.id = block_id_ - 1,
+              .storage_long_hash = {},
+              .value = value,
+              // No genesis runs against this server; serve the production
+              // native wallet so root-fallback behavior matches a real chain.
+              .default_wallet =
+                  GenesisConfigurationLoader::native_default_wallet_hash()};
     return out;
   }
 
@@ -127,10 +134,10 @@ private:
   BlockID block_id_;
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
-  x23::MVar<std::unordered_map<SHA256Hash, Contract, ByteArrayHasher>>
+  x23::MVar<std::unordered_map<SHA256Hash, Contract, SipHash24Hasher>>
       contracts_;
   x23::MVar<std::unordered_map<ContractAddress, DeployedContractHash,
-                               ByteArrayHasher>>
+                               SipHash24Hasher>>
       deployments_;
   x23::MVar<std::unordered_map<AddressAndKey, std::vector<QueueEntry>>>
       concurrent_rcq_items_;

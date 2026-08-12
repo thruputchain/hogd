@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
+#include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
@@ -208,6 +209,13 @@ build_genesis_json(GenesisConfiguration const &genesis)
     });
     w.object_field("storage_cost_model", [&](json::Writer &w) {
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
+    });
+    w.object_field("default_wallet", [&](json::Writer &w) {
+      w.field("hash", xdr_hex(genesis.default_wallet.hash));
+      w.field("contract_size",
+              static_cast<std::int64_t>(genesis.default_wallet.contract_size));
+      w.field("contract_type",
+              std::format("{}", genesis.default_wallet.contract_type));
     });
   });
   return buffer;

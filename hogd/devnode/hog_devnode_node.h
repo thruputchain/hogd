@@ -93,7 +93,8 @@ public:
   std::string const &runtime_dir() const { return runtime_dir_.directory(); }
 
 private:
-  static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
+  // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
+  static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffff;
 
   HogDbDAO open_db_backend() const;
   void init_db_backend(HogDbDAO db,

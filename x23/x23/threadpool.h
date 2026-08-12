@@ -123,6 +123,7 @@
 #include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/err.h>
+#include <x23/move_only_function.h>
 #include <x23/mvar.h>
 #include <x23/signal.h>
 #include <x23/utility.h>
@@ -278,6 +279,15 @@ public:
   // least once.  It is an error to call this function from within the
   // ThreadPool, as that would cause deadlock.
   void quiesce() noexcept;
+
+  // Run a callback asynchronously after every worker has passed through a
+  // quiescent state.  Unlike quiesce(), this can be called from a worker.
+  void on_quiesce(move_only_function<void() noexcept> cb)
+  {
+    std::lock_guard _g(qcbq_lock_);
+    qcbq_.emplace_back(std::move(cb));
+    qcbq_nonempty_.notify_one();
+  }
 
   // Drain pauses the current thread and doesn't return until all
   // coroutine handles that were either in the queue or executing at
@@ -453,6 +463,15 @@ private:
   inline static thread_local size_t my_thread_no{};
 
   std::stop_source ss_;
+
+  std::mutex qcbq_lock_;
+  std::condition_variable qcbq_nonempty_;
+  std::vector<move_only_function<void() noexcept>> qcbq_;
+  std::jthread qcbq_service_thread_;
+
+  void qcbq_service();
+  void qcbq_do_service(std::unique_lock<std::mutex> &lk);
+
   std::vector<std::unique_ptr<Worker>> workers_;
   std::vector<std::jthread> threads_;
 

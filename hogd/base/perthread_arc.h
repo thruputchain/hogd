@@ -170,14 +170,25 @@ public:
     });
     CHECK(pending_count >= 0);
 
-    // Now pending_count stores the count of outstanding references
-    // to the object.
-    shutdown_pending_refcount_.store(pending_count, std::memory_order_relaxed);
+    // Retain a self-reference (the "+ 1") across readiness publication.
+    // Publishing is_shutdown_ready_ lets a concurrent last releaser drain
+    // shutdown_pending_refcount_ to zero and destroy this object; the extra
+    // count keeps it alive until we have finished touching it below (notably
+    // is_shutdown_ready_.notify_all()).
+    shutdown_pending_refcount_.store(pending_count + 1,
+                                     std::memory_order_relaxed);
 
     is_shutdown_ready_.store(true, std::memory_order_release);
     is_shutdown_ready_.notify_all();
 
-    return pending_count == 0;
+    // Drop our self-reference. If all real references have already been
+    // released (or there were none), we are the last owner and the caller may
+    // destroy the object. Exactly one party observes the transition to zero,
+    // so destruction ownership is unambiguous.
+    auto prev =
+        shutdown_pending_refcount_.fetch_sub(1, std::memory_order_acq_rel);
+    CHECK(prev >= 1);
+    return prev == 1;
   }
 
   ~PerThreadARC()

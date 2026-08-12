@@ -200,13 +200,13 @@ Scheduler::apply_committed_block_hog_ages(
   x23::CoroGuard cg;
   co_await cg(global_lock_);
 
-  std::unordered_map<ContractAddress, HogAge, ByteArrayHasher>
+  std::unordered_map<ContractAddress, HogAge, SipHash24Hasher>
       hog_ages_by_account;
-  std::unordered_map<ContractAddress, uint128_t, ByteArrayHasher>
+  std::unordered_map<ContractAddress, uint128_t, SipHash24Hasher>
       hogs_spent_by_account;
-  std::unordered_set<ContractAddress, ByteArrayHasher> skipped_accounts =
+  std::unordered_set<ContractAddress, SipHash24Hasher> skipped_accounts =
       std::move(read_result.missing);
-  std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
+  std::unordered_set<ContractAddress, SipHash24Hasher> touched_accounts;
   hog_ages_by_account.reserve(txs.size());
   hogs_spent_by_account.reserve(txs.size());
   skipped_accounts.reserve(txs.size());
@@ -292,13 +292,13 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 {
-  std::unordered_set<ContractAddress, ByteArrayHasher> accounts;
+  std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
   for (const SignedTransaction &tx : txs) {
     accounts.insert(tx.tx.invocation.invoked_address);
   }
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
-  std::unordered_set<ContractAddress, ByteArrayHasher> already_found;
+  std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
   x23::CoroGuard cg;
@@ -327,7 +327,7 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
 x23::Async<Scheduler::ReadAverageHogAgesResult>
 Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 {
-  std::unordered_set<ContractAddress, ByteArrayHasher> accounts;
+  std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
   for (const Delta &delta : transfers.deltas) {
     accounts.insert(delta.address);
   }
@@ -335,7 +335,7 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
   // TODO(jhumphri): This is the same as the code above.
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
-  std::unordered_set<ContractAddress, ByteArrayHasher> already_found;
+  std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
   x23::CoroGuard cg;
@@ -476,7 +476,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
     handles.push_back(
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
-           const std::unordered_set<ContractAddress, ByteArrayHasher> &missing,
+           const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -835,7 +835,7 @@ Scheduler::refresh_accounts_excluded_from_block()
 
 void
 Scheduler::refresh_ready_accounts(
-    const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts)
+    const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts)
 {
   for (const ContractAddress &account : accounts) {
     // We call [erase_ready_account()] even if the account ends up getting
@@ -878,7 +878,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
 
 void
 Scheduler::cycle_accounts_during_schedule_helper(
-    const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts,
+    const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
     const TxKey &lower_bound)
 {
   for (const ContractAddress &account : accounts) {
@@ -912,12 +912,12 @@ Scheduler::schedule(size_t num_txs,
                     x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
-  static std::unordered_set<ContractAddress, ByteArrayHasher> removed_accounts;
-  static std::unordered_set<ContractAddress, ByteArrayHasher>
+  static std::unordered_set<ContractAddress, SipHash24Hasher> removed_accounts;
+  static std::unordered_set<ContractAddress, SipHash24Hasher>
       local_accounts_excluded_from_block;
   removed_accounts.clear();
   local_accounts_excluded_from_block.clear();
-  std::unordered_set<ContractAddress, ByteArrayHasher>
+  std::unordered_set<ContractAddress, SipHash24Hasher>
       &accounts_excluded_from_block =
           pending_nomination_.block_id
               ? pending_nomination_.accounts_excluded_from_block
@@ -1071,7 +1071,7 @@ Scheduler::remove_from_scheduler(
 {
   co_await default_coropoll().pool_.bg();
 
-  static SynchronizedMap<ContractAddress, char, ByteArrayHasher> accounts;
+  static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
   accounts.clear();
 
   ElapsedTimer timer;
@@ -1090,7 +1090,7 @@ Scheduler::remove_from_scheduler(
     handles.push_back(
         [](const ChunkRange *chunk,
            x23::span<const SignedTransactionHash> tx_hashes,
-           SynchronizedMap<ContractAddress, char, ByteArrayHasher> &accounts,
+           SynchronizedMap<ContractAddress, char, SipHash24Hasher> &accounts,
            Scheduler &scheduler) noexcept -> x23::Async<size_t> {
           co_await default_coropoll().pool_.bg();
 
