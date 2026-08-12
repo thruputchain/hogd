@@ -43,7 +43,8 @@ test_poisoned_connect_propagates_error()
   // writable edge on its own.
   auto pending = cp.connect(fd, &server_addr);
   if (pending.operator co_await().await_ready())
-    throw std::runtime_error("test connect completed before it could be poisoned");
+    throw std::runtime_error(
+        "test connect completed before it could be poisoned");
 
   // A successful accept proves that the TCP handshake itself has completed.
   // The client coroutine is nevertheless still parked because no CoroPoll loop
