@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# The benchmark control servers build concurrently on remote hosts, and a slow
+# checkout (for example, cloning the RocksDB submodule) can delay one well past
+# the shared harness's 60-second default. Allow that setup to finish while
+# preserving an explicit timeout supplied by the caller.
+CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-1000}
+
 . "$(dirname "$0")/bench_harness.sh"
+ci_enable_error_trace
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./${BUILD_DIR}/hogd/utils/get_port kCIControlServerPort)
-CONTROL_CLI="./$BUILD_DIR/hogd/hogexec/bench/control_cli"
+CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 BENCH_HOSTS=(hog5 hog6 hog7 hog8 hog11)
 
 cleanup() {
@@ -30,13 +37,13 @@ echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh
 
 echo 'launch multiexec runner one exec'
-./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -a 100 >multiexec_runner_log
+./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -a 100 >multiexec_runner_log
 
 echo 'launch multiexec runner two exec'
-./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -a 100 >>multiexec_runner_log
+./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -a 100 >>multiexec_runner_log
 
 echo 'launch multiexec runner three exec'
-./$BUILD_DIR/hogd/hogexec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -s hog6 -a 100 >>multiexec_runner_log
+./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog5 -s hog11 -s hog6 -a 100 >>multiexec_runner_log
 
 echo 'log multiexec runner logs'
 ./scripts/log_metric.sh multiexec_interface multiexec_runner_log

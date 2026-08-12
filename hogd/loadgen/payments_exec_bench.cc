@@ -6,9 +6,9 @@
 
 #include "exec_result.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
@@ -18,7 +18,7 @@
 // In-process benchmark of the contract runtimes on the erc20 + simple_wallet
 // payments workload. Unlike payments_bench (which drives a distributed
 // bench_server / coordinator over RPC), this runs entirely in one process
-// against an in-memory hogdb via NativeContractTestFramework -- nothing to
+// against an in-memory hog_db via NativeContractTestFramework -- nothing to
 // stand up, just run the binary locally.
 //
 // Timing/averaging/stats are handled by google benchmark. The timed body
@@ -46,8 +46,8 @@ public:
     try {
       framework_ = std::make_unique<NativeContractTestFramework>(
           /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, /*empty_genesis=*/false);
-      context_ = make_hogexec_context();
+          TestDB::kHogDb, /*empty_genesis=*/false);
+      context_ = make_hog_exec_context();
 
       ERC20ExperimentState exp(
           ERC20PaymentsConfig{

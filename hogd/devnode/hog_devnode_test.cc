@@ -49,6 +49,7 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_hash.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -58,11 +59,15 @@
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/indexer/db.h"
-#include "hogd/indexer/status.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/status.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
@@ -88,6 +93,7 @@ constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 constexpr auto kShutdownTimeout = std::chrono::seconds(5);
 constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
+constexpr std::size_t kTestRamDbBytes = 15UL * 1024 * 1024 * 1024;
 
 std::tuple<uint64_t, uint64_t>
 make_erc20_amount(uint128_t amount)
@@ -148,6 +154,7 @@ struct Readiness {
   Endpoint indexer;
   Endpoint db_gateway;
   Endpoint view_gateway;
+  std::string chain_state;
   std::string network_hash;
   std::filesystem::path manifest_path;
   std::string manifest_hash;
@@ -388,7 +395,7 @@ parse_readiness(std::string line)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", line);
-  if (schema_version != 1) {
+  if (schema_version != 2) {
     throw std::runtime_error(
         std::format("unexpected readiness schemaVersion {}: {}", schema_version,
                     line));
@@ -424,15 +431,21 @@ parse_readiness(std::string line)
 
   const std::int64_t manifest_schema_version =
       require_integer_field(*manifest, "schemaVersion", manifest_bytes);
-  if (manifest_schema_version != 1) {
+  if (manifest_schema_version != 2) {
     throw std::runtime_error(std::format("unexpected manifest schemaVersion {}",
                                          manifest_schema_version));
   }
   std::string_view kind =
       require_string_field(*manifest, "kind", manifest_bytes);
-  if (kind != "hog-devnode-runtime") {
+  if (kind != "hogd-dev-runtime") {
     throw std::runtime_error(
         std::format("unexpected manifest kind '{}'", kind));
+  }
+  std::string chain_state = std::string(
+      require_string_field(*manifest, "chainState", manifest_bytes));
+  if (chain_state != "fresh" && chain_state != "recovered") {
+    throw std::runtime_error(
+        std::format("unexpected manifest chainState '{}'", chain_state));
   }
   std::string_view network_hash =
       require_string_field(*manifest, "networkHash", manifest_bytes);
@@ -462,6 +475,7 @@ parse_readiness(std::string line)
           parse_endpoint(require_string_field(*endpoints, "viewGateway",
                                               manifest_bytes),
                          "viewGateway", manifest_bytes),
+      .chain_state = std::move(chain_state),
       .network_hash = std::string(network_hash),
       .manifest_path = std::move(manifest_path),
       .manifest_hash = std::move(manifest_hash),
@@ -816,9 +830,9 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("artifactHint", "./dev-wallet.rv32a");
       w.field("contentHash", content_hash);
       w.field("deployEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+              entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
       w.field("doActionEntrypoint",
-              entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+              entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
     });
     w.object_field("bootstrapAccounts", [&](json::Writer &w) {
       w.field("count", static_cast<std::int64_t>(count));
@@ -866,6 +880,22 @@ make_test_data_dir()
          std::format(
              "hog-devnode-data-{}-{}", getpid(),
              std::chrono::steady_clock::now().time_since_epoch().count());
+}
+
+HogDbDAO
+open_persistent_hog_db(std::filesystem::path const &data_dir)
+{
+  const std::string db_path = (data_dir / "ramdb").string();
+  DBStatus<std::uint64_t> lsn = Database::check(db_path, kTestRamDbBytes);
+  if (!lsn.has_value()) {
+    lsn.error().raise("failed to check test hog_db");
+  }
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open_lsn(db_path, *lsn, kTestRamDbBytes);
+  if (!db.has_value()) {
+    db.error().raise("failed to open test hog_db");
+  }
+  return HogDbDAO(RAMDB(std::move(*db)));
 }
 
 void
@@ -1003,11 +1033,11 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*dev_wallet, "artifactHint", ""),
             "contracts/dev_wallet.rv32a");
   EXPECT_EQ(require_string_field(*dev_wallet, "deployEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "doActionEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
   EXPECT_EQ(require_string_field(*dev_wallet, "createWalletEntrypoint", ""),
-            entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+            entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
 
   const json::Value *cost_model = bootstrap->find("storageCostModel");
   ASSERT_NE(cost_model, nullptr);
@@ -1052,6 +1082,7 @@ TEST(HogDevnode, HelpPrintsBeforeInitialization)
   EXPECT_TRUE(stdout_output.contains("--version"));
   EXPECT_TRUE(stdout_output.contains("HOGD_LOG_FORMAT=json"));
   EXPECT_TRUE(stdout_output.contains("readiness line"));
+  EXPECT_TRUE(stdout_output.contains("--ramdb-bytes <bytes>"));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
 }
 
@@ -1097,6 +1128,43 @@ TEST(HogDevnode, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)
   EXPECT_TRUE(stderr_output.contains("error:")) << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Invalid")) << stderr_output;
   EXPECT_TRUE(stderr_output.contains("Usage:")) << stderr_output;
+}
+
+TEST(HogDevnode, InvalidRamdbBytesPrintsFriendlyUsageBeforeInitialization)
+{
+  expect_startup_failure({"--ramdb-bytes", "not-a-size"},
+                         "Invalid --ramdb-bytes: not-a-size");
+}
+
+TEST(HogDevnode, ZeroRamdbBytesPrintsFriendlyUsageBeforeInitialization)
+{
+  expect_startup_failure({"--ramdb-bytes", "0"},
+                         "--ramdb-bytes must be positive");
+}
+
+TEST(HogDevnode, RamdbReservationFailurePrintsDiagnostic)
+{
+  // 1 EiB cannot be reserved on any host; the failure must name the size and
+  // point at the flag instead of the bare "Cannot allocate memory" it used
+  // to print.
+  expect_startup_failure({"--ramdb-bytes", "1152921504606846976"},
+                         "ramdb failed to reserve 1073741824.0 GiB");
+}
+
+TEST(HogDevnode, RamdbReservationFailureReferencesFlag)
+{
+  expect_startup_failure({"--ramdb-bytes", "1152921504606846976"},
+                         "Reduce capacity with --ramdb-bytes.");
+}
+
+TEST(HogDevnode, ReducedRamdbBytesReachesReadiness)
+{
+  // 2 GiB instead of the 15 GiB default; mirrors the low-memory (e.g. WSL)
+  // configuration the flag exists for.
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--ramdb-bytes", "2147483648"});
+  process.wait_for_readiness();
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode,
@@ -1368,7 +1436,7 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       std::format("hog-devnode-test-manifest-{}.json", getpid());
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
   std::string manifest =
-      R"({"schemaVersion":1,"kind":"hog-devnode-runtime",)"
+      R"({"schemaVersion":2,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
       R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
@@ -1390,7 +1458,7 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
     output << manifest;
   }
   Readiness readiness = parse_readiness(
-      std::format(R"({{"schemaVersion":1,"status":"ready",)"
+      std::format(R"({{"schemaVersion":2,"status":"ready",)"
                   R"("manifestPath":"{}","manifestHash":"{}"}})",
                   manifest_path.string(), hex_string(hash_string(manifest))));
 
@@ -1798,7 +1866,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                 .gas_limit = GasAmount{10'000'000},
                 .calldata = Calldata{},
             },
@@ -1879,9 +1947,9 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
                     make_nonce(11), sha256(*fibonacci_contract)),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
@@ -1944,8 +2012,10 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     });
     Readiness readiness = process.wait_for_readiness();
     ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    EXPECT_EQ(readiness.chain_state, "fresh");
     EXPECT_TRUE(readiness.manifest_path.string().starts_with(
         (data_dir / "runtime").string()));
+    EXPECT_EQ(path_mode(readiness.manifest_path.parent_path()), 0700);
 
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
@@ -1969,9 +2039,9 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
                     make_nonce(17), sha256(*fibonacci_contract)),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
@@ -2034,6 +2104,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     });
     Readiness readiness = process.wait_for_readiness();
     ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    EXPECT_EQ(readiness.chain_state, "recovered");
 
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
@@ -2080,6 +2151,7 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
     });
     Readiness readiness = process.wait_for_readiness();
     ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    EXPECT_EQ(readiness.chain_state, "recovered");
 
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
@@ -2100,6 +2172,148 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
         << stderr_output;
     EXPECT_TRUE(process.read_remaining_stdout().empty());
   }
+}
+
+TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+
+  auto wallet_contract = load_default_dev_wallet_contract();
+  const std::string manifest =
+      bootstrap_manifest_json(0, "groundhog-dev-accounts", "1000000000",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  auto start_and_check = [&](std::string_view expected_state) {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--bootstrap-manifest",
+        manifest_path.string(),
+    });
+    Readiness readiness = process.wait_for_readiness();
+    EXPECT_EQ(readiness.chain_state, expected_state);
+    EXPECT_EQ(
+        readiness.network_hash,
+        "00000000000000000000000000000000000000000000000000000000000000aa");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
+    EXPECT_EQ(format_network_hash(
+                  tip.db_tip().value.proposal_header.network_hash),
+              readiness.network_hash);
+
+    expect_clean_exit(process);
+  };
+
+  start_and_check("fresh");
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value()) << tip.error();
+    tip->value.proposal_header.network_hash = {};
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
+  }
+  start_and_check("recovered");
+  start_and_check("recovered");
+}
+
+TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  ASSERT_TRUE(std::filesystem::remove(data_dir / "hog-devnode-data.json"));
+
+  auto wallet_contract = load_default_dev_wallet_contract();
+  const std::string manifest =
+      bootstrap_manifest_json(1, "groundhog-dev-accounts", "1000000000",
+                              hex_string(sha256(*wallet_contract)));
+  std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
+  Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--bootstrap-manifest",
+          manifest_path.string(),
+      },
+      "recovered chain network hash "
+      "0000000000000000000000000000000000000000000000000000000000000000 "
+      "does not match requested network hash "
+      "00000000000000000000000000000000000000000000000000000000000000aa");
+}
+
+TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    constexpr std::string_view kDbTipKey = "<DBTIP";
+    constexpr uint8_t kWrongType = 1;
+    std::array<std::byte, 1> value{};
+    ASSERT_TRUE(
+        db.get_ramdb()
+            .put(std::as_bytes(std::span(kDbTipKey.data(), kDbTipKey.size())),
+                 kWrongType, value)
+            .has_value());
+    ASSERT_TRUE(db.commit().has_value());
+  }
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "failed to read recovered DbTip: Type Mismatch");
+}
+
+TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value());
+    tip->storage_long_hash[0] ^= 1;
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
+  }
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "recovered database storage hash does not match DbTip");
 }
 
 TEST(HogDevnode, DataDirRejectsRestartWithDifferentDevAccountSeed)
@@ -2378,10 +2592,11 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
         .invocation =
             Invocation{
                 .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<"deploy">(),
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
                 .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<"deploy">(deploy_nonce,
-                                                                 contract_hash),
+                .calldata =
+                    wallet_meta::make_calldata<u8"deploy">(deploy_nonce,
+                                                           contract_hash),
             },
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -2498,17 +2713,17 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
         x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                       erc20_meta::entrypoint<"transfer">(),
+                       erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{10'000'000},
-                       erc20_meta::make_calldata<"transfer">(
+                       erc20_meta::make_calldata<u8"transfer">(
                            created_wallet_address,
                            make_erc20_amount(uint128_t{200'000'000})));
     Transaction prefund_wallet_tx{
         .invocation =
             Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"do_action">(),
+                       .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
                        .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"do_action">(
+                       .calldata = wallet_meta::make_calldata<u8"do_action">(
                            transfer_calldata)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -2536,11 +2751,12 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     Transaction create_wallet_tx{
         .invocation =
-            Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<"create_wallet">(),
-                       .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<"create_wallet">(
-                           create_wallet_nonce, wallet_hash, owner_public_key)},
+            Invocation{
+                .invoked_address = sponsor_wallet_address,
+                .entrypoint = wallet_meta::entrypoint<u8"create_wallet">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<u8"create_wallet">(
+                    create_wallet_nonce, wallet_hash, owner_public_key)},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 31},

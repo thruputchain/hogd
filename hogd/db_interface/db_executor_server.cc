@@ -18,7 +18,7 @@ namespace hogd {
 
 // DbExecutorRpc implementations
 
-bool
+RPCError
 DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
                                  AddressAndKey const &addrkey,
                                  StorageDelta const &delta,
@@ -27,24 +27,28 @@ DbExecutorRpc::try_reserve_delta(BlockState *block_state, TransactionID tx,
   if constexpr (is_debug_build()) {
     check_delta_type(addrkey.key.key_type(), delta.type());
   }
-  // Reject exclusive locks on replay cache items (match HogDB behavior).
+  // Reject exclusive locks on replay cache items (match HogDb behavior).
+  // An honest executor never sets ExclusiveLock on a replay cache delta, so
+  // this is executor misbehavior rather than a recoverable conflict.
   if (delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier &&
       (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
-    return false;
+    return RPCError::kRPCUnrecoverable;
   }
   // MockInMemory does not implement the replay cache (it is being removed).
   // Accept-and-drop consume-uniquifier deltas so a transaction that consumes
   // its nonce still commits against the mock; replay semantics (dedup, expiry,
-  // capacity) are verified against HogDB only.
+  // capacity) are verified against HogDb only.
   if (delta.type() == StorageDeltaType::kDeltaTypeConsumeUniquifier) {
-    return true;
+    return RPCError::kRPCNone;
   }
-  // Reject exclusive locks on balance keys (match HogDB behavior).
+  // Reject exclusive locks on balance keys (match HogDb behavior).
   if (addrkey.key.key_type() == StorageKeyType::FreeNativeTokenBalance &&
       (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock))) {
-    return false;
+    return RPCError::kRPCStorageWriteFailed;
   }
-  return block_state->try_reserve_storage_delta(tx, addrkey, delta, flags);
+  return block_state->try_reserve_storage_delta(tx, addrkey, delta, flags)
+             ? RPCError::kRPCNone
+             : RPCError::kRPCStorageWriteFailed;
 }
 
 RPCError
@@ -85,7 +89,7 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   block_data->push_subtransaction(tx);
 
   if constexpr (is_debug_build()) {
-    // Invariant: hogexec sends at most one delta per key per subtransaction.
+    // Invariant: hog_exec sends at most one delta per key per subtransaction.
     std::set<AddressAndKey> seen_keys;
     for (auto const &delta : batch) {
       auto [_, inserted] = seen_keys.insert(delta.addrkey);
@@ -94,13 +98,15 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   }
 
   for (auto const &delta : batch) {
-    if (!try_reserve_delta(block_data.get(), tx, delta.addrkey, delta.delta,
-                           delta.flags)) {
+    RPCError reserve_err =
+        try_reserve_delta(block_data.get(), tx, delta.addrkey, delta.delta,
+                          delta.flags);
+    if (reserve_err != RPCError::kRPCNone) {
       if (auto err = block_data->pop_subtransactions(tx, 1);
           err != RPCError::kRPCNone) {
         return TryPushSubtransactionResult(err);
       }
-      return TryPushSubtransactionResult(RPCError::kRPCStorageWriteFailed);
+      return TryPushSubtransactionResult(reserve_err);
     }
   }
 
@@ -254,7 +260,8 @@ DbExecutorRpc::get_db_tip(BlockID block_id)
   value.proposal_header.block_height = -1;
   out.db_tip() = DbTip{.id = block_manager_->committed_tip_id(),
                        .storage_long_hash = {},
-                       .value = value};
+                       .value = value,
+                       .default_wallet = block_manager_->get_default_wallet()};
   return out;
 }
 

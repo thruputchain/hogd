@@ -42,29 +42,29 @@ BUILD_DIR=$1
 ./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim rv32a >metrics_history/metrics/initial_token_claim-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 # Performance metrics
-## hogdb_bench (roundrobin_payments)
-./scripts/make_metric_file.sh hogdb-bench $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/hogdb_bench.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## hog_db_bench (roundrobin_payments)
+./scripts/make_metric_file.sh hog-db-bench $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hog_db_bench.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## hogdb_bench_onetomany
-./scripts/make_metric_file.sh hogdb-bench-onetomany $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/hogdb_bench_onetomany.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-onetomany/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## hog_db_bench_onetomany
+./scripts/make_metric_file.sh hog-db-bench-onetomany $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hog_db_bench_onetomany.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-onetomany/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## hogdb_bench_manytoone
-./scripts/make_metric_file.sh hogdb-bench-manytoone $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/hogdb_bench_manytoone.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-manytoone/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## hog_db_bench_manytoone
+./scripts/make_metric_file.sh hog-db-bench-manytoone $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hog_db_bench_manytoone.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-manytoone/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## hogdb_bench_new_storage
-./scripts/make_metric_file.sh hogdb-bench-new-storage $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/hogdb_bench_new_storage.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-new-storage/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## hog_db_bench_new_storage
+./scripts/make_metric_file.sh hog-db-bench-new-storage $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hog_db_bench_new_storage.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-new-storage/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## hogdb_bench_rcq (sequential insert+consume and concurrent insert+consume)
-./scripts/make_metric_file.sh hogdb-bench-rcq $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/hogdb_bench_rcq.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-rcq/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## hog_db_bench_rcq (sequential insert+consume and concurrent insert+consume)
+./scripts/make_metric_file.sh hog-db-bench-rcq $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hog_db_bench_rcq.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-rcq/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## hogdb_bench_rcq_sweep (queue-count sweep)
-./scripts/make_metric_file.sh hogdb-bench-rcq-sweep $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/hogdb_bench_rcq_sweep.sh $BUILD_DIR >metrics_history/metrics/hogdb-bench-rcq-sweep/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## hog_db_bench_rcq_sweep (queue-count sweep)
+./scripts/make_metric_file.sh hog-db-bench-rcq-sweep $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/hog_db_bench_rcq_sweep.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-rcq-sweep/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## mass fibonacci.wasm calls
 ./scripts/make_metric_file.sh fibonacci-wasmonly $GIT_branch $GIT_commit $GIT_commit_time

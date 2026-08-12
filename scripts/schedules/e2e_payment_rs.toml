@@ -26,7 +26,7 @@ cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log
 
 cp "$HOME/.cargo/bin/chuckd" release/chuckd.dev
 
-echo 'clear hogdb file directory'
+echo 'clear hog-db file directory'
 rm -r ./work_dir/ || true
 mkdir -p work_dir/
 
@@ -34,7 +34,7 @@ echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'run bench server'
-./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w work_dir/
+./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w work_dir/
 
 """
 
@@ -96,13 +96,13 @@ echo 'set port env vars'
 export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'cleanup control servers'
-./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
-./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
+./release/hogd/hog_exec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
 
 """
 

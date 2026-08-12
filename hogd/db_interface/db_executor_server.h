@@ -78,10 +78,12 @@ public:
   }
 
 private:
-  static bool try_reserve_delta(BlockState *block_state, TransactionID tx,
-                                AddressAndKey const &addrkey,
-                                StorageDelta const &delta,
-                                StorageDeltaFlagSet flags);
+  // Returns kRPCNone if the delta was reserved, kRPCStorageWriteFailed on a
+  // recoverable conflict, or kRPCUnrecoverable on executor misbehavior.
+  static RPCError try_reserve_delta(BlockState *block_state, TransactionID tx,
+                                    AddressAndKey const &addrkey,
+                                    StorageDelta const &delta,
+                                    StorageDeltaFlagSet flags);
   BlockManager *block_manager_;
 };
 

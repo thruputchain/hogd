@@ -28,13 +28,13 @@
 #include "event.hh"
 #include "genesis.hh"
 #include "header.hh"
-#include "hogd/auth/auth_server.h"
-#include "hogd/auth/dbauth_client.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_hash.h"
+#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -44,22 +44,24 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
-#include "hogd/event/event_block_context.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_auth.h"
-#include "hogd/hogdb/rpc_from_exec.h"
-#include "hogd/hogdb/rpc_from_gateway.h"
-#include "hogd/hogdb/rpc_from_sched.h"
-#include "hogd/hogdb/status.h"
-#include "hogd/hogexec/interface/rpc_from_view_gateway.h"
-#include "hogd/indexer/db.h"
-#include "hogd/indexer/rpc_from_block_explorer.h"
-#include "hogd/indexer/rpc_from_event.h"
-#include "hogd/indexer/status.h"
-#include "hogd/mempool/scheduler.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/hog_auth/auth_server.h"
+#include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/rpc_from_auth.h"
+#include "hogd/hog_db/rpc_from_exec.h"
+#include "hogd/hog_db/rpc_from_gateway.h"
+#include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_event/event_block_context.h"
+#include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/rpc_from_block_explorer.h"
+#include "hogd/hog_indexer/rpc_from_event.h"
+#include "hogd/hog_indexer/status.h"
+#include "hogd/hog_mempool/scheduler.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -453,21 +455,59 @@ read_event_log_file(std::filesystem::path const &path)
   }
   return events;
 }
+
+std::string
+ramdb_reserve_failure_message(std::size_t ramdb_bytes, std::string_view detail)
+{
+  constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+  std::string message =
+      std::format("ramdb failed to reserve {:.1f} GiB ({})",
+                  static_cast<double>(ramdb_bytes) / kGiB, detail);
+  if (const std::size_t physical = total_physical_memory(); physical > 0) {
+    message += std::format("; system has {:.1f} GiB physical RAM",
+                           static_cast<double>(physical) / kGiB);
+  }
+  message += ". Reduce capacity with --ramdb-bytes.";
+  return message;
+}
+
+// run_ramdb_open translates the std::system_error that the Database
+// constructor throws when the ramdb arena mmap is refused (ENOMEM under the
+// kernel's overcommit accounting) into an actionable startup error. Other
+// system errors pass through unchanged.
+template<typename Fn>
+auto
+run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
+{
+  try {
+    return fn();
+  } catch (const std::system_error &e) {
+    if (e.code() == std::errc::not_enough_memory) {
+      throw std::runtime_error(
+          ramdb_reserve_failure_message(ramdb_bytes, e.code().message()));
+    }
+    throw;
+  }
+}
+
 } // namespace
 
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
     BootstrapAccountConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
-    NetworkHash network_hash)
+    NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    runtime_dir_(data_dir, kRuntimeSubdir), db_dir_(data_dir, kRamDbSubdir),
-    event_dir_(data_dir, kEventSubdir), indexer_dir_(data_dir, kIndexerSubdir),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
-    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
+    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
+    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
+    indexer_dir_(data_dir, kIndexerSubdir), event_ctx_(event_dir_.directory()),
+    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
+    event_indexer_server_(event_ctx_)
 {
   try {
+    HogDbDAO db = open_db_backend();
+
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
     mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -491,21 +531,21 @@ HogDevnodeNode::HogDevnodeNode(
             sched_db_client_res.error().error_code().message());
     auto sched_db_client =
         std::make_unique<sched_db_client_t>(std::move(*sched_db_client_res));
-    init_db_backend(std::move(sched_db_client));
+    init_db_backend(std::move(db), std::move(sched_db_client));
 
     // [db_executor_server_] handles RPCs from the executor.
-    db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
+    db_executor_server_ = std::make_unique<HogDbExecutorServer>(*ctx_);
     db_executor_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
     // [db_scheduler_server_] handles RPCs from the mempool.
-    db_scheduler_server_ = std::make_unique<HogDBSchedServer>(*ctx_);
+    db_scheduler_server_ = std::make_unique<HogDbSchedServer>(*ctx_);
     (*db_scheduler_server_)->max_message_size_ = kDevRpcMaxMessageSize;
     db_scheduler_server_->start_server(make_bind_host_port(bind_host_,
                                                            /*port=*/0));
-    db_auth_server_ = std::make_unique<HogDBAuthServer>(*ctx_);
+    db_auth_server_ = std::make_unique<HogDbAuthServer>(*ctx_);
     db_auth_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
     // Read-only state reads served to the public RPC gateway over x23.
-    db_gateway_server_ = std::make_unique<HogDBGatewayServer>(*ctx_);
+    db_gateway_server_ = std::make_unique<HogDbGatewayServer>(*ctx_);
     db_gateway_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
@@ -918,7 +958,7 @@ void
 HogDevnodeNode::refresh_bootstrap_account_balances()
 {
   for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
-    HogDBStatus<AddressAuthData> auth_data =
+    HogDbStatus<AddressAuthData> auth_data =
         ctx_->get_db().read_address_auth_data(account.address);
     if (!auth_data.has_value()) {
       throw std::runtime_error(
@@ -927,7 +967,7 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
     }
     validate_bootstrap_account_auth_data(account, *auth_data);
 
-    HogDBStatus<int128_t> balance =
+    HogDbStatus<int128_t> balance =
         ctx_->get_db().read_address_balance(account.address);
     if (!balance.has_value()) {
       throw std::runtime_error(
@@ -944,25 +984,76 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
   }
 }
 
-void
-HogDevnodeNode::init_db_backend(
-    std::unique_ptr<sched_db_client_t> sched_db_client)
+HogDbDAO
+HogDevnodeNode::open_db_backend() const
 {
-  DBStatus<std::uint64_t> lsn =
-      Database::check(db_dir_.directory(), kRamDbBytes);
-  CHECK(lsn.has_value());
+  DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::check(db_dir_.directory(), ramdb_bytes_);
+  });
+  if (!lsn.has_value()) {
+    lsn.error().raise("ramdb integrity check failed for '{}'",
+                      db_dir_.directory());
+  }
   info("database '{}' passed integrity check; current LSN is {}",
        db_dir_.directory(), *lsn);
 
-  DBStatus<std::unique_ptr<Database>> ramdb =
-      Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
-  CHECK(ramdb.has_value());
+  DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+  });
+  if (!ramdb.has_value()) {
+    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+  }
 
-  auto db = HogDBDAO(RAMDB(std::move(*ramdb)));
+  HogDbDAO db(RAMDB(std::move(*ramdb)));
+  HogDbStatus<DbTip> recovered_tip = db.read_dbtip();
+  if (!recovered_tip && recovered_tip.error().code() != HogDbCode::kNotFound) {
+    recovered_tip.error().raise("failed to read recovered DbTip");
+  }
+
+  StorageLongHash full_hash = db.compute_full_db_hash();
+  if (!recovered_tip) {
+    if (full_hash != StorageLongHash{}) {
+      throw std::runtime_error("recovered database has state but no DbTip");
+    }
+    return db;
+  }
+  if (full_hash != recovered_tip->storage_long_hash) {
+    throw std::runtime_error(
+        "recovered database storage hash does not match DbTip");
+  }
+  if (RPCContext::has_committed_tip(*recovered_tip) &&
+      recovered_tip->value.proposal_header.network_hash != network_hash_) {
+    ProposalHeader &header = recovered_tip->value.proposal_header;
+    if (header.block_height == 0 && header.network_hash == NetworkHash{}) {
+      header.network_hash = network_hash_;
+      if (HogDbStatus<void> status = db.write_dbtip(*recovered_tip); !status) {
+        status.error().raise("failed to migrate genesis network hash");
+      }
+      if (HogDbStatus<std::uint64_t> status = db.commit(); !status) {
+        status.error().raise("failed to persist genesis network hash");
+      }
+      info("migrated legacy genesis network hash to {}",
+           format_network_hash(network_hash_));
+    }
+    else {
+      throw std::runtime_error(std::format(
+          "recovered chain network hash {} does not match requested network "
+          "hash {}",
+          format_network_hash(header.network_hash),
+          format_network_hash(network_hash_)));
+    }
+  }
+  return db;
+}
+
+void
+HogDevnodeNode::init_db_backend(
+    HogDbDAO db, std::unique_ptr<sched_db_client_t> sched_db_client)
+{
   ctx_ =
       std::make_unique<RPCContext>(std::move(db), std::move(sched_db_client));
   if (ctx_->has_committed_tip()) {
-    HogDBStatus<StorageCostModel> cost_model = ctx_->get_db().read_cost_model();
+    HogDbStatus<StorageCostModel> cost_model = ctx_->get_db().read_cost_model();
     if (!cost_model) {
       panic("failed to read recovered cost model: {}", cost_model.error());
     }

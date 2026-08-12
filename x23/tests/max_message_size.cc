@@ -174,4 +174,23 @@ TEST(RpcDispatcherLifetime, SuspendedHandlerSurvivesStreamFail)
   SUCCEED();
 }
 
+// A single ONC RPC record marker leaves 31 bits for the payload length, so a
+// message-size cap above kMaxRecordPayloadSize cannot be framed in one
+// fragment.  Creating a client with such a cap must fail loudly at setup
+// rather than let make_record() later truncate the marker and desync the
+// stream (issue #3275).
+TEST(MaxMessageSize, ClientCreationRejectsCapAboveRecordLimit)
+{
+  ThreadPool pool(2);
+  CoroPoll cp(pool);
+
+  int fds[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  UniqueFd server_fd{fds[1]};
+
+  auto cc = rpc_stream(cp, fds[0]);
+  cc->max_message_size = kMaxRecordPayloadSize + 1;
+  EXPECT_THROW(cc->client<blank_rpc_v1>(), XdrBadInput);
+}
+
 } // namespace x23

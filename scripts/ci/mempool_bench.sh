@@ -4,11 +4,12 @@ set -Eeuo pipefail
 : "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 . "$(dirname "$0")/bench_harness.sh"
 . "$(dirname "$0")/../hog-ip.sh"
+ci_enable_error_trace
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
-STALE_PROCESSES="loadgen_server hogexec event_exec indexer_exec hogdb auth_exec mempool_exec chuckd chuckd.dev scpd scpd.dev"
-CONTROL_CLI="./$BUILD_DIR/hogd/hogexec/bench/control_cli"
+STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
+CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -76,31 +77,31 @@ $CONTROL_CLI hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --bind-ip "
 echo 'wait for loadgen'
 ci_wait_port hog7 $LOADGEN_PORT
 
-echo 'launch first hogexec'
+echo 'launch first hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hogexec/hogexec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
-# can't wait for hogexec: that's waiting on the coordinator
+$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+# can't wait for hog-exec: that's waiting on the coordinator
 
-echo 'launch second hogexec'
+echo 'launch second hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hogexec/hogexec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
-# can't wait for hogexec: that's waiting on the coordinator
+$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+# can't wait for hog-exec: that's waiting on the coordinator
 
-echo 'check hogexec is running'
+echo 'check hog-exec is running'
 $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
 
 echo 'launch event'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/event/event_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
+$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir $WORK_DIR/ --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
 echo 'launch indexer'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/indexer/indexer_exec --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
+$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path $WORK_DIR/ --bind-ip "$(hog_ip hog9)" --event-port $INDEXER_EVENT_PORT --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
-echo 'launch hogdb'
-$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hogdb/hogdb --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
+echo 'launch hog-db'
+$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
 
 echo 'launch auth'
-$CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/auth/auth_exec --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
+$CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
@@ -137,7 +138,7 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
 set +e
-timeout 180s ./$BUILD_DIR/hogd/mempool/mempool_exec \
+timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
   --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
@@ -164,11 +165,15 @@ echo 'copy coordinator output from hog4'
 scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
-  echo "mempool exited with status $mempool_status" >&2
+  # 124 is [timeout] reaping a mempool that outlived the load, which is the
+  # expected end of this benchmark. Anything else is a real failure, and a
+  # signal-terminated status is a crash rather than a reported error, so name
+  # the signal instead of leaving a bare number in the log.
+  echo "mempool $(ci_describe_exit_status "$mempool_status")" >&2
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
-  echo "coordinator exited with status $coordinator_status" >&2
+  echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
   exit "$coordinator_status"
 fi
 

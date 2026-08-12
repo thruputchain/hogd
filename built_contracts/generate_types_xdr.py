@@ -7,39 +7,50 @@ import sys
 from typing import Any
 
 
-def map_xdr_type(ty: dict[str, Any]) -> str:
-    """Map a spec type to an XDR type string for use in struct fields."""
+def map_xdr_type(ty: dict[str, Any]) -> tuple[str, str]:
+    """Map a spec type to an XDR (type, declarator suffix) pair.
+
+    XDR attaches vec/array sizes to the declarator, not the type
+    (`opaque data<256>;`, `opaque hash[32];`), so struct emission must
+    place the suffix after the field name.
+    """
     kind: str = ty["kind"]
     if kind == "u32":
-        return "unsigned int"
+        return "unsigned int", ""
     elif kind == "i32":
-        return "int"
+        return "int", ""
     elif kind == "u64":
-        return "unsigned hyper"
+        return "unsigned hyper", ""
     elif kind == "i64":
-        return "hyper"
+        return "hyper", ""
     elif kind == "u128":
-        return "uint128_xdr"
+        return "uint128_xdr", ""
     elif kind == "i128":
-        return "int128_xdr"
+        return "int128_xdr", ""
     elif kind == "bool":
-        return "bool"
+        return "bool", ""
     elif kind == "address":
-        return "ContractAddress"
+        return "ContractAddress", ""
     elif kind == "named":
-        return ty["name"]
+        return ty["name"], ""
     elif kind == "vec":
         inner: dict[str, Any] = ty["element"]
         max_len: int = ty["max_len"]
         if inner["kind"] == "u8":
-            return f"opaque<{max_len}>"
-        return f"{map_xdr_type(inner)}<{max_len}>"
+            return "opaque", f"<{max_len}>"
+        inner_type, inner_suffix = map_xdr_type(inner)
+        if inner_suffix:
+            raise ValueError("nested vec/array requires a named typedef in XDR")
+        return inner_type, f"<{max_len}>"
     elif kind == "array":
         inner = ty["element"]
         length: int = ty["len"]
         if inner["kind"] == "u8":
-            return f"opaque[{length}]"
-        return f"{map_xdr_type(inner)}[{length}]"
+            return "opaque", f"[{length}]"
+        inner_type, inner_suffix = map_xdr_type(inner)
+        if inner_suffix:
+            raise ValueError("nested vec/array requires a named typedef in XDR")
+        return inner_type, f"[{length}]"
     elif kind == "u8":
         raise ValueError("bare u8 cannot appear in XDR — must be inside vec/array as opaque")
     else:
@@ -57,8 +68,8 @@ def emit_enum(name: str, variants: list[dict[str, Any]]) -> str:
 def emit_struct(name: str, fields: list[dict[str, Any]]) -> str:
     lines: list[str] = [f"struct {name} {{"]
     for f in fields:
-        xdr_type = map_xdr_type(f["type"])
-        lines.append(f"\t{xdr_type} {f['name']};")
+        xdr_type, suffix = map_xdr_type(f["type"])
+        lines.append(f"\t{xdr_type} {f['name']}{suffix};")
     lines.append("};")
     return "\n".join(lines)
 

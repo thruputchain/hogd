@@ -2,10 +2,11 @@
 set -Eeuo pipefail
 
 . "$(dirname "$0")/bench_harness.sh"
+ci_enable_error_trace
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./${BUILD_DIR}/hogd/utils/get_port kCIControlServerPort)
-CONTROL_CLI="./${BUILD_DIR}/hogd/hogexec/bench/control_cli"
+CONTROL_CLI="./${BUILD_DIR}/hogd/hog_exec/bench/control_cli"
 BENCH_HOSTS=(hog11 hog8)
 
 cleanup() {

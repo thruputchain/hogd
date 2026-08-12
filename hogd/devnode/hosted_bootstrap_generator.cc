@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
+#include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
@@ -37,7 +38,7 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "storage_cost.hh"
@@ -209,6 +210,13 @@ build_genesis_json(GenesisConfiguration const &genesis)
     w.object_field("storage_cost_model", [&](json::Writer &w) {
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
     });
+    w.object_field("default_wallet", [&](json::Writer &w) {
+      w.field("hash", xdr_hex(genesis.default_wallet.hash));
+      w.field("contract_size",
+              static_cast<std::int64_t>(genesis.default_wallet.contract_size));
+      w.field("contract_type",
+              std::format("{}", genesis.default_wallet.contract_type));
+    });
   });
   return buffer;
 }
@@ -284,11 +292,11 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         w.field("deployedCodeHash", hex_string(dev_wallet_hash));
         w.field("artifactHint", wallet_profile.artifact_hint);
         w.field("deployEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"deploy">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"deploy">()));
         w.field("doActionEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"do_action">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
         w.field("createWalletEntrypoint",
-                entrypoint_hex(wallet_meta::entrypoint<"create_wallet">()));
+                entrypoint_hex(wallet_meta::entrypoint<u8"create_wallet">()));
       });
       w.object_field("storageCostModel", [&](json::Writer &w) {
         write_storage_cost_model(w, storage_cost_model);
@@ -460,8 +468,8 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     builder.add_initial_config(
-        wallet_contract, nonce, wallet_meta::entrypoint<"initialize">(),
-        wallet_meta::make_calldata<"initialize">(config.faucet->public_key),
+        wallet_contract, nonce, wallet_meta::entrypoint<u8"initialize">(),
+        wallet_meta::make_calldata<u8"initialize">(config.faucet->public_key),
         static_cast<int128_t>(config.faucet->storage_tokens));
     faucet = HostedFaucetMetadata{
         .wallet_address = wallet_address,

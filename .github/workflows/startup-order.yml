@@ -111,16 +111,16 @@ jobs:
           # Configure only (-n), then build just the node daemons this test
           # launches and their transitive deps — not the whole tree, tests, or
           # benchmarks. Target names from the hogd/*/CMakeLists.txt files
-          # (hogdb_exec has OUTPUT_NAME hogdb).
+          # The CMake target names match the installed executable names.
           ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror" -n
           cmake --build build/gcc --parallel "$(nproc)" --target \
             loadgen_server \
-            mempool_exec \
-            hogexec \
-            event_exec \
-            indexer_exec \
-            hogdb_exec \
-            auth_exec
+            hog-mempool \
+            hog-exec \
+            hog-event \
+            hog-indexer \
+            hog-db \
+            hog-auth
 
       - name: Install Go
         uses: actions/setup-go@v5
@@ -153,7 +153,7 @@ jobs:
 
       # Reproduction attempt for the reported "wrong start order" crash:
       # coordinator drives traffic before the mempool's downstream services
-      # (auth/hogexec/hogdb) connect. Expected to FAIL (mempool aborts on an
+      # (auth/hog-exec/hog-db) connect. Expected to FAIL (mempool aborts on an
       # RPC to a not-yet-ready fd) if that hypothesis holds. Runs last so the
       # known-good orderings above are exercised first.
       - name: "Scenario: coordinator-first"

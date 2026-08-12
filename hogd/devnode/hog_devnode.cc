@@ -34,7 +34,7 @@
 #include "hogd/devnode/hog_devnode_node.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/hogexec/shared.h"
+#include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "types.hh"
 
@@ -119,10 +119,11 @@ hog_devnode_init(std::string listen_host,
                  ReadinessSink readiness_sink,
                  NetworkHash const &runtime_network_hash,
                  BootstrapAccountConfig const &bootstrap_config,
-                 std::optional<std::filesystem::path> const &data_dir)
+                 std::optional<std::filesystem::path> const &data_dir,
+                 std::size_t ramdb_bytes)
 {
   install_signal_handler();
-  // Block SIGTERM before spawning any worker threads (init_hogexec_metrics and
+  // Block SIGTERM before spawning any worker threads (init_hog_exec_metrics and
   // the HogDevnodeNode constructor start well over a hundred of them). Threads
   // inherit the signal mask of their creator, so blocking here means SIGTERM is
   // blocked in every worker. A process-directed SIGTERM is then delivered only
@@ -132,10 +133,11 @@ hog_devnode_init(std::string listen_host,
   // itself, so shutdown would hang until the test escalates to SIGKILL.
   ShutdownSignals shutdown_signals = block_shutdown_signal();
 
-  init_hogexec_metrics();
+  init_hog_exec_metrics();
 
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, data_dir, runtime_network_hash);
+                      bootstrap_config, data_dir, runtime_network_hash,
+                      ramdb_bytes);
   emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
@@ -179,6 +181,7 @@ struct HogDevnodeOptions {
   hogd::BootstrapAccountConfig bootstrap_config;
   std::vector<std::filesystem::path> contract_artifact_directories;
   std::optional<hogd::LogLevel> log_level;
+  std::size_t ramdb_bytes = hogd::HogDevnodeNode::kDefaultRamDbBytes;
 };
 
 class DataDirLock {
@@ -276,6 +279,9 @@ Options:
                                  [default: 1000000000]
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
+  --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.
+                                 Lower it on low-memory systems (e.g. WSL)
+                                 [default: 16106127360 (15 GiB)]
   --version                      Print version
   -h, --help                     Print help
 
@@ -495,6 +501,15 @@ parse_args(int argc, char *argv[])
       dev_account_tokens_value = argv[++i];
       continue;
     }
+    if (arg == "--ramdb-bytes" && i + 1 < argc) {
+      options.ramdb_bytes =
+          hogd::parse_integer_arg<std::size_t>("--ramdb-bytes", argv[++i], argv,
+                                               usage, /*base=*/0);
+      if (options.ramdb_bytes == 0) {
+        hogd::arg_error("--ramdb-bytes must be positive", argv, usage);
+      }
+      continue;
+    }
     usage(argv);
   }
   reject_manifest_shorthand_conflicts(sources, argv);
@@ -572,7 +587,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                                   options.scheduler_port,
                                   options.readiness_sink,
                                   options.runtime_network_hash,
-                                  options.bootstrap_config, options.data_dir);
+                                  options.bootstrap_config, options.data_dir,
+                                  options.ramdb_bytes);
   } catch (const std::exception &error) {
     hogd::error("hog-devnode failed before readiness: {}", error.what());
     return EXIT_FAILURE;

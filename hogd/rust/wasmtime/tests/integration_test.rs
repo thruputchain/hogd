@@ -1341,3 +1341,230 @@ fn test_h001_runtime_creation_on_float_returns_system_unrecoverable() {
         let _: Box<i32> = Box::from_raw(core::mem::transmute(context_ptr));
     }
 }
+
+// The production config must pin every wasm proposal it depends on, rather
+// than inheriting a wasmtime default or relying on a side effect of the
+// selected compiler strategy. Deployment admission is consensus-visible: if
+// the accepted contract set can shift because an upstream default flipped or
+// because someone swapped Strategy::Winch for Strategy::Cranelift, nodes can
+// disagree on whether a contract is deployable. See issue #2535.
+
+fn tail_call_module_bytes() -> Vec<u8> {
+    let wat = r#"(module
+        (memory (export "memory") 1)
+        (func $tail)
+        (func (export "call1") return_call $tail))"#;
+    let raw = wat::parse_str(wat).expect("tail call wat should parse");
+    groundhog_wasm_meter::instrument(
+        &raw,
+        &groundhog_wasm_meter::Config::default(),
+    )
+    .expect("wasm-meter allowlists tail calls, so instrumentation succeeds")
+}
+
+fn memory64_module_bytes() -> Vec<u8> {
+    let wat = r#"(module
+        (memory (export "memory") i64 1)
+        (func (export "call1") (result i32) i64.const 0 i32.load))"#;
+    wat::parse_str(wat).expect("memory64 wat should parse")
+}
+
+#[test]
+fn test_production_config_rejects_tail_calls_under_any_strategy() {
+    // wasm-meter allowlists ReturnCall/ReturnCallIndirect, so the engine is
+    // the only gate. Before #2535 that gate was Strategy::Winch subtracting
+    // WasmFeatures::TAIL_CALL in Config::validate rather than an explicit
+    // policy, so selecting Cranelift silently made tail-call contracts
+    // deployable. Pin the feature so the rejection survives a strategy change.
+    let mut config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    config.strategy(wasmtime::Strategy::Cranelift);
+    config.signals_based_traps(false);
+    config.table_lazy_init(true);
+
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    let err = wasmtime::Module::validate(&engine, &tail_call_module_bytes())
+        .err()
+        .expect(
+            "production config must explicitly disable tail calls, so they \
+             are rejected regardless of the compiler strategy",
+        );
+
+    assert!(
+        format!("{err:#}").contains("tail calls"),
+        "expected a tail-call validation rejection, got: {err:#}"
+    );
+}
+
+#[test]
+fn test_production_config_rejects_memory64_at_validation() {
+    // wasmtime enables WasmFeatures::MEMORY64 by default and Winch does not
+    // subtract it, so wasm-meter was the sole gate rejecting 64-bit memories.
+    // The engine must reject them too: a 64-bit memory index type would change
+    // contract-visible pointer width out from under the marmot::syscall ABI
+    // (i32 pointers since #2422).
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    let err = wasmtime::Module::validate(&engine, &memory64_module_bytes())
+        .err()
+        .expect(
+            "production config must explicitly disable memory64 so 64-bit \
+             memories are rejected at validation, not only by wasm-meter",
+        );
+
+    assert!(
+        format!("{err:#}").contains("memory64"),
+        "expected a memory64 validation rejection, got: {err:#}"
+    );
+}
+
+fn extended_const_module_bytes() -> Vec<u8> {
+    let wat = r#"(module
+        (memory (export "memory") 1)
+        (global i32 (i32.add (i32.const 1) (i32.const 2)))
+        (func (export "call1")))"#;
+    wat::parse_str(wat).expect("extended const wat should parse")
+}
+
+#[test]
+fn test_production_config_rejects_extended_const_at_validation() {
+    // The extended-const proposal adds i32/i64 add/sub/mul to the constant
+    // expression grammar used by global initializers and data/element segment
+    // offsets. It exists for dynamic linking (computing a segment offset as
+    // __memory_base + N), which contracts have no use for. wasm-meter's
+    // allowlist only classifies operators in function bodies, so constant
+    // expressions never reach it — the engine is the only gate.
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    wasmtime::Module::validate(&engine, &extended_const_module_bytes())
+        .err()
+        .expect(
+            "production config must disable extended const so arithmetic in \
+             constant expressions is rejected at validation",
+        );
+}
+
+#[test]
+fn test_production_config_accepted_proposal_surface_is_locked() {
+    // The complete set of wasm proposals the production engine accepts. The
+    // config denies every feature bit and then names what it re-enables, so
+    // this table is the observable form of that decision: a proposal can only
+    // move columns if someone edits new_config().
+    //
+    // This locks the surface against all three ways it has drifted or could
+    // drift: an upstream default flipping on a wasmtime bump (memory64 was
+    // enabled by default and gated only by wasm-meter), a compiler strategy
+    // change (tail calls were rejected only because Strategy::Winch subtracts
+    // TAIL_CALL), and an ordinary editing mistake in the config chain.
+    let accepted: &[(&str, &str)] = &[
+        (
+            "reference_types",
+            r#"(module (memory (export "memory") 1) (table 1 funcref) (func (export "call1") i32.const 0 ref.null func table.set 0))"#,
+        ),
+        (
+            "bulk_memory",
+            r#"(module (memory (export "memory") 1) (func (export "call1") i32.const 0 i32.const 0 i32.const 1 memory.copy))"#,
+        ),
+        (
+            "multi_value",
+            r#"(module (memory (export "memory") 1) (func (export "call1") (result i32) (block (result i32 i32) i32.const 1 i32.const 2) drop))"#,
+        ),
+        (
+            "sign_extension",
+            r#"(module (memory (export "memory") 1) (func (export "call1") (result i32) i32.const 1 i32.extend8_s))"#,
+        ),
+        (
+            "call_indirect",
+            r#"(module (memory (export "memory") 1) (table 1 funcref) (type $t (func)) (func (export "call1") i32.const 0 call_indirect (type $t)))"#,
+        ),
+        (
+            "mutable_global",
+            r#"(module (memory (export "memory") 1) (global $g (mut i32) (i32.const 0)) (func (export "call1") i32.const 1 global.set $g))"#,
+        ),
+    ];
+    let rejected: &[(&str, &str)] = &[
+        (
+            "floats",
+            r#"(module (memory (export "memory") 1) (func (export "call1") (result f32) f32.const 1))"#,
+        ),
+        (
+            "simd",
+            r#"(module (memory (export "memory") 1) (func (export "call1") v128.const i32x4 0 0 0 0 drop))"#,
+        ),
+        (
+            "tail_call",
+            r#"(module (memory (export "memory") 1) (func $t) (func (export "call1") return_call $t))"#,
+        ),
+        (
+            "memory64",
+            r#"(module (memory (export "memory") i64 1) (func (export "call1") (result i32) i64.const 0 i32.load))"#,
+        ),
+        (
+            "extended_const",
+            r#"(module (memory (export "memory") 1) (global i32 (i32.add (i32.const 1) (i32.const 2))) (func (export "call1")))"#,
+        ),
+        (
+            "custom_page_sizes",
+            r#"(module (memory (export "memory") 1 (pagesize 1)) (func (export "call1")))"#,
+        ),
+        (
+            "multi_memory",
+            r#"(module (memory (export "memory") 1) (memory 1) (func (export "call1")))"#,
+        ),
+        (
+            "threads",
+            r#"(module (memory (export "memory") 1) (func (export "call1") (result i32) i32.const 0 i32.atomic.load))"#,
+        ),
+        (
+            "wide_arithmetic",
+            r#"(module (memory (export "memory") 1) (func (export "call1") (result i64) i64.const 1 i64.const 1 i64.const 1 i64.const 1 i64.add128 drop))"#,
+        ),
+        (
+            "gc",
+            r#"(module (memory (export "memory") 1) (type $s (struct (field i32))) (func (export "call1") i32.const 1 struct.new $s drop))"#,
+        ),
+        (
+            "function_references",
+            r#"(module (memory (export "memory") 1) (type $s (func)) (func $t) (elem declare func $t) (func (export "call1") ref.func $t call_ref $s))"#,
+        ),
+        (
+            "exceptions",
+            r#"(module (memory (export "memory") 1) (tag $e) (func (export "call1") try_table (catch_all 0) end))"#,
+        ),
+    ];
+
+    let config =
+        wasmtime_lib::global_context::WasmtimeGlobalContext::new_config();
+    let engine = wasmtime::Engine::new(&config)
+        .expect("production config should produce a valid host engine");
+
+    for (name, src) in accepted {
+        let bytes = wat::parse_str(src)
+            .unwrap_or_else(|e| panic!("{name}: wat should parse: {e}"));
+        wasmtime::Module::validate(&engine, &bytes).unwrap_or_else(|e| {
+            panic!(
+                "{name} is part of the accepted contract set but the \
+                 production config now rejects it: {e:#}"
+            )
+        });
+    }
+
+    for (name, src) in rejected {
+        let bytes = wat::parse_str(src)
+            .unwrap_or_else(|e| panic!("{name}: wat should parse: {e}"));
+        assert!(
+            wasmtime::Module::validate(&engine, &bytes).is_err(),
+            "{name} is not part of the accepted contract set, but the \
+             production config now admits it — deployment admission is \
+             consensus-visible, so this must be a deliberate change"
+        );
+    }
+}

@@ -40,13 +40,13 @@ cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnin
 # wall at ~5.5min. The check earns its keep on shipped code (it flags real
 # noexcept violations in the syscall handlers), so instead of dropping it
 # globally we split the corpus: production TUs get the full check set, while
-# test/bench/loadgen TUs and hogdb.cc -- where the check is just as expensive but
+# test/bench/loadgen TUs and hog-db.cc -- where the check is just as expensive but
 # reports nothing -- get everything except exception-escape. The two passes run
 # concurrently. Net: full tidy 327s -> 109s with no loss of coverage on
 # production code.
 cd ${ROOT_DIR}
 ALL_FILES=$(find ${CODE_DIR} -name '*.h' -o -name '*.cc')
-EE_EXEMPT='_tests?\.(cc|h)$|/contract_tests/|/direct_rpc_tests/|/test_util/|/bench/|/loadgen/|test_framework|/hogdb/hogdb\.cc$'
+EE_EXEMPT='_tests?\.(cc|h)$|/contract_tests/|/direct_rpc_tests/|/test_util/|/bench/|/loadgen/|test_framework|/hog_db/hog_db\.cc$'
 PROD_FILES=$(echo "$ALL_FILES" | grep -vE "$EE_EXEMPT")
 EXEMPT_FILES=$(echo "$ALL_FILES" | grep -E "$EE_EXEMPT")
 

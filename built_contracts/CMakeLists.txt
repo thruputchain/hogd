@@ -4,7 +4,7 @@ cmake_path(RELATIVE_PATH CMAKE_CURRENT_SOURCE_DIR BASE_DIRECTORY ${CMAKE_SOURCE_
 # Add contract loader library
 add_library(contract_loader
   contract_loader.cc
-  ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/wasm/instrumented_bytes.cc
+  ${CMAKE_SOURCE_DIR}/hogd/hog_exec/runtime/wasm/instrumented_bytes.cc
 )
 
 target_link_libraries(contract_loader
@@ -251,6 +251,7 @@ add_wasm_builds(
     fibonacci_call
     cxs_roundtrip
     txs_roundtrip
+    default_wallet
     dev_wallet
     deploy_and_transfer
     read_only_test
@@ -275,12 +276,18 @@ add_wasm_builds(
     delegate_call_test
     ed25519_verify_wrapper
     view_gateway_test
+  # RAW_CONTRACTS carry no #[contract] macro, so they embed no spec. They still
+  # export functions, which is what groundhog-cli >= 0.8.0 requires: a module
+  # that exports nothing at all can never be invoked, so the CLI now rejects it
+  # rather than emitting a dead artifact. nocontract_wallet is exactly that case
+  # -- it is a client-stub-only crate (interface + Client for cross-contract
+  # calls, and a compile_error! under `guest` saying it is not a wasm contract),
+  # so it is a workspace member for compile coverage but is not built to wasm.
   RAW_CONTRACTS
     hash_bug
     calldata_raw
     sha256_raw
     fibonacci_raw
-    nocontract_wallet
 )
 
 add_executable(contract_loader_test contract_loader_test.cc)
@@ -295,17 +302,19 @@ gtest_discover_tests(contract_loader_test)
 #
 # A few contracts are intentionally excluded because they cannot be lowered to
 # an RV32 artifact:
-#   - RAW_CONTRACTS (hash_bug, calldata_raw, sha256_raw, fibonacci_raw,
-#     nocontract_wallet): no #[contract] macro -> no gh_* entry symbols, so
-#     rv32-lower rejects the ELF ("no #[contract] entry-point symbols found").
-#     hash_bug additionally has no sdk dep, so the rv32 runtime never links.
+#   - RAW_CONTRACTS (hash_bug, calldata_raw, sha256_raw, fibonacci_raw): no
+#     #[contract] macro -> no gh_* entry symbols, so rv32-lower rejects the ELF
+#     ("no #[contract] entry-point symbols found"). hash_bug additionally has no
+#     sdk dep, so the rv32 runtime never links.
+#   - nocontract_wallet: client-stub-only crate, not built for either target.
 #   - cxs_roundtrip, txs_roundtrip: their image overflows the rv32 RAM region
 #     (rust-lld: "section will not fit in region 'RAM'").
-message(STATUS "RV32 contracts: building 26 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
+message(STATUS "RV32 contracts: building 27 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
 add_riscv_builds(
   CONTRACTS
     fibonacci
     fibonacci_call
+    default_wallet
     dev_wallet
     deploy_and_transfer
     read_only_test
@@ -333,6 +342,7 @@ add_riscv_builds(
 )
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types
+add_types_xdr(default_wallet)
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
 add_types_xdr(simple_wallet)
@@ -341,6 +351,7 @@ add_types_xdr(cxs_roundtrip)
 add_types_xdr(payment_channel)
 
 # XDR .x -> .hh via x23c
+add_xdr(default_wallet_hh ./default_wallet.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
 add_xdr(simple_wallet_hh ./simple_wallet.x)
@@ -349,6 +360,7 @@ add_xdr(cxs_roundtrip_hh ./cxs_roundtrip.x)
 add_xdr(payment_channel_hh ./payment_channel.x)
 
 # Ensure XDR generation waits for spec JSONs (produced by wasm build)
+add_dependencies(build_default_wallet_hh all_wasms_built)
 add_dependencies(build_itc_erc20_hh all_wasms_built)
 add_dependencies(build_manual_revert_test_hh all_wasms_built)
 add_dependencies(build_simple_wallet_hh all_wasms_built)
@@ -364,6 +376,7 @@ add_contract_header(fibonacci)
 add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/cxs_roundtrip.hh")
 add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.hh")
+add_contract_header(default_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/default_wallet.hh")
 add_contract_header(dev_wallet)
 add_contract_header(deploy_and_transfer)
 add_contract_header(read_only_test)
@@ -384,8 +397,10 @@ add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
+add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
 
+add_dependencies(default_wallet_header default_wallet_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)

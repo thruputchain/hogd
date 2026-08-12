@@ -11,37 +11,44 @@ from generate_types_xdr import map_xdr_type, emit_enum, emit_struct, generate_xd
 
 class TestMapXdrType(unittest.TestCase):
     def test_primitives(self) -> None:
-        self.assertEqual(map_xdr_type({"kind": "u32"}), "unsigned int")
-        self.assertEqual(map_xdr_type({"kind": "i32"}), "int")
-        self.assertEqual(map_xdr_type({"kind": "u64"}), "unsigned hyper")
-        self.assertEqual(map_xdr_type({"kind": "i64"}), "hyper")
-        self.assertEqual(map_xdr_type({"kind": "bool"}), "bool")
+        self.assertEqual(map_xdr_type({"kind": "u32"}), ("unsigned int", ""))
+        self.assertEqual(map_xdr_type({"kind": "i32"}), ("int", ""))
+        self.assertEqual(map_xdr_type({"kind": "u64"}), ("unsigned hyper", ""))
+        self.assertEqual(map_xdr_type({"kind": "i64"}), ("hyper", ""))
+        self.assertEqual(map_xdr_type({"kind": "bool"}), ("bool", ""))
 
     def test_128bit(self) -> None:
-        self.assertEqual(map_xdr_type({"kind": "u128"}), "uint128_xdr")
-        self.assertEqual(map_xdr_type({"kind": "i128"}), "int128_xdr")
+        self.assertEqual(map_xdr_type({"kind": "u128"}), ("uint128_xdr", ""))
+        self.assertEqual(map_xdr_type({"kind": "i128"}), ("int128_xdr", ""))
 
     def test_address(self) -> None:
-        self.assertEqual(map_xdr_type({"kind": "address"}), "ContractAddress")
+        self.assertEqual(map_xdr_type({"kind": "address"}), ("ContractAddress", ""))
 
     def test_named(self) -> None:
-        self.assertEqual(map_xdr_type({"kind": "named", "name": "Foo"}), "Foo")
+        self.assertEqual(map_xdr_type({"kind": "named", "name": "Foo"}), ("Foo", ""))
 
     def test_vec_u8_is_opaque(self) -> None:
         ty = {"kind": "vec", "element": {"kind": "u8"}, "max_len": 1000}
-        self.assertEqual(map_xdr_type(ty), "opaque<1000>")
+        self.assertEqual(map_xdr_type(ty), ("opaque", "<1000>"))
 
     def test_vec_non_u8(self) -> None:
         ty = {"kind": "vec", "element": {"kind": "u32"}, "max_len": 50}
-        self.assertEqual(map_xdr_type(ty), "unsigned int<50>")
+        self.assertEqual(map_xdr_type(ty), ("unsigned int", "<50>"))
 
     def test_array_u8_is_opaque(self) -> None:
         ty = {"kind": "array", "element": {"kind": "u8"}, "len": 32}
-        self.assertEqual(map_xdr_type(ty), "opaque[32]")
+        self.assertEqual(map_xdr_type(ty), ("opaque", "[32]"))
 
     def test_array_non_u8(self) -> None:
         ty = {"kind": "array", "element": {"kind": "u64"}, "len": 4}
-        self.assertEqual(map_xdr_type(ty), "unsigned hyper[4]")
+        self.assertEqual(map_xdr_type(ty), ("unsigned hyper", "[4]"))
+
+    def test_nested_vec_raises(self) -> None:
+        ty = {"kind": "vec",
+              "element": {"kind": "vec", "element": {"kind": "u8"}, "max_len": 8},
+              "max_len": 4}
+        with self.assertRaises(ValueError):
+            map_xdr_type(ty)
 
     def test_bare_u8_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -79,8 +86,8 @@ class TestEmitStruct(unittest.TestCase):
             {"name": "data", "type": {"kind": "vec", "element": {"kind": "u8"}, "max_len": 256}},
             {"name": "hash", "type": {"kind": "array", "element": {"kind": "u8"}, "len": 32}},
         ])
-        self.assertIn("\topaque<256> data;", result)
-        self.assertIn("\topaque[32] hash;", result)
+        self.assertIn("\topaque data<256>;", result)
+        self.assertIn("\topaque hash[32];", result)
 
 
 class TestGenerateXdr(unittest.TestCase):

@@ -49,6 +49,13 @@ HogDevnodeTmpDir::HogDevnodeTmpDir(
         std::format("hog-devnode data path '{}' is not a directory",
                     path.string()));
   }
+  std::filesystem::permissions(path, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, ec);
+  if (ec) {
+    throw std::runtime_error(
+        std::format("could not secure hog-devnode data directory '{}': {}",
+                    path.string(), ec.message()));
+  }
 
   path_ = std::filesystem::absolute(path).string();
   remove_on_destroy_ = false;

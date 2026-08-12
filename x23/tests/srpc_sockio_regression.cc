@@ -15,7 +15,9 @@
 #include "tests/xdrtest.hh"
 #include "x23/cleanup.h"
 #include "x23/refcnt.h"
+#include "x23/rpc.h"
 #include "x23/rpc_msg.hh"
+#include "x23/threadpool.h"
 #include "x23/utility.h"
 #include "x23/vec.h"
 
@@ -198,6 +200,48 @@ TEST(SrpcRegression, OversizedBoundedVecReplyIsDecodeError)
   EXPECT_TRUE(got_xdr_error.load())
       << "oversized bounded-vector reply should surface as a client-side "
          "XdrException without terminating the process";
+}
+
+TEST(RpcRegression, InFlightDisconnectIsTransportException)
+{
+  int fds[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+  UniqueFd peer_fd{fds[1]};
+  ThreadPool thread_pool(2);
+  CoroPoll poll(thread_pool);
+  RefPtr<RpcStream<>> client_stream{
+      *new RpcStream<>(poll, UniqueFd{fds[0]}, RpcNoLogger{})};
+  auto client = client_stream->client(blank_rpc_v1{});
+
+  std::atomic<bool> request_read{false};
+  std::thread peer{[fd = std::move(peer_fd), &request_read]() mutable {
+    std::uint32_t marker = 0;
+    if (!read_exact(fd.get(), &marker, sizeof(marker))) {
+      return;
+    }
+    Buf request;
+    request.resize_uninitialized(getbe<std::uint32_t>(&marker) & 0x7fff'ffffU);
+    if (read_exact(fd.get(), request.data(), request.size())) {
+      request_read = true;
+    }
+  }};
+
+  bool got_transport_error = false;
+  try {
+    client.null()();
+  } catch (const XdrBadInput &e) {
+    ADD_FAILURE() << "disconnect was misclassified as malformed XDR: "
+                  << e.what();
+  } catch (const XdrCallFailed &e) {
+    ADD_FAILURE() << "disconnect was misclassified as an RPC rejection: "
+                  << e.what();
+  } catch (const XdrException &e) {
+    got_transport_error = true;
+  }
+  peer.join();
+
+  EXPECT_TRUE(request_read.load());
+  EXPECT_TRUE(got_transport_error);
 }
 
 } // namespace x23

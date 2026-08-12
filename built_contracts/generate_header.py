@@ -88,8 +88,13 @@ def map_type(ty):
         return f"std::tuple<{', '.join(items)}>"
     elif kind == "named":
         return ty["name"]
+    elif kind == "signed_token":
+        # `Signed<T>` serializes to zero bytes; the handle arrives out-of-band.
+        # `preimage` (the signed payload type, or null when opaque) is metadata
+        # only and does not change the C++ mirror.
+        return "SignedToken"
     else:
-        return kind
+        raise ValueError(f"unmapped C++ type kind '{kind}'")
 
 
 def generate_interface_struct(interface, wasm_file=None):
@@ -204,7 +209,7 @@ def generate_header(
 #include "x23/vec.h"
 #include "x23/x23.h"
 #include "types.hh"
-#include "hogd/hogexec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_result.h"
 
 // Auto-generated from contract spec
 // DO NOT EDIT

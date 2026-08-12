@@ -9,32 +9,32 @@
 #include <vector>
 
 #include "genesis.hh"
-#include "hogd/auth/auth_server.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/fake_coordinator.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
-#include "hogd/event/rpc_context.h"
-#include "hogd/event/rpc_from_exec.h"
-#include "hogd/event/rpc_from_indexer.h"
-#include "hogd/event/rpc_from_sched.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_auth.h"
-#include "hogd/hogdb/rpc_from_exec.h"
-#include "hogd/hogdb/rpc_from_gateway.h"
-#include "hogd/hogdb/rpc_from_sched.h"
-#include "hogd/hogexec/interface/executor.h"
-#include "hogd/hogexec/interface/rpc_from_view_gateway.h"
-#include "hogd/indexer/db.h"
-#include "hogd/indexer/recent_tx_failure_cache.h"
-#include "hogd/indexer/rpc_from_block_explorer.h"
-#include "hogd/indexer/rpc_from_event.h"
-#include "hogd/mempool/rpc_from_auth.h"
-#include "hogd/mempool/rpc_from_coord.h"
-#include "hogd/mempool/rpc_from_db.h"
-#include "hogd/mempool/rpc_from_event.h"
-#include "hogd/mempool/rpc_from_exec.h"
-#include "hogd/mempool/shared.h"
+#include "hogd/hog_auth/auth_server.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/rpc_from_auth.h"
+#include "hogd/hog_db/rpc_from_exec.h"
+#include "hogd/hog_db/rpc_from_gateway.h"
+#include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_event/rpc_context.h"
+#include "hogd/hog_event/rpc_from_exec.h"
+#include "hogd/hog_event/rpc_from_indexer.h"
+#include "hogd/hog_event/rpc_from_sched.h"
+#include "hogd/hog_exec/interface/executor.h"
+#include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/hog_indexer/rpc_from_block_explorer.h"
+#include "hogd/hog_indexer/rpc_from_event.h"
+#include "hogd/hog_mempool/rpc_from_auth.h"
+#include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/rpc_from_db.h"
+#include "hogd/hog_mempool/rpc_from_event.h"
+#include "hogd/hog_mempool/rpc_from_exec.h"
+#include "hogd/hog_mempool/shared.h"
 #include "transaction.hh"
 #include "x23/async.h"
 
@@ -42,11 +42,15 @@ namespace hogd {
 
 class HogDevnodeNode {
 public:
+  // RAMDB maps this capacity but does not consume it as steady-state RSS.
+  static constexpr std::size_t kDefaultRamDbBytes = 15UL * 1024 * 1024 * 1024;
+
   HogDevnodeNode(
       std::string bind_host, std::uint16_t requested_scheduler_port,
       BootstrapAccountConfig const &bootstrap_config = {},
       std::optional<std::filesystem::path> const &data_dir = std::nullopt,
-      NetworkHash network_hash = {});
+      NetworkHash network_hash = {},
+      std::size_t ramdb_bytes = kDefaultRamDbBytes);
   ~HogDevnodeNode();
 
   HogDevnodeNode(HogDevnodeNode const &) = delete;
@@ -82,14 +86,19 @@ public:
   {
     return genesis_configuration_;
   }
+  bool recovered_existing_chain() const noexcept
+  {
+    return recovered_existing_chain_;
+  }
   std::string const &runtime_dir() const { return runtime_dir_.directory(); }
 
 private:
-  // RAMDB maps this capacity but does not consume it as steady-state RSS.
-  static constexpr std::size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024;
-  static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffffff;
+  // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
+  static constexpr std::size_t kDevRpcMaxMessageSize = 0x7fffffff;
 
-  void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client);
+  HogDbDAO open_db_backend() const;
+  void init_db_backend(HogDbDAO db,
+                       std::unique_ptr<sched_db_client_t> sched_db_client);
   void init_indexer_backend();
   void reconcile_indexer_with_recovered_tip();
   void register_indexer_with_event_service();
@@ -113,6 +122,7 @@ private:
   const NetworkHash network_hash_;
   std::optional<std::filesystem::path> data_dir_;
   BootstrapAccountConfig bootstrap_config_;
+  const std::size_t ramdb_bytes_;
   GenesisConfiguration genesis_configuration_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;
@@ -137,10 +147,10 @@ private:
   std::unique_ptr<RPCContext> ctx_;
   EventRPCContext event_ctx_;
 
-  std::unique_ptr<HogDBExecutorServer> db_executor_server_;
-  std::unique_ptr<HogDBSchedServer> db_scheduler_server_;
-  std::unique_ptr<HogDBAuthServer> db_auth_server_;
-  std::unique_ptr<HogDBGatewayServer> db_gateway_server_;
+  std::unique_ptr<HogDbExecutorServer> db_executor_server_;
+  std::unique_ptr<HogDbSchedServer> db_scheduler_server_;
+  std::unique_ptr<HogDbAuthServer> db_auth_server_;
+  std::unique_ptr<HogDbGatewayServer> db_gateway_server_;
   std::unique_ptr<ViewGatewayServer> view_gateway_server_;
 
   EventMempoolServer event_sched_server_;

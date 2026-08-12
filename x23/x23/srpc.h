@@ -301,6 +301,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   requires requires { typename VersMeta::template client<ClientRef>; }
   typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
+    check_max_message_size(max_message_size_);
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
 
@@ -314,7 +315,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   };
 
   template<typename ProcMeta>
-  ProcMeta::return_type send_call(const is_xdr_type auto &...args)
+  ProcMeta::return_type send_call(const is_xdr_serializable auto &...args)
   {
     // If this fails, you tried to make a blocking RPC call from
     // within a coroutine, which can cause deadlock.
@@ -420,7 +421,7 @@ struct SRpcMulticlient : RefCount, PerCpuSet<RefPtr<SRpcStream<Logger>>, true> {
   }
 
   template<typename ProcMeta>
-  ProcMeta::return_type send_call(const is_xdr_type auto &...args)
+  ProcMeta::return_type send_call(const is_xdr_serializable auto &...args)
   {
     return this->lookup()->template send_call<ProcMeta>(args...);
   }

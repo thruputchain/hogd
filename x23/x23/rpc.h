@@ -384,6 +384,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   requires requires { typename VersMeta::template client<ClientRef>; }
   typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
+    check_max_message_size(max_message_size);
     go();
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
@@ -460,6 +461,9 @@ struct RpcStream : public detail::RpcStreamImpl {
     BufView rv;
     try {
       rbuf = co_await a;
+      if (rbuf.empty()) {
+        throw XdrException("RPC connection closed before reply");
+      }
       rv = rbuf.subspan(deserialize_from(&msg, rbuf));
     } catch (const XdrBadInput &e) {
       throw XdrBadInput("{}: {}", ProcMeta::proc_name, e.what());

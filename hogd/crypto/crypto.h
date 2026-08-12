@@ -201,6 +201,20 @@ SipHash24::operator()(x23::BufView buf)
 // byte arrays (ContractAddress, SHA256Hash, etc.) that uses the process-wide
 // keyed SipHash24, so adversaries can't pack containers full of bucket-
 // colliding keys.
+//
+// Use this for every container keyed by an opaque byte array. Those keys are
+// attacker-chosen -- a deployer grinds the nonce feeding the deploy-address
+// SHA-256, and a contract's code bytes feed its contract hash -- and std::hash
+// would route them through the standard library's unkeyed, implementation-
+// defined algorithm, which an attacker can reproduce offline to precompute a
+// key set that lands in one bucket, or for SynchronizedMap one shard mutex.
+//
+// The key is random per process, so hash values -- and therefore bucket/shard
+// assignment and container iteration order -- differ between runs and between
+// nodes. That is fine for the lookup-keyed caches, lock shards, and dedup sets
+// that use this today, but an iteration order derived from a container hashed
+// this way must never be persisted, serialized, or otherwise fed into
+// consensus-visible state.
 struct SipHash24Hasher {
   template<std::size_t N>
   std::size_t operator()(const std::array<uint8_t, N> &array) const

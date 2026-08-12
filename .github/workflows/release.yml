@@ -11,6 +11,7 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
+  HOGD_RELEASE_VERSION: "0.1.19"
 
 permissions:
   contents: write
@@ -126,12 +127,6 @@ jobs:
           echo "CCACHE_NAMESPACE=gcc-release-${{ matrix.architecture }}" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
 
-          if [[ "$GITHUB_REF_NAME" == v* ]]; then
-            echo "HOGD_RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          else
-            echo "HOGD_RELEASE_VERSION=0.0.1-dev" >> "$GITHUB_ENV"
-          fi
-
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
@@ -144,7 +139,7 @@ jobs:
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
 
       - name: Build GCC Debug
         run: |
@@ -155,28 +150,42 @@ jobs:
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
-            hogdb_exec hogexec mempool_exec auth_exec event_exec indexer_exec hog-devnode hog-hosted-bootstrap
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
 
       - name: Check Linux binaries for unexpected AVX-512
         if: matrix.architecture == 'x86_64'
         run: |
           ./scripts/check-no-unexpected-avx512.sh \
-            build/release/hogd/hogdb/hogdb \
-            build/release/hogd/hogexec/hogexec \
-            build/release/hogd/mempool/mempool_exec \
-            build/release/hogd/auth/auth_exec \
-            build/release/hogd/event/event_exec \
-            build/release/hogd/indexer/indexer_exec \
+            build/release/hogd/hog_db/hog-db \
+            build/release/hogd/hog_exec/hog-exec \
+            build/release/hogd/hog_mempool/hog-mempool \
+            build/release/hogd/hog_auth/hog-auth \
+            build/release/hogd/hog_event/hog-event \
+            build/release/hogd/hog_indexer/hog-indexer \
             build/release/hogd/devnode/hog-devnode \
             build/release/hogd/devnode/hog-hosted-bootstrap \
-            build/debug/hogd/hogdb/hogdb \
-            build/debug/hogd/hogexec/hogexec \
-            build/debug/hogd/mempool/mempool_exec \
-            build/debug/hogd/auth/auth_exec \
-            build/debug/hogd/event/event_exec \
-            build/debug/hogd/indexer/indexer_exec \
+            build/debug/hogd/hog_db/hog-db \
+            build/debug/hogd/hog_exec/hog-exec \
+            build/debug/hogd/hog_mempool/hog-mempool \
+            build/debug/hogd/hog_auth/hog-auth \
+            build/debug/hogd/hog_event/hog-event \
+            build/debug/hogd/hog_indexer/hog-indexer \
             build/debug/hogd/devnode/hog-devnode \
             build/debug/hogd/devnode/hog-hosted-bootstrap
+
+      - name: Verify distribution version
+        run: |
+          set -euo pipefail
+          binaries=(hog_db/hog-db hog_exec/hog-exec hog_mempool/hog-mempool hog_auth/hog-auth hog_event/hog-event hog_indexer/hog-indexer devnode/hog-devnode devnode/hog-hosted-bootstrap)
+          for build_type in release debug; do
+            for binary in "${binaries[@]}"; do
+              output=$("build/${build_type}/hogd/${binary}" --version 2>&1)
+              if [[ "$output" != *"$HOGD_RELEASE_VERSION"* ]]; then
+                echo "${binary} does not report distribution version ${HOGD_RELEASE_VERSION}: ${output}" >&2
+                exit 1
+              fi
+            done
+          done
 
       - name: Prepare artifacts
         run: |
@@ -200,7 +209,6 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   hog-devnode-macos-arm64:
-    needs: release
     runs-on: namespace-profile-hogd-arm64-macos
     permissions:
       contents: read
@@ -286,14 +294,6 @@ jobs:
 
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
-
-      - name: Set Release Version
-        run: |
-          if [[ "$GITHUB_REF_NAME" == v* ]]; then
-            echo "HOGD_RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          else
-            echo "HOGD_RELEASE_VERSION=0.0.1-dev" >> "$GITHUB_ENV"
-          fi
 
       - name: Build hog-devnode
         run: |
@@ -390,6 +390,12 @@ jobs:
 
           file hog-devnode
           otool -L hog-devnode
+
+          version_output=$(./hog-devnode --version 2>&1)
+          if [[ "$version_output" != *"$HOGD_RELEASE_VERSION"* ]]; then
+            echo "hog-devnode does not report distribution version ${HOGD_RELEASE_VERSION}: ${version_output}" >&2
+            exit 1
+          fi
 
           readiness_file="$(mktemp)"
           log_file="$(mktemp)"

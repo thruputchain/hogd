@@ -18,11 +18,11 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hogexec/precompiles/context.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
-#include "hogd/hogexec/runtime/contract_trait_client.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -38,10 +38,10 @@ public:
   GenesisConfigurationUnfurlTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDB, false)
+          TestDB::kHogDb, false)
   {}
 
-  void SetUp() override { wasm_runtime_context_ = make_hogexec_context(); }
+  void SetUp() override { wasm_runtime_context_ = make_hog_exec_context(); }
 
 protected:
   std::unique_ptr<RuntimeContext> wasm_runtime_context_;
@@ -98,13 +98,13 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
 
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
-                             fibonacci_meta_t::entrypoint<"fibonacci">(),
-                             fibonacci_meta_t::make_calldata<"fibonacci">(
+                             fibonacci_meta_t::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta_t::make_calldata<u8"fibonacci">(
                                  uint32_t{0}),
                              int128_t{1'000'000'000});
   builder.add_initial_config(caller_contract, caller_nonce,
-                             caller_meta_t::entrypoint<"initialize">(),
-                             caller_meta_t::make_calldata<"initialize">(
+                             caller_meta_t::entrypoint<u8"initialize">(),
+                             caller_meta_t::make_calldata<u8"initialize">(
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
   auto genesis_configuration =
@@ -136,7 +136,7 @@ TEST_F(GenesisConfigurationUnfurlTest, LaunchFibonacciContractAndCaller)
 
   {
     auto tx = Transaction{.invocation =
-                              caller_client.make_invocation<"call_fibonacci">(
+                              caller_client.make_invocation<u8"call_fibonacci">(
                                   UINT64_MAX, uint32_t{5}, UINT64_MAX),
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
@@ -195,13 +195,13 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
-                             fibonacci_meta_t::entrypoint<"fibonacci">(),
-                             fibonacci_meta_t::make_calldata<"fibonacci">(
+                             fibonacci_meta_t::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta_t::make_calldata<u8"fibonacci">(
                                  uint32_t{0}),
                              int128_t{1'000'000'000});
   builder.add_initial_config(caller_contract, caller_nonce,
-                             caller_meta_t::entrypoint<"initialize">(),
-                             caller_meta_t::make_calldata<"initialize">(
+                             caller_meta_t::entrypoint<u8"initialize">(),
+                             caller_meta_t::make_calldata<u8"initialize">(
                                  expected_fibonacci_address),
                              int128_t{1'000'000'000});
   auto genesis_configuration =
@@ -253,7 +253,7 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
   {
     auto tx = Transaction{.invocation =
-                              caller_client.make_invocation<"call_fibonacci">(
+                              caller_client.make_invocation<u8"call_fibonacci">(
                                   UINT64_MAX, uint32_t{5}, UINT64_MAX),
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
@@ -269,7 +269,9 @@ TEST_F(GenesisConfigurationUnfurlTest, ProposeThenValidateOK)
 
 TEST_F(GenesisConfigurationUnfurlTest, DoubleLoadError)
 {
-  GenesisConfiguration genesis_configuration{};
+  GenesisConfiguration genesis_configuration{
+      .default_wallet =
+          GenesisConfigurationLoader::native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
 
@@ -303,13 +305,14 @@ TEST_F(GenesisConfigurationUnfurlTest,
   auto cost_model = StorageCostModel::default_cost_model();
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
-                             fibonacci_meta_t::entrypoint<"fibonacci">(),
-                             fibonacci_meta_t::make_calldata<"fibonacci">(
+                             fibonacci_meta_t::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta_t::make_calldata<u8"fibonacci">(
                                  uint32_t{0}),
                              int128_t{1'000'000'000});
   builder.add_initial_config(
-      caller_contract, caller_nonce, caller_meta_t::entrypoint<"initialize">(),
-      caller_meta_t::make_calldata<"initialize">(expected_fibonacci_address),
+      caller_contract, caller_nonce,
+      caller_meta_t::entrypoint<u8"initialize">(),
+      caller_meta_t::make_calldata<u8"initialize">(expected_fibonacci_address),
       GenesisConfigurationLoader::initial_hog_token_supply() -
           int128_t{1'000'000'000} - genesis_deployer_storage_costs(cost_model));
   auto block = builder.build_or_panic(cost_model);
@@ -343,7 +346,7 @@ TEST_F(GenesisConfigurationUnfurlTest,
 
   {
     auto tx = Transaction{.invocation =
-                              caller_client.make_invocation<"call_fibonacci">(
+                              caller_client.make_invocation<u8"call_fibonacci">(
                                   UINT64_MAX, uint32_t{5}, UINT64_MAX),
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *wasm_runtime_context_);
@@ -370,8 +373,8 @@ TEST_F(GenesisConfigurationUnfurlTest, AllocateEntireTokenSupplyOneAddress)
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(
       fibonacci_contract, fibonacci_nonce,
-      fibonacci_meta_t::entrypoint<"fibonacci">(),
-      fibonacci_meta_t::make_calldata<"fibonacci">(uint32_t{0}),
+      fibonacci_meta_t::entrypoint<u8"fibonacci">(),
+      fibonacci_meta_t::make_calldata<u8"fibonacci">(uint32_t{0}),
       GenesisConfigurationLoader::initial_hog_token_supply() -
           genesis_deployer_storage_costs(cost_model));
   auto genesis_configuration = builder.build_or_panic(cost_model);
@@ -416,8 +419,8 @@ TEST_F(GenesisConfigurationUnfurlTest, InitialTokenClaimPropagatesReverts)
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(
       manual_revert_contract, manual_revert_nonce,
-      manual_revert_meta_t::entrypoint<"test_basic_manual_revert">(),
-      manual_revert_meta_t::make_calldata<"test_basic_manual_revert">(true),
+      manual_revert_meta_t::entrypoint<u8"test_basic_manual_revert">(),
+      manual_revert_meta_t::make_calldata<u8"test_basic_manual_revert">(true),
       int128_t{1'000'000'000});
   auto genesis_configuration =
       builder.build_or_panic(StorageCostModel::default_cost_model());
@@ -445,8 +448,8 @@ TEST_F(GenesisConfigurationUnfurlTest,
 
   GenesisConfigurationBuilder builder;
   builder.add_initial_config(fibonacci_contract, fibonacci_nonce,
-                             fibonacci_meta_t::entrypoint<"fibonacci">(),
-                             fibonacci_meta_t::make_calldata<"fibonacci">(
+                             fibonacci_meta_t::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta_t::make_calldata<u8"fibonacci">(
                                  uint32_t{0}),
                              int128_t{1'000'000'000});
   auto genesis_configuration =

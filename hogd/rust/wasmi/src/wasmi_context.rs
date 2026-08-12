@@ -18,7 +18,7 @@ use common::{
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes owned by one RuntimeContext.
-// This structure is not threadsafe; hogexec keeps RuntimeContext
+// This structure is not threadsafe; hog_exec keeps RuntimeContext
 // thread-confined.
 // Specifically, Engine is a shared_pointer around EngineInner,
 // which appears to have appropriate mutexes.

@@ -57,6 +57,13 @@ public:
     contract_creates_->emplace(hash, std::move(contract));
   }
 
+  // For testing only: removes a contract record so subsequent lookups see it
+  // as absent (simulates a store that never received the genesis write).
+  void erase_contract(SHA256Hash const &hash)
+  {
+    contract_creates_->erase(hash);
+  }
+
   void write_deployment(ContractAddress const &addr,
                         DeployedContractHash const &deployment,
                         StorageCostModel const *cost_model)
@@ -105,7 +112,7 @@ private:
                                std::shared_ptr<const StorageItemWrapper>>>
       items_;
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>,
-                               ByteArrayHasher>>
+                               SipHash24Hasher>>
       contract_creates_;
 
   BlockHeight height_{0};

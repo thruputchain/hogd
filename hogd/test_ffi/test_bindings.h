@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 20
-#define TEST_FFI_VERSION_PATCH 1
+#define TEST_FFI_VERSION_MINOR 21
+#define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
 // ==================
@@ -98,7 +98,7 @@ struct ForeignTracedInvokeResult {
   struct FFIDataBuffer serialized_events;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
-  // of hogexec.
+  // of hog_exec.
   enum TestFFIErrorCode ffi_error_code;
 };
 
@@ -128,7 +128,7 @@ struct ForeignTryCommitResult {
   struct FFIDataBuffer serialized_conflict;
 
   // Errors that arise from the FFI bindings, and NOT from the regular operation
-  // of hogexec.
+  // of hog_exec.
   enum TestFFIErrorCode ffi_error_code;
 };
 
@@ -243,6 +243,12 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
+// invoke_flags must contain only defined, implemented InvokeFlag bits
+// (TryInvoke | ReadOnly), the same set production's SystemCallHandler::invoke()
+// admits. Anything else -- an undefined bit, a negative value, or the
+// defined-but-unimplemented DelegateCall -- is rejected with
+// kTestFFIErrorCodeInvalidArgument, and the rejected call is a complete no-op:
+// no frame is opened and the handler stays usable.
 enum TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,

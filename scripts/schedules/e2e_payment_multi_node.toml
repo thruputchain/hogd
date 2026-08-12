@@ -39,7 +39,7 @@ export CI_CONTROL_PORT=$(./release/hogd/utils/get_port kCIControlServerPort)
 
 echo 'run bench server'
 mkdir -p ci_work_dir/
-./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/
+./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/
 
 """
 after = """
@@ -110,20 +110,20 @@ export WORK_DIR=ci_work_dir/
 
 shutdown_bench_servers() {
   set +e
-  ./release/hogd/hogexec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog10 $CI_CONTROL_PORT shutdown
-  ./release/hogd/hogexec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog4 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog5 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog6 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog7 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog8 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog9 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog10 $CI_CONTROL_PORT shutdown
+  ./release/hogd/hog_exec/bench/control_cli hog11 $CI_CONTROL_PORT shutdown
 }
 trap shutdown_bench_servers EXIT
 
 echo 'run local bench server for hog10-hosted services'
 mkdir -p ci_work_dir/
-./release/hogd/hogexec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
+./release/hogd/hog_exec/bench/control_server -p $CI_CONTROL_PORT -w ci_work_dir/ &
 
 echo 'run mempool benchmarks'
 set +e

@@ -59,14 +59,18 @@ TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHA
 # incorrectly and trip rustc's sanitizer ABI-mismatch check.
 rm -rf build/llvm_tsan build/llvm_tsan_release
 
+# Cap build parallelism at 64, same as the asan/ubsan schedule: fanning out to
+# all 128 hyperthreads OOMs the host (the OOM killer took out the login
+# session's sd-pam, dropping the SSH job mid-build). Applies to both builds
+# below.
 echo 'build clang tsan'
-./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug "${TSAN_CMAKE_FLAGS[@]}"
+./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug -j 64 "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tests'
 ctest --test-dir build/llvm_tsan --parallel --timeout 300 --output-on-failure
 
 echo 'build clang tsan release'
-./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release "${TSAN_CMAKE_FLAGS[@]}"
+./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release -j 64 "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tsan tests release'
 ctest --test-dir build/llvm_tsan_release --parallel --timeout 300 --output-on-failure
