@@ -157,6 +157,29 @@ impl WasmtimeGlobalContext {
             .debug_info(false)
             .cranelift_opt_level(wasmtime::OptLevel::Speed)
             .cranelift_nan_canonicalization(true) // deterministic nan on cranelift
+            // Deny wasm proposals by default. Config::default() is a synonym
+            // for Config::new(), and neither takes an "everything off" form:
+            // it initializes enabled_features/disabled_features to empty and
+            // the real defaults (WASM2 | MULTI_MEMORY | TAIL_CALL | ...) are
+            // computed later, in Config::features(), at Engine::new time.
+            // The only lever is that override pair, which features() applies
+            // last as `features &= !disabled; features |= enabled`.
+            //
+            // Clearing every bit here makes that a deny-list: a proposal is
+            // reachable only if something below names it. Without this line
+            // the baseline is "wasm 2.0, plus whatever upstream turned on by
+            // default since the last bump", so a version bump can widen the
+            // accepted contract set without any change on our side. Every
+            // enable/disable below still stands on its own and is the record
+            // of what we actually decided.
+            //
+            // Note that features() applies `|= enabled_features` AFTER
+            // subtracting compiler_panicking_wasm_features(), so an explicit
+            // enable overrides wasmtime's own backend-panic guard. The enable
+            // list therefore deserves more scrutiny than the disable list;
+            // everything in it is core wasm 2.0 that Winch compiles on both
+            // x86_64 and aarch64.
+            .wasm_features(WasmFeatures::all(), false)
             // Note: nan canonicalization is not currently available on winch,
             // so we disable floats entirely. wasmtime's Config has no
             // high-level helper for this; the supported path is the
@@ -177,6 +200,100 @@ impl WasmtimeGlobalContext {
             .wasm_relaxed_simd(false)
             .relaxed_simd_deterministic(true)
             .wasm_multi_memory(false)
+            // Every remaining wasm proposal is pinned explicitly below, even
+            // where the value matches wasmtime's default. Deployment
+            // admission is consensus-visible, so the accepted contract set
+            // must not be able to shift underneath us because an upstream
+            // default flipped on a version bump, or because the compiler
+            // strategy changed.
+            //
+            // The latter is not hypothetical: Config::validate subtracts
+            // TAIL_CALL (among others) for Strategy::Winch, so tail calls
+            // were rejected only as a side effect of the backend choice
+            // while wasm-meter allowlists ReturnCall/ReturnCallIndirect.
+            // Selecting Cranelift — which this file already supports below,
+            // and which was the production strategy until #2208 — silently
+            // made tail-call contracts deployable. See issue #2535.
+            //
+            // Proposals kept ENABLED. Under the blanket clear above these are
+            // no longer optional documentation — they are the entire set of
+            // wasm features contracts may use. Everything here is core wasm
+            // 2.0; nothing post-2.0 is enabled.
+            //
+            // SATURATING_FLOAT_TO_INT is deliberately absent even though it is
+            // part of WASM2 and was therefore on before the blanket clear. It
+            // gates i32/i64.trunc_sat_f32/f64_s/u, every one of which takes a
+            // float operand, and FLOATS above makes float values
+            // unconstructible — no f32/f64 const, load, local, global, param
+            // or result survives validation. The feature is unreachable, so it
+            // stays out of the enable list rather than being carried as dead
+            // surface area.
+            //
+            // REFERENCE_TYPES subsumes CALL_INDIRECT_OVERLONG and BULK_MEMORY
+            // subsumes BULK_MEMORY_OPT (wasmparser defines the parent bits to
+            // include the child), so those two are listed only to keep the
+            // set readable as a complete enumeration.
+            //
+            // The typed `wasm_reference_types` setter is `#[cfg(feature =
+            // "gc")]`, which this crate does not enable, so REFERENCE_TYPES
+            // goes through the same low-level `wasm_features` hatch used for
+            // FLOATS above. Enabling the `gc` crate feature purely to reach
+            // the setter would flip GC_TYPES on by default — strictly worse.
+            .wasm_features(
+                WasmFeatures::REFERENCE_TYPES
+                    | WasmFeatures::MUTABLE_GLOBAL
+                    | WasmFeatures::SIGN_EXTENSION
+                    | WasmFeatures::CALL_INDIRECT_OVERLONG
+                    | WasmFeatures::BULK_MEMORY_OPT,
+                true,
+            )
+            .wasm_bulk_memory(true)
+            .wasm_multi_value(true)
+            // Proposals kept DISABLED. wasm-meter's opcode allowlist rejects
+            // most of these independently, but it does not cover all of them
+            // (tail calls are allowlisted; custom page sizes are a memory
+            // definition and extended const lives in constant expressions,
+            // neither of which is an opcode in a function body), and defense
+            // in depth is cheap here.
+            //
+            // memory64 deserves specific mention: wasmtime enables it by
+            // default and Winch does not subtract it, so wasm-meter was the
+            // sole gate. A 64-bit memory index type would change
+            // contract-visible pointer width out from under the
+            // marmot::syscall ABI (i32 pointers since #2422).
+            //
+            // extended_const adds i32/i64 add/sub/mul to the constant
+            // expression grammar used by global initializers and data/element
+            // segment offsets. It exists for dynamic linking — computing a
+            // segment offset as __memory_base + N — which contracts have no
+            // use for. wasm-meter's allowlist only classifies operators in
+            // function bodies, so constant expressions never reach it and the
+            // engine is the sole gate.
+            .wasm_extended_const(false)
+            .wasm_tail_call(false)
+            .wasm_memory64(false)
+            .wasm_custom_page_sizes(false)
+            .wasm_shared_everything_threads(false)
+            .wasm_stack_switching(false)
+            .wasm_wide_arithmetic(false)
+            // THREADS / EXCEPTIONS / GC / GC_TYPES / FUNCTION_REFERENCES /
+            // COMPONENT_MODEL have typed setters gated behind `gc`,
+            // `threads`, and `component-model` crate features this crate does
+            // not enable, so they are off at compile time already. Pin them
+            // anyway: a future dependency edit that turns a crate feature on
+            // must not quietly widen the accepted contract set as a side
+            // effect. LEGACY_EXCEPTIONS is here rather than on its typed
+            // setter, which is deprecated.
+            .wasm_features(
+                WasmFeatures::THREADS
+                    | WasmFeatures::EXCEPTIONS
+                    | WasmFeatures::LEGACY_EXCEPTIONS
+                    | WasmFeatures::GC
+                    | WasmFeatures::GC_TYPES
+                    | WasmFeatures::FUNCTION_REFERENCES
+                    | WasmFeatures::COMPONENT_MODEL,
+                false,
+            )
             .epoch_interruption(false)
             // Wasmtime 42.0.0 sync stack notes:
             // - max_wasm_stack is a per-Store wasm limit, not a separate native

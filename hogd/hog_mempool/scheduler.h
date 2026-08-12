@@ -12,8 +12,8 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
 #include "sched_db.hh"
 #include "transaction.hh"
@@ -126,8 +126,8 @@ public:
   x23::Async<void> write_all_average_hog_ages_to_db();
 
   struct ReadAverageHogAgesResult {
-    std::unordered_set<ContractAddress, ByteArrayHasher> found;
-    std::unordered_set<ContractAddress, ByteArrayHasher> missing;
+    std::unordered_set<ContractAddress, SipHash24Hasher> found;
+    std::unordered_set<ContractAddress, SipHash24Hasher> missing;
   };
   x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
@@ -203,9 +203,9 @@ private:
 
   struct PendingNominationState {
     BlockID block_id = 0;
-    std::unordered_map<ContractAddress, HogAge, ByteArrayHasher> hog_ages;
-    std::unordered_set<ContractAddress, ByteArrayHasher> touched_accounts;
-    std::unordered_set<ContractAddress, ByteArrayHasher>
+    std::unordered_map<ContractAddress, HogAge, SipHash24Hasher> hog_ages;
+    std::unordered_set<ContractAddress, SipHash24Hasher> touched_accounts;
+    std::unordered_set<ContractAddress, SipHash24Hasher>
         accounts_excluded_from_block;
 
     PendingNominationState() { clear(); }
@@ -252,7 +252,7 @@ private:
 
   // TODO(jhumphri): Give this a better name.
   void cycle_accounts_during_schedule_helper(
-      const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts,
+      const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
       const TxKey &lower_bound);
 
   void process_transfers_helper(const Delta &delta,
@@ -285,7 +285,7 @@ private:
   const HogAge &get_hog_age_from_pending_nomination_if_exists(
       const AccountState &account_state, const ContractAddress &account) const;
   void refresh_ready_accounts(
-      const std::unordered_set<ContractAddress, ByteArrayHasher> &accounts);
+      const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts);
   void refresh_accounts_excluded_from_block();
   bool account_excluded_from_block(const ContractAddress &account) const;
   void erase_ready_account(const ContractAddress &account);
@@ -298,10 +298,10 @@ private:
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
   SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>,
-                  ByteArrayHasher>
+                  SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
-  SynchronizedMap<ContractAddress, AccountState, ByteArrayHasher> accounts_;
+  SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;
 
   // The number of txs on the runqueue. [size_] is signed because it can
   // temporarily go below 0 in the following scenario:

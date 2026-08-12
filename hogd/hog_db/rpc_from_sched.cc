@@ -317,8 +317,20 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     GenesisConfiguration genesis_configuration, ConsensusValue value)
 {
   constexpr static BlockID kGenesisBlockID = 0;
+  constexpr static BlockHeight kGenesisBlockHeight = 0;
   if (ctx_.get_tip().value.proposal_header.block_height != -1) {
     error("Genesis block can only be loaded if the database has no blocks");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  // Validate the caller-supplied genesis height before mutating any state.
+  // commit_block() only fatal-checks the committed tip height against the -1
+  // bootstrap sentinel after the tip has already been persisted, so a bad
+  // height here would otherwise be written to the db before terminating the
+  // process. Reject it up front instead (issue #3246).
+  if (value.proposal_header.block_height != kGenesisBlockHeight) {
+    error("Genesis block must have height {}, got {}", kGenesisBlockHeight,
+          value.proposal_header.block_height);
     co_return DbSchedResult::DbSchedResultError;
   }
 

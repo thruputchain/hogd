@@ -9,7 +9,7 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -17,10 +17,10 @@ namespace hogd {
 class BorrowedContractBatch {
 public:
   using value_type = Contract;
-  using hash_set_t = std::unordered_set<SHA256Hash, ByteArrayHasher>;
+  using hash_set_t = std::unordered_set<SHA256Hash, SipHash24Hasher>;
   using contract_map_t =
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                         ByteArrayHasher>;
+                         SipHash24Hasher>;
 
   // NOLINTNEXTLINE(readability-identifier-naming)
   class const_iterator {

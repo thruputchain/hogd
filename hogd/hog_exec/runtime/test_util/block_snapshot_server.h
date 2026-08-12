@@ -134,10 +134,10 @@ private:
   BlockID block_id_;
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
-  x23::MVar<std::unordered_map<SHA256Hash, Contract, ByteArrayHasher>>
+  x23::MVar<std::unordered_map<SHA256Hash, Contract, SipHash24Hasher>>
       contracts_;
   x23::MVar<std::unordered_map<ContractAddress, DeployedContractHash,
-                               ByteArrayHasher>>
+                               SipHash24Hasher>>
       deployments_;
   x23::MVar<std::unordered_map<AddressAndKey, std::vector<QueueEntry>>>
       concurrent_rcq_items_;

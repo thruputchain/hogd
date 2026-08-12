@@ -42,6 +42,9 @@ endforeach()
 add_x23_test(poll_zombie)
 set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
 
+add_x23_test(poll_writer_zombie)
+set_tests_properties(poll_writer_zombie PROPERTIES TIMEOUT 10)
+
 add_x23_test(abort_zombie)
 set_tests_properties(abort_zombie PROPERTIES TIMEOUT 10)
 
@@ -99,6 +102,7 @@ add_x23_gtest(max_message_size)
 add_x23_gtest(srpc_sockio_regression)
 add_x23_gtest(shutdown)
 add_x23_gtest(sync)
+add_x23_gtest(threadpool)
 add_x23_gtest(detached)
 add_x23_gtest(dag)
 add_x23_gtest(uiobuf)
@@ -106,7 +110,7 @@ add_x23_gtest(xdr)
 add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
-set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+set_tests_properties(shutdown threadpool PROPERTIES TIMEOUT 10)
 endif()
 
 if(BENCHMARK_PATH)

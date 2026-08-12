@@ -252,9 +252,11 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 TEST_F(ViewTest, ViewContractSelfInvokeFaults)
 {
   ContractTraitClient<read_only_test::ReadOnlyTest> client(kReadOnlyAddress);
+  // Pointing the entrypoint's callee at its own address makes the inner invoke
+  // reentrant, which the guard rejects -- faulting the frame.
   auto invocation =
       client.make_invocation<u8"read_only_aliasing_before_read_only_check">(
-          UINT64_MAX);
+          UINT64_MAX, kReadOnlyAddress);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);

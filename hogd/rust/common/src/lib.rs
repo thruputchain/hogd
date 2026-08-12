@@ -78,10 +78,20 @@ pub fn verify_contract_meter(
         max_imported_functions: 1,
         max_table_initial_size: MAX_TABLE_ELEMENTS,
         reject_floats: true,
+        // `groundhogspecv0` is the *finalized* spec section (sdk_rs
+        // `groundhog-contract-spec::FINAL_SECTION_NAME`) and is the only spec
+        // section a built contract carries.
+        //
+        // The `groundhogspecraw*` sections are not listed: they are a
+        // compile-time intermediate. rustc emits one raw fragment section per
+        // crate, and `groundhog build`'s spec finalization shakes and merges
+        // them into the single final section, stripping the raw ones -- so no
+        // deployed artifact contains one. (They are separately versioned via
+        // the SDK's RAW_SPEC_FORMAT, currently `groundhogspecrawv1`; hogd never
+        // sees that name, so it has no reason to track the bumps.)
         allowed_custom_sections: vec![
             "name".to_string(),
             "groundhogspecv0".to_string(),
-            "groundhogspecrawv0".to_string(),
         ],
         ..groundhog_wasm_meter::Config::default()
     };

@@ -45,7 +45,6 @@ RpcStreamImpl::fail()
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
-  srvmap_.clear();
   cp_->poison(fd_);
 }
 

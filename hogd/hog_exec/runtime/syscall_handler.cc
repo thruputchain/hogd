@@ -173,7 +173,7 @@ SystemCallHandler::SystemCallHandler(
     root_invoked_address_(tx.invocation.invoked_address),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                         ByteArrayHasher>
+                         SipHash24Hasher>
           contracts;
       contracts.reserve(tx.contracts_to_deploy.size());
 

@@ -76,14 +76,24 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   return detail::get_engine_info(engine).has_eager_link_guards;
 }
 
-using ErasedHostFn = void();
-using ErasedFnPtr = ErasedHostFn *;
-
 // Erased C-ABI function-pointer type for syscall trampoline dispatch.
 // Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
 // Using a function-pointer type (not void*) keeps the cast chain within
 // the guaranteed fn-ptr <-> fn-ptr reinterpret_cast
 // ([expr.reinterpret.cast]/6).
+//
+// The aliases sit inside a linkage-specification so the aliased function type
+// has C language linkage ([dcl.link]/4), matching both the Rust declaration
+// and the HostFnN family in runtime_exports.h that this type carries.
+// Language linkage is part of a function type, so without the specification
+// the carrier is formally a distinct type from the C-linkage parameter the
+// generated FFI headers declare -- a distinction the compilers we build with
+// ignore, but one worth not relying on in the syscall dispatch path.
+extern "C" {
+using ErasedHostFn = void();
+using ErasedFnPtr = ErasedHostFn *;
+}
+
 template<typename Fn> struct HostFnTraits;
 
 template<> struct HostFnTraits<HostFn0> {

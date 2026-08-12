@@ -301,6 +301,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   requires requires { typename VersMeta::template client<ClientRef>; }
   typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
+    check_max_message_size(max_message_size_);
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
 

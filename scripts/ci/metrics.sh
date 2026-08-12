@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 . "$(dirname "$0")/bench_harness.sh"
+ci_enable_error_trace
 
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./${BUILD_DIR}/hogd/utils/get_port kCIControlServerPort)

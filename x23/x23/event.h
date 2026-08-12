@@ -313,10 +313,21 @@ public:
     ::close(fd.get());
   }
 
+  // The generation number (if non-zero) changes every time a file
+  // descriptor is recycled.  If a file descriptor is in a reset state
+  // and make is true (the default), generation will activate the file
+  // descriptor (which may involve memory allocation or setting edge
+  // triggered modes in epoll).  make can be set to false to read the
+  // generation number without activating the file descriptor.
+  uint64_t generation(BorrowedFd fd, bool make = true);
+
   // Make any pending and future callbacks return with EBADF until
   // reset() is called.  Pending callbacks are made asynchronously, so
-  // may still be running after poison() returns.
+  // may still be running after poison() returns.  The second version
+  // poisons the file descriptor only if generation() is still
+  // generation_number.
   void poison(BorrowedFd fd);
+  void poison(BorrowedFd fd, uint64_t generation_number);
 
   // If there's a callback for reading (write == false) or writing
   // (write == true) on file descriptor fd, then immediately make the
@@ -358,7 +369,8 @@ private:
     using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
-    std::atomic<std::uint32_t> ready_{0};
+    std::atomic_uint32_t ready_{0};
+    std::atomic_uint64_t generation_{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<AtomicWorkItem, 2> callbacks_{};
 #if X23_FD_TRACE
@@ -394,6 +406,7 @@ private:
     {
       mode_ = other.mode();
       ready_ = other.ready_.load();
+      generation_ = other.generation_.load();
       for (size_t i = 0; i < callbacks_.size(); ++i) {
         callbacks_[i].value = other.callbacks_[i].value.load();
         callbacks_[i].cpuhint = other.callbacks_[i].cpuhint.load();
@@ -446,6 +459,8 @@ private:
                                                 POLLOUT | POLLHUP | POLLERR};
   struct FdState : BufHolder {
     bool poisoned{false};
+    uint64_t generation =
+        std::chrono::steady_clock::now().time_since_epoch().count();
     std::array<WorkItem, 2> callbacks;
     short events() const
     {

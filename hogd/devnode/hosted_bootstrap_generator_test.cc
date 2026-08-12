@@ -155,9 +155,8 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
                 GenesisConfigurationLoader::native_default_wallet_hash().hash));
   EXPECT_EQ(require_field(default_wallet, "contract_size").as_integer(),
             std::optional<std::int64_t>{0});
-  EXPECT_EQ(require_field(default_wallet, "contract_type").as_integer(),
-            std::optional<std::int64_t>{
-                static_cast<std::int64_t>(ContractType::kNative)});
+  EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),
+            "kNative");
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);

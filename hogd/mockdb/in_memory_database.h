@@ -112,7 +112,7 @@ private:
                                std::shared_ptr<const StorageItemWrapper>>>
       items_;
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>,
-                               ByteArrayHasher>>
+                               SipHash24Hasher>>
       contract_creates_;
 
   BlockHeight height_{0};

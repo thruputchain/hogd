@@ -49,15 +49,12 @@ public:
       listen_fd_.wait(lfd);
     }
 
-    for (;;) {
-      auto ptr = cs_.take();
-      Conn *c = ptr->connlist;
-      if (!c)
-        break;
-      x23::RefPtr s(*c->rpcstream_);
-      ptr.reset();
-      s->fail();
+    {
+      auto ptr = fdgen_.take();
+      for (auto [fd, gen] : *ptr)
+        cp_.poison(fd, gen);
     }
+
     destroy_wait();
   }
 
@@ -86,6 +83,13 @@ public:
     return {port_, std::move(lfd)};
   }
 
+private:
+  struct ImplPtrOps : x23::detail::RefOps<RpcServer *> {
+    static auto get(RpcServer *p) noexcept { return &p->impl_; }
+  };
+  using ImplPtr = x23::RefPtr<RpcServer, ImplPtrOps>;
+
+public:
   void start_accepting(x23::UniqueFd lfd)
   {
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
@@ -94,7 +98,10 @@ public:
                          [self = x23::RefPtr(*this),
                           _d = x23::Defer([this] { eof(); })](auto c) {
                            c->max_message_size = self->max_message_size_;
-                           new Conn{*self, c};
+                           self->fdgen_->insert_or_assign(c->get_fd(),
+                                                          self->cp_.generation(
+                                                              c->get_fd()));
+                           c->template server<VersMeta>(ImplPtr(*self));
                          });
   }
 
@@ -117,50 +124,8 @@ public:
   RpcServer *operator->() noexcept { return this; }
 
 private:
-  struct Conn {
-    x23::RefPtr<RpcServer> s_;
-    Conn *next_;
-    Conn **prev_;
-    x23::RefPtr<x23::detail::RpcStreamImpl> rpcstream_;
-
-    struct Ptr {
-      Conn *c_;
-      explicit Ptr(Conn *c) : c_(c) {}
-      Ptr(Ptr &&other) noexcept : c_(std::exchange(other.c_, nullptr)) {}
-      ~Ptr() { delete c_; }
-      Impl &operator*() const noexcept { return c_->s_->impl_; }
-      Impl *operator->() const noexcept { return &c_->s_->impl_; }
-    };
-
-    // NOLINTBEGIN(bugprone-assignment-in-if-condition,bugprone-exception-escape)
-    // noexcept because it's UB to delete objects before constructors
-    // return.  If c->server throws it could delete this, so at least
-    // crash close to the bug.
-    Conn(RpcServer &s, auto &c) noexcept : s_(s), rpcstream_(*c)
-    {
-      auto ptr = s_->cs_.take();
-      if ((next_ = ptr->connlist))
-        next_->prev_ = &next_;
-      prev_ = &ptr->connlist;
-      *prev_ = this;
-      static_assert(x23::implements_async_rpc<Ptr, VersMeta>);
-      c->template server<VersMeta>(Ptr(this));
-    }
-    ~Conn()
-    {
-      auto ptr = s_->cs_.take();
-      if ((*prev_ = next_))
-        next_->prev_ = prev_;
-      ptr.reset();
-    }
-    // NOLINTEND(bugprone-assignment-in-if-condition,bugprone-exception-escape)
-  };
-  struct ConnState {
-    Conn *connlist{};
-  };
-
   Impl impl_;
-  x23::MVar<ConnState> cs_;
+  x23::MVar<std::map<int, uint64_t>> fdgen_;
   bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};

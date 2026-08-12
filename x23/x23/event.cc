@@ -39,8 +39,10 @@ WriteBuffer::Service::write(BufVec &work)
     if (*res != IoResult::kAgain)
       tok_.reset();
   }
-  else
+  else {
     cp_->poison(fd_);
+    return res.error();
+  }
   return 0;
 }
 
@@ -67,17 +69,10 @@ WriteBuffer::Service::worker(Service self, BufVec work)
   RefPtr<WriteBuffer> wbref(*self.wb_);
   for (;;) {
     while (!work.empty()) {
-      if (self.tok_)
-        // If write_wait returns an error (e.g. EBADF after the fd was
-        // poisoned or reset), stop; otherwise a delayed write could
-        // land on a later connection that recycles the same integer fd.
-        // Release the service lock first: on co_return the frame drops
-        // wbref (possibly freeing the WriteBuffer, and with it the lock)
-        // before ~self runs, so the lock must not be held here.
-        if (co_await self.cp_->write_wait(self.tok_)) {
-          self.lk_.unlock();
-          co_return;
-        }
+      if (self.tok_ && co_await self.cp_->write_wait(self.tok_)) {
+        self.lk_.unlock();
+        co_return;
+      }
       if (self.write(work))
         co_return;
     }
@@ -234,7 +229,8 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
       co_return Errno{err};
     }
 
-    co_await write_wait(tok);
+    if (auto e = co_await write_wait(tok); e)
+      co_return e;
     tok = write_clear(fd);
 
     len = sizeof(err);
