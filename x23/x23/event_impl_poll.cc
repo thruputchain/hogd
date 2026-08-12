@@ -49,6 +49,8 @@ RefPtr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto s = state_.take();
+  if (stop_requested())
+    return nullptr;
   auto &f = (*s)[fd.get()];
   if (f.poisoned)
     return nullptr;
@@ -59,6 +61,8 @@ RefPtr<WriteBuffer>
 CoroPollImpl::get_writer(BorrowedFd fd)
 {
   auto s = state_.take();
+  if (stop_requested())
+    return nullptr;
   auto &f = (*s)[fd.get()];
   if (f.poisoned)
     return nullptr;
@@ -69,6 +73,8 @@ std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
 CoroPollImpl::get_rw(BorrowedFd fd)
 {
   auto s = state_.take();
+  if (stop_requested())
+    return {nullptr, nullptr};
   auto &f = (*s)[fd.get()];
   if (f.poisoned)
     return {nullptr, nullptr};
@@ -187,7 +193,10 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
   auto s = state_.take();
   if (stop_requested())
     return;
-  auto &f = (*s)[fd.get()];
+  auto it = s->find(fd.get());
+  if (it == s->end())
+    return;
+  auto &f = it->second;
   if (f.generation != genno)
     return;
   f.poisoned = true;
