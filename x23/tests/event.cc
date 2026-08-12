@@ -77,6 +77,69 @@ test_stale_poison_generation(CoroPoll &cp)
   cp.reset(readfd);
 }
 
+#if USE_EPOLL
+void
+test_matching_poison_generation_race(CoroPoll &cp)
+{
+  int fds[2];
+  if (pipe(fds) == -1)
+    Errno{}.raise("pipe");
+  UniqueFd readfd(fds[0]);
+  UniqueFd writefd(fds[1]);
+  set_nonblock(readfd);
+
+  std::binary_semaphore activate(0);
+  std::binary_semaphore activated(0);
+
+  std::jthread activator([&](std::stop_token stop) {
+    while (!stop.stop_requested()) {
+      activate.acquire();
+      if (stop.stop_requested())
+        break;
+      (void)cp.read_clear(readfd);
+      activated.release();
+    }
+  });
+
+  constexpr unsigned attempts = 100000;
+  for (unsigned i = 0; i < attempts; ++i) {
+    cp.reset(readfd);
+    uint64_t old_generation = cp.generation(readfd, false);
+
+    activate.release();
+
+    // setmode() increments generation_ while mode_ is still kLocked.
+    // Wait until that point, then race the generation-qualified poison
+    // against the remainder of the activation.
+    uint64_t generation;
+    while ((generation = cp.generation(readfd, false)) == old_generation)
+      std::this_thread::yield();
+
+    cp.poison(readfd, generation);
+    activated.acquire();
+
+    // A successful matching-generation poison advances the generation.
+    // If it is unchanged, poison() observed kLocked, lost its one-shot
+    // compare_exchange, and silently returned even though this generation
+    // is still current.
+    if (cp.generation(readfd, false) == generation) {
+      activator.request_stop();
+      activate.release();
+      std::println(stderr,
+                   "matching-generation poison was lost on attempt {} "
+                   "(generation {})",
+                   i, generation);
+      throw std::runtime_error(
+          "matching-generation poison lost while fd was kLocked");
+    }
+  }
+
+  activator.request_stop();
+  activate.release();
+  cp.reset(readfd);
+}
+#endif // USE_EPOLL
+
 int
 main()
 {
@@ -116,4 +179,7 @@ main()
 
   test_matching_poison_generation(cp);
   test_stale_poison_generation(cp);
+#if USE_EPOLL
+  test_matching_poison_generation_race(cp);
+#endif // USE_EPOLL
 }
