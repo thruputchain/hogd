@@ -69,8 +69,10 @@ WriteBuffer::Service::worker(Service self, BufVec work)
   RefPtr<WriteBuffer> wbref(*self.wb_);
   for (;;) {
     while (!work.empty()) {
-      if (self.tok_ && co_await self.cp_->write_wait(self.tok_))
+      if (self.tok_ && co_await self.cp_->write_wait(self.tok_)) {
+        self.lk_.unlock();
         co_return;
+      }
       if (self.write(work))
         co_return;
     }
