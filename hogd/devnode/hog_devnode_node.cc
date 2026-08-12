@@ -68,6 +68,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
 #include "proposal_hash.h"
 #include "rpc_types.hh"

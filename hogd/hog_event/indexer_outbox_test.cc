@@ -653,11 +653,13 @@ TEST_F(IndexerOutboxTest, ValidatedHistorySnapshotInstallsMatchingAppendCache)
   ASSERT_TRUE(history.has_value()) << history.error();
   ASSERT_EQ(history->records.size(), 1UL);
   ASSERT_TRUE(history->latest.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(*history->latest, history->records.front());
 
   auto cached = reopened.lookup_validated_committed_record(1)();
   ASSERT_TRUE(cached.has_value()) << cached.error();
   ASSERT_TRUE(cached->has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(**cached, *history->latest);
 
   auto second = make_committed(2, {}, {});

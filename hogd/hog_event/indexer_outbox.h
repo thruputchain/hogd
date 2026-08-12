@@ -84,6 +84,8 @@ struct IndexerOutboxLoadedCommittedRecord {
   IndexerOutboxCommittedPayload payload;
 };
 
+// Generated XDR members confuse clang-tidy's exception propagation.
+// NOLINTBEGIN(bugprone-exception-escape)
 struct IndexerOutboxValidatedHistory {
   std::vector<IndexerOutboxCommittedRecordInfo> records;
   std::vector<IndexerOutboxEpochOriginInfo> origins;
@@ -91,6 +93,7 @@ struct IndexerOutboxValidatedHistory {
   std::optional<IndexerOutboxCommittedRecordInfo> latest;
   std::optional<IndexerOutboxCanonicalBoundary> canonical_boundary;
 };
+// NOLINTEND(bugprone-exception-escape)
 
 enum class IndexerOutboxFaultPoint {
   kVerifyPublishedInode,

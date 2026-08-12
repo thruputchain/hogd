@@ -78,20 +78,26 @@ public:
       }
       if (pending_event_card_) {
         CHECK(*pending_event_card_ == event_card_);
+        CHECK(pending_event_tip_.has_value());
         EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         result.snapshot().tip = *pending_event_tip_;
         result.snapshot().token = pending_event_token_;
         return result;
       }
       CHECK(event_canonical_tip_.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       if (*event_canonical_tip_ == active_event_snapshot_->tip) {
         EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         result.snapshot() = *active_event_snapshot_;
         return result;
       }
     }
     if (pending_event_card_ && card == *pending_event_card_) {
+      CHECK(pending_event_tip_.has_value());
       EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       result.snapshot().tip = *pending_event_tip_;
       result.snapshot().token = pending_event_token_;
       return result;
@@ -124,6 +130,7 @@ public:
     std::unique_lock lk(event_mutex_);
     if (event_registered_.load(std::memory_order_acquire)) {
       CHECK(active_event_snapshot_.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       if (snapshot == *active_event_snapshot_) {
         return EventActivationResult{EventActivationOutcome::EventActivationOK};
       }

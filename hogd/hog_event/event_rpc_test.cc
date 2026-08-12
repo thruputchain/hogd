@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono> // IWYU pragma: keep
 #include <fcntl.h>
@@ -509,12 +510,12 @@ TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
     genesis.proposal_header.block_height = 0;
     ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
     ConsensusValue block_one =
-        commit_empty_block(ctx, 870 + i * 2, 1, sha256(genesis));
+        commit_empty_block(ctx, 870 + (i * 2), 1, sha256(genesis));
     EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
     ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
     IndexerProgress first_progress = progress_at(first.pulled_block());
 
-    const BlockID block_two_id = 871 + i * 2;
+    const BlockID block_two_id = 871 + (i * 2);
     ASSERT_EQ(event_rpc.eventsched_open_block(block_two_id)(),
               RPCError::kRPCNone);
     EventBlockResult closed =

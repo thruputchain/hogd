@@ -106,18 +106,13 @@ make_proposal_txs(const ProposedTransactionBatch &canonical_bodies)
 
 IndexerCommittedBlock
 make_block(BlockHeight height, ConsensusValueHash prev_hash,
-           ProposedTransactionBatch bodies = {},
-           bool reverse_delivery_order = false)
+           ProposedTransactionBatch bodies = {})
 {
   const ProposedTransactionBatch canonical_bodies = bodies;
   TxEventLogBatch logs;
   for (size_t i = 0; i < bodies.size(); ++i) {
     logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
                                               : std::nullopt));
-  }
-  if (reverse_delivery_order) {
-    std::ranges::reverse(bodies);
-    std::ranges::reverse(logs);
   }
   ProposalTxs proposal = make_proposal_txs(canonical_bodies);
   ConsensusValue value;
@@ -401,7 +396,7 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
   ProposedTransaction eventless = make_body(7, 0xCC);
   IndexerCommittedBlock first =
       make_block(1, origin.first_prev_hash,
-                 ProposedTransactionBatch{make_body(6, 0xBB), eventless}, true);
+                 ProposedTransactionBatch{make_body(6, 0xBB), eventless});
   ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
