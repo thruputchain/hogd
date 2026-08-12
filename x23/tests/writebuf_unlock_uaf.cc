@@ -1,4 +1,5 @@
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <print>
 
@@ -65,16 +66,38 @@ main() // NOLINT(bugprone-exception-escape)
     x23::Errno{}.raise("socketpair");
   x23::set_nonblock(fds[0]);
   int bufsz = 4096;
-  setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz));
-  setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz));
+  if (setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz)) ||
+      setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz)))
+    x23::Errno{}.raise("setsockopt");
+
+  // Everything below only means something if the write cannot finish
+  // inside flush(), so check that the socket really cannot swallow the
+  // whole payload rather than trust the setsockopt calls above.
+  constexpr size_t kPayload = 4 << 20;
+  int sndbuf = 0;
+  int rcvbuf = 0;
+  socklen_t optlen = sizeof(int);
+  if (getsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &sndbuf, &optlen) ||
+      getsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &rcvbuf, &optlen))
+    x23::Errno{}.raise("getsockopt");
+  if (size_t(sndbuf) + size_t(rcvbuf) >= kPayload) {
+    std::println(stderr,
+                 "SETUP FAILED: socket buffers ({} + {}) can take the whole "
+                 "{}-byte write, so no worker would suspend",
+                 sndbuf, rcvbuf, kPayload);
+    return 1;
+  }
 
   x23::ThreadPool pool(2);
   {
     x23::CoroPoll cp(pool);
 
-    x23::Buf data(4 << 20, uint8_t{'x'});
-    if (x23::Errno err = cp.awrite(fds[0], std::move(data)))
-      std::println(stderr, "awrite: {}", err);
+    x23::Buf data(kPayload, uint8_t{'x'});
+    if (x23::Errno err = cp.awrite(fds[0], std::move(data))) {
+      // No worker to leave holding the lock, so the run proves nothing.
+      std::println(stderr, "SETUP FAILED: awrite: {}", err);
+      return 1;
+    }
 
     std::println(stderr, "destroying CoroPoll with a write still pending...");
     // ~CoroPoll runs here:
