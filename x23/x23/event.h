@@ -601,13 +601,25 @@ class WriteBuffer::Service {
 public:
   [[nodiscard]]
   Service(WriteBuffer &wb, CoroPoll &cp, BorrowedFd fd)
-    : wb_(&wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
+    : wb_(wb), cp_(&cp), fd_(fd), lk_(wb.service_lock_, std::defer_lock)
   {}
 
   Errno go();
 
 private:
-  WriteBuffer *wb_;
+  // The Service keeps the WriteBuffer alive, because the detached
+  // worker() coroutine can outlive every other reference to it: when a
+  // shutting-down CoroPoll resets the file descriptor, it drops the
+  // BufHolder's reference while the worker is still suspended.
+  //
+  // Declaration order matters here.  Members are destroyed in reverse
+  // order, so wb_ outlives lk_, and lk_ therefore unlocks
+  // wb_->service_lock_ while the WriteBuffer it lives in is still
+  // allocated.  Holding the reference anywhere that dies first -- such
+  // as a local in worker(), whose body locals are destroyed before the
+  // coroutine frame holding its Service parameter -- unlocks freed
+  // memory instead.
+  RefPtr<WriteBuffer> wb_;
   CoroPoll *cp_;
   BorrowedFd fd_;
   std::unique_lock<TestLock> lk_;

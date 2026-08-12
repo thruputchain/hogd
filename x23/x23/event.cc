@@ -66,7 +66,7 @@ WriteBuffer::Service::go()
 Detached
 WriteBuffer::Service::worker(Service self, BufVec work)
 {
-  RefPtr<WriteBuffer> wbref(*self.wb_);
+  // self keeps *self.wb_ alive; see the comment on Service::wb_.
   for (;;) {
     while (!work.empty()) {
       if (self.tok_ && co_await self.cp_->write_wait(self.tok_))

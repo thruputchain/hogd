@@ -45,6 +45,9 @@ set_tests_properties(poll_zombie PROPERTIES TIMEOUT 10)
 add_x23_test(poll_writer_zombie)
 set_tests_properties(poll_writer_zombie PROPERTIES TIMEOUT 10)
 
+add_x23_test(writebuf_unlock_uaf)
+set_tests_properties(writebuf_unlock_uaf PROPERTIES TIMEOUT 30)
+
 add_x23_test(abort_zombie)
 set_tests_properties(abort_zombie PROPERTIES TIMEOUT 10)
 
