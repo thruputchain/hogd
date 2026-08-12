@@ -54,6 +54,9 @@ set_tests_properties(abort_live PROPERTIES TIMEOUT 10)
 add_x23_test(writebuf_fd_poison)
 set_tests_properties(writebuf_fd_poison PROPERTIES TIMEOUT 15)
 
+add_x23_test(poll_writer_uaf)
+set_tests_properties(poll_writer_uaf PROPERTIES TIMEOUT 15)
+
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
 list(APPEND TEST_EXECUTABLES test_canary)
