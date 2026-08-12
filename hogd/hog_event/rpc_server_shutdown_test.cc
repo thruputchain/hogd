@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <semaphore>
@@ -12,6 +13,7 @@
 #include "hogd/base/rpc_server.h"
 #include "indexer.hh"
 #include "x23/async.h"
+#include "x23/event.h"
 #include "x23/rpc.h"
 
 namespace hogd {
@@ -67,8 +69,6 @@ static_assert(is_EventIndexer1<SuspendedIndexerIntroRpc *, x23::MaybeAsync>);
 // deterministic and does not depend on network timeout behavior.
 TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
 {
-  using namespace std::chrono_literals;
-
   auto state = std::make_shared<SuspendedIndexerIntroState>();
   x23::CoroPoll &cp = default_coropoll();
   auto server = std::make_unique<RpcServer<SuspendedIndexerIntroRpc>>(cp, state);
@@ -82,7 +82,7 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
   const IndexerCard card{.protocol = "test", .address_for_event = "test"};
   auto pending_call = client.event_indexer_intro(card);
 
-  ASSERT_TRUE(state->invoked.try_acquire_for(5s));
+  ASSERT_TRUE(state->invoked.try_acquire_for(std::chrono::seconds(5)));
 
   std::binary_semaphore shutdown_done{0};
   std::thread shutdown_thread([&] {
@@ -93,7 +93,7 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
   // Record the current drain semantics. Whether waiting here is desirable is a
   // shutdown-policy question by itself; the stronger correctness question is
   // whether a disconnected/aborted RPC can become unable to make progress.
-  const bool completed = shutdown_done.try_acquire_for(1s);
+  const bool completed = shutdown_done.try_acquire_for(std::chrono::seconds(1));
   EXPECT_TRUE(completed)
       << "RpcServer destruction waits for the suspended RPC handler";
 
@@ -108,11 +108,7 @@ TEST(RpcServerShutdown, SuspendedIndexerIntroPinsServerDestruction)
   // The server-side stream is gone, so fail the client explicitly to drain the
   // outstanding call before its coroutine frame is destroyed at test teardown.
   client_stream->fail();
-  try {
-    (void)pending_call();
-  } catch (const std::exception &) {
-    // Expected once shutdown has failed the connection.
-  }
+  EXPECT_THROW((void)pending_call(), std::exception);
 }
 
 } // namespace
