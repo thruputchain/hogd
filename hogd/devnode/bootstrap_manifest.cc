@@ -36,7 +36,7 @@ namespace {
 
 constexpr std::size_t kMaxBootstrapManifestBytes = 64 * 1024;
 constexpr std::string_view kBootstrapManifestKind = "groundhog-bootstrap";
-// v1 supports only the hog-devnode-default contract profile and the
+// v2 supports only the hog-devnode-default contract profile and the
 // hogd-default cost-model profile. When benchmark profiles arrive (spec: Phase
 // 5), this equality check generalizes into a lookup, and the per-profile rule
 // that benchmark profiles must pin `protocol` becomes mandatory.
@@ -293,11 +293,14 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   if (!schema_version) {
     return std::unexpected(std::move(schema_version.error()));
   }
-  // Additive optional fields do not bump schemaVersion, so exact-match is
-  // correct under the additive-only contract.
-  if (*schema_version != 1) {
+  if (*schema_version != 2) {
+    if (*schema_version == 1) {
+      return std::unexpected(
+          "bootstrap manifest schemaVersion 1 uses the legacy account layout; "
+          "upgrade groundhog node to generate schemaVersion 2");
+    }
     return std::unexpected(std::format(
-        "unsupported bootstrap manifest schemaVersion {}, expected 1",
+        "unsupported bootstrap manifest schemaVersion {}, expected 2",
         *schema_version));
   }
 
@@ -377,6 +380,40 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     return std::unexpected(std::move(valid.error()));
   }
 
+  std::expected<const json::Value *, std::string> faucet =
+      require_object_field(*parsed, "bootstrapFaucet", "root");
+  if (!faucet) {
+    return std::unexpected(std::move(faucet.error()));
+  }
+  std::expected<std::int64_t, std::string> faucet_index =
+      require_integer_field(**faucet, "index", "bootstrapFaucet");
+  if (!faucet_index) {
+    return std::unexpected(std::move(faucet_index.error()));
+  }
+  if (*faucet_index != 0) {
+    return std::unexpected(std::format(
+        "bootstrap manifest bootstrapFaucet.index must be 0, got {}",
+        *faucet_index));
+  }
+  std::expected<std::string_view, std::string> faucet_tokens_field =
+      require_string_field(**faucet, "initialStorageTokens", "bootstrapFaucet");
+  if (!faucet_tokens_field) {
+    return std::unexpected(std::move(faucet_tokens_field.error()));
+  }
+  const std::optional<std::uint64_t> faucet_tokens =
+      try_parse_u64(*faucet_tokens_field);
+  if (!faucet_tokens) {
+    return std::unexpected(std::format(
+        "Invalid bootstrap manifest bootstrapFaucet.initialStorageTokens: {}",
+        *faucet_tokens_field));
+  }
+  if (*faucet_tokens != kLocalFaucetStorageTokens) {
+    return std::unexpected(std::format(
+        "bootstrap manifest bootstrapFaucet.initialStorageTokens must be {}, "
+        "got {}",
+        kLocalFaucetStorageTokens, *faucet_tokens));
+  }
+
   std::expected<const json::Value *, std::string> accounts =
       require_object_field(*parsed, "bootstrapAccounts", "root");
   if (!accounts) {
@@ -392,6 +429,16 @@ load_bootstrap_manifest(std::filesystem::path const &path)
         std::format("bootstrap manifest bootstrapAccounts.count {} exceeds "
                     "maximum {}",
                     *count, kMaxBootstrapAccounts));
+  }
+  std::expected<std::int64_t, std::string> first_index =
+      require_integer_field(**accounts, "firstIndex", "bootstrapAccounts");
+  if (!first_index) {
+    return std::unexpected(std::move(first_index.error()));
+  }
+  if (*first_index != 1) {
+    return std::unexpected(std::format(
+        "bootstrap manifest bootstrapAccounts.firstIndex must be 1, got {}",
+        *first_index));
   }
   std::expected<std::string_view, std::string> seed_field =
       require_string_field(**accounts, "seed", "bootstrapAccounts");
@@ -409,17 +456,17 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   if (!initial_storage_tokens) {
     return std::unexpected(std::move(initial_storage_tokens.error()));
   }
-  const std::optional<std::uint64_t> storage_tokens =
+  const std::optional<std::uint64_t> user_storage_tokens =
       try_parse_u64(*initial_storage_tokens);
-  if (!storage_tokens) {
+  if (!user_storage_tokens) {
     return std::unexpected(
         std::format("Invalid bootstrap manifest initialStorageTokens: {}",
                     *initial_storage_tokens));
   }
-  BootstrapAccountConfig config{
-      .count = static_cast<std::uint32_t>(*count),
+  LocalBootstrapConfig config{
+      .user_account_count = static_cast<std::uint32_t>(*count),
       .seed = std::move(seed),
-      .storage_tokens = *storage_tokens,
+      .user_storage_tokens = *user_storage_tokens,
       .dev_wallet_profile = std::string(dev_wallet_profile->name),
   };
   return BootstrapManifestConfig{
