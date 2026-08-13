@@ -2216,18 +2216,20 @@ protected:
   //    flag is inert: the rollback observed is frame-failure rollback, and
   //    removing InvokeFlag::TryInvoke does not change the outcome.
   //
-  //  - Child 31 succeeds. That is the case TryInvoke actually governs: the
-  //    lock probe for its writes runs, conflicts with the concurrent insert,
-  //    and rewrites the frame result, so the child comes back Fault. Method 32
-  //    drives it, and TryInvokeDeleteConflictsWithConcurrentInsert is the one
-  //    test in this file that fails if the flag is removed.
+  //  - Children that succeed in-frame are the case TryInvoke actually
+  //    governs: the lock probe for their writes runs and either commits them
+  //    into the caller or rewrites the frame result to Fault. Child 31
+  //    (driven by method 32), children 0 and 1 (driven by method 70), and
+  //    child 0 at kContractAddress3 (driven by method 68) are all of this
+  //    kind; the tests built on them fail if the flag is removed.
   //
   // The methods that drive a TryInvoke'd child frame do no storage work
   // themselves -- every RCQ operation happens in a frame they invoke at
-  // kContractAddress. Running the orchestrating frame at a second address
-  // keeps all of those operations on kContractAddress's queue, including the
-  // one inside the frame that gets reverted, while never putting the same
-  // address on the invocation stack twice.
+  // kContractAddress (method 68's TryInvoke'd insert is the one exception:
+  // it targets kContractAddress3 so the reverting frame in between is not
+  // reentrant). Running the orchestrating frame at a second address keeps
+  // those operations off the orchestrator's queue while never putting the
+  // same address on the invocation stack twice.
   //
   // The children must stay real invokes for this: they are what the TryInvoke
   // reverts, and they have to execute at kContractAddress so they act on that
@@ -2293,6 +2295,23 @@ protected:
     ASSERT_NE(res, ExecResult::ExecResultOK);
   }
 
+  // Transaction builder for tests that drive SystemCallHandler directly
+  // (the ProposalValidation tests) instead of going through
+  // invoke_method_impl. Several older tests still carry a local lambda with
+  // this exact shape; new tests should use this member.
+  template<x23::is_xdr_type... Args>
+  Transaction make_tx(ContractAddress const &addr, Runtime::MethodID method,
+                      Args const &...args)
+  {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
+  }
+
   void insert(uint32_t value) { invoke_method(0, value); }
 
   void set_bytestring(Bytestring const &bytestring)
@@ -2328,14 +2347,18 @@ protected:
     // The orchestrated tests depend on kContractAddress2 doing no storage work
     // of its own: a stray in-frame RCQ call in one of those methods would act
     // on the orchestrator's queue, and every assertion here inspects
-    // kContractAddress's. Checked from here rather than from
+    // kContractAddress's. kContractAddress3 gets the same guard: the only
+    // method that writes there (68) always reverts, so a committed queue at
+    // that address is likewise a stray. Checked from here rather than from
     // invoke_method_orchestrated because DB reads only see the write after
     // advance_block(), which callers do before reaching this.
-    if (lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2))
-            .has_value()) {
-      return testing::AssertionFailure()
-             << "orchestrator address has a queue: a method meant to only "
-                "invoke did RCQ work in its own frame";
+    for (auto const &aux_addr : {kContractAddress2, kContractAddress3}) {
+      if (lookup_storage_item_from_db(get_queue_addrkey_for(aux_addr))
+              .has_value()) {
+        return testing::AssertionFailure()
+               << "auxiliary address has a queue: a method meant to only "
+                  "invoke (or revert) did RCQ work that reached the DB";
+      }
     }
 
     auto queue = lookup_storage_item_from_db(get_queue_addrkey());
@@ -2955,10 +2978,6 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-// A successful delete inside a try_invoke frame should fail to acquire locks
-// when a concurrent transaction has inserted into the same queue.
-// The delete is reverted due to conflict, and the entry remains consumable.
-
 // A TryInvoke that succeeds still has its writes discarded if the frame that
 // made it later reverts. The child ran at a third address, so nothing here is
 // reentrant: orchestrator -> kContractAddress (reverts) -> kContractAddress3
@@ -2976,6 +2995,10 @@ TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
           .has_value())
       << "a reverted frame kept the writes of a successful nested TryInvoke";
 }
+
+// A successful delete inside a try_invoke frame should fail to acquire locks
+// when a concurrent transaction has inserted into the same queue.
+// The delete is reverted due to conflict, and the entry remains consumable.
 TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
   insert(42); // concurrent insert creates conflicting lock
@@ -3002,19 +3025,18 @@ TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
 }
 
 // A consume of a past-block entry inside a successful TryInvoke commits: the
-// entry is gone from the queue after the block.
+// entry is gone from the queue after the block. This is the flow that pushes
+// the item's consume delta twice -- once at the TryInvoke probe and again,
+// cumulatively, at root commit.
 //
-// Skipped on MockDB: a successful TryInvoke pushes the child's consume delta
-// at the probe and the root commit re-pushes the item's cumulative delta.
-// RCQ deltas carry absolute consume state, so the re-push is idempotent on
-// HogDb, but MockDB's per-key consumer lock has no transaction identity and
-// rejects the second push as a competing consumer (see
+// Skipped on MockDB: the re-push is idempotent on HogDb, but MockDB rejects
+// this transaction's second consume push as a competing consumer (see
 // mockdb/KNOWN_ISSUES.md).
 TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
 {
   if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB's RCQ consume lock is not reentrant across "
-                    "subtransaction depths (see mockdb/KNOWN_ISSUES.md)";
+    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
+                    "mockdb/KNOWN_ISSUES.md)";
   }
 
   insert(42);
@@ -3035,8 +3057,8 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
 TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
 {
   if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB's RCQ consume lock is not reentrant across "
-                    "subtransaction depths (see mockdb/KNOWN_ISSUES.md)";
+    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
+                    "mockdb/KNOWN_ISSUES.md)";
   }
 
   insert(42); // concurrent
@@ -4057,17 +4079,6 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
 // without probing any locks itself.
 TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 {
-  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
-                        auto const &...args) -> Transaction {
-    return Transaction{.invocation =
-                           Invocation{.invoked_address = addr,
-                                      .entrypoint =
-                                          entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = x23::serialize(args...)},
-                       .uniquifier = make_new_uniquifier()};
-  };
-
   // Concurrent insert whose lock the TryInvoke'd delete conflicts with.
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
   // Method 32: TryInvoke delete (expects the conflict) -> consume(42).
@@ -4114,25 +4125,13 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 // (note_validation_try_invoke_success) instead of pushing a subtransaction.
 //
 // Skipped on MockDB for the same reason as TryInvokeConsumeCommits: the
-// proposal-phase commit re-pushes the consume delta the probe already pushed,
-// which MockDB's consumer lock rejects (see mockdb/KNOWN_ISSUES.md).
+// proposal-phase commit re-pushes the consume delta the probe already pushed.
 TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
 {
   if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB's RCQ consume lock is not reentrant across "
-                    "subtransaction depths (see mockdb/KNOWN_ISSUES.md)";
+    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
+                    "mockdb/KNOWN_ISSUES.md)";
   }
-
-  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
-                        auto const &...args) -> Transaction {
-    return Transaction{.invocation =
-                           Invocation{.invoked_address = addr,
-                                      .entrypoint =
-                                          entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = x23::serialize(args...)},
-                       .uniquifier = make_new_uniquifier()};
-  };
 
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
   // Method 70: TryInvoke consume(42), expecting the frame to commit (Return).
