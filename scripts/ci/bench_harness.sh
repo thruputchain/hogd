@@ -260,24 +260,28 @@ ci_remote_run() {
 # Takes the captured start output and the names of two variables to assign the
 # stdout and stderr paths to; fails without assigning when the output does not
 # carry both, which means there is nothing left to collect from that process.
-# The variables are passed by name, so a caller must not name them
-# [ci_stdout_out] or [ci_stderr_out].
+#
+# The output variables are passed by name, and bash scopes locals dynamically:
+# a local here with the same name as one of them shadows the caller's variable,
+# so the nameref would assign to this frame and leave the caller's unset. Every
+# local below is therefore prefixed, and a caller must not pass a name starting
+# with [ci_clp_].
 ci_control_log_paths() {
-  local output=$1
-  local -n ci_stdout_out=$2
-  local -n ci_stderr_out=$3
-  local stdout_path stderr_path
+  local ci_clp_output=$1
+  local -n ci_clp_out_stdout=$2
+  local -n ci_clp_out_stderr=$3
+  local ci_clp_stdout ci_clp_stderr
 
-  stdout_path=$(printf '%s\n' "$output" |
+  ci_clp_stdout=$(printf '%s\n' "$ci_clp_output" |
     sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
-  stderr_path=$(printf '%s\n' "$output" |
+  ci_clp_stderr=$(printf '%s\n' "$ci_clp_output" |
     sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
-  if [ -z "$stdout_path" ] || [ -z "$stderr_path" ]; then
+  if [ -z "$ci_clp_stdout" ] || [ -z "$ci_clp_stderr" ]; then
     return 1
   fi
 
-  ci_stdout_out=$stdout_path
-  ci_stderr_out=$stderr_path
+  ci_clp_out_stdout=$ci_clp_stdout
+  ci_clp_out_stderr=$ci_clp_stderr
 }
 
 ci_control_stop_hosts() {

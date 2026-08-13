@@ -107,6 +107,21 @@ else
   echo "ok   a lone stdout path fails"
 fi
 
+# The real callers pass locals named [stdout_path] and [stderr_path] from inside
+# a function. Bash scopes locals dynamically, so any local in the helper by
+# those names would shadow them and the paths would be assigned to the wrong
+# frame -- leaving the caller's variables unset, and aborting it under [set -u]
+# on the very next line. Call it the way they do.
+shadowing_caller() {
+  local stdout_path
+  local stderr_path
+  ci_control_log_paths "$start_output" stdout_path stderr_path
+  printf '%s %s\n' "$stdout_path" "$stderr_path"
+}
+check_eq "assigns through caller-named locals" \
+  "/tmp/hogd_stdout_603992681528260_2983852_BSgpmb /tmp/hogd_stderr_603992681528260_2983852_R4SDV2" \
+  "$(set -u; shadowing_caller)"
+
 ## ci_report_failed_bench_steps
 
 CI_FAILED_BENCH_STEPS=()
