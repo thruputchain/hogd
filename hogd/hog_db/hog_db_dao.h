@@ -401,20 +401,28 @@ make_replay_cache_data_key(const Address &addr, BlockHeight height)
   return ret;
 }
 
+constexpr size_t kRetrocausalQueueBlockKeySize =
+    kContractDataItemKeySize + sizeof(uint64_t);
+
+// Retrocausal queues are always keyed by a contract-data ItemKey: the same
+// ItemKey is routed through make_contract_data_key() to build the metadata
+// key, which asserts the same invariant. That fixes this key's size, so it
+// can live in the caller's frame rather than in a heap temporary.
 constexpr auto
 make_retrocausal_queue_block_key(const ItemKey &key, uint64_t block_number)
 {
+  assert(key.is_contract_data());
   std::span<const std::byte> key_bytes = key.as_bytes();
+  assert(key_bytes.size() == kContractDataItemKeySize - 1);
 
-  std::vector<std::byte> ret;
-  ret.reserve(1 + key_bytes.size() + sizeof(uint64_t));
+  std::array<std::byte, kRetrocausalQueueBlockKeySize> ret;
+  ret[0] = static_cast<std::byte>(Prefix::kRetrocausalQueueBlock);
 
-  ret.push_back(static_cast<std::byte>(Prefix::kRetrocausalQueueBlock));
-
-  std::ranges::copy(key_bytes, std::back_inserter(ret));
+  std::ranges::copy(key_bytes, std::begin(ret) + 1);
 
   auto n = cpu_to_le(block_number);
-  std::ranges::copy(std::as_bytes(std::span(&n, 1)), std::back_inserter(ret));
+  std::ranges::copy(std::as_bytes(std::span(&n, 1)),
+                    std::begin(ret) + 1 + key_bytes.size());
 
   return ret;
 }
