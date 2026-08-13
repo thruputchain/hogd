@@ -1453,38 +1453,15 @@ protected:
         42,
         [](NativeSyscallContext &ctx, uint32_t consume_val,
            uint32_t insert_val) -> InvokeStatus<void> {
-          auto r1 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(consume_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to consume in consume_insert_and_fail";
+          // Runs as the TryInvoke'd child, so its own operations are in-frame:
+          // invoking this contract again from here would be reentrant even
+          // with an orchestrator driving the outer frame.
+          if (!rcq_consume_expect(ctx, consume_val)) {
+            ADD_FAILURE() << "Failed to consume " << consume_val
+                          << " in consume_insert_and_fail";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-
-          auto r2 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(insert_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r2.has_value() ||
-              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_insert(ctx, insert_val)) {
             ADD_FAILURE() << "Failed to insert in consume_insert_and_fail";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -2096,30 +2073,37 @@ protected:
   template<x23::is_xdr_type... Args>
   void invoke_method(Runtime::MethodID method, Args const &...args)
   {
-    invoke_method_impl(false, method, args...);
+    invoke_method_impl(kContractAddress, method, args...);
   }
 
-  // Same, for the methods that still reach one of this contract's own
-  // entrypoints via kInvoke -- the reentrance guard rejects that, so these
-  // call sites need the bypass until they are restructured.
-  // TODO(geoff): remove along with the rest of #1382.
+  // Runs `method` at kContractAddress2 instead, as an orchestrator.
+  //
+  // The methods that drive a TryInvoke'd child frame do no storage work
+  // themselves -- every RCQ operation happens in a frame they invoke at
+  // kContractAddress. Running the orchestrating frame at a second address
+  // keeps all of those operations on kContractAddress's queue, including the
+  // one inside the frame that gets reverted, while never putting the same
+  // address on the invocation stack twice.
+  //
+  // The children must stay real invokes for this: they are what the TryInvoke
+  // reverts, and they have to execute at kContractAddress so they act on that
+  // queue rather than the orchestrator's.
   template<x23::is_xdr_type... Args>
-  void invoke_method_allow_reentrance(Runtime::MethodID method,
-                                      Args const &...args)
+  void invoke_method_orchestrated(Runtime::MethodID method, Args const &...args)
   {
-    invoke_method_impl(true, method, args...);
+    invoke_method_impl(kContractAddress2, method, args...);
   }
 
   template<x23::is_xdr_type... Args>
-  void invoke_method_impl(bool allow_reentrance, Runtime::MethodID method,
-                          Args const &...args)
+  void invoke_method_impl(ContractAddress const &root_address,
+                          Runtime::MethodID method, Args const &...args)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = kContractAddress,
+                        Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
                                    .gas_limit = UINT64_MAX,
@@ -2127,10 +2111,6 @@ protected:
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
-
-    if (allow_reentrance) {
-      handler.hack_dont_use_test_bypass_allow_reentrance();
-    }
 
     auto r = handler.root_invoke();
     ASSERT_TRUE(r.is_root_success());
@@ -2141,20 +2121,19 @@ protected:
   template<x23::is_xdr_type... Args>
   void invoke_method_fail_commit(Runtime::MethodID method, Args const &...args)
   {
-    invoke_method_fail_commit_impl(false, method, args...);
+    invoke_method_fail_commit_impl(kContractAddress, method, args...);
   }
 
-  // See invoke_method_allow_reentrance.
-  // TODO(geoff): remove along with the rest of #1382.
+  // See invoke_method_orchestrated.
   template<x23::is_xdr_type... Args>
-  void invoke_method_fail_commit_allow_reentrance(Runtime::MethodID method,
-                                                  Args const &...args)
+  void invoke_method_fail_commit_orchestrated(Runtime::MethodID method,
+                                              Args const &...args)
   {
-    invoke_method_fail_commit_impl(true, method, args...);
+    invoke_method_fail_commit_impl(kContractAddress2, method, args...);
   }
 
   template<x23::is_xdr_type... Args>
-  void invoke_method_fail_commit_impl(bool allow_reentrance,
+  void invoke_method_fail_commit_impl(ContractAddress const &root_address,
                                       Runtime::MethodID method,
                                       Args const &...args)
   {
@@ -2163,7 +2142,7 @@ protected:
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = kContractAddress,
+                        Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
                                    .gas_limit = UINT64_MAX,
@@ -2171,10 +2150,6 @@ protected:
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
-
-    if (allow_reentrance) {
-      handler.hack_dont_use_test_bypass_allow_reentrance();
-    }
 
     auto r = handler.root_invoke();
     ASSERT_TRUE(r.is_root_success());
@@ -2797,7 +2772,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
 {
   insert(42);
-  invoke_method_allow_reentrance(26, uint32_t{42});
+  invoke_method_orchestrated(26, uint32_t{42});
 
   advance_block();
 
@@ -2812,7 +2787,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 
   advance_block();
 
-  invoke_method_allow_reentrance(26, uint32_t{42});
+  invoke_method_orchestrated(26, uint32_t{42});
 
   advance_block();
 
@@ -2824,7 +2799,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 {
   insert(99); // concurrent
-  invoke_method_allow_reentrance(29, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(29, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2837,7 +2812,7 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
   insert(42); // concurrent insert creates conflicting lock
-  invoke_method_allow_reentrance(32, uint32_t{42});
+  invoke_method_orchestrated(32, uint32_t{42});
 
   advance_block();
 
@@ -2903,7 +2878,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 // queue should remain empty.
 TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 {
-  invoke_method_allow_reentrance(36, uint32_t{42});
+  invoke_method_orchestrated(36, uint32_t{42});
 
   advance_block();
 
@@ -2917,7 +2892,7 @@ TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 // normally. Only the successful entry is consumable.
 TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 {
-  invoke_method_allow_reentrance(37, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(37, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2929,7 +2904,7 @@ TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 {
   insert(99); // concurrent
-  invoke_method_allow_reentrance(43, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(43, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2943,7 +2918,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 
   advance_block();
 
-  invoke_method_allow_reentrance(43, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(43, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2955,7 +2930,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(38, uint32_t{42});
+  invoke_method_orchestrated(38, uint32_t{42});
 
   advance_block();
 
@@ -2969,7 +2944,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 
   advance_block();
 
-  invoke_method_allow_reentrance(38, uint32_t{42});
+  invoke_method_orchestrated(38, uint32_t{42});
 
   advance_block();
 
@@ -2980,7 +2955,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(39, uint32_t{42});
+  invoke_method_orchestrated(39, uint32_t{42});
 
   advance_block();
 
@@ -2995,7 +2970,7 @@ TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(40, uint32_t{42});
+  invoke_method_orchestrated(40, uint32_t{42});
 
   advance_block();
 
@@ -3007,7 +2982,7 @@ TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(41, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(41, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -3315,9 +3290,6 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   }
   {
     auto handler = make_new_system_call_handler(tx_delete_recreate, *context_);
-    // Method 28 reaches this contract's own entrypoints via kInvoke.
-    // TODO(geoff): remove along with the rest of #1382.
-    handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     delete_recreate_proposal_data = handler.get_proposal_data();
     ASSERT_EQ(delete_recreate_proposal_data.nondeterministic_bit_count, 1U);
@@ -3339,8 +3311,6 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
     auto handler =
         make_new_system_call_handler_validation(tx_delete_recreate, *context_,
                                                 delete_recreate_proposal_data);
-    // TODO(geoff): remove along with the rest of #1382.
-    handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
