@@ -277,7 +277,6 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
