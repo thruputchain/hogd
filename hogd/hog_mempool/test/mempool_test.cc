@@ -880,6 +880,51 @@ TEST(Mempool, Validate)
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
+// A misbehaving (or hostile) executor can reply to a validation request with
+// more results than there were transactions. This used to trip a fatal
+// CHECK_EQ and terminate the mempool; it must now fail validation gracefully.
+TEST(Mempool, ValidateOversizedExecutorReplyFailsGracefully)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+
+  // Force the executor reply to carry one more result than was requested.
+  server.mempool_coord_rpc().set_validate_batch_result_test_hook(
+      [](ExecValidateBatchResult &res) {
+        res = ExecValidateBatchResult(res.size() + 1, ExecResult::ExecResultOK);
+      });
+
+  SchedulerValidationResult res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  server.mempool_coord_rpc().set_validate_batch_result_test_hook({});
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+}
+
 TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
 {
   MempoolTestInfra server;

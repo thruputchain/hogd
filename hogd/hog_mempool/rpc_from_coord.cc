@@ -1470,7 +1470,19 @@ MempoolCoordinatorRpc::validate_batch_chunk(
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
-  CHECK_EQ(res.size(), txs.size());
+  if (validate_batch_result_test_hook_) {
+    validate_batch_result_test_hook_(res);
+  }
+  // The reply comes from a separate executor process. A cardinality mismatch
+  // means the executor misbehaved (or a hostile peer registered as an
+  // executor); treat it as a nondeterministic validation failure rather than
+  // terminating the mempool on a fatal invariant.
+  if (res.size() != txs.size()) {
+    error("executor {} returned {} validation results for {} transactions; "
+          "failing validation",
+          executor_idx, res.size(), txs.size());
+    co_return false;
+  }
   CHECK(!std::ranges::contains(res, ExecResult::ExecResultUnrecoverable));
   // Validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
