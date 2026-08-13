@@ -407,12 +407,6 @@ public:
     return x23::Defer([]() { debug_force_commit_abort_ = false; });
   }
 
-  // TODO(geoff): remove this once tests are updated to not use reentrance
-  void hack_dont_use_test_bypass_allow_reentrance()
-  {
-    hack_DONTUSE_TEST_BYPASS_allow_reentrance_ = true;
-  }
-
 private:
   RuntimeContext &runtime_context_;
   PerTransactionDatabaseProxy db_proxy_;
@@ -462,8 +456,6 @@ private:
   StorageSnapshotCache &snapshot_cache_;
 
   inline static bool debug_force_commit_abort_{false};
-
-  bool hack_DONTUSE_TEST_BYPASS_allow_reentrance_{false};
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.

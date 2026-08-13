@@ -2032,9 +2032,23 @@ protected:
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          // Delete in this (driver) frame.
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          // Delete in a child frame (entrypoint 31, which only deletes). The
+          // deletion delta propagates up into this frame when that child
+          // returns, so it is pending here when the insert child below
+          // returns -- which is the collision this test covers. Doing the
+          // delete in this frame directly would work too, but would force
+          // this frame to be kContractAddress and so make the insert child
+          // reentrant.
+          CopyableInvokeInputs delete_in{
+              .entrypoint_id = 31,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto r2 =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, delete_in,
+                                              CopyableInvokeOutputs{});
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -3845,8 +3859,11 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
       SignedTransaction{
           .tx =
               Transaction{
+                  // Orchestrated from the second address: method 67 only
+                  // invokes, so every RCQ operation still happens in a frame
+                  // at kContractAddress and acts on that queue.
                   .invocation =
-                      Invocation{.invoked_address = kContractAddress,
+                      Invocation{.invoked_address = kContractAddress2,
                                  .entrypoint = entrypoint_from_method_id(67),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = x23::serialize(uint32_t{77},
@@ -3854,13 +3871,6 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
                   .uniquifier = make_new_uniquifier(),
               }},
       *context_);
-  // Method 67 reaches this contract's own entrypoints via kInvoke. Without the
-  // bypass its first self-invoke is rejected, method 67 returns a deterministic
-  // error, and the "not Unrecoverable" assertion below is satisfied by that
-  // rejection -- so the test would pass without ever pushing the RCQ delta it
-  // exists to cover.
-  // TODO(geoff): remove along with the rest of #1382.
-  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   // The forbidden RCQ delta is pushed when the final child (insert) frame
   // returns -- i.e. during root_invoke, before commit -- so a
