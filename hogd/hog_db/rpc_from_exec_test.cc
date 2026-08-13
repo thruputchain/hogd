@@ -64,6 +64,25 @@ make_bytes_delta(AddressAndKey addrkey, std::uint8_t byte)
                                  std::to_underlying(StorageDeltaFlags::None)};
 }
 
+AddressAndKey
+make_balance_key(ContractAddress const &addr)
+{
+  return AddressAndKey{.address = addr,
+                       .key =
+                           StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+}
+
+FlaggedStorageDelta
+make_balance_delta(ContractAddress const &addr, int128_t amount)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  delta.nnint_add() = to_xdr(amount);
+  return FlaggedStorageDelta{.addrkey = make_balance_key(addr),
+                             .delta = std::move(delta),
+                             .flags =
+                                 std::to_underlying(StorageDeltaFlags::None)};
+}
+
 // Requests to consume [uniquifier] for [addr]. The request itself succeeds
 // (a fresh replay-cache entry); it's the balance lock it charges storage
 // cost against that can later fail at sync_balance_locks.
@@ -236,6 +255,68 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
   auto r2 =
       rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{4}, retry);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
+}
+
+// A failed push must leave the root InvokeTX holding nothing for the keys
+// only the failed child touched. Retained empty entries are invisible to
+// commit/abort/sync, but rollback skips empty vectors, so they would survive
+// every later rollback -- letting a contract that repeats a failing TryInvoke
+// against fresh addresses grow the live transaction's maps (#3090).
+TEST_F(RpcFromExecDiagnosticsTest, FailedBalancePushRetainsNoEntries)
+{
+  // Under the cost model's balance cost, so crediting a fresh receiver never
+  // pays for its own balance row: its lock is rejected on first admission in
+  // update_balance_lock(), before any entry can be published.
+  constexpr int128_t kTransferAmount = 100;
+  ASSERT_LT(kTransferAmount,
+            StorageCostModel::default_cost_model().get_balance_cost());
+
+  constexpr int kAttempts = 8;
+  for (int i = 0; i < kAttempts; ++i) {
+    ContractAddress receiver{};
+    for (std::size_t j = 0; j < receiver.size(); ++j)
+      receiver[j] = static_cast<std::uint8_t>(0xB0 + j);
+    receiver[0] = static_cast<std::uint8_t>(i);
+
+    // addr_ is funded, so the debit locks successfully and is then rolled
+    // back; the fresh receiver's credit is what fails.
+    StorageDeltaBatch batch;
+    batch.push_back(make_balance_delta(addr_, -kTransferAmount));
+    batch.push_back(make_balance_delta(receiver, kTransferAmount));
+
+    auto r =
+        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{9}, batch);
+    ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed) << i;
+
+    InvokeTX *itx = ctx_->get_invoke_tx(BlockID{1}, TransactionID{9});
+    ASSERT_NE(itx, nullptr);
+    EXPECT_EQ(itx->get_savepoint_head(), 0U) << i;
+    EXPECT_EQ(itx->change_entry_count_for_testing(), 0U) << i;
+    EXPECT_EQ(itx->balance_entry_count_for_testing(), 0U) << i;
+  }
+}
+
+// Same invariant for ordinary storage keys: the successful key_b write and
+// the storage cost it locked against addr_'s balance are both rolled back,
+// and neither leaves an entry behind.
+TEST_F(RpcFromExecDiagnosticsTest, FailedDataPushRetainsNoEntries)
+{
+  auto key_a = make_data_key(addr_, 1);
+  auto key_b = make_data_key(addr_, 2);
+  seed_conflict(BlockID{1}, TransactionID{1}, key_a);
+
+  StorageDeltaBatch batch;
+  batch.push_back(make_bytes_delta(key_b, 0xCC));
+  batch.push_back(make_bytes_delta(key_a, 0xBB));
+  auto r =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
+  ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
+
+  InvokeTX *itx = ctx_->get_invoke_tx(BlockID{1}, TransactionID{3});
+  ASSERT_NE(itx, nullptr);
+  EXPECT_EQ(itx->get_savepoint_head(), 0U);
+  EXPECT_EQ(itx->change_entry_count_for_testing(), 0U);
+  EXPECT_EQ(itx->balance_entry_count_for_testing(), 0U);
 }
 
 } // namespace
