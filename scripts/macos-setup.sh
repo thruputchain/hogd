@@ -239,10 +239,18 @@ export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
 # For cmake to find packages
 export CMAKE_PREFIX_PATH="/opt/homebrew/opt/llvm:/opt/homebrew/opt/openssl@3:/opt/homebrew/opt/zlib:/opt/homebrew/opt/bzip2:/opt/homebrew/opt/lz4:/opt/homebrew/opt/zstd:/opt/homebrew/opt/snappy:/opt/homebrew/opt/jemalloc"
 
+# Default build parallelism, derived from performance cores and RAM. Raw core
+# count oversubscribes Apple silicon (efficiency cores) and RAM (~0.9 GB per
+# translation unit); see scripts/build-jobs.sh for the measurements.
+if [ -f "$SCRIPT_DIR/build-jobs.sh" ]; then
+  . "$SCRIPT_DIR/build-jobs.sh"
+fi
+
 echo "hogd development environment activated"
 echo "  Python: $HOGD_PYTHON"
 echo "  Clang:  $(clang --version | head -1)"
 echo "  Rust:   $(rustc --version) (default)"
+echo "  Jobs:   ${HOGD_BUILD_JOBS:-unset} (override with HOGD_BUILD_JOBS or build.sh -j)"
 # Show the project toolchain version to verify rustup is working
 TOOLCHAIN_VERSION=$(grep 'channel' "$PROJECT_ROOT/hogd/rust/rust-toolchain.toml" 2>/dev/null | cut -d'"' -f2)
 if [ -n "$TOOLCHAIN_VERSION" ]; then
