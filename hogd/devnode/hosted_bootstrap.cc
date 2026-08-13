@@ -78,7 +78,7 @@ Options:
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
-                                 [default: 10000000000000]
+                                 [default: 1000000000]
   --faucet-public-key <hex>      Dedicated faucet Ed25519 public key
   --faucet-tokens <tokens>       Initial storage-token balance for the faucet
   --genesis-out <path>           Output JSON-XDR genesis configuration
