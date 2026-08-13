@@ -19,6 +19,7 @@
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
