@@ -44,7 +44,6 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
-#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_db/hog_db_dao.h"

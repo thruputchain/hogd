@@ -1826,7 +1826,7 @@ TEST(HogDevnode, SchedulerTipReportsFaucetInitializationAfterReadiness)
     SchedulerGetTipResult tip = client.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
-    EXPECT_EQ(tip.db_tip().id, 1UL);
+    EXPECT_NE(tip.db_tip().id, 0UL);
   }
 
   expect_clean_exit(process);

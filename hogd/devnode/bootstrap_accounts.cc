@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
+#include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
