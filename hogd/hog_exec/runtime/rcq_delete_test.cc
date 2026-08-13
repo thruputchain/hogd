@@ -4419,6 +4419,13 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
                   .uniquifier = make_new_uniquifier(),
               }},
       *context_);
+  // Method 67 reaches this contract's own entrypoints via kInvoke. Without the
+  // bypass its first self-invoke is rejected, method 67 returns a deterministic
+  // error, and the "not Unrecoverable" assertion below is satisfied by that
+  // rejection -- so the test would pass without ever pushing the RCQ delta it
+  // exists to cover.
+  // TODO(geoff): remove along with the rest of #1382.
+  handler.hack_dont_use_test_bypass_allow_reentrance();
 
   // The forbidden RCQ delta is pushed when the final child (insert) frame
   // returns -- i.e. during root_invoke, before commit -- so a
