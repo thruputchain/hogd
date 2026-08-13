@@ -1079,6 +1079,14 @@ protected:
             ADD_FAILURE() << "System error on try_invoke insert";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -1117,6 +1125,7 @@ protected:
         37,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t real_val) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
@@ -1126,11 +1135,18 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(revert_val),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1467,6 +1483,7 @@ protected:
         43,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t concurrent_val) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
@@ -1476,11 +1493,18 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(revert_val),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -2071,13 +2095,20 @@ protected:
 
   // Runs `method` at kContractAddress2 instead, as an orchestrator.
   //
-  // A note on what these tests do and do not cover: the children they
-  // TryInvoke all fail on purpose, and InvocationFrameStack::finish_frame only
-  // takes its TryInvoke path when the frame *succeeds* and was not manually
-  // reverted. So the rollback these tests observe comes from the frame
-  // failing, not from the TryInvoke flag -- removing the flag does not change
-  // their outcome. What TryInvoke itself does, probing locks for a successful
-  // child's writes, is covered by TryInvokeDeleteConflictsWithConcurrentInsert.
+  // A note on what these tests do and do not cover. There are two kinds of
+  // TryInvoke'd child here:
+  //
+  //  - Children 25, 34, 35 and 42 do their RCQ work and then fail on purpose.
+  //    InvocationFrameStack::finish_frame only takes its TryInvoke path when
+  //    the frame *succeeds* and was not manually reverted, so for these the
+  //    flag is inert: the rollback observed is frame-failure rollback, and
+  //    removing InvokeFlag::TryInvoke does not change the outcome.
+  //
+  //  - Child 31 succeeds. That is the case TryInvoke actually governs: the
+  //    lock probe for its writes runs, conflicts with the concurrent insert,
+  //    and rewrites the frame result, so the child comes back Fault. Method 32
+  //    drives it, and TryInvokeDeleteConflictsWithConcurrentInsert is the one
+  //    test in this file that fails if the flag is removed.
   //
   // The methods that drive a TryInvoke'd child frame do no storage work
   // themselves -- every RCQ operation happens in a frame they invoke at
@@ -2123,14 +2154,6 @@ protected:
   void invoke_method_fail_commit(Runtime::MethodID method, Args const &...args)
   {
     invoke_method_fail_commit_impl(kContractAddress, method, args...);
-  }
-
-  // See invoke_method_orchestrated.
-  template<x23::is_xdr_type... Args>
-  void invoke_method_fail_commit_orchestrated(Runtime::MethodID method,
-                                              Args const &...args)
-  {
-    invoke_method_fail_commit_impl(kContractAddress2, method, args...);
   }
 
   template<x23::is_xdr_type... Args>
@@ -2190,6 +2213,19 @@ protected:
 
   testing::AssertionResult check_rcq_empty()
   {
+    // The orchestrated tests depend on kContractAddress2 doing no storage work
+    // of its own: a stray in-frame RCQ call in one of those methods would act
+    // on the orchestrator's queue, and every assertion here inspects
+    // kContractAddress's. Checked from here rather than from
+    // invoke_method_orchestrated because DB reads only see the write after
+    // advance_block(), which callers do before reaching this.
+    if (lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2))
+            .has_value()) {
+      return testing::AssertionFailure()
+             << "orchestrator address has a queue: a method meant to only "
+                "invoke did RCQ work in its own frame";
+    }
+
     auto queue = lookup_storage_item_from_db(get_queue_addrkey());
     if (GetParam() == TestDB::kHogDb) {
       // On HogDb, metadata is removed when live_entries drops to 0.
