@@ -312,12 +312,16 @@ ci_killall_script() {
   # the table under its own name for as long as nothing asks after it: skipping
   # state Z keeps a host that is in fact clear from burning both deadlines.
   #
-  # [killall -q] and [sudo -n] both fail with status 1, so the status alone does
-  # not say whether nothing matched or the kill never ran -- and a [sudo -n] that
-  # cannot run at all used to be indistinguishable from a clear host. A silent
-  # failure is [killall] reporting no such process; a failure that said something
-  # came from sudo, and is worth retrying unprivileged, since the benchmark
-  # processes belong to the CI user anyway.
+  # [killall]'s exit status cannot say whether the host is clear: killall(1)
+  # returns zero only when at least one process was killed for *every* name it
+  # was given, and no host runs all of these. It reports failure while killing
+  # what it did find, so only the process table can be believed about what is
+  # left -- the kill signals and [ci_wait_gone] decides.
+  #
+  # That leaves the status good for one thing. [killall -q] is silent about names
+  # it did not find, so anything on stderr came from [sudo -n] failing to run at
+  # all, and that is worth retrying unprivileged: the benchmark processes belong
+  # to the CI user anyway.
   #
   # A host with no [pgrep] cannot be observed, only signalled, so there it falls
   # back to the idiom the schedule already uses for the control server: SIGTERM,
@@ -329,9 +333,9 @@ ci_killall_script() {
     'command -v "$ci_killall" >/dev/null 2>&1 ||' \
     '  { echo "$ci_killall not found (install psmisc)" >&2; exit 1; }' \
     'ci_kill() {' \
-    '  ci_out=$(sudo -n "$ci_killall" -q -s "$1" $ci_procs 2>&1) && return 0' \
-    '  [ -n "$ci_out" ] || return 1' \
-    '  "$ci_killall" -q -s "$1" $ci_procs 2>/dev/null' \
+    '  ci_out=$(sudo -n "$ci_killall" -q -s "$1" $ci_procs 2>&1)' \
+    '  [ -z "$ci_out" ] || "$ci_killall" -q -s "$1" $ci_procs 2>/dev/null' \
+    '  return 0' \
     '}' \
     'ci_survivors() {' \
     '  for ci_p in $ci_procs; do' \
@@ -350,14 +354,14 @@ ci_killall_script() {
     '    sleep 0.5' \
     '  done' \
     '}' \
-    'ci_kill TERM || exit 0' \
+    'ci_kill TERM' \
     'command -v pgrep >/dev/null 2>&1 || {' \
     '  sleep 3' \
     '  ci_kill KILL' \
     '  exit 0' \
     '}' \
     'ci_wait_gone && exit 0' \
-    'ci_kill KILL || exit 0' \
+    'ci_kill KILL' \
     'ci_wait_gone && exit 0' \
     'echo "still running after SIGKILL: $(ci_survivors | tr "\n" " ")" >&2' \
     'exit 1'

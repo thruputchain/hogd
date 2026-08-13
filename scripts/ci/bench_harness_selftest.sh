@@ -142,7 +142,11 @@ STUB
 
 cat >"$stub_dir/killall" <<'STUB'
 #!/usr/bin/env bash
-# Usage: killall -q -s <SIG> <name>... Exits 0 if it signalled something.
+# Usage: killall -q -s <SIG> <name>...
+#
+# Exits 0 only when at least one process was killed for EVERY name, which is
+# what killall(1) documents and what psmisc does -- it reports failure while
+# killing what it did find. Nothing may read this status as "the host is clear".
 signal=""
 names=()
 while (($#)); do
@@ -157,20 +161,22 @@ while (($#)); do
   shift
 done
 echo "$signal ${names[*]}" >>"$STUB_SIGNALS"
-matched=1
+status=0
 for name in "${names[@]}"; do
+  killed=1
   while read -r p pid state dies_on; do
     [[ "$p" == "$name" ]] || continue
-    matched=0
     # A process only leaves when the signal is one it dies on; a zombie is
     # already gone but still signallable, so it stays in the table.
     if [[ "$dies_on" == "$signal" || ("$dies_on" == TERM && "$signal" == KILL) ]]; then
+      killed=0
       grep -v "^$p $pid " "$STUB_PROCS" >"$STUB_PROCS.new" || true
       mv "$STUB_PROCS.new" "$STUB_PROCS"
     fi
   done <"$STUB_PROCS"
+  [[ "$killed" == 0 ]] || status=1
 done
-exit "$matched"
+exit "$status"
 STUB
 
 cat >"$stub_dir/sudo" <<'STUB'
@@ -225,8 +231,13 @@ check_eq "SIGTERM leaves the host clear" "" "$killall_survivors"
 # The failure this change exists for: a process that outlives SIGTERM still
 # holds its ports, so it has to be escalated rather than left for the next
 # suite to collide with.
+#
+# Note what the table does not have: hog-exec. Every real host runs a subset of
+# the names, so [killall] reports failure on the absent ones even as it signals
+# the one that is there -- reading that status as "clear" would skip the wait and
+# the escalation on precisely the host that still holds the ports.
 run_killall_script "hog-mempool 202 S KILL"
-check_eq "SIGTERM survivor is escalated" "0" "$killall_status"
+check_eq "SIGTERM survivor host succeeds" "0" "$killall_status"
 check_contains "escalation sends SIGKILL" "KILL hog-exec hog-mempool" \
   "$killall_signals"
 check_eq "escalation leaves the host clear" "" "$killall_survivors"
