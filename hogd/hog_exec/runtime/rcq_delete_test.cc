@@ -2130,6 +2130,41 @@ protected:
           return {};
         });
 
+    // Method 70: try_invoke_child(child_entrypoint, value, expect_fault).
+    // TryInvokes child_entrypoint(value) at kContractAddress and checks the
+    // frame outcome: Return means the lock probe committed the child's writes
+    // into this frame; Fault (expect_fault != 0) means the probe conflicted
+    // and rolled the child back.
+    builder.add<SerializationFormat::kTxs>(
+        70,
+        [](NativeSyscallContext &ctx, uint32_t child_entrypoint, uint32_t value,
+           uint32_t expect_fault) -> InvokeStatus<void> {
+          CopyableInvokeOutputs outs{};
+          CopyableInvokeInputs in{
+              .entrypoint_id = child_entrypoint,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(value),
+                                              std::span<uint32_t>{}, in, outs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "System error on try_invoke";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto expected = expect_fault != 0 ? InvocationFrameStatusCode::Fault
+                                            : InvocationFrameStatusCode::Return;
+          if (outs.frame_status != expected) {
+            ADD_FAILURE() << "try_invoke child entrypoint " << child_entrypoint
+                          << ": expected "
+                          << (expect_fault != 0 ? "Fault" : "Return");
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -2949,6 +2984,105 @@ TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
   advance_block();
 
   ASSERT_TRUE(check_rcq_empty());
+}
+
+// The TryInvoke happy path: an insert in a TryInvoke'd child with nothing to
+// conflict with passes the lock probe, commits into the caller, and the
+// transaction commits it for real. A second transaction in the same block
+// consumes the entry retrocausally, proving the insert landed in the DB
+// rather than only in the child frame.
+TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
+{
+  invoke_method_orchestrated(70, uint32_t{0}, uint32_t{42}, uint32_t{0});
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// A consume of a past-block entry inside a successful TryInvoke commits: the
+// entry is gone from the queue after the block.
+//
+// Skipped on MockDB: a successful TryInvoke pushes the child's consume delta
+// at the probe and the root commit re-pushes the item's cumulative delta.
+// RCQ deltas carry absolute consume state, so the re-push is idempotent on
+// HogDb, but MockDB's per-key consumer lock has no transaction identity and
+// rejects the second push as a competing consumer (see
+// mockdb/KNOWN_ISSUES.md).
+TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB's RCQ consume lock is not reentrant across "
+                    "subtransaction depths (see mockdb/KNOWN_ISSUES.md)";
+  }
+
+  insert(42);
+
+  advance_block();
+
+  invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{0});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Same, but the consumed entry is a concurrent one from another transaction
+// in the same block, so the consume is a nondeterministic observation made
+// inside the TryInvoke'd frame and then committed through the probe's
+// mid-transaction subtransaction push.
+TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB's RCQ consume lock is not reentrant across "
+                    "subtransaction depths (see mockdb/KNOWN_ISSUES.md)";
+  }
+
+  insert(42); // concurrent
+  invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{0});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// The insert counterpart of TryInvokeDeleteConflictsWithConcurrentInsert: a
+// concurrent transaction's delete holds the queue's exclusive lock, so a
+// TryInvoke'd insert fails the probe and comes back Fault instead of
+// committing.
+TEST_P(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
+{
+  insert(42);
+
+  advance_block();
+
+  invoke_method(31); // concurrent delete holds the queue's exclusive lock
+  invoke_method_orchestrated(70, uint32_t{0}, uint32_t{99}, uint32_t{1});
+
+  advance_block();
+
+  // The delete won; the TryInvoke'd insert left no trace.
+  ASSERT_FALSE(lookup_storage_item_from_db(get_queue_addrkey()).has_value())
+      << "a conflicted TryInvoke'd insert still reached the queue";
+}
+
+// The consume counterpart: the child consumes a past-block entry successfully
+// in-frame (against the transaction's snapshot, where the concurrent delete
+// is not visible), and the lock probe then conflicts with that delete.
+TEST_P(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
+{
+  insert(42);
+
+  advance_block();
+
+  invoke_method(31); // concurrent delete holds the queue's exclusive lock
+  invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{1});
+
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(get_queue_addrkey()).has_value())
+      << "a conflicted TryInvoke'd consume left queue state behind";
 }
 
 // After delete+recreate, entries inserted in the same block should be
@@ -3914,6 +4048,129 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
     EXPECT_FALSE(queue.has_value()) << "Queue should be empty (all consumed)";
+  }
+}
+
+// The TryInvoke conflict bit under validation mode. The proposal's lock probe
+// conflicts with a concurrent insert and logs a false nondeterministic bit;
+// validation must consume that bit and fail the child frame the same way,
+// without probing any locks itself.
+TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
+{
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
+  };
+
+  // Concurrent insert whose lock the TryInvoke'd delete conflicts with.
+  auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
+  // Method 32: TryInvoke delete (expects the conflict) -> consume(42).
+  auto tx_orch = make_tx(kContractAddress2, 32, uint32_t{42});
+
+  NondeterministicProposalData insert_pd;
+  NondeterministicProposalData orch_pd;
+  {
+    auto handler = make_new_system_call_handler(tx_insert, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    insert_pd = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler = make_new_system_call_handler(tx_orch, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    orch_pd = handler.get_proposal_data();
+    // Two bits: the TryInvoke lock probe (false, the conflict) and the
+    // consume of the concurrent entry, which is also observed.
+    ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
+    ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
+                                                           insert_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+}
+
+// A successful TryInvoke under validation mode. The proposal's probe succeeds
+// and logs a true bit; validation consumes it, checks the child's queue
+// observations against its item views, and bumps the frame's TryInvoke depth
+// (note_validation_try_invoke_success) instead of pushing a subtransaction.
+//
+// Skipped on MockDB for the same reason as TryInvokeConsumeCommits: the
+// proposal-phase commit re-pushes the consume delta the probe already pushed,
+// which MockDB's consumer lock rejects (see mockdb/KNOWN_ISSUES.md).
+TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB's RCQ consume lock is not reentrant across "
+                    "subtransaction depths (see mockdb/KNOWN_ISSUES.md)";
+  }
+
+  auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
+                        auto const &...args) -> Transaction {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
+  };
+
+  auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
+  // Method 70: TryInvoke consume(42), expecting the frame to commit (Return).
+  auto tx_orch =
+      make_tx(kContractAddress2, 70, uint32_t{1}, uint32_t{42}, uint32_t{0});
+
+  NondeterministicProposalData insert_pd;
+  NondeterministicProposalData orch_pd;
+  {
+    auto handler = make_new_system_call_handler(tx_insert, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    insert_pd = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler = make_new_system_call_handler(tx_orch, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    orch_pd = handler.get_proposal_data();
+    // Two bits: the consume of the concurrent entry and the TryInvoke lock
+    // probe (true, no conflict).
+    ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
+    ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
+                                                           insert_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 }
 

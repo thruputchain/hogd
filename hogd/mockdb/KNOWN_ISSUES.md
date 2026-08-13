@@ -26,6 +26,23 @@ contract calls `get_db_tip` on MockDB.
 
 - **File**: `hogd/db_interface/db_executor_server.cc:~226`
 
+## RCQ consume lock is not reentrant across subtransaction depths
+
+A successful TryInvoke pushes the child frame's deltas as a subtransaction
+(`InvocationFrame::try_acquire_frame_locks`), and the root commit later pushes
+the same item's cumulative delta again. RCQ deltas carry absolute consume
+state, so the re-push is idempotent on HogDb, which tracks the transaction's
+subtransactions in `InvokeTX`. MockDB's per-key
+`RetrocausalQueueArgs::consumer_lock_` is a single boolean with no transaction
+identity, so the root push's consume delta is rejected as a competing consumer
+and the transaction fails with `ExecResultTxNonDeterministicError`.
+
+- **File**: `hogd/storage_item/refcounted_delta_variant.h`
+  (`try_reserve_consume`)
+- **Tests**: `TryInvokeConsumeCommits`, `TryInvokeConsumeConcurrentEntryCommits`
+  and `ProposalValidationTryInvokeConsumeCommitMatch` in `rcq_delete_test.cc`
+  (skipped on MockDB)
+
 ## Balance deltas from different subtransaction depths are not combined
 
 MockDB's `TransactionState::extract_results()` iterates subtransactions
