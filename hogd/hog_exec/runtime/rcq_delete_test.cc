@@ -2072,12 +2072,73 @@ protected:
           return {};
         });
 
+    // Method 68: TryInvoke a *successful* insert into kContractAddress3, then
+    // fail this frame. The TryInvoke succeeded on its own terms, so its writes
+    // were probed and committed into this frame -- and this frame then
+    // reverts, which must discard them.
+    builder.add<SerializationFormat::kTxs>(
+        68,
+        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs outs{};
+          CopyableInvokeInputs in{
+              .entrypoint_id = 0,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress3,
+                                              x23::serialize(value),
+                                              std::span<uint32_t>{}, in, outs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "System error on nested try_invoke insert";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (outs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "nested try_invoke insert should have succeeded";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          // Revert this frame, discarding the insert the TryInvoke committed
+          // into it.
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
+
+    // Method 69: orchestrator for 68. Invokes it and expects it to fault.
+    builder.add<SerializationFormat::kTxs>(
+        69,
+        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs outs{};
+          CopyableInvokeInputs in{
+              .entrypoint_id = 68,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(value),
+                                              std::span<uint32_t>{}, in, outs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "System error invoking the reverting frame";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (outs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the reverting frame to fault";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
   }
 
   constexpr static ContractAddress kContractAddress2 = make_contract_address(1);
+  // Third address, so a frame can TryInvoke a contract that is neither itself
+  // nor the orchestrator driving it.
+  constexpr static ContractAddress kContractAddress3 = make_contract_address(2);
 
   static AddressAndKey get_queue_addrkey_for(ContractAddress const &addr)
   {
@@ -2095,6 +2156,8 @@ protected:
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
     write_deployment(kContractAddress2, contract_0);
     setup_grant_storage_token(kContractAddress2, 1'000'000'000);
+    write_deployment(kContractAddress3, contract_0);
+    setup_grant_storage_token(kContractAddress3, 1'000'000'000);
     context_ = make_context();
 
     wait_flag_1_ = false;
@@ -2860,6 +2923,24 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 // A successful delete inside a try_invoke frame should fail to acquire locks
 // when a concurrent transaction has inserted into the same queue.
 // The delete is reverted due to conflict, and the entry remains consumable.
+
+// A TryInvoke that succeeds still has its writes discarded if the frame that
+// made it later reverts. The child ran at a third address, so nothing here is
+// reentrant: orchestrator -> kContractAddress (reverts) -> kContractAddress3
+// (the TryInvoke'd insert).
+TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
+{
+  invoke_method_orchestrated(69, uint32_t{42});
+
+  advance_block();
+
+  // The insert happened in a TryInvoke that succeeded, but its caller
+  // reverted, so kContractAddress3's queue must never have received it.
+  ASSERT_FALSE(
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress3))
+          .has_value())
+      << "a reverted frame kept the writes of a successful nested TryInvoke";
+}
 TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
   insert(42); // concurrent insert creates conflicting lock
