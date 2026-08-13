@@ -110,8 +110,9 @@ fi
 # The real callers pass locals named [stdout_path] and [stderr_path] from inside
 # a function. Bash scopes locals dynamically, so any local in the helper by
 # those names would shadow them and the paths would be assigned to the wrong
-# frame -- leaving the caller's variables unset, and aborting it under [set -u]
-# on the very next line. Call it the way they do.
+# frame -- leaving the caller's variables unset, and aborting it on the very
+# next line under the [set -u] this script and both callers run with. Call it
+# the way they do.
 shadowing_caller() {
   local stdout_path
   local stderr_path
@@ -120,7 +121,7 @@ shadowing_caller() {
 }
 check_eq "assigns through caller-named locals" \
   "/tmp/hogd_stdout_603992681528260_2983852_BSgpmb /tmp/hogd_stderr_603992681528260_2983852_R4SDV2" \
-  "$(set -u; shadowing_caller)"
+  "$(shadowing_caller)"
 
 ## ci_report_failed_bench_steps
 
