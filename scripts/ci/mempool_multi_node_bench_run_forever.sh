@@ -131,9 +131,7 @@ control_start_with_ulimit() {
     return 1
   fi
   printf '%s\n' "$output"
-  stdout_path=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
-  stderr_path=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
-  if [[ -z $stdout_path || -z $stderr_path ]]; then
+  if ! ci_control_log_paths "$output" stdout_path stderr_path; then
     echo "failed to parse control cli log paths for $label on $host" >&2
     return 1
   fi

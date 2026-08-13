@@ -250,6 +250,36 @@ ci_remote_run() {
   ssh "${CI_SSH_OPTS[@]}" "$host" "$@"
 }
 
+# Reads the log paths out of the output of a [control_cli start].
+#
+# [control_cli start] redirects the process it spawns to files on the remote
+# host and prints their paths as [CONTROL_STDOUT_PATH=] and
+# [CONTROL_STDERR_PATH=]. Nothing the spawned process writes reaches this job's
+# log, so those two paths are the only handle a launcher has on its output.
+#
+# Takes the captured start output and the names of two variables to assign the
+# stdout and stderr paths to; fails without assigning when the output does not
+# carry both, which means there is nothing left to collect from that process.
+# The variables are passed by name, so a caller must not name them
+# [ci_stdout_out] or [ci_stderr_out].
+ci_control_log_paths() {
+  local output=$1
+  local -n ci_stdout_out=$2
+  local -n ci_stderr_out=$3
+  local stdout_path stderr_path
+
+  stdout_path=$(printf '%s\n' "$output" |
+    sed -n 's/^CONTROL_STDOUT_PATH=//p' | tail -n 1)
+  stderr_path=$(printf '%s\n' "$output" |
+    sed -n 's/^CONTROL_STDERR_PATH=//p' | tail -n 1)
+  if [ -z "$stdout_path" ] || [ -z "$stderr_path" ]; then
+    return 1
+  fi
+
+  ci_stdout_out=$stdout_path
+  ci_stderr_out=$stderr_path
+}
+
 ci_control_stop_hosts() {
   local control_cli=$1
   local control_port=$2

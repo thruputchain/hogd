@@ -68,6 +68,45 @@ ci_run_bench_step aborting bash -c 'echo about to abort; kill -ABRT $$'
 check_eq "signal status taken from step, not tee" "aborting:134" \
   "${CI_FAILED_BENCH_STEPS[0]}"
 
+## ci_control_log_paths
+
+# The paths a launcher records come out of a [control_cli start] that also logs
+# its own progress, so the two lines have to be picked out of that noise.
+start_output=$(
+  cat <<'EOF'
+I[0813 00:43:44 control_cli.cc:93] Starting server: chuckd.dev bench
+I[0813 00:43:44 control_cli.cc:98] Start command sent successfully
+CONTROL_STDOUT_PATH=/tmp/hogd_stdout_603992681528260_2983852_BSgpmb
+CONTROL_STDERR_PATH=/tmp/hogd_stderr_603992681528260_2983852_R4SDV2
+EOF
+)
+unset out_stdout out_stderr
+ci_control_log_paths "$start_output" out_stdout out_stderr
+check_eq "start output stdout path" \
+  "/tmp/hogd_stdout_603992681528260_2983852_BSgpmb" "$out_stdout"
+check_eq "start output stderr path" \
+  "/tmp/hogd_stderr_603992681528260_2983852_R4SDV2" "$out_stderr"
+
+# A start that reported neither path leaves the caller nothing to collect, and
+# must not leave it a half-assigned pair either.
+unset out_stdout out_stderr
+if ci_control_log_paths "no paths here" out_stdout out_stderr; then
+  echo "FAIL missing paths should fail"
+  fail=1
+else
+  echo "ok   missing paths fails"
+fi
+check_eq "missing paths assigns nothing" "" "${out_stdout:-}${out_stderr:-}"
+
+# Only stderr missing is still a failure: the replay needs both streams.
+unset out_stdout out_stderr
+if ci_control_log_paths "CONTROL_STDOUT_PATH=/tmp/out" out_stdout out_stderr; then
+  echo "FAIL a lone stdout path should fail"
+  fail=1
+else
+  echo "ok   a lone stdout path fails"
+fi
+
 ## ci_report_failed_bench_steps
 
 CI_FAILED_BENCH_STEPS=()

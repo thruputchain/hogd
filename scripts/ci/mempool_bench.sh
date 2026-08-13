@@ -5,11 +5,22 @@ set -Eeuo pipefail
 . "$(dirname "$0")/bench_harness.sh"
 . "$(dirname "$0")/../hog-ip.sh"
 ci_enable_error_trace
+# For [replay_control_log_for_label], which needs [CONTROL_LOG_RECORDS] and
+# [remote_run] in scope.
+. "$(dirname "$0")/wait_port_report.sh"
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
 CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
+
+# "<host>|<label>|<stdout path>|<stderr path>" per process launched through a
+# control server, for the replay helpers to read.
+declare -a CONTROL_LOG_RECORDS=()
+
+remote_run() {
+  ci_remote_run "$@"
+}
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -104,7 +115,11 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+# Captured rather than streamed so the log paths [control_cli start] reports can
+# be recorded: the coordinator drives this whole benchmark from hog4 and writes
+# nothing into this job's log, so a coordinator that dies leaves only its exit
+# status behind unless those paths are kept for the replay below.
+if ! coordinator_start_output=$($CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
   --skip 20 \
@@ -125,7 +140,21 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+  --scp-control-addr 127.0.0.1:4400 2>&1); then
+  printf '%s\n' "$coordinator_start_output"
+  echo 'coordinator launch failed' >&2
+  exit 1
+fi
+printf '%s\n' "$coordinator_start_output"
+
+if ! ci_control_log_paths "$coordinator_start_output" \
+  coordinator_stdout_path coordinator_stderr_path; then
+  echo 'control_cli start did not report the coordinator log paths' >&2
+  exit 1
+fi
+CONTROL_LOG_RECORDS+=(
+  "hog4|coordinator|$coordinator_stdout_path|$coordinator_stderr_path"
+)
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -160,9 +189,14 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
   set -e
 fi
 
-echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+if [[ $coordinator_status -ne 0 ||
+  ($mempool_status -ne 0 && $mempool_status -ne 124) ]]; then
+  # Whichever of the two died, the coordinator's output is where the reason
+  # lives, and it is on hog4. Replay it here, before either exit below, so the
+  # failure this suite reports arrives with the evidence for it instead of a
+  # bare exit status.
+  replay_control_log_for_label coordinator
+fi
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
@@ -176,6 +210,13 @@ if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
   exit "$coordinator_status"
 fi
+
+# Only the success path needs the file: the metric below is parsed out of it,
+# and a failing run has already replayed the same output above. Copying it
+# before the exits would let a failed [scp] replace the failure being reported
+# with one of its own.
+echo 'copy coordinator output from hog4'
+scp "hog4:$coordinator_stdout_path" ./coordinator_output.txt
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
