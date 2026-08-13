@@ -411,9 +411,9 @@ constexpr size_t kRetrocausalQueueBlockKeySize =
 constexpr auto
 make_retrocausal_queue_block_key(const ItemKey &key, uint64_t block_number)
 {
-  assert(key.is_contract_data());
+  CHECK(key.is_contract_data());
   std::span<const std::byte> key_bytes = key.as_bytes();
-  assert(key_bytes.size() == kContractDataItemKeySize - 1);
+  CHECK(key_bytes.size() == kContractDataItemKeySize - 1);
 
   std::array<std::byte, kRetrocausalQueueBlockKeySize> ret;
   ret[0] = static_cast<std::byte>(Prefix::kRetrocausalQueueBlock);
