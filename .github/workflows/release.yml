@@ -398,7 +398,7 @@ jobs:
             --readiness stdout \
             --dev-accounts 1 \
             --dev-account-seed groundhog-dev-accounts \
-            --dev-account-tokens 10000000000000 \
+            --dev-account-tokens 1000000000 \
             >"$readiness_file" 2>"$log_file" &
           devnode_pid=$!
           cleanup_devnode() {
@@ -443,6 +443,19 @@ jobs:
               readiness = json.loads(handle.readline())
           if readiness.get("status") != "ready":
               raise SystemExit(f"unexpected readiness payload: {readiness}")
+          with open(readiness["manifestPath"], encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          accounts = manifest.get("bootstrapAccounts")
+          expected = [
+              {"index": 0, "role": "faucet", "initialStorageTokens": "10000000000000"},
+              {"index": 1, "role": "local_user", "initialStorageTokens": "1000000000"},
+          ]
+          if not isinstance(accounts, list) or len(accounts) != len(expected):
+              raise SystemExit(f"unexpected bootstrap accounts: {accounts}")
+          for account, fields in zip(accounts, expected):
+              for key, value in fields.items():
+                  if account.get(key) != value:
+                      raise SystemExit(f"unexpected bootstrap account: {account}")
           PY
           cat "$readiness_file"
           cleanup_devnode
