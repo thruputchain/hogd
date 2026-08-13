@@ -64,6 +64,66 @@ protected:
     return AddressAndKey{.address = kContractAddress, .key = key};
   }
 
+  // The RCQ operations behind entrypoints 0, 1 and 2, callable directly.
+  //
+  // Methods that need to sequence several of these used to do it by invoking
+  // those entrypoints on their own address, which the reentrance guard now
+  // rejects. Calling them in-frame instead is equivalent for what these tests
+  // assert: a queue is addressed by the executing frame's own address, so two
+  // frames touching one queue means one address twice on the invocation stack
+  // -- something the guard makes unreachable in production. Observations are
+  // recorded per transaction, keyed by (address, key, index), not per frame,
+  // so the observation sequence is unchanged either way; and a child frame
+  // that returns normally commits into its parent, so no savepoint behaviour
+  // is lost. Only the TryInvoke-based methods, where a child frame is reverted
+  // on purpose, still need real frames.
+  //
+  // Each returns true on success; callers report and bail on false.
+  [[nodiscard]] static bool rcq_insert(NativeSyscallContext &ctx,
+                                       uint32_t value)
+  {
+    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+        kStorageKey, std::as_bytes(std::span(&value, 1)));
+    return res.has_value() &&
+           res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+  }
+
+  [[nodiscard]] static bool rcq_consume_expect(NativeSyscallContext &ctx,
+                                               uint32_t expected)
+  {
+    uint32_t out = 0;
+    RuntimeMemoryLength written_len = 0;
+    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+        written_len);
+    return res.has_value() &&
+           res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+           written_len == 4 && out == expected;
+  }
+
+  [[nodiscard]] static bool rcq_consume_expect_empty(NativeSyscallContext &ctx)
+  {
+    uint32_t out = 0;
+    RuntimeMemoryLength written_len = 0;
+    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+        written_len);
+    return res.has_value() &&
+           ((res.value() ==
+             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) ||
+            (res.value() ==
+             SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) &&
+           written_len == 0;
+  }
+
+  [[nodiscard]] static bool rcq_delete(NativeSyscallContext &ctx)
+  {
+    auto res = ctx.syscall<SyscallNo::kDeleteObject>(
+        kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+    return res.has_value() &&
+           res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+  }
+
   // NOLINTNEXTLINE(readability-function-size)
   static std::unique_ptr<RuntimeContext> make_context()
   {
@@ -295,44 +355,17 @@ protected:
         12,
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t consume_b) -> InvokeStatus<void> {
-          // insert() -> delete -> consume
-          CopyableInvokeInputs inputs1{
-              .entrypoint_id = 0,
-              .gas_limit = std::numeric_limits<GasAmount>::max(),
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          auto r1 =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(insert_a),
-                                              std::span<uint32_t>{}, inputs1,
-                                              CopyableInvokeOutputs{});
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to invoke insert";
+          // insert -> delete -> consume
+          if (!rcq_insert(ctx, insert_a)) {
+            ADD_FAILURE() << "Failed to insert";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
-          if (!r2.has_value() ||
-              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          CopyableInvokeInputs inputs3{
-              .entrypoint_id = 1,
-              .gas_limit = std::numeric_limits<GasAmount>::max(),
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          auto r3 =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(consume_b),
-                                              std::span<uint32_t>{}, inputs3,
-                                              CopyableInvokeOutputs{});
-          if (!r3.has_value() ||
-              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to invoke consume";
+          if (!rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to consume " << consume_b;
             return InvokeError{InvokeErrorCode::None};
           }
 
@@ -343,28 +376,13 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         13,
         [](NativeSyscallContext &ctx, uint32_t insert_1) -> InvokeStatus<void> {
-          // delete -> insert()
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          // delete -> insert
+          if (!rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          CopyableInvokeInputs inputs2{
-              .entrypoint_id = 0,
-              .gas_limit = std::numeric_limits<GasAmount>::max(),
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          auto r2 =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(insert_1),
-                                              std::span<uint32_t>{}, inputs2,
-                                              CopyableInvokeOutputs{});
-          if (!r2.has_value() ||
-              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to invoke insert";
+          if (!rcq_insert(ctx, insert_1)) {
+            ADD_FAILURE() << "Failed to insert";
             return InvokeError{InvokeErrorCode::None};
           }
 
@@ -377,65 +395,21 @@ protected:
         14,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> InvokeStatus<void> {
-          auto r1 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(consume_a),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to invoke consume(a)";
+          // consume(a) -> delete -> consume(b) -> consume(c)
+          if (!rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
             return InvokeError{InvokeErrorCode::None};
           }
-
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
-          if (!r2.has_value() ||
-              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          auto r3 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(consume_b),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r3.has_value() ||
-              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to invoke consume(b)";
+          if (!rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
             return InvokeError{InvokeErrorCode::None};
           }
-
-          auto r4 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(consume_c),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r4.has_value() ||
-              r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to invoke consume(c)";
+          if (!rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
             return InvokeError{InvokeErrorCode::None};
           }
 
@@ -448,87 +422,23 @@ protected:
         15,
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t insert_b) -> InvokeStatus<void> {
-          // insert(a)
-          auto r1 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(insert_a),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          // consume(a)
-          auto r2 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(insert_a),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r2.has_value() ||
-              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_consume_expect(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to consume(a)";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          // delete
-          auto r3 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
-          if (!r3.has_value() ||
-              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          // insert(b)
-          auto r4 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(insert_b),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r4.has_value() ||
-              r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_insert(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
             return InvokeError{InvokeErrorCode::None};
           }
-
-          // consume(b)
-          auto r5 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(insert_b),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r5.has_value() ||
-              r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_consume_expect(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to consume(b)";
             return InvokeError{InvokeErrorCode::None};
           }
@@ -2846,7 +2756,7 @@ TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
   insert(42);
 
   // insert -> delete -> consume
-  invoke_method_allow_reentrance(12, uint32_t{99}, uint32_t{42});
+  invoke_method(12, uint32_t{99}, uint32_t{42});
 
   advance_block();
 
@@ -2860,7 +2770,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 
   advance_block();
 
-  invoke_method_allow_reentrance(13, uint32_t{10});
+  invoke_method(13, uint32_t{10});
 
   advance_block();
 
@@ -2919,7 +2829,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
   // Block 3: delete -> insert (same tx). This is the RCQ->delete->RCQ path.
   // hog_exec should fold a consume-all via make_fully_consumed_item so that
   // RetrocausalQueueLock::stage_committed_changes prunes old blocks.
-  invoke_method_allow_reentrance(13, uint32_t{99});
+  invoke_method(13, uint32_t{99});
 
   advance_block();
 
@@ -2955,7 +2865,7 @@ TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
   insert(42);
   insert(99);
   insert(77);
-  invoke_method_allow_reentrance(14, uint32_t{42}, uint32_t{99}, uint32_t{77});
+  invoke_method(14, uint32_t{42}, uint32_t{99}, uint32_t{77});
 
   advance_block();
 
@@ -2986,7 +2896,7 @@ TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 // Verifies self entries before delete are discarded correctly.
 TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 {
-  invoke_method_allow_reentrance(15, uint32_t{42}, uint32_t{99});
+  invoke_method(15, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2998,7 +2908,7 @@ TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 {
   insert(42);
-  invoke_method_allow_reentrance(12, uint32_t{99}, uint32_t{42});
+  invoke_method(12, uint32_t{99}, uint32_t{42});
 
   advance_block();
 
@@ -3227,7 +3137,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
 TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 {
   // Start from empty, delete (no-op), then insert a new item
-  invoke_method_allow_reentrance(13, uint32_t{42});
+  invoke_method(13, uint32_t{42});
 
   // Then retrocausally consume the item
   invoke_method(1, uint32_t{42});
@@ -3247,7 +3157,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
   set_bytestring(make_bytestring("test"));
   advance_block();
   // delete, then insert a new item
-  invoke_method_allow_reentrance(13, uint32_t{42});
+  invoke_method(13, uint32_t{42});
 
   // Then retrocausally consume the item
   invoke_method(1, uint32_t{42});
@@ -3269,7 +3179,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
 
   advance_block();
   // delete, then insert a new item
-  invoke_method_allow_reentrance(13, uint32_t{42});
+  invoke_method(13, uint32_t{42});
 
   // Then retrocausally consume the item
   invoke_method(1, uint32_t{42});
@@ -3289,7 +3199,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
 
   advance_block();
   // delete, then insert a new item
-  invoke_method_allow_reentrance(13, uint32_t{99});
+  invoke_method(13, uint32_t{99});
 
   // Consuming the preexisting item should fail
   invoke_method_fail_commit(1, uint32_t{42});
@@ -3459,7 +3369,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
   advance_block();
 
   // Block 3: delete, insert(30)
-  invoke_method_allow_reentrance(13, uint32_t{30});
+  invoke_method(13, uint32_t{30});
 
   advance_block();
 
@@ -3630,7 +3540,7 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   advance_block();
 
   // Delete the bytestring, then insert into RCQ at the same key
-  invoke_method_allow_reentrance(13, uint32_t{42});
+  invoke_method(13, uint32_t{42});
 
   // Another tx retrocausally consumes the entry
   invoke_method(1, uint32_t{42});
