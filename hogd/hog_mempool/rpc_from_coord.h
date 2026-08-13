@@ -165,6 +165,9 @@ public:
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block(BlockID block_id, ConsensusValue value);
 
+  x23::Async<GenesisCeremonyResult>
+  schedulercoord_commit_genesis_ceremony(GenesisCeremonyRequest request);
+
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
@@ -242,6 +245,46 @@ public:
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
 
+    co_return ret;
+  }
+
+  x23::Async<DbSchedResult> schedcoord_load_genesis_configuration_v2(
+      GenesisConfigurationV2 genesis_configuration)
+  {
+    CHECK(ready());
+    x23::CoroGuard commit_cg;
+    co_await commit_cg(commit_lock_);
+
+    if (last_committed_block_.value.proposal_header.block_height != -1 ||
+        genesis_configuration.network_hash != network_hash_) {
+      co_return DbSchedResult::DbSchedResultError;
+    }
+    CHECK_EQ(auth_data_height(), -1);
+    CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
+
+    ConsensusValue genesis_value{};
+    genesis_value.proposal_header.block_height = 0;
+    genesis_value.proposal_header.network_hash = network_hash_;
+    DbSchedResult ret =
+        co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
+            genesis_configuration, genesis_value);
+    if (ret != DbSchedResult::DbSchedResultOK) {
+      co_return ret;
+    }
+
+    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+    CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
+    last_committed_block_ = db_res.db_tip();
+    CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
+    CHECK_EQ(last_committed_block_.id, 0UL);
+    scheduler_->set_current_block(0);
+    co_await Health::instance().set_current_block_height(0);
+    MempoolMetrics::instance().current_block_height.record(0);
+    MempoolMetrics::instance().scheduler_pending_tx_count.record(
+        scheduler_->size());
+    MempoolMetrics::instance().scheduler_tx_cache_size.record(
+        scheduler_->tx_cache_size());
+    scheduler_->transfer_finished_.store(0);
     co_return ret;
   }
 
@@ -733,6 +776,8 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  std::optional<SHA256Hash> committed_genesis_ceremony_batch_hash_;
+  std::optional<ProposalTxs> committed_genesis_ceremony_proposal_txs_;
 
   using FailedAuthenticationTxSet =
       SynchronizedMap<SignedTransactionHash, char, SipHash24Hasher>;

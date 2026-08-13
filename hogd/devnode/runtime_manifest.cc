@@ -130,8 +130,8 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
-      node.genesis_configuration().storage_cost_model);
-  const SHA256Hash genesis_hash = sha256(node.genesis_configuration());
+      node.genesis_configuration_v2().storage_cost_model);
+  const SHA256Hash genesis_hash = sha256(node.genesis_configuration_v2());
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {

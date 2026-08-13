@@ -144,13 +144,6 @@ HogDbExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
         tx.request_auth_data(addrkey.address, delta.auth_data_change(), flags));
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
     CHECK(addrkey.key.key_type() == StorageKeyType::ReplayCache);
-    // The initial token claim precompile is exempt from the replay cache (it
-    // provides its own replay protection via exclusive deletes). The executor
-    // consumes no uniquifier for it, so a uniquifier-consume delta keyed here
-    // can only come from a buggy executor: reject it as invalid behavior.
-    if (addrkey.address == kInitialTokenClaimPrecompileAddress) {
-      return finish(HogDbError{HogDbCode::kInvalidExecutorBehavior});
-    }
     return finish(tx.request_consume_uniquifier(
         addrkey.address, delta.consume_uniquifier_args().uniquifier, flags));
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:

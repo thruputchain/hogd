@@ -56,6 +56,19 @@ public:
   // These could be, but are not required to be, all run in the first block.
   std::vector<SignedTransaction> make_unfurl_genesis_transactions() const;
 
+  // Build the policy-neutral height-0 configuration. V2 contains no
+  // allocations or native supply; those are created by root-contract
+  // invocations in the height-1 ceremony.
+  GenesisConfigurationV2 build_v2(NetworkHash const &network_hash,
+                                  StorageCostModel const &cost_model,
+                                  Contract const &root_contract) const;
+
+  // Build the stock distributor root's height-1 invocations. Each transaction
+  // mints exactly its own incremental replay-cache cost to the root and mints
+  // its configured allocation directly to the deployed address.
+  std::vector<SignedTransaction>
+  make_genesis_ceremony_transactions(StorageCostModel const &cost_model) const;
+
   // Override GenesisConfiguration::default_wallet (defaults to
   // native_default_wallet_hash()).
   void set_default_wallet(DeployedContractHash const &default_wallet)
@@ -74,6 +87,10 @@ private:
   int128_t allocated_hogs_ = 0;
   std::optional<DeployedContractHash> default_wallet_override_;
 };
+
+// Load the repository's reviewed stock distributor artifact. Chains may put a
+// different RV32 contract in GenesisConfigurationV2::root_contract.
+std::shared_ptr<const Contract> load_stock_genesis_root_contract();
 
 class GenesisConfigurationLoader {
 public:
@@ -124,6 +141,31 @@ public:
 
 private:
   GenesisConfiguration genesis_configuration_;
+};
+
+class GenesisConfigurationV2Loader {
+public:
+  explicit GenesisConfigurationV2Loader(GenesisConfigurationV2 config)
+    : config_(std::move(config))
+  {}
+
+  [[nodiscard]] bool valid() const
+  {
+    return config_.root_contract.contract_type() == ContractType::kRv32 &&
+           !config_.root_contract.rv32_contract().data.empty();
+  }
+
+  void load_genesis_configuration(
+      std::function<void(std::shared_ptr<const Contract>)> const
+          &write_contract,
+      std::function<void(ContractAddress const &,
+                         DeployedContractHash const &)> const &write_deployment,
+      std::function<void(ContractAddress const &,
+                         AddressAuthData const &)> const &write_auth_data)
+      const;
+
+private:
+  GenesisConfigurationV2 config_;
 };
 
 } // namespace hogd

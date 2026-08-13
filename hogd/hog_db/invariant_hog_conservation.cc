@@ -1,5 +1,6 @@
 #include "hogd/hog_db/invariant_hog_conservation.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <span>
@@ -11,6 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
@@ -56,7 +58,7 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
     handle_address_metadata_item_change(before, after);
     return;
   case Prefix::kContractDataKey:
-    handle_contract_data_item_change(before, after);
+    handle_contract_data_item_change(key, before, after);
     return;
   case Prefix::kReplayCache:
     handle_replay_cache_item_change(key, before, after);
@@ -123,7 +125,8 @@ HogConservationInvariant::handle_address_metadata_item_change(
 
 void
 HogConservationInvariant::handle_contract_data_item_change(
-    HogDbStatus<DBItem> const &before, HogDbStatus<DBItem> const &after)
+    std::span<const std::byte> key, HogDbStatus<DBItem> const &before,
+    HogDbStatus<DBItem> const &after)
 {
   auto get_storage_cost = [this](HogDbStatus<DBItem> const &item) -> int128_t {
     if (!item.has_value()) {
@@ -158,6 +161,25 @@ HogConservationInvariant::handle_contract_data_item_change(
   // Deleting an item (negative total supply change) is equivalent to
   // transferring that amount to another key
   update_total_supply(after_cost - before_cost);
+
+  const auto supply_db_key = make_contract_data_key(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  if (!std::ranges::equal(key, supply_db_key)) {
+    return;
+  }
+  auto value = [](HogDbStatus<DBItem> const &item) -> int128_t {
+    if (!item) {
+      return 0;
+    }
+    assert(item->type == kNNInt128);
+    assert(item->value.size() == sizeof(int128_xdr));
+    return int128_from_xdr_bytes(
+        std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
+                                                       sizeof(int128_xdr)));
+  };
+  // The counter records newly issued HOG. Its positive delta exactly offsets
+  // the corresponding balance credit in the conservation sum.
+  update_total_supply(-(value(after) - value(before)));
 }
 
 void

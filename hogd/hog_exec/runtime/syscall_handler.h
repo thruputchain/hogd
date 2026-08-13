@@ -467,11 +467,9 @@ private:
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.
-  // Mirrors add_replay_nonce_delta's exemption for the initial-token-claim
-  // precompile (which consumes no replay nonce).
   static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
-                                        ContractAddress const &root_address,
                                         BlockHeight executing_height);
+  SystemStatus<bool> root_is_legacy_initial_token_claim();
 
   // Whether this handler's transaction has an already-expired replay uniquifier
   // (reads the db tip via get_block_height(); a tip-read failure is

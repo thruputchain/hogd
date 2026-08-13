@@ -1,4 +1,5 @@
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 
 #include <algorithm>
 #include <array>
@@ -15,6 +16,8 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/genesis_root.h"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
@@ -25,12 +28,20 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
 namespace {
+std::tuple<std::uint64_t, std::uint64_t>
+make_contract_u128(uint128_t value)
+{
+  return {static_cast<std::uint64_t>(value >> 64),
+          static_cast<std::uint64_t>(value)};
+}
+
 std::shared_ptr<const Contract>
 make_native_contract(HogexecPrecompiledNativeContracts contract_id)
 {
@@ -79,6 +90,37 @@ GenesisConfigurationLoader::GenesisConfigurationLoader(
     GenesisConfiguration genesis_configuration)
   : genesis_configuration_(std::move(genesis_configuration))
 {}
+
+void
+GenesisConfigurationV2Loader::load_genesis_configuration(
+    std::function<void(std::shared_ptr<const Contract>)> const &write_contract,
+    std::function<void(ContractAddress const &,
+                       DeployedContractHash const &)> const &write_deployment,
+    std::function<void(ContractAddress const &, AddressAuthData const &)> const
+        &write_auth_data) const
+{
+  CHECK(valid());
+
+  auto root = std::make_shared<Contract>(config_.root_contract);
+  write_contract(root);
+  write_deployment(kGenesisRootContractAddress,
+                   make_deployed_contract_hash(root));
+
+  AddressAuthData root_auth{};
+  root_auth.required_weight = 0;
+  root_auth.last_written_height = 0;
+  write_auth_data(kGenesisRootContractAddress, root_auth);
+
+  auto token = make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+  write_contract(token);
+  write_deployment(kNativeTokenContractAddress,
+                   make_deployed_contract_hash(token));
+
+  auto wallet = make_native_contract(
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet);
+  write_contract(wallet);
+}
 
 int128_t
 GenesisConfigurationLoader::initial_hog_token_supply()
@@ -177,6 +219,70 @@ GenesisConfigurationBuilder::make_unfurl_genesis_transactions() const
   }
 
   return unfurl_transactions;
+}
+
+std::shared_ptr<const Contract>
+load_stock_genesis_root_contract()
+{
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract() = load_contract_blob("genesis_root.rv32a");
+  return contract;
+}
+
+GenesisConfigurationV2
+GenesisConfigurationBuilder::build_v2(NetworkHash const &network_hash,
+                                      StorageCostModel const &cost_model,
+                                      Contract const &root_contract) const
+{
+  CHECK_EQ(root_contract.contract_type(), ContractType::kRv32);
+  CHECK(!root_contract.rv32_contract().data.empty());
+  return GenesisConfigurationV2{
+      .network_hash = network_hash,
+      .storage_cost_model = cost_model.to_xdr(),
+      .root_contract = root_contract,
+      .default_wallet = default_wallet_override_.value_or(
+          GenesisConfigurationLoader::native_default_wallet_hash()),
+  };
+}
+
+std::vector<SignedTransaction>
+GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
+    StorageCostModel const &cost_model) const
+{
+  using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
+  root_client_t client(kGenesisRootContractAddress);
+  constexpr static GasAmount kDistributionGas = 1'000'000'000;
+
+  // Height 0 creates an empty ReplayCacheMetadata item for the root, so every
+  // permanent nonce adds only one entry's incremental cost. Keeping each
+  // transaction self-funded makes execution independent of batch ordering.
+  const uint128_t root_funding = cost_model.kReplayCacheCostPerEntry;
+
+  std::vector<SignedTransaction> transactions;
+  transactions.reserve(entries_.size());
+  for (std::size_t i = 0; i < entries_.size(); ++i) {
+    auto const &entry = entries_[i];
+    CHECK_GE(entry.amount, 0);
+    auto const expiry_bucket =
+        static_cast<BlockHeight>(i / kReplayCacheNoncesMaxLen);
+    auto const nonce = static_cast<std::uint64_t>(i % kReplayCacheNoncesMaxLen);
+    CHECK_LT(expiry_bucket, std::numeric_limits<BlockHeight>::max());
+
+    transactions.push_back(SignedTransaction{
+        .tx = Transaction{
+            .invocation = client.make_invocation<u8"distribute">(
+                kDistributionGas, entry.config.initial_nonce,
+                entry.config.contract_hash, entry.config.entrypoint,
+                entry.config.calldata, make_contract_u128(root_funding),
+                make_contract_u128(static_cast<uint128_t>(entry.amount))),
+            .uniquifier = {.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max() -
+                               expiry_bucket,
+                           .nonce = nonce},
+            .contracts_to_deploy = {*entry.deployed_contract},
+        }});
+  }
+  return transactions;
 }
 
 StorageKey

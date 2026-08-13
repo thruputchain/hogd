@@ -59,6 +59,7 @@
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -916,25 +917,27 @@ initialize_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfiguration
+GenesisConfigurationV2
 build_test_data_dir_genesis(BootstrapAccountConfig const &config)
 {
   if (config.count == 0) {
     GenesisConfigurationBuilder builder;
-    return builder.build_or_panic(StorageCostModel::default_cost_model());
+    return builder.build_v2(NetworkHash{},
+                            StorageCostModel::default_cost_model(),
+                            *load_stock_genesis_root_contract());
   }
 
   BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
-  artifact.genesis_configuration.storage_cost_model =
+  artifact.genesis_configuration_v2.storage_cost_model =
       StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration);
+  return std::move(artifact.genesis_configuration_v2);
 }
 
 void
 write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              BootstrapAccountConfig const &config)
 {
-  const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
+  const GenesisConfigurationV2 genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{1});
@@ -1015,8 +1018,9 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   }
 
   GenesisConfigurationBuilder builder;
-  GenesisConfiguration genesis =
-      builder.build_or_panic(StorageCostModel::default_cost_model());
+  GenesisConfigurationV2 genesis =
+      builder.build_v2(NetworkHash{}, StorageCostModel::default_cost_model(),
+                       *load_stock_genesis_root_contract());
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 
@@ -1778,8 +1782,7 @@ TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
 
     SchedulerGetTipResult tip = client.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
-    EXPECT_EQ(tip.db_tip().id, 0UL);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
   }
 
   expect_clean_exit(process);
@@ -2206,7 +2209,7 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
             .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
     EXPECT_EQ(format_network_hash(
                   tip.db_tip().value.proposal_header.network_hash),
               readiness.network_hash);
@@ -2219,7 +2222,14 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
     HogDbDAO db = open_persistent_hog_db(data_dir);
     HogDbStatus<DbTip> tip = db.read_dbtip();
     ASSERT_TRUE(tip.has_value()) << tip.error();
+    HogDbStatus<DeployedContractHash> root =
+        db.read_address_metadata(kGenesisRootContractAddress);
+    ASSERT_TRUE(root.has_value()) << root.error();
+    root->contract_type = ContractType::kNative;
+    ASSERT_TRUE(db.write_address_metadata(kGenesisRootContractAddress, *root)
+                    .has_value());
     tip->value.proposal_header.network_hash = {};
+    tip->storage_long_hash = db.compute_full_db_hash();
     ASSERT_TRUE(db.write_dbtip(*tip).has_value());
     ASSERT_TRUE(db.commit().has_value());
   }

@@ -353,6 +353,29 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
 }
 
+TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress account = make_account_address(99);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = kBlock;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(age->address, account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+}
+
 TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];

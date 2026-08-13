@@ -16,6 +16,7 @@
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
+#include "built_contracts/fibonacci.h"
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
@@ -26,6 +27,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
@@ -1776,6 +1778,71 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   ExpectedDBTip final_tip = gateway.schedgateway_get_tip()();
   EXPECT_EQ(final_tip.error(), RPCError::kRPCNone);
   EXPECT_EQ(final_tip.db_tip().value.proposal_header.block_height, 0);
+}
+
+TEST(Mempool, GenesisV2CeremonyMintsDeploysAndIsIdempotent)
+{
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  GenesisConfigurationBuilder builder;
+  auto fibonacci_contract = load_contract("fibonacci.wasm");
+  const SHA256Hash deployment_nonce = make_test_nonce(9001);
+  const int128_t allocation = 1'000'000'000;
+  using fibonacci_meta = ContractTraitMeta<fibonacci::Fibonacci>;
+  builder.add_initial_config(fibonacci_contract, deployment_nonce,
+                             fibonacci_meta::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta::make_calldata<u8"fibonacci">(
+                                 uint32_t{0}),
+                             allocation);
+
+  auto root_contract = load_stock_genesis_root_contract();
+  GenesisConfigurationV2 genesis =
+      builder.build_v2(MempoolTestInfra::kNetworkHash, cost_model,
+                       *root_contract);
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
+                std::move(genesis))(),
+            DbSchedResult::DbSchedResultOK);
+
+  const SchedulerGetTipResult parent =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+
+  SignedTransactionBatch ceremony_txs;
+  ceremony_txs.append_range(
+      builder.make_genesis_ceremony_transactions(cost_model));
+  ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
+  GenesisCeremonyRequest request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(parent.db_tip().value),
+      .expected_batch_hash = sha256(parallel),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = parallel,
+  };
+
+  GenesisCeremonyResult result =
+      server.mempool_coord_rpc().schedulercoord_commit_genesis_ceremony(
+          request)();
+  ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
+  EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
+
+  const ContractAddress deployed =
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), deployment_nonce);
+  ASSERT_TRUE(server.read_address_metadata(deployed).has_value());
+  ASSERT_TRUE(server.read_address_balance(deployed).has_value());
+  EXPECT_GT(*server.read_address_balance(deployed), 0);
+  ASSERT_TRUE(
+      server.read_address_balance(kGenesisRootContractAddress).has_value());
+  EXPECT_EQ(*server.read_address_balance(kGenesisRootContractAddress), 0);
+
+  GenesisCeremonyResult retry =
+      server.mempool_coord_rpc().schedulercoord_commit_genesis_ceremony(
+          std::move(request))();
+  EXPECT_EQ(retry.outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
+  EXPECT_EQ(retry.commit().db_tip, result.commit().db_tip);
 }
 
 TEST(Mempool, SubmitUnvettedDuplicateTxDropped)

@@ -45,6 +45,7 @@
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -161,22 +162,23 @@ metadata_path(std::filesystem::path const &data_dir)
   return data_dir / kDataDirMetadataFile;
 }
 
-GenesisConfiguration
+GenesisConfigurationV2
 build_genesis_configuration(BootstrapAccountConfig const &config,
+                            NetworkHash const &network_hash,
                             StorageCostModel const &cost_model)
 {
-  if (config.count == 0) {
-    GenesisConfigurationBuilder builder;
-    return builder.build_or_panic(cost_model);
+  GenesisConfigurationBuilder builder;
+  if (config.count != 0) {
+    append_bootstrap_accounts(builder, config);
   }
-  BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
-  artifact.genesis_configuration.storage_cost_model = cost_model.to_xdr();
-  return std::move(artifact.genesis_configuration);
+  return builder.build_v2(network_hash, cost_model,
+                          *load_stock_genesis_root_contract());
 }
 
 std::string
-build_data_dir_metadata_json(BootstrapAccountConfig const &config,
-                             GenesisConfiguration const &genesis_configuration)
+build_data_dir_metadata_json(
+    BootstrapAccountConfig const &config,
+    GenesisConfigurationV2 const &genesis_configuration)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -303,7 +305,7 @@ require_string_value(std::string_view actual, std::string_view expected,
 }
 
 BootstrapAccountConfig
-parse_data_dir_metadata(std::string_view bytes)
+parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
 {
   std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
   if (!parsed.has_value()) {
@@ -364,8 +366,8 @@ parse_data_dir_metadata(std::string_view bytes)
   resolve_dev_wallet_profile(config.dev_wallet_profile);
 
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
-  const GenesisConfiguration genesis =
-      build_genesis_configuration(config, cost_model);
+  const GenesisConfigurationV2 genesis =
+      build_genesis_configuration(config, network_hash, cost_model);
   const std::string expected_genesis_hash = hex_string(sha256(genesis));
   require_string_value(require_string_field(*parsed, "genesisHash", "root"),
                        expected_genesis_hash, "genesisHash");
@@ -808,7 +810,8 @@ HogDevnodeNode::validate_fresh_data_dir(
   std::error_code ec;
   if (std::filesystem::exists(metadata_path(*data_dir_), ec)) {
     BootstrapAccountConfig persisted_config =
-        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
+        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
+                                network_hash_);
     require_matching_bootstrap_config(persisted_config, requested_config);
     return persisted_config;
   }
@@ -844,7 +847,8 @@ HogDevnodeNode::validate_recovered_data_dir(
   }
 
   BootstrapAccountConfig persisted_config =
-      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
+      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
+                              network_hash_);
   require_matching_bootstrap_config(persisted_config, requested_config);
   return persisted_config;
 }
@@ -860,7 +864,7 @@ HogDevnodeNode::write_data_dir_metadata() const
       metadata_path(*data_dir_),
       build_data_dir_metadata_json(
           bootstrap_config_,
-          build_genesis_configuration(bootstrap_config_,
+          build_genesis_configuration(bootstrap_config_, network_hash_,
                                       ctx_->get_cost_model())));
 }
 
@@ -869,14 +873,22 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
     BootstrapAccountConfig const &config)
 {
   if (config.count == 0) {
-    genesis_configuration_ =
-        build_genesis_configuration(config, ctx_->get_cost_model());
+    GenesisConfigurationBuilder builder;
+    genesis_configuration_ = builder.build_or_panic(ctx_->get_cost_model());
+    genesis_configuration_v2_ =
+        builder.build_v2(network_hash_, ctx_->get_cost_model(),
+                         *load_stock_genesis_root_contract());
     return;
   }
 
-  BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
+  BootstrapAccountArtifact artifact =
+      build_bootstrap_account_artifact(config, network_hash_,
+                                       ctx_->get_cost_model());
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
+  genesis_configuration_v2_ = std::move(artifact.genesis_configuration_v2);
+  genesis_configuration_v2_.storage_cost_model =
+      ctx_->get_cost_model().to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
   if (ctx_->get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
@@ -901,16 +913,23 @@ HogDevnodeNode::materialize_bootstrap_accounts(
     GenesisConfigurationBuilder builder;
     genesis_configuration_ =
         builder.build_or_panic(StorageCostModel::default_cost_model());
-    CHECK_EQ(client.schedcoord_load_genesis_configuration(
-                 GenesisConfiguration(genesis_configuration_))(),
+    genesis_configuration_v2_ =
+        builder.build_v2(network_hash_, ctx_->get_cost_model(),
+                         *load_stock_genesis_root_contract());
+    CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
+                 GenesisConfigurationV2(genesis_configuration_v2_))(),
              DbSchedResult::DbSchedResultOK);
+    commit_initialization_batch({});
     return;
   }
 
-  BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
+  BootstrapAccountArtifact artifact =
+      build_bootstrap_account_artifact(config, network_hash_,
+                                       ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration(
-               std::move(artifact.genesis_configuration))(),
+  genesis_configuration_v2_ = artifact.genesis_configuration_v2;
+  CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
+               std::move(artifact.genesis_configuration_v2))(),
            DbSchedResult::DbSchedResultOK);
   maybe_inject_post_genesis_failure();
 
@@ -925,10 +944,6 @@ HogDevnodeNode::materialize_bootstrap_accounts(
 void
 HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
 {
-  if (txs.empty()) {
-    return;
-  }
-
   auto client_res =
       create_client<SchedulerCoord1>(bind_host_,
                                      mempool_coord_server_.port())();
@@ -936,22 +951,21 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
     panic("devnode commit_initialization_batch connect failed: {}",
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
-  client.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
-
   SchedulerGetTipResult tip = client.schedcoord_get_tip()();
   CHECK_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-
-  SchedulerProposalResult proposal =
-      client.schedulercoord_propose_block(tip.db_tip().id, ProposalContext{})();
-  CHECK_EQ(proposal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
-  ConsensusValue value{};
-  value.prev_hash = sha256(tip.db_tip().value);
-  value.proposal_header = proposal.proposed_block().proposal.header;
-  value.proposal_txs_hash = proposal_txs_compatibility_hash(
-      proposal.proposed_block().proposal.transactions);
-  CHECK_EQ(client.schedulercoord_commit_block(
-               proposal.proposed_block().block_id, value)(),
-           SchedulerCommitOutcome::SchedulerCommitOK);
+  ParallelSignedTransactionBatch parallel = t_to_parallel_batch(txs)();
+  GenesisCeremonyRequest request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(tip.db_tip().value),
+      .expected_batch_hash = sha256(parallel),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = std::move(parallel),
+  };
+  GenesisCeremonyResult result =
+      client.schedulercoord_commit_genesis_ceremony(std::move(request))();
+  CHECK(result.outcome() == GenesisCeremonyOutcome::GenesisCeremonyCommitted ||
+        result.outcome() ==
+            GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
 }
 
 void
@@ -1024,7 +1038,12 @@ HogDevnodeNode::open_db_backend() const
   if (RPCContext::has_committed_tip(*recovered_tip) &&
       recovered_tip->value.proposal_header.network_hash != network_hash_) {
     ProposalHeader &header = recovered_tip->value.proposal_header;
-    if (header.block_height == 0 && header.network_hash == NetworkHash{}) {
+    HogDbStatus<DeployedContractHash> root =
+        db.read_address_metadata(kGenesisRootContractAddress);
+    const bool is_legacy_genesis =
+        root && root->contract_type == ContractType::kNative;
+    if (header.block_height <= 1 && header.network_hash == NetworkHash{} &&
+        is_legacy_genesis) {
       header.network_hash = network_hash_;
       if (HogDbStatus<void> status = db.write_dbtip(*recovered_tip); !status) {
         status.error().raise("failed to migrate genesis network hash");

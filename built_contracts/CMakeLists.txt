@@ -254,6 +254,7 @@ add_wasm_builds(
     default_wallet
     dev_wallet
     deploy_and_transfer
+    genesis_root
     read_only_test
     manual_revert_test
     manual_revert_caller
@@ -309,7 +310,7 @@ gtest_discover_tests(contract_loader_test)
 #   - nocontract_wallet: client-stub-only crate, not built for either target.
 #   - cxs_roundtrip, txs_roundtrip: their image overflows the rv32 RAM region
 #     (rust-lld: "section will not fit in region 'RAM'").
-message(STATUS "RV32 contracts: building 27 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
+message(STATUS "RV32 contracts: building 28 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
 add_riscv_builds(
   CONTRACTS
     fibonacci
@@ -317,6 +318,7 @@ add_riscv_builds(
     default_wallet
     dev_wallet
     deploy_and_transfer
+    genesis_root
     read_only_test
     manual_revert_test
     manual_revert_caller
@@ -379,6 +381,7 @@ add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.
 add_contract_header(default_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/default_wallet.hh")
 add_contract_header(dev_wallet)
 add_contract_header(deploy_and_transfer)
+add_contract_header(genesis_root)
 add_contract_header(read_only_test)
 add_contract_header(manual_revert_test "${CURRENT_RELATIVE_SOURCE_DIR}/manual_revert_test.hh")
 add_contract_header(manual_revert_caller)

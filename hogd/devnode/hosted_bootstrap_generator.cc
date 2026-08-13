@@ -179,36 +179,22 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
   w.field("balance_cost", uint64_string(model.balance_cost));
 }
 
-void
-write_int128_xdr(json::Writer &w, int128_xdr const &value)
-{
-  w.field("highbits", static_cast<std::int64_t>(value.highbits));
-  w.field("lowbits", uint64_string(value.lowbits));
-}
-
 std::string
-build_genesis_json(GenesisConfiguration const &genesis)
+build_genesis_json(GenesisConfigurationV2 const &genesis)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.array_field("initial_config", [&](json::Writer &w) {
-      for (InitialConfigurationEntry const &entry : genesis.initial_config) {
-        w.object([&](json::Writer &w) {
-          w.object_field("config", [&](json::Writer &w) {
-            w.field("initial_nonce", xdr_hex(entry.config.initial_nonce));
-            w.field("contract_hash", xdr_hex(entry.config.contract_hash));
-            w.field("entrypoint", xdr_hex(entry.config.entrypoint));
-            w.field("calldata",
-                    xdr_hex(std::as_bytes(std::span(entry.config.calldata))));
-          });
-          w.object_field("amount", [&](json::Writer &w) {
-            write_int128_xdr(w, entry.amount);
-          });
-        });
-      }
-    });
+    w.field("network_hash", xdr_hex(genesis.network_hash));
     w.object_field("storage_cost_model", [&](json::Writer &w) {
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
+    });
+    w.object_field("root_contract", [&](json::Writer &w) {
+      w.field("contract_type",
+              std::format("{}", genesis.root_contract.contract_type()));
+      w.object_field("rv32_contract", [&](json::Writer &w) {
+        w.field("data", xdr_hex(std::as_bytes(std::span(
+                            genesis.root_contract.rv32_contract().data))));
+      });
     });
     w.object_field("default_wallet", [&](json::Writer &w) {
       w.field("hash", xdr_hex(genesis.default_wallet.hash));
@@ -232,7 +218,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
-      artifact.genesis_configuration.storage_cost_model);
+      artifact.genesis_configuration_v2.storage_cost_model);
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -490,12 +476,17 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
 
   HostedBootstrapArtifact artifact{
       .genesis_configuration = std::move(*genesis_configuration),
-      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .genesis_configuration_v2 =
+          builder.build_v2(config.network_hash,
+                           StorageCostModel::default_cost_model(),
+                           *load_stock_genesis_root_contract()),
+      .initialization_txs = builder.make_genesis_ceremony_transactions(
+          StorageCostModel::default_cost_model()),
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),
   };
-  artifact.genesis_hash = sha256(artifact.genesis_configuration);
-  artifact.genesis_json = build_genesis_json(artifact.genesis_configuration);
+  artifact.genesis_hash = sha256(artifact.genesis_configuration_v2);
+  artifact.genesis_json = build_genesis_json(artifact.genesis_configuration_v2);
   artifact.metadata_json = build_metadata_json(config, artifact);
   return artifact;
 }

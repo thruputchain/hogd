@@ -59,7 +59,9 @@ derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
 }
 
 BootstrapAccountArtifact
-build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
+build_bootstrap_account_artifact(BootstrapAccountConfig const &config,
+                                 NetworkHash const &network_hash,
+                                 StorageCostModel const &cost_model)
 {
   GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts =
@@ -69,7 +71,7 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
   // is a reportable input error. devnode's main() turns this into a clean
   // message; it still reports failures by exception (see hogd #3001).
   std::optional<GenesisConfiguration> genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build(cost_model);
   if (!genesis_configuration) {
     throw std::runtime_error("bootstrap accounts allocate more hogs than the "
                              "initial hog token supply");
@@ -77,7 +79,11 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
 
   return BootstrapAccountArtifact{
       .genesis_configuration = std::move(*genesis_configuration),
-      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .genesis_configuration_v2 =
+          builder.build_v2(network_hash, cost_model,
+                           *load_stock_genesis_root_contract()),
+      .initialization_txs =
+          builder.make_genesis_ceremony_transactions(cost_model),
       .accounts = std::move(accounts),
   };
 }

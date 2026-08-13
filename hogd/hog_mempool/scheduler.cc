@@ -765,8 +765,32 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // then calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
   const auto &[_, missing] = co_await read_average_hog_ages(transfers);
-  if (!transfers.deltas.empty()) {
-    CHECK(missing.empty());
+
+  // A balance can be created without a pre-existing HogAge row. This is most
+  // visible during the genesis ceremony, where mint creates the first balance
+  // for each allocation recipient, but it is also the natural behavior for
+  // any account receiving HOGs for the first time. Seed those accounts with an
+  // empty HogAge; process_transfers_helper() below puts the received balance in
+  // the received group at this block's height.
+  //
+  // Aggregate missing-account deltas for validation in case more than one DB
+  // shard reports a delta for the same address. A missing account cannot have
+  // a zero or negative final balance.
+  std::unordered_map<ContractAddress, int128_t, SipHash24Hasher>
+      missing_account_deltas;
+  for (const Delta &delta : transfers.deltas) {
+    if (!missing.contains(delta.address)) {
+      continue;
+    }
+    int128_t &total = missing_account_deltas[delta.address];
+    CHECK(!integer_add_overflow(total, from_xdr(delta.hog_delta), &total));
+  }
+  for (const ContractAddress &account : missing) {
+    const auto delta_it = missing_account_deltas.find(account);
+    CHECK(delta_it != missing_account_deltas.end());
+    CHECK_GT(delta_it->second, static_cast<int128_t>(0));
+    auto [account_state, lock] = accounts_[account];
+    account_state.hog_age.address = account;
   }
 
   const std::vector<ChunkRange> chunks =

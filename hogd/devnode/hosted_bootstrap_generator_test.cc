@@ -134,14 +134,8 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   std::expected<json::Value, json::ParseError> genesis =
       json::parse(artifact.genesis_json);
   ASSERT_TRUE(genesis.has_value()) << genesis.error().message;
-  ASSERT_EQ(require_field(*genesis, "initial_config").as_array().size(), 2UL);
-  const json::Value &first_config = require_field(
-      require_field(require_field(*genesis, "initial_config").as_array()[0],
-                    "config"),
-      "contract_hash");
-  std::string_view first_config_string = require_string(first_config);
-  EXPECT_EQ(first_config_string.size(), 64UL);
-  EXPECT_FALSE(first_config_string.starts_with("0x"));
+  EXPECT_EQ(require_string(require_field(*genesis, "network_hash")),
+            "0000000000000000000000000000000000000000000000000000000000000001");
   EXPECT_EQ(require_string(
                 require_field(require_field(*genesis, "storage_cost_model"),
                               "bytestring_cost_per_byte")),
@@ -157,6 +151,13 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
             std::optional<std::int64_t>{0});
   EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),
             "kNative");
+  const json::Value &root_contract = require_field(*genesis, "root_contract");
+  EXPECT_EQ(require_string(require_field(root_contract, "contract_type")),
+            "kRv32");
+  EXPECT_FALSE(
+      require_string(
+          require_field(require_field(root_contract, "rv32_contract"), "data"))
+          .empty());
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);

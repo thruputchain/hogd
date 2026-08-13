@@ -15,6 +15,7 @@ members = [
     "integration_test_contracts/fibonacci",
     "integration_test_contracts/fibonacci_call",
     "integration_test_contracts/fibonacci_raw",
+    "integration_test_contracts/genesis_root",
     "integration_test_contracts/hash_bug",
     "integration_test_contracts/htlc",
     "integration_test_contracts/initial_token_claim",

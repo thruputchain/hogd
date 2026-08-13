@@ -688,6 +688,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "genesis_root"
+version = "0.1.0"
+dependencies = [
+ "genesis_root",
+ "groundhog-erc20-if",
+ "sdk",
+]
+
+[[package]]
 name = "itc_erc20"
 version = "0.2.0"
 dependencies = [

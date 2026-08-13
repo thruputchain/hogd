@@ -32,6 +32,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/block_tx.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -481,6 +482,129 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   StorageLongHash full_hash = ctx_.get_db().compute_full_db_hash();
   CHECK_EQ(full_hash, db_hash);
   co_return ret;
+}
+
+x23::Async<DbSchedResult>
+HogDbSchedRpc::dbsched_load_genesis_configuration_v2(
+    GenesisConfigurationV2 genesis_configuration, ConsensusValue value)
+{
+  constexpr BlockID kGenesisBlockID = 0;
+  constexpr BlockHeight kGenesisBlockHeight = 0;
+  if (ctx_.get_tip().value.proposal_header.block_height != -1) {
+    error("Genesis block can only be loaded if the database has no blocks");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (value.proposal_header.block_height != kGenesisBlockHeight ||
+      value.proposal_header.network_hash !=
+          genesis_configuration.network_hash) {
+    error("invalid V2 genesis height or network hash");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  GenesisConfigurationV2Loader loader(genesis_configuration);
+  if (!loader.valid()) {
+    error("V2 genesis root contract must be a non-empty RV32 artifact");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  ctx_.set_default_wallet(genesis_configuration.default_wallet);
+  ctx_.initialize_cost_model(
+      StorageCostModel(genesis_configuration.storage_cost_model));
+  if (auto write = ctx_.get_db().write_cost_model(ctx_.get_cost_model());
+      !write) {
+    error("failed to write V2 genesis cost model: {}", write.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  // These fixed rows are protocol-created state. The empty replay metadata is
+  // essential for concurrent ceremony transactions: each one then reserves
+  // only its incremental nonce-entry cost and can mint that amount in-body.
+  if (auto write =
+          ctx_.get_db().write_address_balance(kGenesisRootContractAddress, 0);
+      !write) {
+    error("failed to write V2 genesis root balance: {}", write.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (auto write = ctx_.get_db().write_address_replay_cache_meta(
+          kGenesisRootContractAddress, ReplayCacheMetadata{});
+      !write) {
+    error("failed to write V2 genesis root replay metadata: {}", write.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (auto write = ctx_.get_db().write_nnint128(
+          ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey), 0);
+      !write) {
+    error("failed to write V2 genesis native supply: {}", write.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  // Height-0 rows are protocol-created state, not economically funded
+  // transaction writes. Install them directly before opening the empty
+  // genesis BlockTX; otherwise deployment/auth storage costs would be charged
+  // to the deliberately zero-balance root.
+  bool failure = false;
+  loader.load_genesis_configuration(
+      [&](auto const &contract) {
+        const auto bytes = x23::serialize(*contract);
+        if (auto r =
+                ctx_.get_db().write_wasm_code(sha256(*contract),
+                                              std::as_bytes(std::span(bytes)));
+            !r) {
+          error("failed to write V2 genesis contract: {}", r.error());
+          failure = true;
+        }
+      },
+      [&](ContractAddress const &address, DeployedContractHash const &hash) {
+        if (auto r = ctx_.get_db().write_address_metadata(address, hash); !r) {
+          error("failed to write V2 genesis deployment: {}", r.error());
+          failure = true;
+        }
+      },
+      [&](ContractAddress const &address, AddressAuthData const &auth) {
+        if (auto r = ctx_.get_db().write_address_auth_data(address, auth); !r) {
+          error("failed to write V2 genesis auth: {}", r.error());
+          failure = true;
+        }
+      });
+  if (failure) {
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  const StorageLongHash base_hash = ctx_.get_db().compute_full_db_hash();
+  auto block =
+      ctx_.open_block_tx(kGenesisBlockID,
+                         BlockExecutionMode::kBlockExecutionModeProposal);
+  if (!block) {
+    error("failed to open V2 genesis block: {}", block.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+
+  InvokeTX *itx = ctx_.get_invoke_tx(kGenesisBlockID, 0);
+  CHECK_PTR(itx);
+  if (auto sync = itx->sync_balance_locks(); !sync) {
+    error("failed to sync V2 genesis balance locks: {}", sync.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  if (auto commit = itx->commit(); !commit) {
+    error("failed to commit V2 genesis transaction: {}", commit.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  auto db_hash_result = block.value()->get().close(base_hash);
+  if (!db_hash_result) {
+    error("V2 genesis close failed: {}", db_hash_result.error());
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  const StorageLongHash db_hash = *db_hash_result;
+  ctx_.close_invoke_tx(kGenesisBlockID, 0, itx);
+  value.proposal_header.storage_hash =
+      sha256(std::as_bytes(std::span(db_hash)));
+  const DbSchedResult result = to_db_result(
+      commit_block(kGenesisBlockID, std::move(value), block.value(), db_hash));
+  if (result == DbSchedResult::DbSchedResultOK) {
+    co_await Health::instance().set_current_block_height(kGenesisBlockHeight);
+  }
+  CHECK_EQ(ctx_.get_db().compute_full_db_hash(), db_hash);
+  co_return result;
 }
 
 x23::Async<DbShardResult>
