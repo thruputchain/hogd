@@ -755,8 +755,8 @@ protected:
             ADD_FAILURE() << "try_invoke was rejected before running child";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE() << "try_invoke should have reported inner failure";
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -853,8 +853,8 @@ protected:
             ADD_FAILURE() << "try_invoke was rejected before running child";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r2_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE() << "try_invoke should have reported inner failure";
+          if (r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -963,7 +963,7 @@ protected:
             return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Expect conflict when concurrent insert exists
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "try_invoke delete should have conflicted";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1079,14 +1079,22 @@ protected:
             ADD_FAILURE() << "System error on try_invoke insert";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE() << "try_invoke should have reported inner failure";
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1117,6 +1125,7 @@ protected:
         37,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t real_val) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
@@ -1126,11 +1135,18 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(revert_val),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1201,8 +1217,8 @@ protected:
             ADD_FAILURE() << "try_invoke was rejected before running child";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE() << "try_invoke should have reported inner failure";
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1254,8 +1270,8 @@ protected:
             ADD_FAILURE() << "try_invoke was rejected before running child";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE() << "try_invoke should have reported inner failure";
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1282,95 +1298,88 @@ protected:
         });
 
     // Method 40: inner_consume_revert_twice_then_consume(value)
-    builder
-        .add<SerializationFormat::kTxs>(
-            40,
-            [](NativeSyscallContext &ctx,
-               uint32_t value) -> InvokeStatus<void> {
-              // first reverted consume
-              CopyableInvokeOutputs r1_outputs{};
-              auto r1 = [&]() {
-                CopyableInvokeInputs inputs{
-                    .entrypoint_id = 35,
-                    .gas_limit = std::numeric_limits<GasAmount>::max(),
-                    .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                };
-                return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                       x23::serialize(value),
-                                                       std::span<uint32_t>{},
-                                                       inputs, r1_outputs);
-              }();
-              if (!r1.has_value()) {
-                ADD_FAILURE() << "System error on try_invoke consume (1st)";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
-              // The child ran (so the syscall returns None); it must have
-              // rolled back (revert or fault) rather than committed.
-              if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                ADD_FAILURE()
-                    << "try_invoke was rejected before running child (1st)";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
-              if (r1_outputs.frame_status ==
-                  InvocationFrameStatusCode::Return) {
-                ADD_FAILURE()
-                    << "try_invoke should have reported inner failure (1st)";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
+    builder.add<SerializationFormat::kTxs>(
+        40,
+        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          // first reverted consume
+          CopyableInvokeOutputs r1_outputs{};
+          auto r1 = [&]() {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 35,
+                .gas_limit = std::numeric_limits<GasAmount>::max(),
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs, r1_outputs);
+          }();
+          if (!r1.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume (1st)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // The child ran (so the syscall returns None); it must have
+          // rolled back (revert or fault) rather than committed.
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE()
+                << "try_invoke was rejected before running child (1st)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault (1st)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-              // second reverted consume
-              CopyableInvokeOutputs r2_outputs{};
-              auto r2 = [&]() {
-                CopyableInvokeInputs inputs{
-                    .entrypoint_id = 35,
-                    .gas_limit = std::numeric_limits<GasAmount>::max(),
-                    .flags = std::to_underlying(InvokeFlag::TryInvoke),
-                };
-                return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                       x23::serialize(value),
-                                                       std::span<uint32_t>{},
-                                                       inputs, r2_outputs);
-              }();
-              if (!r2.has_value()) {
-                ADD_FAILURE() << "System error on try_invoke consume (2nd)";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
-              // The child ran (so the syscall returns None); it must have
-              // rolled back (revert or fault) rather than committed.
-              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                ADD_FAILURE()
-                    << "try_invoke was rejected before running child (2nd)";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
-              if (r2_outputs.frame_status ==
-                  InvocationFrameStatusCode::Return) {
-                ADD_FAILURE()
-                    << "try_invoke should have reported inner failure (2nd)";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
+          // second reverted consume
+          CopyableInvokeOutputs r2_outputs{};
+          auto r2 = [&]() {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 35,
+                .gas_limit = std::numeric_limits<GasAmount>::max(),
+                .flags = std::to_underlying(InvokeFlag::TryInvoke),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs, r2_outputs);
+          }();
+          if (!r2.has_value()) {
+            ADD_FAILURE() << "System error on try_invoke consume (2nd)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          // The child ran (so the syscall returns None); it must have
+          // rolled back (revert or fault) rather than committed.
+          if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE()
+                << "try_invoke was rejected before running child (2nd)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault (2nd)";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-              // entry should still be available
-              auto r3 = [&]() {
-                CopyableInvokeInputs inputs{
-                    .entrypoint_id = 1,
-                    .gas_limit = std::numeric_limits<GasAmount>::max(),
-                    .flags = std::to_underlying(InvokeFlag::None),
-                };
-                return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                       x23::serialize(value),
-                                                       std::span<uint32_t>{},
-                                                       inputs,
-                                                       CopyableInvokeOutputs{});
-              }();
-              if (!r3.has_value() ||
-                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                ADD_FAILURE()
-                    << "Failed to consume after two reverted consumes";
-                return InvokeError{InvokeErrorCode::Deterministic};
-              }
+          // entry should still be available
+          auto r3 = [&]() {
+            CopyableInvokeInputs inputs{
+                .entrypoint_id = 1,
+                .gas_limit = std::numeric_limits<GasAmount>::max(),
+                .flags = std::to_underlying(InvokeFlag::None),
+            };
+            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                   x23::serialize(value),
+                                                   std::span<uint32_t>{},
+                                                   inputs,
+                                                   CopyableInvokeOutputs{});
+          }();
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to consume after two reverted consumes";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-              return {};
-            });
+          return {};
+        });
 
     // Method 41:
     // inner_consume_insert_revert_then_consume_and_empty(consume_val,
@@ -1401,8 +1410,8 @@ protected:
             ADD_FAILURE() << "try_invoke was rejected before running child";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
-            ADD_FAILURE() << "try_invoke should have reported inner failure";
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1453,38 +1462,15 @@ protected:
         42,
         [](NativeSyscallContext &ctx, uint32_t consume_val,
            uint32_t insert_val) -> InvokeStatus<void> {
-          auto r1 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(consume_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r1.has_value() ||
-              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to consume in consume_insert_and_fail";
+          // Runs as the TryInvoke'd child, so its own operations are in-frame:
+          // invoking this contract again from here would be reentrant even
+          // with an orchestrator driving the outer frame.
+          if (!rcq_consume_expect(ctx, consume_val)) {
+            ADD_FAILURE() << "Failed to consume " << consume_val
+                          << " in consume_insert_and_fail";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-
-          auto r2 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(insert_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r2.has_value() ||
-              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          if (!rcq_insert(ctx, insert_val)) {
             ADD_FAILURE() << "Failed to insert in consume_insert_and_fail";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1497,6 +1483,7 @@ protected:
         43,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
            uint32_t concurrent_val) -> InvokeStatus<void> {
+          CopyableInvokeOutputs r1_outputs{};
           auto r1 = [&]() {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
@@ -1506,11 +1493,18 @@ protected:
             return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
                                                    x23::serialize(revert_val),
                                                    std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+                                                   inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "try_invoke was rejected before running child";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the child frame to fault";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -2096,30 +2090,52 @@ protected:
   template<x23::is_xdr_type... Args>
   void invoke_method(Runtime::MethodID method, Args const &...args)
   {
-    invoke_method_impl(false, method, args...);
+    invoke_method_impl(kContractAddress, method, args...);
   }
 
-  // Same, for the methods that still reach one of this contract's own
-  // entrypoints via kInvoke -- the reentrance guard rejects that, so these
-  // call sites need the bypass until they are restructured.
-  // TODO(geoff): remove along with the rest of #1382.
+  // Runs `method` at kContractAddress2 instead, as an orchestrator.
+  //
+  // A note on what these tests do and do not cover. There are two kinds of
+  // TryInvoke'd child here:
+  //
+  //  - Children 25, 34, 35 and 42 do their RCQ work and then fail on purpose.
+  //    InvocationFrameStack::finish_frame only takes its TryInvoke path when
+  //    the frame *succeeds* and was not manually reverted, so for these the
+  //    flag is inert: the rollback observed is frame-failure rollback, and
+  //    removing InvokeFlag::TryInvoke does not change the outcome.
+  //
+  //  - Child 31 succeeds. That is the case TryInvoke actually governs: the
+  //    lock probe for its writes runs, conflicts with the concurrent insert,
+  //    and rewrites the frame result, so the child comes back Fault. Method 32
+  //    drives it, and TryInvokeDeleteConflictsWithConcurrentInsert is the one
+  //    test in this file that fails if the flag is removed.
+  //
+  // The methods that drive a TryInvoke'd child frame do no storage work
+  // themselves -- every RCQ operation happens in a frame they invoke at
+  // kContractAddress. Running the orchestrating frame at a second address
+  // keeps all of those operations on kContractAddress's queue, including the
+  // one inside the frame that gets reverted, while never putting the same
+  // address on the invocation stack twice.
+  //
+  // The children must stay real invokes for this: they are what the TryInvoke
+  // reverts, and they have to execute at kContractAddress so they act on that
+  // queue rather than the orchestrator's.
   template<x23::is_xdr_type... Args>
-  void invoke_method_allow_reentrance(Runtime::MethodID method,
-                                      Args const &...args)
+  void invoke_method_orchestrated(Runtime::MethodID method, Args const &...args)
   {
-    invoke_method_impl(true, method, args...);
+    invoke_method_impl(kContractAddress2, method, args...);
   }
 
   template<x23::is_xdr_type... Args>
-  void invoke_method_impl(bool allow_reentrance, Runtime::MethodID method,
-                          Args const &...args)
+  void invoke_method_impl(ContractAddress const &root_address,
+                          Runtime::MethodID method, Args const &...args)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = kContractAddress,
+                        Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
                                    .gas_limit = UINT64_MAX,
@@ -2127,10 +2143,6 @@ protected:
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
-
-    if (allow_reentrance) {
-      handler.hack_dont_use_test_bypass_allow_reentrance();
-    }
 
     auto r = handler.root_invoke();
     ASSERT_TRUE(r.is_root_success());
@@ -2141,20 +2153,11 @@ protected:
   template<x23::is_xdr_type... Args>
   void invoke_method_fail_commit(Runtime::MethodID method, Args const &...args)
   {
-    invoke_method_fail_commit_impl(false, method, args...);
-  }
-
-  // See invoke_method_allow_reentrance.
-  // TODO(geoff): remove along with the rest of #1382.
-  template<x23::is_xdr_type... Args>
-  void invoke_method_fail_commit_allow_reentrance(Runtime::MethodID method,
-                                                  Args const &...args)
-  {
-    invoke_method_fail_commit_impl(true, method, args...);
+    invoke_method_fail_commit_impl(kContractAddress, method, args...);
   }
 
   template<x23::is_xdr_type... Args>
-  void invoke_method_fail_commit_impl(bool allow_reentrance,
+  void invoke_method_fail_commit_impl(ContractAddress const &root_address,
                                       Runtime::MethodID method,
                                       Args const &...args)
   {
@@ -2163,7 +2166,7 @@ protected:
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = kContractAddress,
+                        Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
                                    .gas_limit = UINT64_MAX,
@@ -2171,10 +2174,6 @@ protected:
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
-
-    if (allow_reentrance) {
-      handler.hack_dont_use_test_bypass_allow_reentrance();
-    }
 
     auto r = handler.root_invoke();
     ASSERT_TRUE(r.is_root_success());
@@ -2214,6 +2213,19 @@ protected:
 
   testing::AssertionResult check_rcq_empty()
   {
+    // The orchestrated tests depend on kContractAddress2 doing no storage work
+    // of its own: a stray in-frame RCQ call in one of those methods would act
+    // on the orchestrator's queue, and every assertion here inspects
+    // kContractAddress's. Checked from here rather than from
+    // invoke_method_orchestrated because DB reads only see the write after
+    // advance_block(), which callers do before reaching this.
+    if (lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2))
+            .has_value()) {
+      return testing::AssertionFailure()
+             << "orchestrator address has a queue: a method meant to only "
+                "invoke did RCQ work in its own frame";
+    }
+
     auto queue = lookup_storage_item_from_db(get_queue_addrkey());
     if (GetParam() == TestDB::kHogDb) {
       // On HogDb, metadata is removed when live_entries drops to 0.
@@ -2797,7 +2809,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
 {
   insert(42);
-  invoke_method_allow_reentrance(26, uint32_t{42});
+  invoke_method_orchestrated(26, uint32_t{42});
 
   advance_block();
 
@@ -2812,7 +2824,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 
   advance_block();
 
-  invoke_method_allow_reentrance(26, uint32_t{42});
+  invoke_method_orchestrated(26, uint32_t{42});
 
   advance_block();
 
@@ -2824,7 +2836,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 {
   insert(99); // concurrent
-  invoke_method_allow_reentrance(29, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(29, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2837,7 +2849,7 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
   insert(42); // concurrent insert creates conflicting lock
-  invoke_method_allow_reentrance(32, uint32_t{42});
+  invoke_method_orchestrated(32, uint32_t{42});
 
   advance_block();
 
@@ -2903,7 +2915,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 // queue should remain empty.
 TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 {
-  invoke_method_allow_reentrance(36, uint32_t{42});
+  invoke_method_orchestrated(36, uint32_t{42});
 
   advance_block();
 
@@ -2917,7 +2929,7 @@ TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 // normally. Only the successful entry is consumable.
 TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 {
-  invoke_method_allow_reentrance(37, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(37, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2929,7 +2941,7 @@ TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 {
   insert(99); // concurrent
-  invoke_method_allow_reentrance(43, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(43, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2943,7 +2955,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 
   advance_block();
 
-  invoke_method_allow_reentrance(43, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(43, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -2955,7 +2967,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(38, uint32_t{42});
+  invoke_method_orchestrated(38, uint32_t{42});
 
   advance_block();
 
@@ -2969,7 +2981,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 
   advance_block();
 
-  invoke_method_allow_reentrance(38, uint32_t{42});
+  invoke_method_orchestrated(38, uint32_t{42});
 
   advance_block();
 
@@ -2980,7 +2992,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(39, uint32_t{42});
+  invoke_method_orchestrated(39, uint32_t{42});
 
   advance_block();
 
@@ -2995,7 +3007,7 @@ TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(40, uint32_t{42});
+  invoke_method_orchestrated(40, uint32_t{42});
 
   advance_block();
 
@@ -3007,7 +3019,7 @@ TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 {
   insert(42); // concurrent
-  invoke_method_allow_reentrance(41, uint32_t{42}, uint32_t{99});
+  invoke_method_orchestrated(41, uint32_t{42}, uint32_t{99});
 
   advance_block();
 
@@ -3315,9 +3327,6 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   }
   {
     auto handler = make_new_system_call_handler(tx_delete_recreate, *context_);
-    // Method 28 reaches this contract's own entrypoints via kInvoke.
-    // TODO(geoff): remove along with the rest of #1382.
-    handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     delete_recreate_proposal_data = handler.get_proposal_data();
     ASSERT_EQ(delete_recreate_proposal_data.nondeterministic_bit_count, 1U);
@@ -3339,8 +3348,6 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
     auto handler =
         make_new_system_call_handler_validation(tx_delete_recreate, *context_,
                                                 delete_recreate_proposal_data);
-    // TODO(geoff): remove along with the rest of #1382.
-    handler.hack_dont_use_test_bypass_allow_reentrance();
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
