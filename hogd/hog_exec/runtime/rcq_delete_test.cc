@@ -2072,12 +2072,108 @@ protected:
           return {};
         });
 
+    // Method 68: TryInvoke a *successful* insert into kContractAddress3, then
+    // fail this frame. The TryInvoke succeeded on its own terms, so its writes
+    // were probed and committed into this frame -- and this frame then
+    // reverts, which must discard them.
+    builder.add<SerializationFormat::kTxs>(
+        68,
+        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs outs{};
+          CopyableInvokeInputs in{
+              .entrypoint_id = 0,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress3,
+                                              x23::serialize(value),
+                                              std::span<uint32_t>{}, in, outs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "System error on nested try_invoke insert";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (outs.frame_status != InvocationFrameStatusCode::Return) {
+            ADD_FAILURE() << "nested try_invoke insert should have succeeded";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          // Revert this frame, discarding the insert the TryInvoke committed
+          // into it.
+          return InvokeError{InvokeErrorCode::Deterministic};
+        });
+
+    // Method 69: orchestrator for 68. Invokes it and expects it to fault.
+    builder.add<SerializationFormat::kTxs>(
+        69,
+        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+          CopyableInvokeOutputs outs{};
+          CopyableInvokeInputs in{
+              .entrypoint_id = 68,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(value),
+                                              std::span<uint32_t>{}, in, outs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "System error invoking the reverting frame";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (outs.frame_status != InvocationFrameStatusCode::Fault) {
+            ADD_FAILURE() << "expected the reverting frame to fault";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
+    // Method 70: try_invoke_child(child_entrypoint, value, expect_fault).
+    // TryInvokes child_entrypoint(value) at kContractAddress and checks the
+    // frame outcome: Return means the lock probe committed the child's writes
+    // into this frame; Fault (expect_fault != 0) means the probe conflicted
+    // and rolled the child back.
+    builder.add<SerializationFormat::kTxs>(
+        70,
+        [](NativeSyscallContext &ctx, uint32_t child_entrypoint, uint32_t value,
+           uint32_t expect_fault) -> InvokeStatus<void> {
+          CopyableInvokeOutputs outs{};
+          CopyableInvokeInputs in{
+              .entrypoint_id = child_entrypoint,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::TryInvoke),
+          };
+          auto r =
+              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                              x23::serialize(value),
+                                              std::span<uint32_t>{}, in, outs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "System error on try_invoke";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto expected = expect_fault != 0 ? InvocationFrameStatusCode::Fault
+                                            : InvocationFrameStatusCode::Return;
+          if (outs.frame_status != expected) {
+            ADD_FAILURE() << "try_invoke child entrypoint " << child_entrypoint
+                          << ": expected "
+                          << (expect_fault != 0 ? "Fault" : "Return");
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
   }
 
   constexpr static ContractAddress kContractAddress2 = make_contract_address(1);
+  // Third address, so a frame can TryInvoke a contract that is neither itself
+  // nor the orchestrator driving it.
+  constexpr static ContractAddress kContractAddress3 = make_contract_address(2);
 
   static AddressAndKey get_queue_addrkey_for(ContractAddress const &addr)
   {
@@ -2095,6 +2191,8 @@ protected:
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
     write_deployment(kContractAddress2, contract_0);
     setup_grant_storage_token(kContractAddress2, 1'000'000'000);
+    write_deployment(kContractAddress3, contract_0);
+    setup_grant_storage_token(kContractAddress3, 1'000'000'000);
     context_ = make_context();
 
     wait_flag_1_ = false;
@@ -2118,18 +2216,20 @@ protected:
   //    flag is inert: the rollback observed is frame-failure rollback, and
   //    removing InvokeFlag::TryInvoke does not change the outcome.
   //
-  //  - Child 31 succeeds. That is the case TryInvoke actually governs: the
-  //    lock probe for its writes runs, conflicts with the concurrent insert,
-  //    and rewrites the frame result, so the child comes back Fault. Method 32
-  //    drives it, and TryInvokeDeleteConflictsWithConcurrentInsert is the one
-  //    test in this file that fails if the flag is removed.
+  //  - Children that succeed in-frame are the case TryInvoke actually
+  //    governs: the lock probe for their writes runs and either commits them
+  //    into the caller or rewrites the frame result to Fault. Child 31
+  //    (driven by method 32), children 0 and 1 (driven by method 70), and
+  //    child 0 at kContractAddress3 (driven by method 68) are all of this
+  //    kind; the tests built on them fail if the flag is removed.
   //
   // The methods that drive a TryInvoke'd child frame do no storage work
   // themselves -- every RCQ operation happens in a frame they invoke at
-  // kContractAddress. Running the orchestrating frame at a second address
-  // keeps all of those operations on kContractAddress's queue, including the
-  // one inside the frame that gets reverted, while never putting the same
-  // address on the invocation stack twice.
+  // kContractAddress (method 68's TryInvoke'd insert is the one exception:
+  // it targets kContractAddress3 so the reverting frame in between is not
+  // reentrant). Running the orchestrating frame at a second address keeps
+  // those operations off the orchestrator's queue while never putting the
+  // same address on the invocation stack twice.
   //
   // The children must stay real invokes for this: they are what the TryInvoke
   // reverts, and they have to execute at kContractAddress so they act on that
@@ -2195,6 +2295,23 @@ protected:
     ASSERT_NE(res, ExecResult::ExecResultOK);
   }
 
+  // Transaction builder for tests that drive SystemCallHandler directly
+  // (the ProposalValidation tests) instead of going through
+  // invoke_method_impl. Several older tests still carry a local lambda with
+  // this exact shape; new tests should use this member.
+  template<x23::is_xdr_type... Args>
+  Transaction make_tx(ContractAddress const &addr, Runtime::MethodID method,
+                      Args const &...args)
+  {
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = addr,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(method),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = x23::serialize(args...)},
+                       .uniquifier = make_new_uniquifier()};
+  }
+
   void insert(uint32_t value) { invoke_method(0, value); }
 
   void set_bytestring(Bytestring const &bytestring)
@@ -2230,14 +2347,18 @@ protected:
     // The orchestrated tests depend on kContractAddress2 doing no storage work
     // of its own: a stray in-frame RCQ call in one of those methods would act
     // on the orchestrator's queue, and every assertion here inspects
-    // kContractAddress's. Checked from here rather than from
+    // kContractAddress's. kContractAddress3 gets the same guard: the only
+    // method that writes there (68) always reverts, so a committed queue at
+    // that address is likewise a stray. Checked from here rather than from
     // invoke_method_orchestrated because DB reads only see the write after
     // advance_block(), which callers do before reaching this.
-    if (lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2))
-            .has_value()) {
-      return testing::AssertionFailure()
-             << "orchestrator address has a queue: a method meant to only "
-                "invoke did RCQ work in its own frame";
+    for (auto const &aux_addr : {kContractAddress2, kContractAddress3}) {
+      if (lookup_storage_item_from_db(get_queue_addrkey_for(aux_addr))
+              .has_value()) {
+        return testing::AssertionFailure()
+               << "auxiliary address has a queue: a method meant to only "
+                  "invoke (or revert) did RCQ work that reached the DB";
+      }
     }
 
     auto queue = lookup_storage_item_from_db(get_queue_addrkey());
@@ -2857,6 +2978,24 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
   ASSERT_TRUE(check_rcq_empty());
 }
 
+// A TryInvoke that succeeds still has its writes discarded if the frame that
+// made it later reverts. The child ran at a third address, so nothing here is
+// reentrant: orchestrator -> kContractAddress (reverts) -> kContractAddress3
+// (the TryInvoke'd insert).
+TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
+{
+  invoke_method_orchestrated(69, uint32_t{42});
+
+  advance_block();
+
+  // The insert happened in a TryInvoke that succeeded, but its caller
+  // reverted, so kContractAddress3's queue must never have received it.
+  ASSERT_FALSE(
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress3))
+          .has_value())
+      << "a reverted frame kept the writes of a successful nested TryInvoke";
+}
+
 // A successful delete inside a try_invoke frame should fail to acquire locks
 // when a concurrent transaction has inserted into the same queue.
 // The delete is reverted due to conflict, and the entry remains consumable.
@@ -2868,6 +3007,104 @@ TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
   advance_block();
 
   ASSERT_TRUE(check_rcq_empty());
+}
+
+// The TryInvoke happy path: an insert in a TryInvoke'd child with nothing to
+// conflict with passes the lock probe, commits into the caller, and the
+// transaction commits it for real. A second transaction in the same block
+// consumes the entry retrocausally, proving the insert landed in the DB
+// rather than only in the child frame.
+TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
+{
+  invoke_method_orchestrated(70, uint32_t{0}, uint32_t{42}, uint32_t{0});
+  invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// A consume of a past-block entry inside a successful TryInvoke commits: the
+// entry is gone from the queue after the block. This is the flow that pushes
+// the item's consume delta twice -- once at the TryInvoke probe and again,
+// cumulatively, at root commit.
+//
+// Skipped on MockDB: the re-push is idempotent on HogDb, but MockDB rejects
+// this transaction's second consume push as a competing consumer (see
+// mockdb/KNOWN_ISSUES.md).
+TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
+                    "mockdb/KNOWN_ISSUES.md)";
+  }
+
+  insert(42);
+
+  advance_block();
+
+  invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{0});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Same, but the consumed entry is a concurrent one from another transaction
+// in the same block, so the consume is a nondeterministic observation made
+// inside the TryInvoke'd frame and then committed through the probe's
+// mid-transaction subtransaction push.
+TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
+                    "mockdb/KNOWN_ISSUES.md)";
+  }
+
+  insert(42); // concurrent
+  invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{0});
+
+  advance_block();
+
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// The insert counterpart of TryInvokeDeleteConflictsWithConcurrentInsert: a
+// concurrent transaction's delete holds the queue's exclusive lock, so a
+// TryInvoke'd insert fails the probe and comes back Fault instead of
+// committing.
+TEST_P(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
+{
+  insert(42);
+
+  advance_block();
+
+  invoke_method(31); // concurrent delete holds the queue's exclusive lock
+  invoke_method_orchestrated(70, uint32_t{0}, uint32_t{99}, uint32_t{1});
+
+  advance_block();
+
+  // The delete won; the TryInvoke'd insert left no trace.
+  ASSERT_FALSE(lookup_storage_item_from_db(get_queue_addrkey()).has_value())
+      << "a conflicted TryInvoke'd insert still reached the queue";
+}
+
+// The consume counterpart: the child consumes a past-block entry successfully
+// in-frame (against the transaction's snapshot, where the concurrent delete
+// is not visible), and the lock probe then conflicts with that delete.
+TEST_P(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
+{
+  insert(42);
+
+  advance_block();
+
+  invoke_method(31); // concurrent delete holds the queue's exclusive lock
+  invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{1});
+
+  advance_block();
+
+  ASSERT_FALSE(lookup_storage_item_from_db(get_queue_addrkey()).has_value())
+      << "a conflicted TryInvoke'd consume left queue state behind";
 }
 
 // After delete+recreate, entries inserted in the same block should be
@@ -3833,6 +4070,106 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
     EXPECT_FALSE(queue.has_value()) << "Queue should be empty (all consumed)";
+  }
+}
+
+// The TryInvoke conflict bit under validation mode. The proposal's lock probe
+// conflicts with a concurrent insert and logs a false nondeterministic bit;
+// validation must consume that bit and fail the child frame the same way,
+// without probing any locks itself.
+TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
+{
+  // Concurrent insert whose lock the TryInvoke'd delete conflicts with.
+  auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
+  // Method 32: TryInvoke delete (expects the conflict) -> consume(42).
+  auto tx_orch = make_tx(kContractAddress2, 32, uint32_t{42});
+
+  NondeterministicProposalData insert_pd;
+  NondeterministicProposalData orch_pd;
+  {
+    auto handler = make_new_system_call_handler(tx_insert, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    insert_pd = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler = make_new_system_call_handler(tx_orch, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    orch_pd = handler.get_proposal_data();
+    // Two bits: the TryInvoke lock probe (false, the conflict) and the
+    // consume of the concurrent entry, which is also observed.
+    ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
+    ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
+                                                           insert_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+}
+
+// A successful TryInvoke under validation mode. The proposal's probe succeeds
+// and logs a true bit; validation consumes it, checks the child's queue
+// observations against its item views, and bumps the frame's TryInvoke depth
+// (note_validation_try_invoke_success) instead of pushing a subtransaction.
+//
+// Skipped on MockDB for the same reason as TryInvokeConsumeCommits: the
+// proposal-phase commit re-pushes the consume delta the probe already pushed.
+TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
+{
+  if (GetParam() == TestDB::kMockInMemory) {
+    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
+                    "mockdb/KNOWN_ISSUES.md)";
+  }
+
+  auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
+  // Method 70: TryInvoke consume(42), expecting the frame to commit (Return).
+  auto tx_orch =
+      make_tx(kContractAddress2, 70, uint32_t{1}, uint32_t{42}, uint32_t{0});
+
+  NondeterministicProposalData insert_pd;
+  NondeterministicProposalData orch_pd;
+  {
+    auto handler = make_new_system_call_handler(tx_insert, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    insert_pd = handler.get_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler = make_new_system_call_handler(tx_orch, *context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    orch_pd = handler.get_proposal_data();
+    // Two bits: the consume of the concurrent entry and the TryInvoke lock
+    // probe (true, no conflict).
+    ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
+    ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
+                                                           insert_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+  {
+    auto handler =
+        make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
   }
 }
 
