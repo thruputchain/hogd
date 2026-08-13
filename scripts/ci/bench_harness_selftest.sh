@@ -112,6 +112,163 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_killall_script
+#
+# The script runs against a stubbed host: [procs] is the process table, one
+# "<name> <pid> <state> <dies-on>" line per process, and the stubs for
+# [pgrep]/[ps]/[killall] read and edit it the way the real ones would. Every
+# case asserts what the host looks like afterwards, not just the exit status,
+# because "the host is clear" is the whole contract.
+
+stub_dir="$work_dir/bin"
+mkdir -p "$stub_dir"
+procs="$work_dir/procs"
+signals="$work_dir/signals"
+
+cat >"$stub_dir/pgrep" <<'STUB'
+#!/usr/bin/env bash
+# Usage: pgrep -x <name>. Lists every pid under that name, zombies included,
+# exactly as the real pgrep does.
+name=${!#}
+awk -v n="$name" '$1 == n { print $2 }' "$STUB_PROCS"
+STUB
+
+cat >"$stub_dir/ps" <<'STUB'
+#!/usr/bin/env bash
+# Usage: ps -o stat= -p <pid>.
+pid=${!#}
+awk -v p="$pid" '$2 == p { print $3 }' "$STUB_PROCS"
+STUB
+
+cat >"$stub_dir/killall" <<'STUB'
+#!/usr/bin/env bash
+# Usage: killall -q -s <SIG> <name>... Exits 0 if it signalled something.
+signal=""
+names=()
+while (($#)); do
+  case $1 in
+  -q) ;;
+  -s)
+    signal=$2
+    shift
+    ;;
+  *) names+=("$1") ;;
+  esac
+  shift
+done
+echo "$signal ${names[*]}" >>"$STUB_SIGNALS"
+matched=1
+for name in "${names[@]}"; do
+  while read -r p pid state dies_on; do
+    [[ "$p" == "$name" ]] || continue
+    matched=0
+    # A process only leaves when the signal is one it dies on; a zombie is
+    # already gone but still signallable, so it stays in the table.
+    if [[ "$dies_on" == "$signal" || ("$dies_on" == TERM && "$signal" == KILL) ]]; then
+      grep -v "^$p $pid " "$STUB_PROCS" >"$STUB_PROCS.new" || true
+      mv "$STUB_PROCS.new" "$STUB_PROCS"
+    fi
+  done <"$STUB_PROCS"
+done
+exit "$matched"
+STUB
+
+cat >"$stub_dir/sudo" <<'STUB'
+#!/usr/bin/env bash
+# Usage: sudo -n <command>... Refuses when STUB_SUDO_DENIED is set, the way
+# [sudo -n] does on a host with no passwordless rule: status 1 and a message,
+# which is the only thing distinguishing it from a [killall] that matched
+# nothing.
+if [[ -n "${STUB_SUDO_DENIED:-}" ]]; then
+  echo "sudo: a password is required" >&2
+  exit 1
+fi
+shift # -n
+exec "$@"
+STUB
+
+chmod +x "$stub_dir"/{pgrep,ps,killall,sudo}
+
+# Runs the generated script against the stubbed host and reports its status in
+# [killall_status], its stderr in [killall_stderr], and the signals it sent in
+# [killall_signals].
+run_killall_script() {
+  local table=$1
+  local wait_sec=${2:-1}
+  local path=${3:-$stub_dir:$PATH}
+
+  printf '%s\n' "$table" >"$procs"
+  : >"$signals"
+  killall_stderr=$(
+    PATH="$path" STUB_PROCS="$procs" STUB_SIGNALS="$signals" \
+      CI_KILLALL_BIN="$stub_dir/killall" \
+      bash -c "$(CI_KILLALL_BIN="$stub_dir/killall" \
+        ci_killall_script 'hog-exec hog-mempool' "$wait_sec")" 2>&1 >/dev/null
+  ) && killall_status=0 || killall_status=$?
+  killall_signals=$(tr '\n' ';' <"$signals")
+  killall_survivors=$(cat "$procs")
+}
+
+# A clear host: one [killall] that matches nothing, no escalation, no wait.
+run_killall_script ""
+check_eq "clear host succeeds" "0" "$killall_status"
+check_eq "clear host is not escalated to SIGKILL" "TERM hog-exec hog-mempool;" \
+  "$killall_signals"
+
+# The ordinary case: the processes take SIGTERM and go.
+run_killall_script "hog-exec 101 S TERM"
+check_eq "SIGTERM survivor-free host succeeds" "0" "$killall_status"
+check_eq "SIGTERM alone needs no escalation" "TERM hog-exec hog-mempool;" \
+  "$killall_signals"
+check_eq "SIGTERM leaves the host clear" "" "$killall_survivors"
+
+# The failure this change exists for: a process that outlives SIGTERM still
+# holds its ports, so it has to be escalated rather than left for the next
+# suite to collide with.
+run_killall_script "hog-mempool 202 S KILL"
+check_eq "SIGTERM survivor is escalated" "0" "$killall_status"
+check_contains "escalation sends SIGKILL" "KILL hog-exec hog-mempool" \
+  "$killall_signals"
+check_eq "escalation leaves the host clear" "" "$killall_survivors"
+
+# Nothing left to try: name the survivor so the warning points at the host that
+# will fail the next suite's bind.
+run_killall_script "hog-exec 303 S never"
+check_eq "unkillable process fails" "1" "$killall_status"
+check_contains "unkillable process is named" "hog-exec(303)" "$killall_stderr"
+
+# A zombie holds no ports and will never leave the table on its own, so it must
+# not be mistaken for a live process and spend both deadlines.
+run_killall_script "hog-exec 404 Z never"
+check_eq "zombie does not fail the host" "0" "$killall_status"
+check_eq "zombie is not escalated to SIGKILL" "TERM hog-exec hog-mempool;" \
+  "$killall_signals"
+
+# With no passwordless sudo the unprivileged [killall] still has to run: the
+# benchmark processes belong to the CI user either way. A [sudo -n] that could
+# not run at all used to be indistinguishable from a host with nothing on it.
+export STUB_SUDO_DENIED=1
+run_killall_script "hog-exec 505 S TERM"
+unset STUB_SUDO_DENIED
+check_eq "unprivileged fallback succeeds" "0" "$killall_status"
+check_eq "unprivileged fallback clears the host" "" "$killall_survivors"
+
+# A host that cannot be observed can still be insisted upon: without [pgrep]
+# there is nothing to wait on, so the escalation happens unconditionally rather
+# than not at all.
+nopgrep_dir="$work_dir/nopgrep"
+mkdir -p "$nopgrep_dir"
+for tool in bash awk grep mv cat tr date sleep; do
+  ln -sf "$(command -v "$tool")" "$nopgrep_dir/$tool"
+done
+ln -sf "$stub_dir/ps" "$nopgrep_dir/ps"
+ln -sf "$stub_dir/sudo" "$nopgrep_dir/sudo"
+run_killall_script "hog-exec 606 S KILL" 1 "$nopgrep_dir"
+check_eq "host without pgrep succeeds" "0" "$killall_status"
+check_contains "host without pgrep is still escalated" "KILL hog-exec" \
+  "$killall_signals"
+check_eq "host without pgrep is cleared" "" "$killall_survivors"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

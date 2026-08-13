@@ -8,6 +8,14 @@ CI_BENCH_REPO_ROOT=$(cd "$CI_BENCH_HARNESS_DIR/../.." && pwd)
 CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-60}
 CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
+# How long [ci_remote_killall_hosts] waits, per signal and per host, for the
+# processes it signalled to actually exit.
+CI_KILL_WAIT_SEC=${CI_KILL_WAIT_SEC:-10}
+# Which [killall] the remote script runs. The privileged path names it absolutely
+# because that is what the hosts' sudoers rule permits; the selftest points this
+# at a stub.
+CI_KILLALL_BIN=${CI_KILLALL_BIN:-/usr/bin/killall}
+
 # Where [ci_run_bench_step] tees each step's output, and how much of a failed
 # step's log [ci_report_failed_bench_steps] replays at the end of the job.
 CI_BENCH_LOG_DIR=${CI_BENCH_LOG_DIR:-bench_logs}
@@ -283,12 +291,101 @@ ci_control_clear_work_dirs() {
   done
 }
 
+# The script [ci_remote_killall_hosts] runs on each host: signal the named
+# processes and wait for them to actually be gone, escalating to SIGKILL for
+# whatever ignored SIGTERM. Exits 0 once the host is clear and non-zero, naming
+# the survivors, when even SIGKILL left something behind.
+#
+# Kept as a generated script rather than an inline one-liner so that the quoting
+# stays readable and the selftest can run it directly. Its parameters are
+# emitted as assignments ahead of a body that expands nothing locally.
+ci_killall_script() {
+  local processes=$1
+  local wait_sec=${2:-$CI_KILL_WAIT_SEC}
+
+  # [pgrep -x] and [killall] both match the whole process name, so the two agree
+  # on what is still running.
+  #
+  # A process that has exited but has not been reaped is still listed by [pgrep]
+  # and still signalled by [killall], and it holds no ports. The control server
+  # only reaps in [query_proc_status]/[wait_for_process], so a zombie can sit in
+  # the table under its own name for as long as nothing asks after it: skipping
+  # state Z keeps a host that is in fact clear from burning both deadlines.
+  #
+  # [killall -q] and [sudo -n] both fail with status 1, so the status alone does
+  # not say whether nothing matched or the kill never ran -- and a [sudo -n] that
+  # cannot run at all used to be indistinguishable from a clear host. A silent
+  # failure is [killall] reporting no such process; a failure that said something
+  # came from sudo, and is worth retrying unprivileged, since the benchmark
+  # processes belong to the CI user anyway.
+  #
+  # A host with no [pgrep] cannot be observed, only signalled, so there it falls
+  # back to the idiom the schedule already uses for the control server: SIGTERM,
+  # a moment, then SIGKILL. Still better than sending SIGTERM and leaving.
+  printf '%s\n' \
+    "ci_procs='$processes'" \
+    "ci_wait_sec=$wait_sec" \
+    "ci_killall='$CI_KILLALL_BIN'" \
+    'command -v "$ci_killall" >/dev/null 2>&1 ||' \
+    '  { echo "$ci_killall not found (install psmisc)" >&2; exit 1; }' \
+    'ci_kill() {' \
+    '  ci_out=$(sudo -n "$ci_killall" -q -s "$1" $ci_procs 2>&1) && return 0' \
+    '  [ -n "$ci_out" ] || return 1' \
+    '  "$ci_killall" -q -s "$1" $ci_procs 2>/dev/null' \
+    '}' \
+    'ci_survivors() {' \
+    '  for ci_p in $ci_procs; do' \
+    '    for ci_pid in $(pgrep -x "$ci_p" 2>/dev/null); do' \
+    '      case $(ps -o stat= -p "$ci_pid" 2>/dev/null) in' \
+    '      "" | Z*) ;;' \
+    '      *) echo "$ci_p($ci_pid)" ;;' \
+    '      esac' \
+    '    done' \
+    '  done' \
+    '}' \
+    'ci_wait_gone() {' \
+    '  ci_deadline=$(($(date +%s) + ci_wait_sec))' \
+    '  while [ -n "$(ci_survivors)" ]; do' \
+    '    [ "$(date +%s)" -lt "$ci_deadline" ] || return 1' \
+    '    sleep 0.5' \
+    '  done' \
+    '}' \
+    'ci_kill TERM || exit 0' \
+    'command -v pgrep >/dev/null 2>&1 || {' \
+    '  sleep 3' \
+    '  ci_kill KILL' \
+    '  exit 0' \
+    '}' \
+    'ci_wait_gone && exit 0' \
+    'ci_kill KILL || exit 0' \
+    'ci_wait_gone && exit 0' \
+    'echo "still running after SIGKILL: $(ci_survivors | tr "\n" " ")" >&2' \
+    'exit 1'
+}
+
+# Kills the named processes on each host, and waits for them to really be gone.
+#
+# [killall] returns as soon as the signal is delivered, so sending SIGTERM and
+# moving on handed control back while the processes just asked to leave still
+# held their listening sockets. The suites reuse one fixed set of ports on one
+# fixed set of hosts, so the next suite bound the same ports seconds later and
+# died on "bind(<host>:<port>): Address already in use" -- and because the
+# listener it collided with answers connections, a readiness wait on that port
+# is satisfied by the very process that should have been gone. Waiting for the
+# processes to exit, and escalating to SIGKILL for whatever ignores SIGTERM,
+# is what makes the next suite's bind the host's own.
+#
+# A host that is already clear costs one [killall] that matches nothing. A host
+# that cannot be cleared is named but does not fail the run: the benchmark that
+# then fails to bind reports it plainly, and a cleanup that can red an otherwise
+# healthy job is a worse trade than a warning.
 ci_remote_killall_hosts() {
   local processes=$1
   local host
   shift
 
   for host in "$@"; do
-    ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
+    ci_remote_run "$host" "$(ci_killall_script "$processes")" ||
+      echo "warning: $host not confirmed clear of: $processes" >&2
   done
 }
