@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <exception>
 #include <expected>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <unordered_map>
@@ -117,7 +118,8 @@ InvokeTX::update_balance_lock(Address const &addr)
   auto new_item = ItemChange(std::move(storage_change));
 
   auto key = make_address_balance_item_key(addr);
-  auto &change = changes_[key];
+  auto it = changes_.try_emplace(key).first;
+  auto &change = it->second;
   if (change.empty()) {
 
     auto status = block_.get().lock(key, new_item, &last_conflict_reason_);
@@ -130,6 +132,11 @@ InvokeTX::update_balance_lock(Address const &addr)
               x23::show(contract_addr), *new_item.to_balance());
         // NOLINTEND(bugprone-unchecked-optional-access)
       }
+      // Same first-admission cleanup as request_change(): a rejected lock
+      // holds nothing, so drop the entry we just created rather than leave
+      // an empty one behind for the rest of the root transaction (#3090).
+      // [change] dangles past this point.
+      changes_.erase(it);
       return status.error();
     }
 
@@ -283,10 +290,20 @@ void
 InvokeTX::rollback_to_savepoint(int depth)
 {
   tx_depth_ = depth;
-  for (auto &[key, vec] : changes_) {
+  // Entries emptied by this rollback are erased, not just cleared. An empty
+  // vector holds no lock and is invisible to commit/abort/sync_balance_locks,
+  // but the skip below means no later rollback would ever prune it -- so a
+  // child that repeatedly touches fresh keys and fails would grow both maps
+  // for the lifetime of the root transaction (#3090). Erasing also keeps
+  // read_change() from dereferencing vec.back() on an empty vector.
+  for (auto it = changes_.begin(); it != changes_.end();) {
+    const ItemKey &key = it->first;
+    std::vector<ItemVersion> &vec = it->second;
     // skip if no changes made after savepoint.
-    if (vec.empty() || vec.back().tx_depth <= tx_depth_)
+    if (vec.empty() || vec.back().tx_depth <= tx_depth_) {
+      it = vec.empty() ? changes_.erase(it) : std::next(it);
       continue;
+    }
 
     // revert and erase the history of changes made after savepoint.
     ItemChange tmp{std::move(vec.back().change)};
@@ -314,15 +331,19 @@ InvokeTX::rollback_to_savepoint(int depth)
         return;
       }
       assert(vec.back().locked_storage_cost >= *ret);
+      ++it;
       continue;
     }
     block_.get().unlock(key, tmp);
+    it = changes_.erase(it);
   }
 
-  for (auto &[addr, vec] : balance_deltas_) {
+  for (auto it = balance_deltas_.begin(); it != balance_deltas_.end();) {
+    std::vector<StorageBalanceVersion> &vec = it->second;
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &StorageBalanceVersion::tx_depth),
               vec.end());
+    it = vec.empty() ? balance_deltas_.erase(it) : std::next(it);
   }
   assert_is_valid();
 }
@@ -690,6 +711,12 @@ InvokeTX::assert_is_valid() const noexcept
         else {
           assert(balance_deltas[addr] == 0);
         }
+      }
+      // rollback_to_savepoint() erases balance_deltas_ entries it empties
+      // (#3090), so an address may legitimately be absent here -- but only
+      // if nothing left in changes_ still locks storage against it.
+      for (const auto &[addr, locked] : balance_deltas) {
+        assert(locked == 0 || balance_deltas_.contains(addr));
       }
 
       // Verify that balance changes in changes_ match what's expected from

@@ -204,6 +204,16 @@ public:
   // would misreport the conflict type in release builds.
   DbConflictCode conflict_reason_for(HogDbCode code) const;
 
+  // Number of keys retained in the transaction-local change and balance-delta
+  // maps. Tests use these to assert that a failed subtransaction leaves no
+  // entries behind once it is rolled back (#3090); nothing in production
+  // reads them.
+  std::size_t change_entry_count_for_testing() const { return changes_.size(); }
+  std::size_t balance_entry_count_for_testing() const
+  {
+    return balance_deltas_.size();
+  }
+
 private:
   struct ItemVersion {
     ItemChange change;
