@@ -291,7 +291,9 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # The program [ci_remote_reap] runs on one host to reap [$1] (a space-separated
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
-# both.
+# both, and 3 if the signals could not be sent at all -- a host whose [killall]
+# or [sudo] is broken has not been shown to have a process refusing to die, and
+# must not be reported as though it had.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
 # bare [killall <names>] hands the caller back a host where the processes have
@@ -343,13 +345,28 @@ wait_gone() {
   done
 }
 
+# Sends \$1 to every named process. Returns nonzero only when the signal could
+# not be sent at all, which has to be told apart from a process that refused to
+# die: [-q] silences killall's own "no process found", so a nonzero exit that
+# still says something is sudo or killall failing rather than an absence of
+# processes to kill.
+signal_all() {
+  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+  status=\$?
+  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
+    echo "cannot signal processes: \$err" >&2
+    return 1
+  fi
+  return 0
+}
+
 # Signal first and ask questions after: a host that will not report its
 # processes must still have them reaped.
-sudo -n /usr/bin/killall -q -TERM \$procs 2>/dev/null || true
+signal_all TERM || exit 3
 wait_gone "\$term_timeout" && exit 0
 
 echo "alive after SIGTERM, escalating to SIGKILL:\$(survivors)" >&2
-sudo -n /usr/bin/killall -q -KILL \$procs 2>/dev/null || true
+signal_all KILL || exit 3
 wait_gone "\$kill_timeout" && exit 0
 
 echo "alive after SIGKILL:\$(survivors)" >&2
