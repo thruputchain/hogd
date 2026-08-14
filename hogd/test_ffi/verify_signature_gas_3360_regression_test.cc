@@ -9,8 +9,8 @@
 //
 // These tests drive the real kVerifySignature syscall through the production
 // wrap_after_parse() gas epilogue via the mock frame harness (the same harness
-// mock_frame_parent_gas_2725_regression_test.cc uses for kSHA256), then read the
-// frame's metered gas back out.
+// mock_frame_parent_gas_2725_regression_test.cc uses for kSHA256), then read
+// the frame's metered gas back out.
 
 #include <array>
 #include <cstddef>
@@ -113,7 +113,8 @@ TEST(VerifySignatureGas, SuccessfulVerifyIsMeteredByMessageLength)
 
   for (size_t message_len : {size_t{32}, size_t{512}}) {
     std::vector<std::byte> message(message_len, std::byte{0x5a});
-    auto signature = ed25519_sign(secret_key, std::as_bytes(std::span(message)));
+    auto signature =
+        ed25519_sign(secret_key, std::as_bytes(std::span(message)));
     ASSERT_TRUE(signature.has_value());
 
     std::array<std::byte, sizeof(Ed25519Signature)> signature_bytes{};
@@ -141,9 +142,9 @@ TEST(VerifySignatureGas, WrongSizedKeyIsRejectedWithoutCharge)
 
   auto outcome = run_one_verify(signature, short_key, message);
 
-  EXPECT_EQ(
-      outcome.result_code,
-      std::to_underlying(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+  EXPECT_EQ(outcome.result_code,
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
   EXPECT_EQ(outcome.gas_consumed, 0U);
 }
 
