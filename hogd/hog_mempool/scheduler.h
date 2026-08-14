@@ -51,7 +51,10 @@ public:
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
 
-  x23::Async<void> process_transfers(const HogsTransferred &transfer);
+  // Applies a batch of hog transfer deltas. Returns false without mutating any
+  // state if the batch is rejected as malformed (e.g. a zero delta), so callers
+  // can skip any post-transfer continuation.
+  x23::Async<bool> process_transfers(const HogsTransferred &transfer);
 
   // Chooses txs to schedule in the next block. [block_height] is the height of
   // the block that is being scheduled. [block_size] is the maximum number of

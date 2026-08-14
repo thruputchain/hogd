@@ -746,20 +746,22 @@ Scheduler::apply_committed_tx_hog_age(const SignedTransaction &tx,
   return true;
 }
 
-x23::Async<void>
+x23::Async<bool>
 Scheduler::process_transfers(const HogsTransferred &transfers)
 {
   // This callback is reachable by any client on the DB-facing RPC service, so
   // treat its payload as untrusted. A [Delta] with a zero [hog_delta] is a
   // no-op transfer that would otherwise trip the fatal nonzero-delta invariant
-  // in [process_transfers_helper] and terminate the mempool. Reject such a
-  // batch as a recoverable error instead of mutating scheduler state.
+  // in [process_transfers_helper] and terminate the mempool. Reject the whole
+  // batch instead of mutating state; returning false lets the caller skip its
+  // post-transfer continuation (DB writes and completion publish) rather than
+  // running it for a batch that was never applied.
   for (const Delta &delta : transfers.deltas) {
     if (from_xdr(delta.hog_delta) == static_cast<int128_t>(0)) {
       info("scheduler: rejecting hog transfer batch containing a zero "
            "hog_delta for account {}",
            show_byte_array(delta.address));
-      co_return;
+      co_return false;
     }
   }
 
@@ -803,6 +805,7 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
+  co_return true;
 }
 
 void

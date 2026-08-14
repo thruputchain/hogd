@@ -65,7 +65,15 @@ public:
     co_await x23::ThreadPool::get_thread_pool()->bg();
 
     CHECK_PTR(scheduler_.get());
-    co_await scheduler_->process_transfers(transfers);
+    if (!co_await scheduler_->process_transfers(transfers)) {
+      // The batch was rejected as malformed (e.g. a zero delta from an
+      // unregistered DB RPC client) and no scheduler state was mutated. Skip
+      // the success continuation below: running
+      // write_all_average_hog_ages_to_db and publishing transfer_finished_ for
+      // an unapplied batch would let a DB write race snapshot commit and
+      // announce a bogus transfer as complete.
+      co_return;
+    }
 
     // We write the hog ages to the database down here because we need to update
     // the hog ages above first ([scheduler_->process_transfers()]) *and*
