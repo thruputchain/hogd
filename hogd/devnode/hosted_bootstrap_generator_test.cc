@@ -173,6 +173,11 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
             hex_string(artifact.genesis_hash));
   EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
             2UL);
+  for (const json::Value &account :
+       require_field(*metadata, "bootstrapAccounts").as_array()) {
+    EXPECT_EQ(require_string(require_field(account, "role")),
+              "hosted_dev_account");
+  }
   EXPECT_EQ(metadata->find("faucet"), nullptr);
   std::span<const json::Value> initialization_txs =
       require_field(*metadata, "initializationTransactions").as_array();
@@ -181,6 +186,27 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
                   .starts_with("0x"));
   EXPECT_FALSE(require_string(require_field(initialization_txs[0], "xdr"))
                    .starts_with("0x"));
+}
+
+TEST(HostedBootstrapGenerator, DefaultRemainsHomogeneousWithoutFaucet)
+{
+  HostedBootstrapGeneratorConfig config;
+  HostedBootstrapArtifact artifact = build_hosted_bootstrap_artifact(config);
+
+  ASSERT_EQ(artifact.accounts.size(), 10UL);
+  for (std::uint32_t index = 0; index < artifact.accounts.size(); ++index) {
+    EXPECT_EQ(artifact.accounts[index].index, index);
+    EXPECT_EQ(artifact.accounts[index].role,
+              BootstrapAccountRole::kHostedDevAccount);
+    EXPECT_EQ(artifact.accounts[index].initial_storage_tokens,
+              1'000'000'000ULL);
+  }
+  EXPECT_FALSE(artifact.faucet.has_value());
+
+  std::expected<json::Value, json::ParseError> metadata =
+      json::parse(artifact.metadata_json);
+  ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  EXPECT_EQ(metadata->find("faucet"), nullptr);
 }
 
 TEST(HostedBootstrapGenerator, GeneratesExplicitFaucetWallet)

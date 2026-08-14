@@ -118,7 +118,7 @@ hog_devnode_init(std::string listen_host,
                  std::uint16_t requested_scheduler_port,
                  ReadinessSink readiness_sink,
                  NetworkHash const &runtime_network_hash,
-                 BootstrapAccountConfig const &bootstrap_config,
+                 LocalBootstrapConfig const &bootstrap_config,
                  std::optional<std::filesystem::path> const &data_dir,
                  std::size_t ramdb_bytes)
 {
@@ -178,7 +178,7 @@ struct HogDevnodeOptions {
   std::uint16_t scheduler_port = 0;
   hogd::ReadinessSink readiness_sink = hogd::ReadinessSink::kStdout;
   std::optional<std::filesystem::path> data_dir;
-  hogd::BootstrapAccountConfig bootstrap_config;
+  hogd::LocalBootstrapConfig bootstrap_config;
   std::vector<std::filesystem::path> contract_artifact_directories;
   std::optional<hogd::LogLevel> log_level;
   std::size_t ramdb_bytes = hogd::HogDevnodeNode::kDefaultRamDbBytes;
@@ -271,12 +271,14 @@ Options:
   --bootstrap-manifest <path>    Bootstrap intent manifest. When set,
                                  dev-account and wallet shorthand flags
                                  conflict.
-  --dev-accounts <count>         Deterministic dev accounts to bootstrap
+  --dev-accounts <count>         Deterministic user accounts, excluding dev-0
                                  [default: 0]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
-  --dev-account-tokens <tokens>  Initial storage-token balance per dev account
+  --dev-account-tokens <tokens>  Initial storage-token balance per user account
                                  [default: 1000000000]
+                                 dev-0 is always the fixed 10000000000000-raw
+                                 local faucet.
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
   --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.
@@ -514,7 +516,7 @@ parse_args(int argc, char *argv[])
   }
   reject_manifest_shorthand_conflicts(sources, argv);
   if (dev_accounts_value.has_value()) {
-    options.bootstrap_config.count =
+    options.bootstrap_config.user_account_count =
         parse_bootstrap_account_count(*dev_accounts_value, argv);
   }
   if (dev_account_seed_value.has_value()) {
@@ -532,7 +534,7 @@ parse_args(int argc, char *argv[])
                                   *dev_account_tokens_value),
                       argv, usage);
     }
-    options.bootstrap_config.storage_tokens = *tokens;
+    options.bootstrap_config.user_storage_tokens = *tokens;
   }
   if (dev_wallet_profile_value.has_value()) {
     if (dev_wallet_profile_value->empty()) {

@@ -813,8 +813,7 @@ SystemCallHandler::invoke(ContractAddress const &address,
 
   // reentrance guard
   // check if the address is already on the stack
-  if (!hack_DONTUSE_TEST_BYPASS_allow_reentrance_ &&
-      invocation_frame_stack_.has_active_frame_for(address)) {
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
     return {SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance}, 0};
   }
 

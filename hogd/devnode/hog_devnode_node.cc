@@ -163,33 +163,32 @@ metadata_path(std::filesystem::path const &data_dir)
 }
 
 GenesisConfigurationV2
-build_genesis_configuration(BootstrapAccountConfig const &config,
+build_genesis_configuration(LocalBootstrapConfig const &config,
                             NetworkHash const &network_hash,
                             StorageCostModel const &cost_model)
 {
-  GenesisConfigurationBuilder builder;
-  if (config.count != 0) {
-    append_bootstrap_accounts(builder, config);
-  }
-  return builder.build_v2(network_hash, cost_model,
-                          *load_stock_genesis_root_contract());
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact(config, network_hash, cost_model);
+  return std::move(artifact.genesis_configuration_v2);
 }
 
 std::string
 build_data_dir_metadata_json(
-    BootstrapAccountConfig const &config,
+    LocalBootstrapConfig const &config,
     GenesisConfigurationV2 const &genesis_configuration)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
+    w.field("schemaVersion", std::int64_t{2});
     w.field("kind", "hog-devnode-data");
     w.field("genesisHash", hex_string(sha256(genesis_configuration)));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
-      w.field("devAccounts", static_cast<std::int64_t>(config.count));
+      w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
+      w.field("devAccounts",
+              static_cast<std::int64_t>(config.user_account_count));
       w.field("devAccountSeed", config.seed);
-      w.field("devAccountTokens", std::to_string(config.storage_tokens));
+      w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
     });
   });
   return buffer;
@@ -304,7 +303,7 @@ require_string_value(std::string_view actual, std::string_view expected,
   }
 }
 
-BootstrapAccountConfig
+LocalBootstrapConfig
 parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
 {
   std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
@@ -319,9 +318,14 @@ parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
-  if (schema_version != 1) {
+  if (schema_version == 1) {
+    throw std::runtime_error(
+        "hog-devnode data metadata schemaVersion 1 uses the legacy bootstrap "
+        "layout; reinitialize the data dir");
+  }
+  if (schema_version != 2) {
     throw std::runtime_error(std::format(
-        "unsupported hog-devnode data metadata schemaVersion {}, expected 1",
+        "unsupported hog-devnode data metadata schemaVersion {}, expected 2",
         schema_version));
   }
   require_string_value(require_string_field(*parsed, "kind", "root"),
@@ -337,20 +341,35 @@ parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
         kMaxBootstrapAccounts));
   }
 
+  const std::string_view faucet_tokens_field =
+      require_string_field(config_json, "faucetTokens", "bootstrapConfig");
+  const std::optional<std::uint64_t> faucet_tokens =
+      try_parse_u64(faucet_tokens_field);
+  if (!faucet_tokens) {
+    throw std::runtime_error(
+        std::format("Invalid hog-devnode data metadata faucetTokens: {}",
+                    faucet_tokens_field));
+  }
+  if (*faucet_tokens != kLocalFaucetStorageTokens) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata faucetTokens must be {}, got {}",
+                    kLocalFaucetStorageTokens, *faucet_tokens));
+  }
+
   const std::string_view dev_account_tokens =
       require_string_field(config_json, "devAccountTokens", "bootstrapConfig");
-  const std::optional<std::uint64_t> storage_tokens =
+  const std::optional<std::uint64_t> user_storage_tokens =
       try_parse_u64(dev_account_tokens);
-  if (!storage_tokens) {
+  if (!user_storage_tokens) {
     throw std::runtime_error(
         std::format("Invalid hog-devnode data metadata devAccountTokens: {}",
                     dev_account_tokens));
   }
-  BootstrapAccountConfig config{
-      .count = static_cast<std::uint32_t>(count),
+  LocalBootstrapConfig config{
+      .user_account_count = static_cast<std::uint32_t>(count),
       .seed = std::string(require_string_field(config_json, "devAccountSeed",
                                                "bootstrapConfig")),
-      .storage_tokens = *storage_tokens,
+      .user_storage_tokens = *user_storage_tokens,
       .dev_wallet_profile =
           std::string(require_string_field(config_json, "devWalletProfile",
                                            "bootstrapConfig")),
@@ -375,8 +394,8 @@ parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
 }
 
 void
-require_matching_bootstrap_config(BootstrapAccountConfig const &persisted,
-                                  BootstrapAccountConfig const &requested)
+require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
+                                  LocalBootstrapConfig const &requested)
 {
   auto fail = [](std::string_view flag, std::string_view expected,
                  std::string_view actual) {
@@ -385,21 +404,45 @@ require_matching_bootstrap_config(BootstrapAccountConfig const &persisted,
         "'{}', got '{}'",
         flag, expected, actual));
   };
-  if (persisted.count != requested.count) {
-    fail("--dev-accounts", std::to_string(persisted.count),
-         std::to_string(requested.count));
+  if (persisted.user_account_count != requested.user_account_count) {
+    fail("--dev-accounts", std::to_string(persisted.user_account_count),
+         std::to_string(requested.user_account_count));
   }
   if (persisted.seed != requested.seed) {
     fail("--dev-account-seed", persisted.seed, requested.seed);
   }
-  if (persisted.storage_tokens != requested.storage_tokens) {
-    fail("--dev-account-tokens", std::to_string(persisted.storage_tokens),
-         std::to_string(requested.storage_tokens));
+  if (persisted.user_storage_tokens != requested.user_storage_tokens) {
+    fail("--dev-account-tokens", std::to_string(persisted.user_storage_tokens),
+         std::to_string(requested.user_storage_tokens));
   }
   if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
     fail("--dev-wallet-profile", persisted.dev_wallet_profile,
          requested.dev_wallet_profile);
   }
+}
+
+void
+preflight_data_dir_metadata(
+    std::optional<std::filesystem::path> const &data_dir,
+    LocalBootstrapConfig const &requested_config,
+    NetworkHash const &network_hash)
+{
+  if (!data_dir.has_value()) {
+    return;
+  }
+  std::error_code ec;
+  const std::filesystem::path path = metadata_path(*data_dir);
+  if (!std::filesystem::exists(path, ec)) {
+    if (ec) {
+      throw std::runtime_error(std::format(
+          "could not inspect hog-devnode data dir metadata '{}': {}",
+          path.string(), ec.message()));
+    }
+    return;
+  }
+  LocalBootstrapConfig persisted_config =
+      parse_data_dir_metadata(read_metadata_file(path), network_hash);
+  require_matching_bootstrap_config(persisted_config, requested_config);
 }
 
 void
@@ -496,7 +539,7 @@ run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
 
 HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
-    BootstrapAccountConfig const &bootstrap_config,
+    LocalBootstrapConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
     NetworkHash network_hash, std::size_t ramdb_bytes)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
@@ -508,6 +551,9 @@ HogDevnodeNode::HogDevnodeNode(
     event_indexer_server_(event_ctx_)
 {
   try {
+    // Reject incompatible bootstrap intent before opening or migrating any
+    // persisted chain state.
+    preflight_data_dir_metadata(data_dir_, bootstrap_config, network_hash_);
     HogDbDAO db = open_db_backend();
 
     // Genesis bootstrap payloads can be larger than the transport default.
@@ -609,9 +655,6 @@ HogDevnodeNode::HogDevnodeNode(
     if (recovered_existing_chain_) {
       bootstrap_config_ = validate_recovered_data_dir(bootstrap_config);
       load_recovered_bootstrap_metadata(bootstrap_config_);
-      if (recovered_data_dir_metadata_missing_) {
-        write_data_dir_metadata();
-      }
     }
     else {
       bootstrap_config_ = validate_fresh_data_dir(bootstrap_config);
@@ -800,16 +843,16 @@ HogDevnodeNode::register_indexer_with_event_service()
           intro_outcome);
 }
 
-BootstrapAccountConfig
+LocalBootstrapConfig
 HogDevnodeNode::validate_fresh_data_dir(
-    BootstrapAccountConfig const &requested_config) const
+    LocalBootstrapConfig const &requested_config) const
 {
   if (!data_dir_.has_value()) {
     return requested_config;
   }
   std::error_code ec;
   if (std::filesystem::exists(metadata_path(*data_dir_), ec)) {
-    BootstrapAccountConfig persisted_config =
+    LocalBootstrapConfig persisted_config =
         parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
                                 network_hash_);
     require_matching_bootstrap_config(persisted_config, requested_config);
@@ -823,9 +866,9 @@ HogDevnodeNode::validate_fresh_data_dir(
   return requested_config;
 }
 
-BootstrapAccountConfig
+LocalBootstrapConfig
 HogDevnodeNode::validate_recovered_data_dir(
-    BootstrapAccountConfig const &requested_config)
+    LocalBootstrapConfig const &requested_config)
 {
   if (!data_dir_.has_value()) {
     return requested_config;
@@ -838,15 +881,12 @@ HogDevnodeNode::validate_recovered_data_dir(
           "could not inspect hog-devnode data dir metadata '{}': {}",
           metadata_path(*data_dir_).string(), ec.message()));
     }
-    recovered_data_dir_metadata_missing_ = true;
-    warn("hog-devnode data dir '{}' has committed chain state but no metadata; "
-         "reconstructing metadata from startup flags; ensure the flags match "
-         "the original data dir",
-         data_dir_->string());
-    return requested_config;
+    throw std::runtime_error(
+        "hog-devnode data dir has committed chain state but no bootstrap "
+        "metadata; reinitialize the data dir");
   }
 
-  BootstrapAccountConfig persisted_config =
+  LocalBootstrapConfig persisted_config =
       parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
                               network_hash_);
   require_matching_bootstrap_config(persisted_config, requested_config);
@@ -870,20 +910,11 @@ HogDevnodeNode::write_data_dir_metadata() const
 
 void
 HogDevnodeNode::load_recovered_bootstrap_metadata(
-    BootstrapAccountConfig const &config)
+    LocalBootstrapConfig const &config)
 {
-  if (config.count == 0) {
-    GenesisConfigurationBuilder builder;
-    genesis_configuration_ = builder.build_or_panic(ctx_->get_cost_model());
-    genesis_configuration_v2_ =
-        builder.build_v2(network_hash_, ctx_->get_cost_model(),
-                         *load_stock_genesis_root_contract());
-    return;
-  }
-
   BootstrapAccountArtifact artifact =
-      build_bootstrap_account_artifact(config, network_hash_,
-                                       ctx_->get_cost_model());
+      build_local_bootstrap_account_artifact(config, network_hash_,
+                                             ctx_->get_cost_model());
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
   genesis_configuration_v2_ = std::move(artifact.genesis_configuration_v2);
@@ -900,7 +931,7 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
 
 void
 HogDevnodeNode::materialize_bootstrap_accounts(
-    BootstrapAccountConfig const &config)
+    LocalBootstrapConfig const &config)
 {
   auto client_res =
       create_client<SchedulerCoord1>(bind_host_,
@@ -909,23 +940,9 @@ HogDevnodeNode::materialize_bootstrap_accounts(
     panic("devnode materialize_bootstrap_accounts connect failed: {}",
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
-  if (config.count == 0) {
-    GenesisConfigurationBuilder builder;
-    genesis_configuration_ =
-        builder.build_or_panic(StorageCostModel::default_cost_model());
-    genesis_configuration_v2_ =
-        builder.build_v2(network_hash_, ctx_->get_cost_model(),
-                         *load_stock_genesis_root_contract());
-    CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
-                 GenesisConfigurationV2(genesis_configuration_v2_))(),
-             DbSchedResult::DbSchedResultOK);
-    commit_initialization_batch({});
-    return;
-  }
-
   BootstrapAccountArtifact artifact =
-      build_bootstrap_account_artifact(config, network_hash_,
-                                       ctx_->get_cost_model());
+      build_local_bootstrap_account_artifact(config, network_hash_,
+                                             ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
   genesis_configuration_v2_ = artifact.genesis_configuration_v2;
   CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(

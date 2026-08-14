@@ -170,7 +170,9 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
            node.bootstrap_accounts()) {
         w.object([&](json::Writer &w) {
           w.field("index", static_cast<std::int64_t>(account.index));
-          w.field("role", "local_user");
+          w.field("role", account.role == BootstrapAccountRole::kFaucet
+                              ? "faucet"
+                              : "local_user");
           w.field("publicKey", hex_string(account.public_key));
           w.field("walletAddress", hex_string(account.address));
           w.field("initialStorageTokens",

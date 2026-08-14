@@ -18,7 +18,7 @@ inline constexpr NetworkHash kDefaultRuntimeNetworkHash{};
 
 struct BootstrapManifestConfig {
   NetworkHash network_hash;
-  BootstrapAccountConfig bootstrap_config;
+  LocalBootstrapConfig bootstrap_config;
 };
 
 // Reads, parses, and validates a bootstrap manifest file. On any failure --
