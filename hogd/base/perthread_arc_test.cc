@@ -361,4 +361,49 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
   EXPECT_TRUE(shutdown_result);
 }
 
+// Repro for the CI use-after-free that aborts RpcLoadgenEventTest /
+// ERC20ExperimentTest teardown at perthread_arc.h:243
+// ("CHECK FAILED: count_.load(...) <= 0").
+//
+// A PerThreadARC keeps each touching thread's refcount in a thread_local slot
+// (PerThread<Refcount>). A balanced acquire/release leaves that slot at
+// kInitializedValue, a *positive* sentinel; the slot is only driven
+// non-positive (to kShutdownValue) by initiate_shutdown()'s for_each over the
+// live threads. If a thread that touched the ARC exits before
+// initiate_shutdown() has drained its slot, thread_local teardown
+// (detail::TLStorage::remove() -> ~TLItems -> ~Refcount()) observes the live
+// positive count and aborts on CHECK(count_ <= 0).
+//
+// Production hits this as a teardown race: an RPC/DB worker thread exits while
+// a BlockTX's PerThreadARC<BlockTX> is still live (not yet shut down), which is
+// why it only fails intermittently under load. This test forces the same
+// invariant violation deterministically so the abort reproduces without relying
+// on scheduler timing -- the existing regression tests above all take pains to
+// keep their worker threads alive until shutdown precisely to avoid it.
+//
+// It is a death test because the defect manifests as a process abort, which can
+// only be observed from a subprocess. Once the lifetime bug is fixed (a thread
+// that touched the ARC may exit before shutdown without tripping the assert)
+// this expectation should be replaced with one that asserts a clean exit.
+TEST(PerThreadARCTest, ThreadExitBeforeShutdownTripsRefcountAssert)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(
+      {
+        // Leaked deliberately: the ARC must still be alive (never shut down)
+        // when the worker thread exits.
+        auto *arc = new PerThreadARC<int>(0);
+        std::thread worker([&] {
+          // A worker fully processes its work: acquire then release. The
+          // release returns false (not the last reference, no shutdown), so
+          // this thread's slot is left at kInitializedValue > 0.
+          arc->try_acquire_reference();
+          arc->release_reference();
+        });
+        // Thread exit runs TLStorage::remove() -> ~Refcount() with a live slot.
+        worker.join();
+      },
+      "CHECK FAILED: count_.load");
+}
+
 } // namespace hogd
