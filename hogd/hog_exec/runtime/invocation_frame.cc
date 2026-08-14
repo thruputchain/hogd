@@ -418,7 +418,18 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
-      frame_stack_.back().commit_failed_child_frame();
+      // Restoring forwarded auth-token ownership to the parent allocates
+      // unordered_set nodes and can throw under memory pressure. finish_frame()
+      // is called from SystemCallHandler::finish_frame()'s noexcept boundary,
+      // so contain the failure and report Unrecoverable rather than letting the
+      // exception terminate the executor (#3378), mirroring the transactional
+      // start_frame() admission path (#3058). The child frame is already popped,
+      // so the stack is left coherent.
+      try {
+        frame_stack_.back().commit_failed_child_frame();
+      } catch (...) {
+        return SystemError{SystemErrorCode::Unrecoverable};
+      }
     }
 
     return {{frame_result, manually_reverted}};
@@ -430,14 +441,24 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   size_t stack_size = frame_stack_.size();
   if (stack_size >= 2) {
     // Commit the frame to it's parent
-    // Accounts for whether or not the frame is set to manually revert
-    if (frame_stack_.back().should_revert()) {
-      frame_stack_[stack_size - 2].commit_manually_reverted_frame(
-          std::move(frame_stack_.back()));
-    }
-    else {
-      frame_stack_[stack_size - 2].commit_successful_child_frame(
-          std::move(frame_stack_.back()));
+    // Accounts for whether or not the frame is set to manually revert.
+    // Merging a child into its parent allocates (auth-token restoration,
+    // event/item/deployment merges) and can throw under memory pressure. As on
+    // the revert path above, contain it at this noexcept boundary and report
+    // Unrecoverable instead of terminating; pop the child first so the stack is
+    // left coherent (#3378).
+    try {
+      if (frame_stack_.back().should_revert()) {
+        frame_stack_[stack_size - 2].commit_manually_reverted_frame(
+            std::move(frame_stack_.back()));
+      }
+      else {
+        frame_stack_[stack_size - 2].commit_successful_child_frame(
+            std::move(frame_stack_.back()));
+      }
+    } catch (...) {
+      frame_stack_.pop_back();
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
   else {
