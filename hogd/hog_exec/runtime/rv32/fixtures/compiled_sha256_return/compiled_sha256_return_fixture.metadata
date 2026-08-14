@@ -1,6 +1,6 @@
 {
   "artifact_bytes": 347,
-  "artifact_sha256": "d76a2eb6ca6d0a40830962b9de928d5eb1f0f477905c81adeb849e62941a5725",
+  "artifact_sha256": "25e45ace95431b96c2ede0fd7874fc5c5c2473fa3cd76105c539aa477c2c0800",
   "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
   "code_bytes": 212,
   "code_sha256": "b36ad41e67a6dcc74033c03006b00a2f015f0d60edf9750645c4816ed72e1938",
@@ -15,8 +15,8 @@
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
   "lowerer_metadata": {
     "artifact_bytes": 347,
-    "artifact_format_fingerprint": "0x8e5caf3e9cd23b22",
-    "artifact_sha256": "d76a2eb6ca6d0a40830962b9de928d5eb1f0f477905c81adeb849e62941a5725",
+    "artifact_format_fingerprint": "0xe2dfedca9220844c",
+    "artifact_sha256": "25e45ace95431b96c2ede0fd7874fc5c5c2473fa3cd76105c539aa477c2c0800",
     "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
     "code_bytes": 212,
     "code_sha256": "b36ad41e67a6dcc74033c03006b00a2f015f0d60edf9750645c4816ed72e1938",

@@ -116,7 +116,7 @@ visible while the implementation remains duplicated across languages.
 
 Current v4 surface to mirror (from `hogd/hog_exec/runtime/rv32/artifact.h`):
 magic `GHRV32A1`, 132-byte header, format version 4, entry ABI 2, syscall ABI 1,
-gas table version 3 + gas-schedule digest `0x918317C21C46BB60`, VM-profile digest
+gas table version 4 + gas-schedule digest `0x5647E8FBFCFFE246`, VM-profile digest
 `0x55C53A685F0EB33D`, and SHA256 commitments for code / initial-memory sections.
 
 Guest-side dispatch has landed in the v4 format surface: the runtime seeds the

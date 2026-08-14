@@ -44,7 +44,7 @@ fingerprints actually match — not just that two hand-copied literals are equal
 
 ```cpp
 inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest(); // FNV-1a fold
-static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
+static_assert(kGasScheduleDigest == 0x5647e8fbfcffe246ULL);
 ```
 
 and `format.rs` mirrors the literal (`GAS_SCHEDULE_DIGEST = 0x9183_17c2_1c46_bb60`).

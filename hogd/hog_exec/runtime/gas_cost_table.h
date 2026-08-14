@@ -17,6 +17,14 @@ namespace hogd {
 constexpr static uint64_t kSHA256HashByteCost = 100;
 constexpr static uint64_t kSHA256HashBaseCost = 500;
 
+// Ed25519 signature verification performs fixed elliptic-curve work plus a
+// SHA-512 pass over the message, so it is priced as a base charge plus a
+// per-message-byte charge, mirroring the SHA-256 model. The base is larger than
+// the SHA-256 base to reflect the two scalar multiplications the verifier does
+// regardless of message length.
+constexpr static uint64_t kEd25519VerifyByteCost = 100;
+constexpr static uint64_t kEd25519VerifyBaseCost = 2000;
+
 // NOLINTBEGIN(readability-identifier-naming)
 constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
   constexpr uint64_t kMaxSafeLen =
@@ -24,6 +32,14 @@ constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
   if (bytes_len > kMaxSafeLen)
     return UINT64_MAX;
   return (bytes_len * kSHA256HashByteCost) + kSHA256HashBaseCost;
+};
+
+constexpr static auto Ed25519VerifyCost = [](uint64_t bytes_len) -> uint64_t {
+  constexpr uint64_t kMaxSafeLen =
+      (UINT64_MAX - kEd25519VerifyBaseCost) / kEd25519VerifyByteCost;
+  if (bytes_len > kMaxSafeLen)
+    return UINT64_MAX;
+  return (bytes_len * kEd25519VerifyByteCost) + kEd25519VerifyBaseCost;
 };
 // NOLINTEND(readability-identifier-naming)
 
@@ -42,11 +58,13 @@ struct SyscallGasCostEntry {
 // Current nonzero direct host-side syscall charges. Most syscalls intentionally
 // return zero direct host gas today; child invocation gas is metered by the
 // invoked VM or WASM runtime rather than a fixed syscall-cost constant.
-constexpr std::array<SyscallGasCostEntry, 4> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 6> kSyscallGasCostSchedule = {{
     {.name = u8"SHA256HashBase", .cost = kSHA256HashBaseCost},
     {.name = u8"SHA256HashByte", .cost = kSHA256HashByteCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
+    {.name = u8"Ed25519VerifyBase", .cost = kEd25519VerifyBaseCost},
+    {.name = u8"Ed25519VerifyByte", .cost = kEd25519VerifyByteCost},
 }};
 
 } // namespace hogd

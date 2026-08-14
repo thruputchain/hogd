@@ -100,14 +100,22 @@ syscall_VerifySignature_inner(int32_t input_scheme,
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
-    if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
-                        input_signature.subspan<0, sizeof(Ed25519Signature)>(),
-                        input_message)) {
-      trace("Signature verification failed");
-      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-              WrappedGasAmount{0}};
+    {
+      // Ed25519 verification is CPU-intensive host work proportional to the
+      // message length, so it must be metered on every path that actually runs
+      // the verifier (both success and verification failure). The size-mismatch
+      // path above never reaches the verifier, so it stays free. See hogd issue
+      // #3360.
+      const WrappedGasAmount gas{Ed25519VerifyCost(input_message.size())};
+      if (!ed25519_verify(
+              input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
+              input_signature.subspan<0, sizeof(Ed25519Signature)>(),
+              input_message)) {
+        trace("Signature verification failed");
+        return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, gas};
+      }
+      return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
   default:
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};

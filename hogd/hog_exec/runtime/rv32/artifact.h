@@ -35,7 +35,8 @@ inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // into the header at kArtifactGasVersionOffset and validated at load.
 // v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
 // trap.
-inline constexpr uint32_t kGasTableVersion = 3;
+// v4 adds direct host-syscall gas for Ed25519 VerifySignature (hogd #3360).
+inline constexpr uint32_t kGasTableVersion = 4;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -95,7 +96,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
+static_assert(kGasScheduleDigest == 0x5647e8fbfcffe246ULL);
 
 constexpr uint64_t
 format_fingerprint_u64(uint64_t digest, const char8_t *name, uint64_t value)
@@ -256,7 +257,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x8e5caf3e9cd23b22ULL);
+static_assert(kArtifactFormatFingerprint == 0xe2dfedca9220844cULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
