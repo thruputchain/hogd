@@ -8,6 +8,7 @@
 #include <span>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -438,6 +439,17 @@ private:
   // for the whole transaction.
   std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
       local_rv32_translations_;
+
+  // Addresses of distinct deployed contracts this transaction has resolved
+  // through the block-scoped snapshot cache. Bounds how much retained contract
+  // code a single transaction can force into the block cache: each recorded
+  // address warmed (or reused) a retained entry, so distinct retained code
+  // hashes are at most the size of this set, capped at
+  // kMaxDistinctContractResolutionsPerTx (#3375). Only addresses whose
+  // resolution reached a deployed contract are recorded, and the set is
+  // size-capped, so the contract-controlled key cannot grow it without bound.
+  std::unordered_set<ContractAddress, SipHash24Hasher>
+      resolved_contract_addresses_;
 
   ExecutionModeData execution_mode_data_;
 

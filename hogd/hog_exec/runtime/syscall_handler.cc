@@ -1297,6 +1297,25 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
 SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
+  // Bound the number of DISTINCT deployed contracts this transaction can force
+  // the block-scoped snapshot cache to fetch and retain. The first resolution
+  // of a distinct callee warms a full ContractCacheEntry (up to
+  // kMaxContractSizeBytes) that lives for the rest of the block; because
+  // resolution runs before the child frame executes or spends gas, a contract
+  // can otherwise invoke many distinct already-deployed callees (even with
+  // gas_limit=0 / TryInvoke, which faults the child spending no child gas) and
+  // pin retained code bytes out of proportion to the gas it spends (#3375).
+  // Once the per-tx cap is reached, reject a new distinct resolution before the
+  // cold fetch/translate allocates. A previously-resolved address stays in the
+  // set and still resolves (a block-cache hit that retains nothing new), so
+  // repeatedly invoking the same callee is unaffected. invoke() surfaces the
+  // null runtime as kSyscallErrorCodeInvalidSyscallInput and starts no frame.
+  if (!resolved_contract_addresses_.contains(addr) &&
+      resolved_contract_addresses_.size() >=
+          kMaxDistinctContractResolutionsPerTx) {
+    return nullptr;
+  }
+
   // Check the snapshot for a deployed contract; on a hit, the returned entry
   // carries the back-pointer to its (eagerly translated) code.
   auto deployed_expect = snapshot_cache_.try_get_deployed_contract(addr);
@@ -1305,6 +1324,11 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
   const DeployedContract *deployed = *deployed_expect;
   if (deployed != nullptr) {
+    // Record this distinct resolution now that it reached a deployed contract
+    // and warmed (or reused) its retained snapshot-cache entry. The set is
+    // bounded by kMaxDistinctContractResolutionsPerTx, so inserting the
+    // contract-controlled address cannot grow it without bound.
+    resolved_contract_addresses_.insert(addr);
     return runtime_context_.make_new_runtime(*deployed, this);
   }
 
