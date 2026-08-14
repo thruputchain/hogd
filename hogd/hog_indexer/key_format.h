@@ -34,6 +34,11 @@ public:
   // the height keeps each receipt addressable and sorts a hash's receipts by
   // ascending height.
   //
+  // Databases written by binaries that predate the suffix still hold bare
+  // 32-byte hash keys.  The read paths accept both layouts (the tx hash is the
+  // leading 32 bytes either way), so an in-place upgrade keeps serving old
+  // history without a rebuild; only new receipts get the block suffix.
+  //
   // This index is the primary event index.  Other indices do not store copies
   // of the events, but rather just reference things that can be looked up in
   // this index.

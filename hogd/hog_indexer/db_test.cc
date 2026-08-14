@@ -910,7 +910,7 @@ TEST_F(IndexDBTest, ReplayedTxHashAcrossHeightsDoesNotShadowReceipt)
   auto at_10 = db->get_tx_events(replayed_tx_hash, 10);
   ASSERT_TRUE(at_10.has_value());
   EXPECT_EQ(at_10->first, 10);
-  ASSERT_EQ(at_10->second.events.size(), 1u);
+  ASSERT_EQ(at_10->second.events.size(), 1);
 
   auto at_11 = db->get_tx_events(replayed_tx_hash, 11);
   ASSERT_TRUE(at_11.has_value());
@@ -922,7 +922,7 @@ TEST_F(IndexDBTest, ReplayedTxHashAcrossHeightsDoesNotShadowReceipt)
   auto by_hash = db->get_tx_events(replayed_tx_hash);
   ASSERT_TRUE(by_hash.has_value());
   EXPECT_EQ(by_hash->first, 10);
-  EXPECT_EQ(by_hash->second.events.size(), 1u);
+  EXPECT_EQ(by_hash->second.events.size(), 1);
 
   // The contract-history query hydrates the original event and does not die.
   EventFilterList filters;
@@ -931,7 +931,7 @@ TEST_F(IndexDBTest, ReplayedTxHashAcrossHeightsDoesNotShadowReceipt)
                                         IterationOrder::IterationOrderAscending,
                                         anchor_at_height(10)));
   ASSERT_TRUE(page.has_value());
-  ASSERT_EQ(page->events.size(), 1u);
+  ASSERT_EQ(page->events.size(), 1);
   EXPECT_EQ(page->events[0].block_height, 10);
   EXPECT_EQ(page->events[0].proposed_tx_hash, replayed_tx_hash);
 }

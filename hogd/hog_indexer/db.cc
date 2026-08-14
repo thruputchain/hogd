@@ -1006,6 +1006,17 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash,
   rocksdb::Status status =
       db_->Get(rocksdb::ReadOptions(), tx_cf_handle_, key_buffer, &value);
 
+  // Backward compatibility: receipts written before the key gained its
+  // block-height suffix live under a bare 32-byte hash key.  The old layout
+  // could not store two receipts under one hash, so a legacy key is unique;
+  // fall back to it on a miss.  The height is still validated by the caller's
+  // CHECK, and new receipts (40-byte keys) never reach this fallback.
+  if (status.IsNotFound()) {
+    IndexerKeyFormat::make_tx_key_prefix(key_buffer, tx_hash);
+    status =
+        db_->Get(rocksdb::ReadOptions(), tx_cf_handle_, key_buffer, &value);
+  }
+
   if (status.IsNotFound()) {
     return IndexerError(IndexerErrorCode::kDBNotFound);
   }
@@ -1570,7 +1581,11 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       db_->NewIterator(read_options, tx_cf_handle_));
   for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
     rocksdb::Slice key = iter->key();
-    if (key.size() != IndexerKeyFormat::kTxKeySize) {
+    // Accept both the current (hash + block) key and the legacy hash-only key
+    // written by binaries that predate the block suffix.  The tx hash is the
+    // leading 32 bytes of either, and the height is read from the value below.
+    if (key.size() != IndexerKeyFormat::kTxKeySize &&
+        key.size() != IndexerKeyFormat::kTxKeyPrefixSize) {
       error("get_transactions: unexpected tx_index key size {}", key.size());
       return IndexerError(IndexerErrorCode::kInternal);
     }
