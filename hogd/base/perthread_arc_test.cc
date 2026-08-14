@@ -361,4 +361,32 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
   EXPECT_TRUE(shutdown_result);
 }
 
+// Regression for the teardown use-after-free that aborted RpcLoadgenEventTest /
+// ERC20ExperimentTest at perthread_arc.h:243. A thread that touched the ARC and
+// exited before initiate_shutdown() drained its slot used to trip
+// CHECK(count_ <= 0) in TLS teardown; ~Refcount() now folds the slot instead.
+TEST(PerThreadARCTest, ThreadExitBeforeShutdownDoesNotAbort)
+{
+  auto arc = std::make_unique<PerThreadARC<int>>(0);
+  std::thread worker([&] {
+    arc->try_acquire_reference();
+    arc->release_reference();
+  });
+  worker.join(); // thread exit folds a zero net delta instead of aborting
+  EXPECT_TRUE(arc->initiate_shutdown());
+}
+
+// Cross-thread fold site: acquire on one worker, release on another leaves
+// imbalanced slots (+1 / -1) with a zero aggregate. Both exit before shutdown,
+// so both fold sites must run for the ARC to see a zero refcount.
+TEST(PerThreadARCTest, CrossThreadRefsFoldOnThreadExit)
+{
+  auto arc = std::make_unique<PerThreadARC<int>>(0);
+  std::thread acquirer([&] { arc->try_acquire_reference(); });
+  acquirer.join();
+  std::thread releaser([&] { arc->release_reference(); });
+  releaser.join();
+  EXPECT_TRUE(arc->initiate_shutdown());
+}
+
 } // namespace hogd

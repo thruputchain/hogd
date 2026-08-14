@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
@@ -68,6 +69,7 @@ public:
       // We can acquire a reference, and we know that the next call to
       // initiate_shutdown() will track our thread's refcount.
       refcount_->count_.store(kInitializedValue + 1, std::memory_order_relaxed);
+      refcount_->aggregate_ = &exited_thread_refcount_;
       return true;
     }
 
@@ -103,6 +105,7 @@ public:
       // otherwise, initialize the refcount to -1; we're not in shutdown, so we
       // must return false.
       refcount_->count_.store(kInitializedValue - 1, std::memory_order_release);
+      refcount_->aggregate_ = &exited_thread_refcount_;
       return false;
     }
 
@@ -168,6 +171,8 @@ public:
 
       pending_count += prev_count - kInitializedValue;
     });
+    // Threads that already exited folded their deltas here (under this lock).
+    pending_count += exited_thread_refcount_;
     CHECK(pending_count >= 0);
 
     // Retain a self-reference (the "+ 1") across readiness publication.
@@ -225,28 +230,44 @@ private:
     {
       count_ =
           obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
+      aggregate_ = std::exchange(obj.aggregate_, nullptr);
     }
     Refcount &operator=(Refcount &&obj) noexcept
     {
       count_ =
           obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
+      aggregate_ = std::exchange(obj.aggregate_, nullptr);
       return *this;
     }
 
     std::atomic<int64_t> count_;
 
+    // &owner.exited_thread_refcount_, set on first touch; nullptr if untouched.
+    int64_t *aggregate_ = nullptr;
+
     ~Refcount()
     {
-      // Assert that the references stored on this refcount were drained into
-      // the main refcount. Or that the refcount was initialized to
-      // kUninitializedValue = 0
-      CHECK(count_.load(std::memory_order_relaxed) <= 0);
+      const int64_t c = count_.load(std::memory_order_relaxed);
+      // A still-live slot (c > 0) means this thread is exiting before shutdown
+      // drained it; fold its net contribution into the ARC aggregate instead of
+      // losing the reference and aborting. Runs under TLStorage::lock_.
+      if (c > 0 && aggregate_ != nullptr) {
+        *aggregate_ += c - kInitializedValue;
+        return;
+      }
+      CHECK(c <= 0);
     }
   };
 
   PerThread<Refcount> refcount_;
   std::atomic<bool> is_shutdown_ready_{false};
   std::atomic<int64_t> shutdown_pending_refcount_{0};
+
+  // Net contribution of threads that touched this ARC then exited before
+  // initiate_shutdown() drained their slots (see ~Refcount). Guarded by
+  // refcount_'s thread lock -- fold sites and initiate_shutdown() all hold it
+  // -- so it is a plain int, not atomic.
+  int64_t exited_thread_refcount_{0};
 
   // too small to ever become nonnegative by +1 ops,
   // too big to every overflow to INT64_MAX by -1 ops
