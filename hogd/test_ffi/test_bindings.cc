@@ -679,12 +679,13 @@ root_invoke(void *syscall_handler, bool enable_tracing) noexcept
     return kUnrecoverableError;
   } catch (...) {
     // A mock contract callback (ForeignEntryPoint) is not declared noexcept and
-    // is not restricted to std::exception throws;
-    // MockRuntime::invoke_internal() lets callback exceptions unwind. A
-    // non-std::exception throw (e.g. int) would otherwise escape this noexcept
-    // boundary and terminate an honest caller (#2693), so translate it to a
-    // structured error -- as mock_syscall_entrypoint() already does. Report via
-    // fputs (no allocation), since there is no exception object to format.
+    // is not restricted to std::exception throws. MockContract::invoke() now
+    // catches callback exceptions at the call itself (#2789), so this arm is a
+    // backstop for anything else that throws a non-std::exception below here --
+    // it must not escape this noexcept boundary and terminate an honest caller
+    // (#2693). Translate it to a structured error, as mock_syscall_entrypoint()
+    // already does. Report via fputs (no allocation), since there is no
+    // exception object to format.
     std::fputs(
         "test_ffi: unrecoverable: unknown exception during root_invoke\n",
         stderr);

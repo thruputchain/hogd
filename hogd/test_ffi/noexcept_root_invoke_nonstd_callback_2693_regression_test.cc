@@ -14,6 +14,12 @@
 // the allocation-failure issues in this cluster, this one is exercised
 // directly: the throw lives in the callback we control, so no global allocator
 // hook is needed.
+//
+// MockContract::invoke() has since grown its own catch, so the callback's throw
+// is translated at the call rather than unwinding all the way here (#2789);
+// root_invoke()'s catch(...) is now the backstop for anything else below it.
+// Either way the caller sees kTestFFIErrorCodeUnrecoverableError, which is what
+// this test pins.
 
 #include <cstdint>
 

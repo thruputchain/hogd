@@ -36,10 +36,12 @@ MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
   auto *context = SyscallHandlerContext::get_context();
   assert(context != nullptr);
   context->push_mock_runtime(this);
-  // Pop on every exit path. The foreign callback reached through
-  // backing_contract_.invoke() is not noexcept, so a C++ exception unwinding
-  // through it must still restore the mock-runtime stack -- otherwise the
-  // leaked entry leaves the handler permanently uncloseable (issue #2470).
+  // Pop on every exit path. MockContract::invoke() now catches the foreign
+  // callback's exceptions and returns Unrecoverable instead of letting them
+  // unwind (issue #2789), so the ordinary return path below does the popping.
+  // Keep the RAII pop anyway: the callback type is not noexcept, and if any
+  // throw ever does reach here the mock-runtime stack must still be restored
+  // -- a leaked entry leaves the handler permanently uncloseable (#2470).
   x23::Defer pop_runtime([this, context]() {
     auto *runtime = context->pop_mock_runtime();
     assert(runtime == this);
