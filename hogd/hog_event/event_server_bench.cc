@@ -20,6 +20,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -87,7 +88,9 @@ connect_to_event_sched_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event sched server address: {}", address));
   }
-  auto client = make_rpc_client<EventSched1>(host_port, false)();
+  auto client =
+      make_rpc_client<EventSched1>(host_port, false,
+                                   kEventSchedulerRpcMaxMessageSize)();
   if (!client)
     panic("connect_to_event_sched_server failed: {}",
           client.error().error_code().message());
