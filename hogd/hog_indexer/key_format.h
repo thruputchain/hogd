@@ -21,11 +21,18 @@ public:
   // Column family: tx_index
   // This is the primary index, and is responsible for storing the list of
   // events per each transaction. Key format:
-  //   tx_hash (32 bytes) (total: 32 bytes)
+  //   tx_hash (32 bytes) + block_height (8 bytes BE) (total: 40 bytes)
   // Value format:
   //   serialized TxEventLog
-  // The first bytes of the key are the block height, so that appending new elts
-  // and pruning old data is efficient.
+  //
+  // The block height is part of the key (not just the value) because a single
+  // tx_hash can be committed at more than one height -- e.g. an initial-token-
+  // claim replay that is exempt from the replay cache and deterministically
+  // errors on the second attempt.  Keying by hash alone let the later receipt
+  // silently overwrite the earlier one, which then mismatched the
+  // contract_index rows that still referenced the original height.  Appending
+  // the height keeps each receipt addressable and sorts a hash's receipts by
+  // ascending height.
   //
   // This index is the primary event index.  Other indices do not store copies
   // of the events, but rather just reference things that can be looked up in
@@ -58,9 +65,14 @@ public:
       "meta:highest_indexed_block";
 
   // Transaction index key format:
+  //   tx_hash (32 bytes) + block_height (8 bytes BE)
+  // Total: 40 bytes
+  static constexpr size_t kTxKeySize = 32 + 8;
+
+  // Transaction index key prefix (all receipts for one tx_hash):
   //   tx_hash (32 bytes)
   // Total: 32 bytes
-  static constexpr size_t kTxKeySize = 32;
+  static constexpr size_t kTxKeyPrefixSize = 32;
 
   // Record kind discriminator, stored as 1 byte immediately after the
   // address so each (address, kind) forms a contiguous key range.
@@ -80,8 +92,13 @@ public:
   // Total: 41 bytes
   static constexpr size_t kContractKeyPrefixSize = 32 + 1 + 8;
 
-  // Build a transaction index key into the provided buffer
-  static void make_tx_key(std::string &key, SHA256Hash const &tx_hash);
+  // Build a transaction index key (tx_hash + block_height) into the buffer
+  static void make_tx_key(std::string &key, SHA256Hash const &tx_hash,
+                          BlockHeight block_height);
+
+  // Build a transaction index key prefix (tx_hash only) into the buffer.
+  // Used to seek every receipt committed under a given tx_hash.
+  static void make_tx_key_prefix(std::string &key, SHA256Hash const &tx_hash);
 
   // Build a contract index key prefix into the provided buffer
   static void make_contract_key_prefix(std::string &key,

@@ -100,10 +100,17 @@ public:
   // Look up the full record (height, body, events) for a transaction.
   IndexerStatus<TxRecord> get_tx_record(SHA256Hash const &tx_hash) const;
 
-  // Look up the block height and events for a specific transaction.
-  // Returns the block height and TxEventLog if found, or an error if not found.
+  // Look up the block height and events for a transaction by hash alone.
+  // A hash can be committed at more than one height (e.g. a replayed
+  // initial-token-claim); this returns the earliest receipt.  Returns the
+  // block height and TxEventLog if found, or an error if not found.
   IndexerStatus<std::pair<BlockHeight, TxEventLog>>
   get_tx_events(SHA256Hash const &tx_hash) const;
+
+  // Look up the events for the receipt committed at an exact (hash, height).
+  // Used to hydrate contract_index rows unambiguously.
+  IndexerStatus<std::pair<BlockHeight, TxEventLog>>
+  get_tx_events(SHA256Hash const &tx_hash, BlockHeight block_height) const;
 
   // Paginated, filtered events query.  See protocol/indexer.x for
   // full semantics.

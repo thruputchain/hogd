@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "event.hh"
+#include "exec_result.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/test.h"
 #include "hogd/hog_indexer/db.h"
@@ -871,6 +872,68 @@ TEST_F(IndexDBTest, DuplicateIngestIsSkippedEntirely)
   SHA256Hash tx4;
   std::ranges::fill(tx4, 0x04);
   EXPECT_FALSE(db->get_tx_events(tx4).has_value());
+}
+
+// Regression for #3370.  An initial-token-claim is exempt from the replay
+// cache, so a byte-identical claim can be committed at two heights: once as a
+// success that emits an event, and later as an empty deterministic-error
+// receipt under the same tx_hash.  tx_index is keyed by (hash, block), so the
+// later empty receipt no longer overwrites the earlier one; a contract-history
+// query hydrates the exact receipt each row was written from instead of
+// tripping the fatal receipt-height CHECK in get_events().
+TEST_F(IndexDBTest, ReplayedTxHashAcrossHeightsDoesNotShadowReceipt)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress emitter;
+  std::ranges::fill(emitter, 0xA1);
+  SHA256Hash replayed_tx_hash;
+  std::ranges::fill(replayed_tx_hash, 0x37);
+
+  // Block 10: the original claim succeeds and emits one event.
+  TxEventLog successful_claim;
+  successful_claim.proposed_tx_hash = replayed_tx_hash;
+  successful_claim.exec_result = ExecResult::ExecResultOK;
+  successful_claim.events.push_back(make_event(emitter, 0, 0));
+
+  // Block 11: the replay deterministically errors and emits no events under
+  // the same tx_hash.
+  TxEventLog replayed_error;
+  replayed_error.proposed_tx_hash = replayed_tx_hash;
+  replayed_error.exec_result = ExecResult::ExecResultTxDeterministicError;
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{successful_claim}, {}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{replayed_error}, {}));
+
+  // Both receipts remain individually addressable by (hash, height).
+  auto at_10 = db->get_tx_events(replayed_tx_hash, 10);
+  ASSERT_TRUE(at_10.has_value());
+  EXPECT_EQ(at_10->first, 10);
+  ASSERT_EQ(at_10->second.events.size(), 1u);
+
+  auto at_11 = db->get_tx_events(replayed_tx_hash, 11);
+  ASSERT_TRUE(at_11.has_value());
+  EXPECT_EQ(at_11->first, 11);
+  EXPECT_TRUE(at_11->second.events.empty());
+
+  // A hash-only lookup returns the earliest (original) receipt, not the later
+  // empty one.
+  auto by_hash = db->get_tx_events(replayed_tx_hash);
+  ASSERT_TRUE(by_hash.has_value());
+  EXPECT_EQ(by_hash->first, 10);
+  EXPECT_EQ(by_hash->second.events.size(), 1u);
+
+  // The contract-history query hydrates the original event and does not die.
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({emitter}));
+  auto page = db->get_events(make_query(std::move(filters),
+                                        IterationOrder::IterationOrderAscending,
+                                        anchor_at_height(10)));
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->events.size(), 1u);
+  EXPECT_EQ(page->events[0].block_height, 10);
+  EXPECT_EQ(page->events[0].proposed_tx_hash, replayed_tx_hash);
 }
 
 TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)

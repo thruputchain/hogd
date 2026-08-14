@@ -24,13 +24,25 @@ TEST_F(IndexerKeyFormatTest, TxKeyByteOrder)
   std::ranges::fill(tx_hash, 0xAA);
 
   std::string key;
-  IndexerKeyFormat::make_tx_key(key, tx_hash);
+  BlockHeight block_height = 0x0123456789ABCDEF;
+  IndexerKeyFormat::make_tx_key(key, tx_hash, block_height);
 
   EXPECT_EQ(key.size(), IndexerKeyFormat::kTxKeySize);
 
   // Verify tx_hash
   EXPECT_EQ(static_cast<uint8_t>(key[0]), 0xAA);
   EXPECT_EQ(static_cast<uint8_t>(key[31]), 0xAA);
+
+  // Verify block_height is appended big-endian (most-significant byte first),
+  // so a hash's receipts sort by ascending height.
+  EXPECT_EQ(static_cast<uint8_t>(key[32]), 0x01);
+  EXPECT_EQ(static_cast<uint8_t>(key[39]), 0xEF);
+
+  // The hash prefix (used to seek all receipts for a hash) is just the hash.
+  std::string prefix;
+  IndexerKeyFormat::make_tx_key_prefix(prefix, tx_hash);
+  EXPECT_EQ(prefix.size(), IndexerKeyFormat::kTxKeyPrefixSize);
+  EXPECT_EQ(key.compare(0, prefix.size(), prefix), 0);
 }
 
 // Test contract key prefix format - verify block_height is big-endian

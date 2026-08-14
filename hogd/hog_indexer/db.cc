@@ -102,8 +102,11 @@ create_tx_index_sst_chunk(
     value.append(reinterpret_cast<const char *>(serialized.data()),
                  serialized.size());
 
-    // Index by transaction (in tx_index column family)
-    IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash);
+    // Index by transaction (in tx_index column family).  The key carries the
+    // block height so receipts sharing a tx_hash across heights (e.g. a
+    // replayed initial-token-claim) do not overwrite each other.
+    IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash,
+                                  block_height);
     entries.emplace_back(key_buffer, value);
   }
 
@@ -939,25 +942,35 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
-  std::string key_buffer;
-  IndexerKeyFormat::make_tx_key(key_buffer, tx_hash);
-  std::string value;
+  // Receipts are keyed by tx_hash || block_height, so a single hash may map to
+  // several receipts (e.g. a replayed initial-token-claim).  Seek to the hash
+  // prefix and return the earliest (lowest-height) receipt, which is the one a
+  // block-explorer lookup by hash wants.
+  std::string prefix;
+  IndexerKeyFormat::make_tx_key_prefix(prefix, tx_hash);
 
   rocksdb::ReadOptions read_options;
-  rocksdb::Status status =
-      db_->Get(read_options, tx_cf_handle_, key_buffer, &value);
-
-  if (status.IsNotFound()) {
+  read_options.total_order_seek = true;
+  std::unique_ptr<rocksdb::Iterator> iter(
+      db_->NewIterator(read_options, tx_cf_handle_));
+  iter->Seek(prefix);
+  if (!iter->Valid()) {
+    if (!iter->status().ok()) {
+      error("Failed to read from indexer: {}", iter->status().ToString());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
     return IndexerError(IndexerErrorCode::kDBNotFound);
   }
 
-  if (!status.ok()) {
-    error("Failed to read from indexer: {}", status.ToString());
-    return IndexerError(IndexerErrorCode::kInternal);
+  rocksdb::Slice key = iter->key();
+  if (key.size() < prefix.size() ||
+      std::memcmp(key.data(), prefix.data(), prefix.size()) != 0) {
+    return IndexerError(IndexerErrorCode::kDBNotFound);
   }
 
   try {
-    return parse_tx_value(value);
+    return parse_tx_value(
+        std::string_view{iter->value().data(), iter->value().size()});
   } catch (const x23::XdrBadInput &e) {
     error("Failed to deserialize tx_index value: {}", e.what());
     return IndexerError(IndexerErrorCode::kInternal);
@@ -972,6 +985,42 @@ IndexDB::get_tx_events(SHA256Hash const &tx_hash) const
     return record.error();
   }
   return std::make_pair(record->height, std::move(record->events));
+}
+
+IndexerStatus<std::pair<BlockHeight, TxEventLog>>
+IndexDB::get_tx_events(SHA256Hash const &tx_hash,
+                       BlockHeight block_height) const
+{
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+
+  // Exact lookup of the receipt committed for this tx_hash at this height.
+  // get_events() hydrates contract_index rows through this path: the row
+  // carries the exact (block, hash) of the receipt that produced it, so the
+  // join is unambiguous even when the hash was committed at several heights.
+  std::string key_buffer;
+  IndexerKeyFormat::make_tx_key(key_buffer, tx_hash, block_height);
+  std::string value;
+
+  rocksdb::Status status =
+      db_->Get(rocksdb::ReadOptions(), tx_cf_handle_, key_buffer, &value);
+
+  if (status.IsNotFound()) {
+    return IndexerError(IndexerErrorCode::kDBNotFound);
+  }
+  if (!status.ok()) {
+    error("Failed to read from indexer: {}", status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
+  try {
+    auto record = parse_tx_value(value);
+    return std::make_pair(record.height, std::move(record.events));
+  } catch (const x23::XdrBadInput &e) {
+    error("Failed to deserialize tx_index value: {}", e.what());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
 }
 
 void
@@ -1343,26 +1392,21 @@ IndexDB::get_events(EventQuery const &query) const
 
     Position const win_pos = winner->current();
 
-    // Hydrate.
-    auto tx_events = get_tx_events(win_pos.tx);
+    // Hydrate the exact receipt this row was written from: tx_index is keyed
+    // by (tx_hash, block), so the (block, hash) carried by the contract_index
+    // row selects the right receipt even when the same hash was committed at
+    // several heights (e.g. a replayed initial-token-claim; #3370).
+    auto tx_events = get_tx_events(win_pos.tx, win_pos.block);
     if (!tx_events) {
       error("get_events: tx_index miss for tx {} at block {}",
             HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block));
       winner->advance(order);
       continue;
     }
-    // Index-integrity: a contract_index row and the tx_index receipt it
-    // hydrates through are written by the same consume_events() call, so
-    // the row's (block, contract) must agree with the receipt.  The join
-    // between the two column families is by tx hash alone -- tx_index
-    // carries no receipt identity or event-vector digest -- so a second
-    // write under that hash silently re-points every contract_index row
-    // referencing it, and a contract-history query would return one
-    // contract's payload under another contract's filter (#2295).
-    //
-    // Queries are read-only, so no caller can drive the index into this
-    // state; reaching it means the on-disk index is already corrupt, and
-    // serving corrupt history is worse than dying loudly.
+    // The lookup keyed on win_pos.block, and the value stores its own height,
+    // so a mismatch here means the on-disk receipt disagrees with its key --
+    // i.e. the index is corrupt.  Serving corrupt history is worse than dying
+    // loudly.
     CHECK_EQ(tx_events->first, win_pos.block);
 
     const TxEventLog &event_log = tx_events->second;

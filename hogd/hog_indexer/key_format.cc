@@ -13,11 +13,24 @@
 namespace hogd {
 
 void
-IndexerKeyFormat::make_tx_key(std::string &key, SHA256Hash const &tx_hash)
+IndexerKeyFormat::make_tx_key(std::string &key, SHA256Hash const &tx_hash,
+                              BlockHeight block_height)
 {
   key.clear();
   key.reserve(kTxKeySize);
-  // Append tx_hash
+  // Append tx_hash, then block_height big-endian so a hash's receipts sort by
+  // ascending height and a prefix seek on the hash lands on the earliest one.
+  key.append(reinterpret_cast<const char *>(tx_hash.data()), 32);
+  uint64_t height_be = std::byteswap(static_cast<uint64_t>(block_height));
+  key.append(reinterpret_cast<const char *>(&height_be), 8);
+}
+
+void
+IndexerKeyFormat::make_tx_key_prefix(std::string &key,
+                                     SHA256Hash const &tx_hash)
+{
+  key.clear();
+  key.reserve(kTxKeyPrefixSize);
   key.append(reinterpret_cast<const char *>(tx_hash.data()), 32);
 }
 
