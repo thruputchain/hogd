@@ -112,6 +112,83 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_reap_program
+
+# The reap has to be synchronous: its callers bind fixed ports seconds later,
+# so a process that has merely been signalled is still a process holding 8075.
+# Drive the emitted program against a fake [pgrep]/[killall] pair so the
+# escalation and the waiting are checked without any real processes.
+reap_bin="$work_dir/bin"
+alive_file="$work_dir/alive"
+signal_file="$work_dir/signals"
+mkdir -p "$reap_bin"
+
+# [pgrep -x NAME] reports the process alive iff NAME is listed in $ALIVE_FILE.
+cat >"$reap_bin/pgrep" <<'FAKE_PGREP'
+#!/usr/bin/env bash
+grep -qx "${*: -1}" "$ALIVE_FILE" 2>/dev/null
+FAKE_PGREP
+
+# [sudo -n /usr/bin/killall -q -SIG names...] records the signal it was asked
+# for and clears $ALIVE_FILE only for the signals in $DIES_ON, standing in for
+# a process that ignores SIGTERM.
+cat >"$reap_bin/sudo" <<'FAKE_SUDO'
+#!/usr/bin/env bash
+signal=""
+for arg in "$@"; do
+  case $arg in
+  -TERM | -KILL) signal=${arg#-} ;;
+  esac
+done
+echo "$signal" >>"$SIGNAL_FILE"
+[[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
+FAKE_SUDO
+chmod +x "$reap_bin/pgrep" "$reap_bin/sudo"
+
+reap_status=0
+reap_output=""
+# Runs the reap program against $1 (newline-free list of live process names)
+# where the live processes die on the signals in $2.
+run_reap() {
+  local alive=$1 dies_on=$2
+
+  : >"$signal_file"
+  : >"$alive_file"
+  [ -z "$alive" ] || printf '%s\n' $alive >"$alive_file"
+
+  reap_status=0
+  reap_output=$(
+    PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
+      SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
+      bash -c "$(ci_reap_program 'hog-mempool hog-exec' 1 1)" 2>&1
+  ) || reap_status=$?
+}
+
+# A host that reports no processes must still be signalled: where /proc hides
+# them, skipping the kill would leave the stale process the reap exists to clear.
+run_reap "" "TERM KILL"
+check_eq "quiet host reaps cleanly" "0" "$reap_status"
+check_eq "quiet host is still signalled" "TERM" "$(cat "$signal_file")"
+
+run_reap "hog-mempool" "TERM KILL"
+check_eq "process dying on SIGTERM reaps cleanly" "0" "$reap_status"
+check_eq "process dying on SIGTERM is not SIGKILLed" "TERM" \
+  "$(cat "$signal_file")"
+
+run_reap "hog-mempool" "KILL"
+check_eq "process ignoring SIGTERM reaps cleanly" "0" "$reap_status"
+check_eq "process ignoring SIGTERM is escalated" "TERM KILL" \
+  "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
+check_contains "escalation names the survivor" \
+  "alive after SIGTERM, escalating to SIGKILL: hog-mempool" "$reap_output"
+
+# Surviving SIGKILL is a wedged host rather than a race, so it is reported as a
+# failure instead of being handed to the next bind to discover.
+run_reap "hog-mempool hog-exec" ""
+check_eq "process surviving SIGKILL fails the reap" "2" "$reap_status"
+check_contains "survivors of SIGKILL are named" \
+  "alive after SIGKILL: hog-mempool hog-exec" "$reap_output"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1
