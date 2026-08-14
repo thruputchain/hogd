@@ -131,6 +131,32 @@ TEST(VerifySignatureGas, SuccessfulVerifyIsMeteredByMessageLength)
   }
 }
 
+// The amplification vector does not need a valid signature: a correctly sized
+// but invalid signature still runs the full verifier over the message, so it
+// must be metered even though verification fails and returns
+// InvalidSyscallInput.
+TEST(VerifySignatureGas, FailedVerifyOfWellSizedSignatureIsMetered)
+{
+  auto [public_key, secret_key] = ed25519_keygen();
+
+  std::array<std::byte, sizeof(Ed25519PublicKey)> public_key_bytes{};
+  std::memcpy(public_key_bytes.data(), std::addressof(public_key),
+              public_key_bytes.size());
+
+  // A correctly sized all-zero signature is well formed but does not verify.
+  std::array<std::byte, sizeof(Ed25519Signature)> bad_signature{};
+  constexpr size_t kMessageLen = 256;
+  std::array<std::byte, kMessageLen> message{};
+
+  auto outcome = run_one_verify(bad_signature, public_key_bytes, message);
+
+  EXPECT_EQ(outcome.result_code,
+            std::to_underlying(
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+  EXPECT_EQ(outcome.gas_consumed, Ed25519VerifyCost(kMessageLen));
+  EXPECT_GT(outcome.gas_consumed, 0U);
+}
+
 // The pre-verifier size checks must stay free: a wrong-sized public key is
 // rejected before any cryptographic work, so it is not metered. This pins the
 // fix to the verify path and keeps size-mismatch rejection from being charged.
