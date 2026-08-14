@@ -126,6 +126,7 @@ public:
     }
     co_await Health::instance().set_status(Health::Status::kOk);
     ready_.store(true, std::memory_order_release);
+    ready_.notify_all();
   }
 
   static x23::Async<coord_sched_client_t> get_client()

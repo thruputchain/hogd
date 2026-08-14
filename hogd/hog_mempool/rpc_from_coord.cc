@@ -1302,11 +1302,10 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
 
 x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
-                                                    ProposalContext context)
+                                                     ProposalContext context)
 {
-  if (!ready()) {
-    co_return SchedulerProposalResult(
-        SchedulerProposalOutcome::SchedulerProposalError);
+  while (!ready()) {
+    ready_.wait(false, std::memory_order_acquire);
   }
   if (context.protocol != 0) {
     co_return SchedulerProposalResult(

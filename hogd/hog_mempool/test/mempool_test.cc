@@ -2246,18 +2246,14 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
             std::future_status::timeout);
   EXPECT_FALSE(server.mempool_coord_rpc().ready());
   EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
-  auto premature_work = std::async(std::launch::async, [&] {
-    SchedulerProposalResult proposal =
-        server.mempool_coord_rpc().schedulercoord_propose_block(0, {})();
-    SchedulerValidationResult validation =
-        server.mempool_coord_rpc().schedulercoord_validate_block(0, {})();
-    return std::pair{proposal.outcome(), validation.outcome()};
+  auto pending_proposal = std::async(std::launch::async, [&] {
+    return server.mempool_coord_rpc().schedulercoord_propose_block(0, {})();
   });
-  ASSERT_EQ(premature_work.wait_for(std::chrono::seconds(1)),
-            std::future_status::ready);
-  const auto [proposal_outcome, validation_outcome] = premature_work.get();
-  EXPECT_EQ(proposal_outcome, SchedulerProposalOutcome::SchedulerProposalError);
-  EXPECT_EQ(validation_outcome,
+  EXPECT_EQ(pending_proposal.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(0, {})()
+                .outcome(),
             SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
 
   server.register_event_only_after_genesis();
@@ -2272,6 +2268,10 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
   runtime_init.get();
   EXPECT_TRUE(server.mempool_coord_rpc().ready());
   EXPECT_NE(health_status().find("\"status\":\"ok\""), std::string::npos);
+  ASSERT_EQ(pending_proposal.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  EXPECT_EQ(pending_proposal.get().outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
 }
 
 TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
