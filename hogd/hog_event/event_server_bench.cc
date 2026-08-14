@@ -115,7 +115,7 @@ const ContractAddress contract_address =
 ProposedTransaction
 create_fake_body(size_t tx_id)
 {
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.block_expiry_height = 1'000'000;
   body.signed_tx.tx.uniquifier.nonce = tx_id;
   body.signed_tx.tx.invocation.gas_limit = 1'000'000;
