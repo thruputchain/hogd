@@ -22,6 +22,15 @@ constexpr static uint64_t kSHA256HashBaseCost = 500;
 // per-message-byte charge, mirroring the SHA-256 model. The base is larger than
 // the SHA-256 base to reflect the two scalar multiplications the verifier does
 // regardless of message length.
+//
+// This charge is levied at runtime by syscall_VerifySignature_inner (the value
+// it returns is debited by the shared syscall gas epilogue for both the WASM
+// and RV32 paths), so it is deterministic and consensus-safe across VMs. It is
+// deliberately NOT added to kSyscallGasCostSchedule below: that array is folded
+// into rv32::kGasScheduleDigest, and bumping the digest would reject every
+// already-lowered RV32 artifact until a matching rv32-lower release re-stamped
+// it. Folding this cost into the committed schedule is left for the next
+// coordinated gas-schedule version bump. See hogd issue #3360.
 constexpr static uint64_t kEd25519VerifyByteCost = 100;
 constexpr static uint64_t kEd25519VerifyBaseCost = 2000;
 
@@ -58,13 +67,11 @@ struct SyscallGasCostEntry {
 // Current nonzero direct host-side syscall charges. Most syscalls intentionally
 // return zero direct host gas today; child invocation gas is metered by the
 // invoked VM or WASM runtime rather than a fixed syscall-cost constant.
-constexpr std::array<SyscallGasCostEntry, 6> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 4> kSyscallGasCostSchedule = {{
     {.name = u8"SHA256HashBase", .cost = kSHA256HashBaseCost},
     {.name = u8"SHA256HashByte", .cost = kSHA256HashByteCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
-    {.name = u8"Ed25519VerifyBase", .cost = kEd25519VerifyBaseCost},
-    {.name = u8"Ed25519VerifyByte", .cost = kEd25519VerifyByteCost},
 }};
 
 } // namespace hogd

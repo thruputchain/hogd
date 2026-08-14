@@ -60,8 +60,7 @@ Instruction gas is a fixed constexpr table in `program.h`:
 - divide/remainder ops: `8`
 
 `kGasScheduleDigest` now covers both RV32 instruction costs and the live host
-syscall costs from `gas_cost_table.h`. `kGasTableVersion` is `4` after adding
-direct host-syscall gas for Ed25519 `VerifySignature`; version `3` admitted
+syscall costs from `gas_cost_table.h`. `kGasTableVersion` is `3` after admitting
 the canonical `unimp` word (`0xc0001073`) as a deterministic invalid-instruction
 trap (version `2` admitted `EBREAK` as a deterministic breakpoint trap); the
 accepted SYSTEM instructions are exactly `ECALL`, `EBREAK`, and canonical
