@@ -116,18 +116,20 @@ check_contains "traced replay still readable" "traced-needle" "$report"
 
 # The reap has to be synchronous: its callers bind fixed ports seconds later,
 # so a process that has merely been signalled is still a process holding 8075.
-# Drive the emitted program against a fake [pgrep]/[killall] pair so the
-# escalation and the waiting are checked without any real processes.
+# Drive the emitted program against a fake [ps]/[killall] pair so the
+# escalation, the waiting, and the name matching are checked without any real
+# processes.
 reap_bin="$work_dir/bin"
 alive_file="$work_dir/alive"
 signal_file="$work_dir/signals"
 mkdir -p "$reap_bin"
 
-# [pgrep -x NAME] reports the process alive iff NAME is listed in $ALIVE_FILE.
-cat >"$reap_bin/pgrep" <<'FAKE_PGREP'
+# [ps -eo comm=] lists the processes named in $ALIVE_FILE, one per line, which
+# is the shape the real thing prints.
+cat >"$reap_bin/ps" <<'FAKE_PS'
 #!/usr/bin/env bash
-grep -qx "${*: -1}" "$ALIVE_FILE" 2>/dev/null
-FAKE_PGREP
+cat "$ALIVE_FILE" 2>/dev/null
+FAKE_PS
 
 # [sudo -n /usr/bin/killall -q -SIG names...] records the signal it was asked
 # for and clears $ALIVE_FILE only for the signals in $DIES_ON, standing in for
@@ -143,12 +145,12 @@ done
 echo "$signal" >>"$SIGNAL_FILE"
 [[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
 FAKE_SUDO
-chmod +x "$reap_bin/pgrep" "$reap_bin/sudo"
+chmod +x "$reap_bin/ps" "$reap_bin/sudo"
 
 reap_status=0
 reap_output=""
 # Runs the reap program against $1 (newline-free list of live process names)
-# where the live processes die on the signals in $2.
+# where the live processes die on the signals in $2, reaping the names in $3.
 run_reap() {
   local alive=$1 dies_on=$2
 
@@ -160,7 +162,7 @@ run_reap() {
   reap_output=$(
     PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
       SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
-      bash -c "$(ci_reap_program 'hog-mempool hog-exec' 1 1)" 2>&1
+      bash -c "$(ci_reap_program "${3:-hog-mempool hog-exec}" 1 1)" 2>&1
   ) || reap_status=$?
 }
 
@@ -188,6 +190,14 @@ run_reap "hog-mempool hog-exec" ""
 check_eq "process surviving SIGKILL fails the reap" "2" "$reap_status"
 check_contains "survivors of SIGKILL are named" \
   "alive after SIGKILL: hog-mempool hog-exec" "$reap_output"
+
+# The names must be matched literally, the way [killall] targets them. Reading
+# the configured [chuckd.dev] as a pattern would find this unrelated process,
+# and the reap would then wait out both timeouts and fail over a process
+# nothing had signalled.
+run_reap "chuckdXdev" "" "chuckd.dev scpd.dev"
+check_eq "a name is not matched as a pattern" "0" "$reap_status"
+check_eq "an unsignalled process is not waited on" "TERM" "$(cat "$signal_file")"
 
 if ((fail)); then
   echo "bench_harness selftest FAILED"

@@ -303,11 +303,18 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # processes to actually go is what makes the reap mean what its callers read it
 # as meaning.
 #
-# The liveness check is [pgrep] rather than another [killall]: it needs no
-# privilege, and signalling a process to ask whether it is there conflates
-# "gone" with "not permitted to signal". Where /proc hides other users'
-# processes [pgrep] sees nothing and this degrades to the old fire-and-forget
-# behaviour, which is the floor rather than a regression.
+# The liveness check reads [ps] rather than signalling with another [killall]:
+# it needs no privilege, and signalling a process to ask whether it is there
+# conflates "gone" with "not permitted to signal". Where /proc hides other
+# users' processes [ps] sees nothing and this degrades to the old
+# fire-and-forget behaviour, which is the floor rather than a regression.
+#
+# The names are matched literally, with [grep -xF] over [ps -eo comm=], because
+# [killall] targets them literally. [pgrep -x] would not do: it anchors its
+# operand but still reads it as a regular expression, so the configured
+# [chuckd.dev] also matches a [chuckdXdev] that [killall] never signalled --
+# and a liveness check that answers "alive" about a process nothing is killing
+# waits out both timeouts and then fails the reap.
 ci_reap_program() {
   cat <<EOF
 procs='$1'
@@ -316,8 +323,9 @@ kill_timeout=$3
 
 survivors() {
   found=
+  live=\$(ps -eo comm= 2>/dev/null) || live=
   for proc in \$procs; do
-    if pgrep -x "\$proc" >/dev/null 2>&1; then
+    if printf '%s\n' "\$live" | grep -qxF "\$proc"; then
       found="\$found \$proc"
     fi
   done
