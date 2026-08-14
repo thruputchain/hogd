@@ -103,6 +103,13 @@ struct ForeignTracedInvokeResult {
 };
 
 // Type of the function pointer used within a mock contract.
+//
+// The callback is not noexcept. A C++ callback that throws is caught where the
+// callback is called and reported as InvokeErrorCode::Unrecoverable -- the same
+// result the callback could have returned itself -- on every path that reaches
+// it: the root mock frame, a nested Invoke syscall from a Wasmtime or RV32
+// parent, and mock_syscall_entrypoint(kInvoke, ...) alike. Prefer returning the
+// panic code; throwing is merely not fatal (hogd issue #2789).
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct ForeignInvokeResult (*ForeignEntryPoint)(void *foreign_context,
                                                         uint64_t method_number);
