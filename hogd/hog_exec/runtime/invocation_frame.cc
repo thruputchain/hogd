@@ -423,8 +423,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       // is called from SystemCallHandler::finish_frame()'s noexcept boundary,
       // so contain the failure and report Unrecoverable rather than letting the
       // exception terminate the executor (#3378), mirroring the transactional
-      // start_frame() admission path (#3058). The child frame is already popped,
-      // so the stack is left coherent.
+      // start_frame() admission path (#3058). The child frame is already
+      // popped, so the stack is left coherent.
       try {
         frame_stack_.back().commit_failed_child_frame();
       } catch (...) {
