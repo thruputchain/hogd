@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
-#include <cstdlib>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -365,24 +364,16 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
 // Regression for the teardown use-after-free that aborted RpcLoadgenEventTest /
 // ERC20ExperimentTest at perthread_arc.h:243. A thread that touched the ARC and
 // exited before initiate_shutdown() drained its slot used to trip
-// CHECK(count_ <= 0) in TLS teardown; ~Refcount() now folds the slot instead. A
-// worker touches the ARC and exits while it is still live, and the process must
-// exit cleanly. Run in an exit subprocess so a regression shows up as
-// SIGABRT != ExitedWithCode(0) rather than taking base_test down.
+// CHECK(count_ <= 0) in TLS teardown; ~Refcount() now folds the slot instead.
 TEST(PerThreadARCTest, ThreadExitBeforeShutdownDoesNotAbort)
 {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(
-      {
-        auto *arc = new PerThreadARC<int>(0); // still live when worker exits
-        std::thread worker([&] {
-          arc->try_acquire_reference();
-          arc->release_reference();
-        });
-        worker.join();
-        std::exit(0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  auto arc = std::make_unique<PerThreadARC<int>>(0);
+  std::thread worker([&] {
+    arc->try_acquire_reference();
+    arc->release_reference();
+  });
+  worker.join(); // thread exit folds a zero net delta instead of aborting
+  EXPECT_TRUE(arc->initiate_shutdown());
 }
 
 // Cross-thread fold site: acquire on one worker, release on another leaves
@@ -390,21 +381,12 @@ TEST(PerThreadARCTest, ThreadExitBeforeShutdownDoesNotAbort)
 // so both fold sites must run for the ARC to see a zero refcount.
 TEST(PerThreadARCTest, CrossThreadRefsFoldOnThreadExit)
 {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(
-      {
-        auto *arc = new PerThreadARC<int>(0);
-        std::thread acquirer([&] { arc->try_acquire_reference(); });
-        acquirer.join();
-        std::thread releaser([&] { arc->release_reference(); });
-        releaser.join();
-        if (!arc->initiate_shutdown()) {
-          std::exit(1); // regression: exited-thread deltas mis-accounted
-        }
-        delete arc;
-        std::exit(0);
-      },
-      ::testing::ExitedWithCode(0), "");
+  auto arc = std::make_unique<PerThreadARC<int>>(0);
+  std::thread acquirer([&] { arc->try_acquire_reference(); });
+  acquirer.join();
+  std::thread releaser([&] { arc->release_reference(); });
+  releaser.join();
+  EXPECT_TRUE(arc->initiate_shutdown());
 }
 
 } // namespace hogd

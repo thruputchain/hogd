@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
@@ -229,15 +230,13 @@ private:
     {
       count_ =
           obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
-      aggregate_ = obj.aggregate_;
-      obj.aggregate_ = nullptr;
+      aggregate_ = std::exchange(obj.aggregate_, nullptr);
     }
     Refcount &operator=(Refcount &&obj) noexcept
     {
       count_ =
           obj.count_.exchange(kUninitializedValue, std::memory_order_relaxed);
-      aggregate_ = obj.aggregate_;
-      obj.aggregate_ = nullptr;
+      aggregate_ = std::exchange(obj.aggregate_, nullptr);
       return *this;
     }
 
