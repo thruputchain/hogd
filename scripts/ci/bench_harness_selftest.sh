@@ -122,6 +122,7 @@ check_contains "traced replay still readable" "traced-needle" "$report"
 reap_bin="$work_dir/bin"
 alive_file="$work_dir/alive"
 signal_file="$work_dir/signals"
+argv_file="$work_dir/argv"
 mkdir -p "$reap_bin"
 
 # [ps -eo comm=] lists the processes named in $ALIVE_FILE, one per line, which
@@ -131,15 +132,18 @@ cat >"$reap_bin/ps" <<'FAKE_PS'
 cat "$ALIVE_FILE" 2>/dev/null
 FAKE_PS
 
-# [sudo -n /usr/bin/killall -q -SIG names...] records the signal it was asked
-# for and clears $ALIVE_FILE only for the signals in $DIES_ON, standing in for
-# a process that ignores SIGTERM. $SUDO_FAILS makes it fail the way a host with
-# no killall or no passwordless sudo does: nonzero, with a complaint on stderr.
-# A signal that matches nothing exits 1 silently, which is what [killall -q]
-# does and must not be read as a failure.
+# [sudo -n /usr/bin/killall -q [-SIG] names...] records its whole argument list
+# and the signal it was asked for, and clears $ALIVE_FILE only for the signals
+# in $DIES_ON, standing in for a process that ignores SIGTERM. $SUDO_FAILS makes
+# it fail the way a host with no killall or no passwordless sudo does: nonzero,
+# with a complaint on stderr. A signal that matches nothing exits 1 silently,
+# which is what [killall -q] does and must not be read as a failure.
 cat >"$reap_bin/sudo" <<'FAKE_SUDO'
 #!/usr/bin/env bash
-signal=""
+printf '%s\n' "$*" >>"$ARGV_FILE"
+# An absent signal argument is SIGTERM, which is what the real [killall]
+# defaults to and what the reap relies on to stay inside the hosts' sudo grant.
+signal=TERM
 for arg in "$@"; do
   case $arg in
   -TERM | -KILL) signal=${arg#-} ;;
@@ -163,13 +167,14 @@ run_reap() {
   local alive=$1 dies_on=$2
 
   : >"$signal_file"
+  : >"$argv_file"
   : >"$alive_file"
   [ -z "$alive" ] || printf '%s\n' $alive >"$alive_file"
 
   reap_status=0
   reap_output=$(
     PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
-      SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
+      SIGNAL_FILE="$signal_file" ARGV_FILE="$argv_file" DIES_ON="$dies_on" \
       SUDO_FAILS="${SUDO_FAILS:-}" \
       bash -c "$(ci_reap_program "${3:-hog-mempool hog-exec}" 1 1)" 2>&1
   ) || reap_status=$?
@@ -186,10 +191,21 @@ check_eq "process dying on SIGTERM reaps cleanly" "0" "$reap_status"
 check_eq "process dying on SIGTERM is not SIGKILLed" "TERM" \
   "$(cat "$signal_file")"
 
+# The bench hosts grant passwordless sudo for [/usr/bin/killall -q <names>] and
+# match the argument list as given, so the SIGTERM pass has to run exactly that
+# command: naming the default signal in front of the names makes every host
+# answer "sudo: a password is required", and a reap that signals nothing leaves
+# the stale process holding the port the next benchmark binds.
+check_eq "the SIGTERM pass names no signal" \
+  "-n /usr/bin/killall -q hog-mempool hog-exec" "$(cat "$argv_file")"
+
 run_reap "hog-mempool" "KILL"
 check_eq "process ignoring SIGTERM reaps cleanly" "0" "$reap_status"
 check_eq "process ignoring SIGTERM is escalated" "TERM KILL" \
   "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
+check_eq "the escalation names SIGKILL" \
+  "-n /usr/bin/killall -q -KILL hog-mempool hog-exec" \
+  "$(tail -n 1 "$argv_file")"
 check_contains "escalation names the survivor" \
   "alive after SIGTERM, escalating to SIGKILL: hog-mempool" "$reap_output"
 

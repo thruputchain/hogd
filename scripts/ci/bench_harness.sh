@@ -345,13 +345,14 @@ wait_gone() {
   done
 }
 
-# Sends \$1 to every named process. Returns nonzero only when the signal could
-# not be sent at all, which has to be told apart from a process that refused to
-# die: [-q] silences killall's own "no process found", so a nonzero exit that
-# still says something is sudo or killall failing rather than an absence of
-# processes to kill.
+# Sends the signal named by \$1 -- empty for [killall]'s own default, SIGTERM --
+# to every named process. Returns nonzero only when the signal could not be sent
+# at all, which has to be told apart from a process that refused to die: [-q]
+# silences killall's own "no process found", so a nonzero exit that still says
+# something is sudo or killall failing rather than an absence of processes to
+# kill.
 signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+  err=\$(sudo -n /usr/bin/killall -q \${1:+"-\$1"} \$procs 2>&1)
   status=\$?
   if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
     echo "cannot signal processes: \$err" >&2
@@ -362,9 +363,21 @@ signal_all() {
 
 # Signal first and ask questions after: a host that will not report its
 # processes must still have them reaped.
-signal_all TERM || exit 3
+#
+# The first pass names no signal. [killall] already defaults to SIGTERM, and
+# the bench hosts' passwordless sudo grant matches the whole argument list, so
+# it covers [/usr/bin/killall -q <names>] -- the command this harness has
+# always run -- and not the same command with a signal spelled out in front of
+# the names. Asking for [-TERM] explicitly turns every reap into "sudo: a
+# password is required", and a reap that signals nothing leaves behind exactly
+# the bound port this code exists to wait out.
+signal_all '' || exit 3
 wait_gone "\$term_timeout" && exit 0
 
+# The escalation has no such unqualified spelling, so a host whose sudo grant
+# does not cover [-KILL] reports that it could not signal and the reap is
+# tolerated rather than failed -- the same treatment as any other host that
+# could not be signalled at all.
 echo "alive after SIGTERM, escalating to SIGKILL:\$(survivors)" >&2
 signal_all KILL || exit 3
 wait_gone "\$kill_timeout" && exit 0
