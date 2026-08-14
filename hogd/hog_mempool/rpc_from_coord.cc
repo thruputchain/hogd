@@ -1489,23 +1489,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     }
   }
 
-  const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
-  if (last_committed_block_.value.proposal_header.block_height == 1) {
-    if (committed_genesis_ceremony_batch_hash_ == request.expected_batch_hash &&
-        committed_genesis_ceremony_proposal_txs_) {
-      GenesisCeremonyResult already(
-          GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
-      already.commit() = {
-          .db_tip = last_committed_block_,
-          .proposal_txs = *committed_genesis_ceremony_proposal_txs_,
-      };
-      co_return already;
-    }
-    co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
-  }
-  if (last_committed_block_.value.proposal_header.block_height != 0 ||
-      parent_hash != request.expected_parent_value_hash) {
-    co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+  if (genesis_ceremony_pre_nomination_test_hook_) {
+    genesis_ceremony_pre_nomination_test_hook_();
   }
 
   // This path deliberately bypasses scheduler admission and its HogAge state.
@@ -1520,6 +1505,35 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   {
     x23::CoroGuard cache_guard;
     co_await cache_guard(nominated_block_cache_lock_);
+
+    // Ordinary commits hold the nomination-cache lock while updating
+    // last_committed_block_. Revalidate after acquiring that same lock, so a
+    // height-1 commit that completed while this request was being decoded
+    // cannot be overwritten by a second height-1 block. Keeping cache_guard
+    // until the ceremony nomination is ready prevents another commit from
+    // advancing the tip after this check and before the block is reserved in
+    // the cache. Do not also take commit_lock_ here: the asynchronous height-0
+    // auth callback can hold it while genesis ceremony execution is pending.
+    const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
+    if (last_committed_block_.value.proposal_header.block_height == 1) {
+      if (committed_genesis_ceremony_batch_hash_ ==
+              request.expected_batch_hash &&
+          committed_genesis_ceremony_proposal_txs_) {
+        GenesisCeremonyResult already(
+            GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
+        already.commit() = {
+            .db_tip = last_committed_block_,
+            .proposal_txs = *committed_genesis_ceremony_proposal_txs_,
+        };
+        co_return already;
+      }
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+    }
+    if (last_committed_block_.value.proposal_header.block_height != 0 ||
+        parent_hash != request.expected_parent_value_hash) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+    }
+
     if (nominated_block_cache_.block_id != 0) {
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
     }

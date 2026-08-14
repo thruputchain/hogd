@@ -1845,6 +1845,85 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndIsIdempotent)
   EXPECT_EQ(retry.commit().db_tip, result.commit().db_tip);
 }
 
+TEST(Mempool, GenesisV2CeremonyRejectsParentCommittedBeforeNomination)
+{
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  GenesisConfigurationBuilder builder;
+  auto root_contract = load_stock_genesis_root_contract();
+  GenesisConfigurationV2 genesis =
+      builder.build_v2(MempoolTestInfra::kNetworkHash, cost_model,
+                       *root_contract);
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
+                std::move(genesis))(),
+            DbSchedResult::DbSchedResultOK);
+
+  const SchedulerGetTipResult parent =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+
+  SchedulerProposalResult normal_proposal =
+      server.mempool_coord_rpc().schedulercoord_propose_block(
+          parent.db_tip().id, ProposalContext{.protocol = 0})();
+  ASSERT_EQ(normal_proposal.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  SignedTransactionBatch ceremony_txs;
+  ceremony_txs.append_range(
+      builder.make_genesis_ceremony_transactions(cost_model));
+  ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
+  GenesisCeremonyRequest request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(parent.db_tip().value),
+      .expected_batch_hash = sha256(parallel),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = std::move(parallel),
+  };
+
+  std::latch ceremony_ready(1);
+  std::latch allow_ceremony_nomination(1);
+  server.mempool_coord_rpc().set_genesis_ceremony_pre_nomination_test_hook(
+      [&]() {
+        ceremony_ready.count_down();
+        allow_ceremony_nomination.wait();
+      });
+
+  std::promise<GenesisCeremonyResult> ceremony_result;
+  std::future<GenesisCeremonyResult> ceremony_future =
+      ceremony_result.get_future();
+  std::thread ceremony_thread([&]() {
+    try {
+      ceremony_result.set_value(
+          server.mempool_coord_rpc().schedulercoord_commit_genesis_ceremony(
+              std::move(request))());
+    } catch (...) {
+      ceremony_result.set_exception(std::current_exception());
+    }
+  });
+
+  ceremony_ready.wait();
+  const SchedulerProposedBlock &normal_block = normal_proposal.proposed_block();
+  const ConsensusValue normal_value =
+      consensus_value(parent.db_tip(), normal_block.proposal);
+  const SchedulerCommitOutcome normal_commit =
+      commit_block(server, parent.db_tip(), normal_block);
+  allow_ceremony_nomination.count_down();
+  ceremony_thread.join();
+  server.mempool_coord_rpc().set_genesis_ceremony_pre_nomination_test_hook({});
+
+  ASSERT_EQ(normal_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const GenesisCeremonyResult stale_ceremony = ceremony_future.get();
+  EXPECT_EQ(stale_ceremony.outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+  const SchedulerGetTipResult final_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(final_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(final_tip.db_tip().value, normal_value);
+  EXPECT_EQ(final_tip.db_tip().value.proposal_header.block_height, 1);
+}
+
 TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
