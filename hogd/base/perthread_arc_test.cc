@@ -362,34 +362,30 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
   EXPECT_TRUE(shutdown_result);
 }
 
-// Failing regression repro for the CI use-after-free that aborts
-// RpcLoadgenEventTest / ERC20ExperimentTest teardown at perthread_arc.h:243
+// Regression test for the CI use-after-free that aborted RpcLoadgenEventTest /
+// ERC20ExperimentTest teardown at perthread_arc.h:243
 // ("CHECK FAILED: count_.load(...) <= 0").
 //
 // A PerThreadARC keeps each touching thread's refcount in a thread_local slot
 // (PerThread<Refcount>). A balanced acquire/release leaves that slot at
 // kInitializedValue, a *positive* sentinel; the slot is only driven
 // non-positive (to kShutdownValue) by initiate_shutdown()'s for_each over the
-// live threads. If a thread that touched the ARC exits before
-// initiate_shutdown() has drained its slot, thread_local teardown
-// (detail::TLStorage::remove() -> ~TLItems -> ~Refcount()) observes the live
-// positive count and aborts on CHECK(count_ <= 0).
+// live threads. Before the fix, a thread that touched the ARC and exited before
+// initiate_shutdown() drained its slot aborted in thread_local teardown
+// (detail::TLStorage::remove() -> ~TLItems -> ~Refcount()) on
+// CHECK(count_ <= 0). Production hit it as a teardown race: an RPC/DB worker
+// thread exits while a BlockTX's PerThreadARC<BlockTX> is still live, which is
+// why it only failed intermittently under load. Every other regression test
+// above keeps its worker threads alive until shutdown precisely to dodge it.
 //
-// Production hits this as a teardown race: an RPC/DB worker thread exits while
-// a BlockTX's PerThreadARC<BlockTX> is still live (not yet shut down), which is
-// why it only fails intermittently under load. This forces the same invariant
-// violation deterministically -- the other regression tests above all take
-// pains to keep their worker threads alive until shutdown precisely to avoid
-// it.
-//
-// The test asserts the *desired* behavior: a thread may touch the ARC and exit
-// before shutdown, and the process exits cleanly. Today the debug CHECK aborts
-// the child instead, so EXPECT_EXIT(ExitedWithCode(0)) FAILS in debug builds --
-// the repro this PR hands off -- and passes in release builds (where the CHECK
-// is compiled out). It flips fully green once the lifetime bug is fixed. It
-// runs in a death/exit subprocess so the abort is isolated from the rest of
-// base_test rather than taking the binary down.
-TEST(PerThreadARCTest, ThreadExitBeforeShutdownShouldNotAbort)
+// ~Refcount() now folds a live slot's net contribution into the ARC's
+// persistent aggregate instead of aborting, so a touching thread may exit at
+// any time. This asserts that: a worker touches the ARC and exits before
+// shutdown, and the process exits cleanly (no abort). It runs in an exit
+// subprocess so a regression here surfaces as SIGABRT != ExitedWithCode(0)
+// rather than taking base_test down. (In release the CHECK was already compiled
+// out, so this passes there regardless; it is a meaningful signal in debug.)
+TEST(PerThreadARCTest, ThreadExitBeforeShutdownDoesNotAbort)
 {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EXIT(
@@ -400,13 +396,40 @@ TEST(PerThreadARCTest, ThreadExitBeforeShutdownShouldNotAbort)
         std::thread worker([&] {
           // Fully process work: acquire then release. The release returns false
           // (not the last reference, no shutdown), so this thread's slot is
-          // left at kInitializedValue > 0.
+          // left at kInitializedValue > 0 until it exits.
           arc->try_acquire_reference();
           arc->release_reference();
         });
-        // Thread exit runs TLStorage::remove() -> ~Refcount(); with the bug it
-        // aborts here on CHECK(count_ <= 0) before reaching the exit below.
+        // Thread exit runs TLStorage::remove() -> ~Refcount(); with the fix it
+        // folds the slot instead of aborting, so control reaches the exit
+        // below.
         worker.join();
+        std::exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+// Companion covering the cross-thread fold site: a reference acquired on one
+// worker and released on another leaves imbalanced per-thread slots (+1 / -1)
+// whose aggregate is zero. Both workers exit before shutdown, so ~Refcount()
+// must fold both deltas (from the acquire path and the release path) for the
+// ARC to still see a zero refcount and shut down cleanly.
+TEST(PerThreadARCTest, CrossThreadRefsFoldOnThreadExit)
+{
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EXIT(
+      {
+        auto *arc = new PerThreadARC<int>(0);
+        std::thread acquirer([&] { arc->try_acquire_reference(); });
+        acquirer.join();
+        std::thread releaser([&] { arc->release_reference(); });
+        releaser.join();
+        // Both touching threads have exited; the aggregate is balanced, so
+        // shutdown must report no outstanding references.
+        if (!arc->initiate_shutdown()) {
+          std::exit(1); // regression: exited-thread deltas mis-accounted
+        }
+        delete arc;
         std::exit(0);
       },
       ::testing::ExitedWithCode(0), "");
