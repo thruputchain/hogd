@@ -283,12 +283,96 @@ ci_control_clear_work_dirs() {
   done
 }
 
+# How long [ci_remote_killall_hosts] waits for the processes it signalled to
+# actually exit, at each of its two escalation steps.
+CI_KILLALL_WAIT_SEC=${CI_KILLALL_WAIT_SEC:-30}
+
+# Turns the space-separated process list into the single extended regexp
+# [pgrep -x] wants. A literal dot in a name ([chuckd.dev]) would otherwise
+# match any character, and leading or trailing separators would leave an empty
+# alternative that matches everything.
+ci_killall_pgrep_pattern() {
+  printf '%s' "$1" |
+    sed -e 's/[]*.^$+?(){}|\[]/\\&/g' \
+      -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+      -e 's/[[:space:]][[:space:]]*/|/g'
+}
+
+# The shell snippet [ci_remote_killall_hosts] runs on a bench host: signal every
+# named process, then wait for it to be gone before returning.
+#
+# [killall] returns once the signals are delivered, not once the processes are
+# reaped, so a caller that kills one benchmark's servers and immediately starts
+# the next one races their shutdown. The new servers bind the same fixed ports,
+# and the loser of that race aborts with "bind(<ip>:<port>): Address already in
+# use". Waiting here is what makes a kill mean "the ports are free again".
+#
+# Liveness is probed with [pgrep] rather than [killall]'s exit status: given
+# more than one name, [killall] reports success only when every name matched
+# something, so it claims nothing is left as soon as any single name is absent,
+# which is almost always true of a list this long.
+ci_killall_wait_script() {
+  local processes=$1 wait_sec=$2 pattern
+
+  pattern=$(ci_killall_pgrep_pattern "$processes")
+
+  cat <<EOF
+set -u
+command -v pgrep >/dev/null || {
+  echo 'pgrep not found (install procps)' >&2
+  exit 1
+}
+
+alive() { pgrep -x '$pattern' >/dev/null 2>&1; }
+
+# Returns 0 once nothing matches, 1 if the deadline passes first.
+wait_gone() {
+  deadline=\$((\$(date +%s) + $wait_sec))
+  while alive; do
+    [ "\$(date +%s)" -lt "\$deadline" ] || return 1
+    sleep 1
+  done
+  return 0
+}
+
+# [killall] exits non-zero for names that matched nothing, which is the normal
+# case here, so its status says nothing about whether the kill worked.
+sudo -n /usr/bin/killall -q $processes || true
+wait_gone && exit 0
+
+sudo -n /usr/bin/killall -q -KILL $processes || true
+wait_gone && exit 0
+
+echo "\$(hostname): still running after SIGKILL: \$(pgrep -x -l '$pattern' |
+  tr '\n' ' ')" >&2
+exit 1
+EOF
+}
+
+# Kills the named processes on every host and waits for them to actually exit.
+# Returns non-zero if any host could not be confirmed clear, naming it: a host
+# that still holds the benchmark ports fails the next benchmark with a bind
+# error that says nothing about which kill did not take.
 ci_remote_killall_hosts() {
   local processes=$1
-  local host
+  local host script status=0 idx
+  local -a kill_pids=() kill_hosts=()
   shift
 
+  script=$(ci_killall_wait_script "$processes" "$CI_KILLALL_WAIT_SEC")
+
+  # One host that ignores SIGTERM must not add its whole wait to every other
+  # host's, so signal and wait everywhere at once, as [ci_wait_port_hosts] does.
   for host in "$@"; do
-    ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
+    ci_remote_run "$host" "$script" &
+    kill_pids+=("$!")
+    kill_hosts+=("$host")
   done
+  for idx in "${!kill_pids[@]}"; do
+    if ! wait "${kill_pids[$idx]}"; then
+      echo "killall: could not confirm [$processes] are gone on ${kill_hosts[$idx]}" >&2
+      status=1
+    fi
+  done
+  return "$status"
 }

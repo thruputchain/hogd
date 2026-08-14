@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-test for the step-capture helpers in bench_harness.sh: exit-status
-# rendering, per-step log capture, and the end-of-job failure report that
-# replays a failed step's log tail.
+# rendering, per-step log capture, the end-of-job failure report that replays a
+# failed step's log tail, and the kill-and-wait that frees the benchmark ports.
 set -euo pipefail
 
 . "$(dirname "$(readlink -f "$0")")/bench_harness.sh"
@@ -111,6 +111,108 @@ case $- in
 esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
+
+## ci_killall_pgrep_pattern
+
+check_eq "pattern joins names with alternation" "loadgen_server|hog-exec" \
+  "$(ci_killall_pgrep_pattern "loadgen_server hog-exec")"
+# An unescaped dot matches any character, and a stray separator leaves an empty
+# alternative that [pgrep -x] would match against every process name.
+check_eq "pattern escapes dots and trims separators" 'chuckd\.dev|scpd\.dev' \
+  "$(ci_killall_pgrep_pattern "  chuckd.dev   scpd.dev ")"
+
+## ci_killall_wait_script
+
+# The script runs the real [killall] through [sudo], so give it a [sudo] that
+# just drops its own flags, and processes of our own to kill. The names stay
+# under the 15 characters [pgrep] and [killall] compare against.
+shim_dir="$work_dir/bin"
+mkdir -p "$shim_dir"
+cat >"$shim_dir/sudo" <<'SHIM'
+#!/usr/bin/env bash
+while [[ $1 == -* ]]; do shift; done
+exec "$@"
+SHIM
+chmod +x "$shim_dir/sudo"
+cp "$(command -v sleep)" "$shim_dir/ci-st-sleeper"
+cp "$(command -v bash)" "$shim_dir/ci-st-ignorer"
+
+run_kill_script() {
+  local names=$1 wait_sec=$2
+  PATH="$shim_dir:$PATH" bash -c "$(ci_killall_wait_script "$names" "$wait_sec")"
+}
+
+"$shim_dir/ci-st-sleeper" 300 &
+sleeper_pid=$!
+if run_kill_script "ci-st-sleeper" 10 2>/dev/null; then
+  echo "ok   kill script reports the process gone"
+else
+  echo "FAIL kill script should have killed ci-st-sleeper"
+  fail=1
+fi
+# The whole point is that the script does not return until the process is
+# actually gone: that is what makes the ports it held free for the next suite.
+if pgrep -x ci-st-sleeper >/dev/null 2>&1; then
+  echo "FAIL kill script returned with ci-st-sleeper still running"
+  fail=1
+else
+  echo "ok   kill script waited for the process to exit"
+fi
+wait "$sleeper_pid" 2>/dev/null || true
+
+# A process that ignores SIGTERM must be escalated to SIGKILL rather than
+# outliving the kill and holding its ports. The sleep runs in a loop so bash
+# cannot exec it in place, which would rename the process out from under
+# [pgrep].
+"$shim_dir/ci-st-ignorer" -c 'trap "" TERM; while :; do sleep 1; done' &
+ignorer_pid=$!
+if run_kill_script "ci-st-ignorer" 2 2>/dev/null; then
+  echo "ok   kill script escalates to SIGKILL"
+else
+  echo "FAIL kill script should have SIGKILLed ci-st-ignorer"
+  fail=1
+fi
+check_eq "SIGKILLed process is gone" "" "$(pgrep -x ci-st-ignorer || true)"
+kill -KILL "$ignorer_pid" 2>/dev/null || true
+wait "$ignorer_pid" 2>/dev/null || true
+
+# A kill that never takes has to be reported, not swallowed: the alternative is
+# a bind failure in the next suite that names no host.
+cat >"$shim_dir/sudo" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+chmod +x "$shim_dir/sudo"
+"$shim_dir/ci-st-sleeper" 300 &
+survivor_pid=$!
+kill_report=$(run_kill_script "ci-st-sleeper" 1 2>&1 >/dev/null) && {
+  echo "FAIL kill script should fail when the process survives"
+  fail=1
+}
+check_contains "surviving process is named" "ci-st-sleeper" "$kill_report"
+kill -KILL "$survivor_pid" 2>/dev/null || true
+wait "$survivor_pid" 2>/dev/null || true
+
+## ci_remote_killall_hosts
+
+# Stand in for ssh so the helper's fan-out and its per-host status reporting can
+# run here. [sudo] is still the no-op above, so every host "fails".
+ci_remote_run() {
+  local host=$1
+  shift
+  PATH="$shim_dir:$PATH" HOSTNAME_OVERRIDE="$host" bash -c "$*"
+}
+"$shim_dir/ci-st-sleeper" 300 &
+survivor_pid=$!
+CI_KILLALL_WAIT_SEC=1
+hosts_report=$(ci_remote_killall_hosts "ci-st-sleeper" hogA hogB 2>&1 >/dev/null) && {
+  echo "FAIL ci_remote_killall_hosts should fail when a host is not clear"
+  fail=1
+}
+check_contains "unclear host named" "hogA" "$hosts_report"
+check_contains "every unclear host named" "hogB" "$hosts_report"
+kill -KILL "$survivor_pid" 2>/dev/null || true
+wait "$survivor_pid" 2>/dev/null || true
 
 if ((fail)); then
   echo "bench_harness selftest FAILED"
