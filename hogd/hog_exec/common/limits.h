@@ -33,12 +33,19 @@ inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
 //
 // Both paths draw on this single per-transaction budget (see
 // SystemCallHandler::distinct_contract_loads()) and reject a new distinct load
-// before the cold fetch/translate allocates, so a transaction's retained code
-// contribution is bounded at kMaxDistinctContractResolutionsPerTx *
-// kMaxContractSizeBytes (64 MiB here). Enforcement is deterministic per
-// transaction, so the bound holds identically in proposal and validation, and
-// the limit is generous relative to any legitimate transaction, which touches
-// few distinct contracts.
+// before the cold fetch/translate allocates. The budget counts distinct
+// resolution *sites* -- callee addresses resolved by invoke() plus contract
+// hashes loaded by DeployContract -- which is a conservative over-approximation
+// of distinct retained ContractCacheEntry objects: a contract reached by both
+// paths, or the same code deployed at several addresses, is counted more than
+// once, which only tightens the bound. Distinct retained entries are therefore
+// at most this budget, so a transaction's retained code contribution is bounded
+// at kMaxDistinctContractResolutionsPerTx * kMaxContractSizeBytes (64 MiB
+// here). Keying invoke() by address rather than hash lets the hot path enforce
+// the budget without an extra deployment-metadata lookup to learn the hash
+// before warming. Enforcement is deterministic per transaction, so the bound
+// holds identically in proposal and validation, and the limit is generous
+// relative to any legitimate transaction, which touches few distinct contracts.
 inline constexpr size_t kMaxDistinctContractResolutionsPerTx = 256;
 
 // Bound on the serialized Contract row hog_db accepts in

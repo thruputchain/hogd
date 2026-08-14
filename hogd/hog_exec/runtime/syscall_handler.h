@@ -440,12 +440,15 @@ private:
   std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
       local_rv32_translations_;
 
-  // Distinct contract entries this transaction has caused the block-scoped
-  // snapshot cache to warm and retain (each up to kMaxContractSizeBytes, held
-  // for the rest of the block). Both warming paths are contract-controlled and
-  // run before the child spends gas, so they are bounded together against
-  // kMaxDistinctContractResolutionsPerTx (#3375); see
-  // distinct_contract_loads().
+  // Per-transaction accounting of the distinct contract resolutions that warm
+  // and retain a full ContractCacheEntry (each up to kMaxContractSizeBytes,
+  // held for the rest of the block) in the block-scoped snapshot cache. Both
+  // warming paths are contract-controlled and run before the child spends gas,
+  // so they are bounded together against kMaxDistinctContractResolutionsPerTx
+  // (#3375); see distinct_contract_loads(). The two sets are keyed differently
+  // (address vs hash), so their combined size is a conservative
+  // over-approximation of distinct retained entries -- it only tightens the
+  // bound.
   //
   // - resolved_contract_addresses_: callee addresses resolved by invoke()
   //   (resolve_runtime -> try_get_deployed_contract). Keyed by address because
