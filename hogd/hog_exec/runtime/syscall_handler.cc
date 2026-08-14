@@ -798,12 +798,27 @@ SystemCallHandler::invoke(ContractAddress const &address,
 
   // reentrance guard
   // check if the address is already on the stack
-  if (!hack_DONTUSE_TEST_BYPASS_allow_reentrance_ &&
-      invocation_frame_stack_.has_active_frame_for(address)) {
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
     return {SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance}, 0};
   }
 
-  auto runtime = resolve_runtime(address);
+  // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
+  // inserts a fresh (possibly negative) entry; that unordered_map insert can
+  // throw std::bad_alloc under memory pressure. invoke() is reached from the
+  // noexcept syscall_Invoke_inner() body, so the exception must not unwind
+  // across that boundary and terminate the executor -- translate it into an
+  // unrecoverable system error instead (issue #3363).
+  auto runtime = [&]() -> SystemStatus<std::unique_ptr<Runtime>> {
+    try {
+      return resolve_runtime(address);
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+      return SystemError{SystemErrorCode::Unrecoverable};
+    } catch (...) {
+      report_dropped_log("unknown exception");
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  }();
   if (!runtime) {
     // invoke() is reached from the noexcept syscall_Invoke_inner() body. A
     // logger allocation/sink failure (typically std::bad_alloc out of memory)

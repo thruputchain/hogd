@@ -11,7 +11,7 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
-  HOGD_RELEASE_VERSION: "0.1.19"
+  HOGD_RELEASE_VERSION: "0.1.20"
 
 permissions:
   contents: write
@@ -450,6 +450,19 @@ jobs:
               readiness = json.loads(handle.readline())
           if readiness.get("status") != "ready":
               raise SystemExit(f"unexpected readiness payload: {readiness}")
+          with open(readiness["manifestPath"], encoding="utf-8") as handle:
+              manifest = json.load(handle)
+          accounts = manifest.get("bootstrapAccounts")
+          expected = [
+              {"index": 0, "role": "faucet", "initialStorageTokens": "10000000000000"},
+              {"index": 1, "role": "local_user", "initialStorageTokens": "1000000000"},
+          ]
+          if not isinstance(accounts, list) or len(accounts) != len(expected):
+              raise SystemExit(f"unexpected bootstrap accounts: {accounts}")
+          for account, fields in zip(accounts, expected):
+              for key, value in fields.items():
+                  if account.get(key) != value:
+                      raise SystemExit(f"unexpected bootstrap account: {account}")
           PY
           cat "$readiness_file"
           cleanup_devnode

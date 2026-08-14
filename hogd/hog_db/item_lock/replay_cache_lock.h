@@ -30,6 +30,7 @@ namespace hogd {
 struct ReplayConflictSetTraits {
   static constexpr uint128_t kEmpty = uint128_t{};
   static constexpr uint128_t kTombstone = ~uint128_t{};
+  static constexpr uint128_t kInserting = ~uint128_t{} - 1;
   static size_t hash(const uint128_t &v);
 };
 

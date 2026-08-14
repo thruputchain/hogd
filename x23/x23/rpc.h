@@ -487,6 +487,16 @@ struct RpcStream : public detail::RpcStreamImpl {
             msg, uformat(" deserialization error in {}: {}",
                          ProcMeta::proc_name, e.what()));
       throw;
+    } catch (const std::exception &e) {
+      // A non-XdrException here (notably std::bad_alloc from decoding a reply
+      // that contains an unbounded vector of zero-wire-size elements) is
+      // surfaced as an XdrException, the same way the reply-header decode above
+      // wraps non-XDR failures, so it can't escape as an unexpected type.
+      if constexpr (!std::same_as<Logger, RpcNoLogger>)
+        logger_.template log_client<ProcMeta>(
+            msg, uformat(" deserialization error in {}: {}",
+                         ProcMeta::proc_name, e.what()));
+      throw XdrException("{}: {}", ProcMeta::proc_name, e.what());
     }
 
     logger_.template log_client<ProcMeta>(msg, ret);

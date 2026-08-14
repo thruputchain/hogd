@@ -428,6 +428,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   CHECK_EQ(get_hostname(hostname), 0);
   std::string mempool_ip = hog_ip(hostname);
 
+  for (auto &control_server_handle : control_server_handles) {
+    if (control_server_handle.ci_client.clear_work_dir() !=
+        CIServerErrorCode::kCIServerErrorCodeOK) {
+      panic("Failed to clear work dir");
+    }
+  }
+
   size_t server_idx = 0;
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hog_event/hog-event",
@@ -438,10 +445,6 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   EventCard event_card = sched_event_test->impl()->await_event_card();
   sched_exec_test->impl()->register_event_card(event_card);
-
-  for (auto &control_server_handle : control_server_handles) {
-    control_server_handle.ci_client.clear_work_dir();
-  }
 
   control_server_handles[server_idx].ci_client.start_server(
       "hogd/hog_db/hog-db",

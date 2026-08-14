@@ -3094,7 +3094,6 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                               .uniquifier = self->make_new_uniquifier()}};
           auto handler =
               self->make_new_system_call_handler(handler_tx, *context);
-          handler.hack_dont_use_test_bypass_allow_reentrance();
           auto res = handler.root_invoke();
           if (!res.is_root_success()) {
             panic("root invoke 0 failed");

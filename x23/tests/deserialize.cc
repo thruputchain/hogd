@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <span>
+#include <tuple>
 #include <utility>
 
 #include <vector>
@@ -551,6 +552,38 @@ TEST(Deserialize, BufViewSerializesLikeCalldata)
   static_assert(
       x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 0xffffffff>>);
   static_assert(x23::serializes_like<x23::BufView, x23::Vec<uint8_t, 100>>);
+}
+
+// A vector of a zero-wire-size element (here an empty XDR struct) consumes no
+// input per element, so the per-element decode never runs short of input; the
+// only bound on the count is the vector's own maximum.  For a *bounded* such
+// vector the decoder's bounded reserve plus Vec::check_size still rejects a
+// count past the maximum (XdrLengthError) rather than materializing empty
+// elements until std::bad_alloc.  (An unbounded such vector has no wire-derived
+// limit; that case is contained at the SRPC boundary, which converts the
+// allocator failure into an error reply instead of crossing its noexcept input
+// boundary.)
+TEST(Deserialize, ZeroWireBoundedVectorRejectsOverflow)
+{
+  static_assert(detail::xdr_size_bounds<std::tuple<>>().max_ == 0,
+                "test relies on the empty struct being zero-wire-size");
+  x23::Vec<std::tuple<>, 8> vec;
+  uint8_t input[] = {0xff, 0xff, 0xff, 0xff}; // count 0xffffffff >> max_size 8
+  EXPECT_THROW(x23::deserialize(&vec, x23::BufView(input, sizeof(input))),
+               x23::XdrLengthError);
+}
+
+// Same for the CXS decode pathway (a Vec<tuple<>> serializes to just its
+// count, so the CXS-encoded count is the whole record).
+TEST(Deserialize, CxsZeroWireBoundedVectorRejectsOverflow)
+{
+  x23::Buf bytes = serialize_cxs_for_test(std::uint32_t(0xffffffff));
+  x23::Vec<std::tuple<>, 8> vec;
+  auto status =
+      x23::deserialize_cxs(&vec, std::span<const uint8_t>(bytes.data(),
+                                                          bytes.size()));
+  ASSERT_FALSE(status);
+  EXPECT_EQ(status.error(), CxsErrorCode::kLengthExceeded);
 }
 
 // NOLINTEND(modernize-type-traits)

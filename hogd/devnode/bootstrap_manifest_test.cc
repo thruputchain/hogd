@@ -54,7 +54,7 @@ real_dev_wallet_content_hash()
 // manifest. Tests tweak only the field(s) under test.
 struct ManifestBuilder {
   bool include_schema_version = true;
-  std::int64_t schema_version = 1;
+  std::int64_t schema_version = 2;
 
   std::string kind = "groundhog-bootstrap";
 
@@ -74,8 +74,14 @@ struct ManifestBuilder {
   std::string dev_wallet_deploy_entrypoint;
   std::string dev_wallet_do_action_entrypoint;
 
+  bool include_bootstrap_faucet = true;
+  std::int64_t faucet_index = 0;
+  std::string faucet_storage_tokens = "10000000000000";
+
   bool include_bootstrap_accounts = true;
   std::int64_t bootstrap_count = 2;
+  bool include_first_index = true;
+  std::int64_t first_index = 1;
   bool include_bootstrap_seed = true;
   std::string bootstrap_seed = "manifest-seed";
   std::string initial_storage_tokens = "1000000000";
@@ -118,9 +124,18 @@ struct ManifestBuilder {
           w.field("doActionEntrypoint", dev_wallet_do_action_entrypoint);
         });
       }
+      if (include_bootstrap_faucet) {
+        w.object_field("bootstrapFaucet", [&](json::Writer &w) {
+          w.field("index", faucet_index);
+          w.field("initialStorageTokens", faucet_storage_tokens);
+        });
+      }
       if (include_bootstrap_accounts) {
         w.object_field("bootstrapAccounts", [&](json::Writer &w) {
           w.field("count", bootstrap_count);
+          if (include_first_index) {
+            w.field("firstIndex", first_index);
+          }
           if (include_bootstrap_seed) {
             w.field("seed", bootstrap_seed);
           }
@@ -216,9 +231,9 @@ TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
   const BootstrapManifestConfig &config = *result;
   EXPECT_EQ(format_network_hash(config.network_hash),
             "00000000000000000000000000000000000000000000000000000000000000aa");
-  EXPECT_EQ(config.bootstrap_config.count, 2U);
+  EXPECT_EQ(config.bootstrap_config.user_account_count, 2U);
   EXPECT_EQ(config.bootstrap_config.seed, "manifest-seed");
-  EXPECT_EQ(config.bootstrap_config.storage_tokens, 1'000'000'000ULL);
+  EXPECT_EQ(config.bootstrap_config.user_storage_tokens, 1'000'000'000ULL);
 }
 
 TEST(BootstrapManifest, RejectsNonObjectRoot)
@@ -240,11 +255,11 @@ TEST(BootstrapManifest, RejectsInvalidJson)
 TEST(BootstrapManifest, RejectsWrongSchemaVersion)
 {
   ManifestBuilder builder;
-  builder.schema_version = 2;
+  builder.schema_version = 1;
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "schemaVersion");
+  expect_error_with(path, "legacy account layout");
 }
 
 TEST(BootstrapManifest, RejectsMissingSchemaVersion)
@@ -387,6 +402,77 @@ TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
   expect_error_with(path, "missing root.bootstrapAccounts");
+}
+
+TEST(BootstrapManifest, RejectsMissingBootstrapFaucet)
+{
+  ManifestBuilder builder;
+  builder.include_bootstrap_faucet = false;
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "missing root.bootstrapFaucet");
+}
+
+TEST(BootstrapManifest, RejectsWrongFaucetIndex)
+{
+  ManifestBuilder builder;
+  builder.faucet_index = 1;
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "bootstrapFaucet.index must be 0");
+}
+
+TEST(BootstrapManifest, RejectsWrongFaucetAllocation)
+{
+  ManifestBuilder builder;
+  builder.faucet_storage_tokens = "1000000000";
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(
+      path, "bootstrapFaucet.initialStorageTokens must be 10000000000000");
+}
+
+TEST(BootstrapManifest, RejectsMalformedFaucetAllocation)
+{
+  ManifestBuilder builder;
+  builder.faucet_storage_tokens = "not-a-number";
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "bootstrapFaucet.initialStorageTokens");
+}
+
+TEST(BootstrapManifest, RejectsWrongFirstUserIndex)
+{
+  ManifestBuilder builder;
+  builder.first_index = 0;
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "bootstrapAccounts.firstIndex must be 1");
+}
+
+TEST(BootstrapManifest, RejectsMissingFirstUserIndex)
+{
+  ManifestBuilder builder;
+  builder.include_first_index = false;
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_error_with(path, "missing bootstrapAccounts.firstIndex");
+}
+
+TEST(BootstrapManifest, AcceptsZeroUserAccounts)
+{
+  ManifestBuilder builder;
+  builder.bootstrap_count = 0;
+  CleanupDefer cleanup;
+  std::filesystem::path path =
+      write_temp_manifest_with_cleanup(builder.build(), cleanup);
+  expect_ok(path);
 }
 
 TEST(BootstrapManifest, RejectsNegativeCount)

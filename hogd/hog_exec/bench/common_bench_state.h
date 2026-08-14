@@ -78,6 +78,11 @@ public:
     event_server_handle_ =
         std::make_unique<ControlServerHandle>(event_server_addr());
 
+    if (event_server_handle_->ci_client.clear_work_dir() !=
+        CIServerErrorCode::kCIServerErrorCodeOK) {
+      panic("Failed to clear event server work dir");
+    }
+
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
     start_db_server();

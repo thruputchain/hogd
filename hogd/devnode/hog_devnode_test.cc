@@ -167,6 +167,7 @@ struct Readiness {
 
   struct BootstrapAccount {
     std::uint32_t index;
+    std::string role;
     std::string address;
     std::string public_key;
     std::string initial_storage_tokens;
@@ -368,6 +369,7 @@ parse_bootstrap_accounts(const json::Value &manifest, std::string_view line)
     }
     out.push_back(Readiness::BootstrapAccount{
         .index = static_cast<std::uint32_t>(index),
+        .role = std::string(require_string_field(account, "role", line)),
         .address =
             std::string(require_string_field(account, "walletAddress", line)),
         .public_key =
@@ -826,7 +828,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
+    w.field("schemaVersion", std::int64_t{2});
     w.field("kind", "groundhog-bootstrap");
     w.field("networkHash",
             "00000000000000000000000000000000000000000000000000000000000000aa");
@@ -843,8 +845,14 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
       w.field("doActionEntrypoint",
               entrypoint_hex(wallet_meta::entrypoint<u8"do_action">()));
     });
+    w.object_field("bootstrapFaucet", [&](json::Writer &w) {
+      w.field("index", std::int64_t{0});
+      w.field("initialStorageTokens",
+              std::to_string(kLocalFaucetStorageTokens));
+    });
     w.object_field("bootstrapAccounts", [&](json::Writer &w) {
       w.field("count", static_cast<std::int64_t>(count));
+      w.field("firstIndex", std::int64_t{1});
       w.field("seed", seed);
       w.field("initialStorageTokens", initial_storage_tokens);
     });
@@ -922,7 +930,7 @@ initialize_persistent_data_dir(std::filesystem::path const &data_dir,
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), dev_accounts);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), dev_accounts + 1UL);
   expect_clean_exit(process);
 }
 
@@ -935,10 +943,13 @@ TEST(HogDevnode, FreshDataDirOutboxOriginLinksCommittedGenesis)
   HogDbDAO db = open_persistent_hog_db(data_dir);
   HogDbStatus<DbTip> tip = db.read_dbtip();
   ASSERT_TRUE(tip.has_value()) << tip.error();
-  ASSERT_EQ(tip->value.proposal_header.block_height, 0);
+  ASSERT_EQ(tip->value.proposal_header.block_height, 1);
   auto store = IndexerOutboxStore::open(
       (data_dir / "events" / "indexer-outbox").string());
   ASSERT_TRUE(store.has_value()) << store.error();
+  auto committed = store->load_committed(1)();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(committed->consensus_value, tip->value);
   auto origin = store->load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   ASSERT_TRUE(origin->has_value());
@@ -947,7 +958,8 @@ TEST(HogDevnode, FreshDataDirOutboxOriginLinksCommittedGenesis)
       origin_value.has_value() ? &origin_value.value() : nullptr;
   ASSERT_NE(current_origin, nullptr);
   EXPECT_EQ(current_origin->origin.first_height, 1);
-  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(tip->value));
+  EXPECT_EQ(current_origin->origin.first_prev_hash,
+            committed->consensus_value.prev_hash);
 }
 
 IndexerOutboxCommittedPayload
@@ -1007,6 +1019,9 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   });
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
+  EXPECT_EQ(readiness.bootstrap_accounts[0].role, "faucet");
+  EXPECT_EQ(readiness.bootstrap_accounts[1].role, "local_user");
 
   sched_coord_client_t scheduler =
       create_client<SchedulerCoord1>(readiness.scheduler.host,
@@ -1039,14 +1054,10 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
 }
 
 GenesisConfiguration
-build_test_data_dir_genesis(BootstrapAccountConfig const &config)
+build_test_data_dir_genesis(LocalBootstrapConfig const &config)
 {
-  if (config.count == 0) {
-    GenesisConfigurationBuilder builder;
-    return builder.build_or_panic(StorageCostModel::default_cost_model());
-  }
-
-  BootstrapAccountArtifact artifact = build_bootstrap_account_artifact(config);
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact(config);
   artifact.genesis_configuration.storage_cost_model =
       StorageCostModel::default_cost_model().to_xdr();
   return std::move(artifact.genesis_configuration);
@@ -1054,19 +1065,22 @@ build_test_data_dir_genesis(BootstrapAccountConfig const &config)
 
 void
 write_test_data_dir_metadata(std::filesystem::path const &data_dir,
-                             BootstrapAccountConfig const &config)
+                             LocalBootstrapConfig const &config,
+                             std::int64_t schema_version = 2)
 {
   const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{1});
+    w.field("schemaVersion", schema_version);
     w.field("kind", "hog-devnode-data");
     w.field("genesisHash", hex_string(sha256(genesis)));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
-      w.field("devAccounts", static_cast<std::int64_t>(config.count));
+      w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
+      w.field("devAccounts",
+              static_cast<std::int64_t>(config.user_account_count));
       w.field("devAccountSeed", config.seed);
-      w.field("devAccountTokens", std::to_string(config.storage_tokens));
+      w.field("devAccountTokens", std::to_string(config.user_storage_tokens));
     });
   });
 
@@ -1111,7 +1125,11 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_GT(readiness.db_gateway.port, 0);
   EXPECT_EQ(readiness.view_gateway.host, "127.0.0.1");
   EXPECT_GT(readiness.view_gateway.port, 0);
-  EXPECT_TRUE(readiness.bootstrap_accounts.empty());
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  EXPECT_EQ(readiness.bootstrap_accounts[0].index, 0U);
+  EXPECT_EQ(readiness.bootstrap_accounts[0].role, "faucet");
+  EXPECT_EQ(readiness.bootstrap_accounts[0].initial_storage_tokens,
+            "10000000000000");
   EXPECT_TRUE(readiness.manifest_path.is_absolute());
   EXPECT_TRUE(std::filesystem::exists(readiness.manifest_path));
   EXPECT_EQ(path_mode(readiness.manifest_path), 0600);
@@ -1136,9 +1154,9 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
   }
 
-  GenesisConfigurationBuilder builder;
-  GenesisConfiguration genesis =
-      builder.build_or_panic(StorageCostModel::default_cost_model());
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact({});
+  GenesisConfiguration genesis = std::move(artifact.genesis_configuration);
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 
@@ -1618,23 +1636,53 @@ TEST(HogDevnode, BootstrapAccountDerivationMatchesRustGoldens)
 
 TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
-  BootstrapAccountConfig config{.count = 3};
+  LocalBootstrapConfig config{.user_account_count = 3};
 
-  BootstrapAccountArtifact first = build_bootstrap_account_artifact(config);
-  BootstrapAccountArtifact second = build_bootstrap_account_artifact(config);
+  BootstrapAccountArtifact first =
+      build_local_bootstrap_account_artifact(config);
+  BootstrapAccountArtifact second =
+      build_local_bootstrap_account_artifact(config);
 
-  ASSERT_EQ(first.accounts.size(), 3UL);
-  ASSERT_EQ(first.initialization_txs.size(), 3UL);
-  ASSERT_EQ(first.genesis_configuration.initial_config.size(), 3UL);
+  ASSERT_EQ(first.accounts.size(), 4UL);
+  ASSERT_EQ(first.initialization_txs.size(), 4UL);
+  ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 
   for (std::uint32_t i = 0; i < first.accounts.size(); ++i) {
     EXPECT_EQ(first.accounts[i].index, i);
-    EXPECT_EQ(first.accounts[i].initial_storage_tokens, config.storage_tokens);
-    EXPECT_EQ(first.accounts[i].storage_tokens, config.storage_tokens);
+    EXPECT_EQ(first.accounts[i].role, i == 0
+                                          ? BootstrapAccountRole::kFaucet
+                                          : BootstrapAccountRole::kLocalUser);
+    const std::uint64_t expected_tokens =
+        i == 0 ? kLocalFaucetStorageTokens : config.user_storage_tokens;
+    EXPECT_EQ(first.accounts[i].initial_storage_tokens, expected_tokens);
+    EXPECT_EQ(first.accounts[i].storage_tokens, expected_tokens);
     EXPECT_EQ(first.accounts[i].address, second.accounts[i].address);
     EXPECT_EQ(first.accounts[i].public_key, second.accounts[i].public_key);
   }
+}
+
+TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
+{
+  LocalBootstrapConfig config{.user_account_count = 1};
+  EXPECT_EQ(config.user_storage_tokens, 1'000'000'000ULL);
+
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact(config);
+  ASSERT_EQ(artifact.accounts.size(), 2UL);
+  EXPECT_EQ(artifact.accounts[0].initial_storage_tokens,
+            kLocalFaucetStorageTokens);
+  EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
+}
+
+TEST(HogDevnode, LocalBootstrapRejectsAggregateAllocationAboveSupply)
+{
+  LocalBootstrapConfig config{
+      .user_account_count = 2,
+      .user_storage_tokens = std::numeric_limits<std::uint64_t>::max(),
+  };
+  EXPECT_THROW(build_local_bootstrap_account_artifact(config),
+               std::runtime_error);
 }
 
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
@@ -1649,7 +1697,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
   });
   Readiness readiness = process.wait_for_readiness();
 
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 3UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 4UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
   ASSERT_NE(derivation, nullptr);
@@ -1661,12 +1709,14 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].role,
+              i == 0 ? "faucet" : "local_user");
     EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
               hex_string(keypair.first));
     EXPECT_TRUE(readiness.bootstrap_accounts[i].address.starts_with("0x"));
     EXPECT_EQ(readiness.bootstrap_accounts[i].address.size(), 66UL);
     EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
-              "1000000000");
+              i == 0 ? "10000000000000" : "1000000000");
   }
 
   expect_clean_exit(process);
@@ -1689,7 +1739,7 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
 
   EXPECT_EQ(readiness.network_hash,
             "00000000000000000000000000000000000000000000000000000000000000aa");
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 3UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
   ASSERT_NE(derivation, nullptr);
@@ -1697,10 +1747,12 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
     auto keypair = derive_bootstrap_account_keypair("manifest-seed", i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
+    EXPECT_EQ(readiness.bootstrap_accounts[i].role,
+              i == 0 ? "faucet" : "local_user");
     EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
               hex_string(keypair.first));
     EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
-              "1000000000");
+              i == 0 ? "10000000000000" : "1000000000");
   }
 
   expect_clean_exit(process);
@@ -1886,7 +1938,7 @@ TEST(HogDevnode, RejectsDevAccountCountAboveLimit)
             std::string::npos);
 }
 
-TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
+TEST(HogDevnode, SchedulerTipReportsFaucetInitializationAfterReadiness)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
@@ -1900,8 +1952,8 @@ TEST(HogDevnode, SchedulerTipReportsGenesisTipAfterReadiness)
 
     SchedulerGetTipResult tip = client.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
-    EXPECT_EQ(tip.db_tip().id, 0UL);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
+    EXPECT_NE(tip.db_tip().id, 0UL);
   }
 
   expect_clean_exit(process);
@@ -1967,7 +2019,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
 
   {
     auto client = create_client<ViewGateway1>(readiness.view_gateway.host,
@@ -1980,9 +2032,11 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     const ContractAddress wallet_address =
-        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+        build_local_bootstrap_account_artifact({.user_account_count = 1})
+            .accounts[1]
+            .address;
     EXPECT_EQ(hex_string(wallet_address),
-              readiness.bootstrap_accounts[0].address);
+              readiness.bootstrap_accounts[1].address);
 
     TransactionViewQuery query{
         .invocation =
@@ -2041,7 +2095,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
 
   {
     sched_coord_client_t scheduler =
@@ -2066,10 +2120,12 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     auto fibonacci_contract = load_contract("fibonacci.wasm");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     const ContractAddress wallet_address =
-        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+        build_local_bootstrap_account_artifact({.user_account_count = 1})
+            .accounts[1]
+            .address;
 
     Transaction tx{
         .invocation =
@@ -2131,7 +2187,9 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
   std::optional<ProposedTransaction> expected_indexed_tx;
   std::optional<TxEventLog> expected_event_log;
   const ContractAddress wallet_address =
-      build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+      build_local_bootstrap_account_artifact({.user_account_count = 1})
+          .accounts[1]
+          .address;
 
   auto expect_recovered_index = [&](auto &reader, BlockHeight latest_height) {
     const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
@@ -2176,7 +2234,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         },
         {{"HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL", "1"}});
     Readiness readiness = process.wait_for_readiness();
-    ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
     EXPECT_EQ(readiness.chain_state, "fresh");
     EXPECT_TRUE(readiness.manifest_path.string().starts_with(
         (data_dir / "runtime").string()));
@@ -2190,7 +2248,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     auto fibonacci_contract = load_contract("fibonacci.wasm");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
 
     Transaction tx{
@@ -2264,7 +2322,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
-    ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
     EXPECT_EQ(readiness.chain_state, "recovered");
 
     sched_coord_client_t scheduler =
@@ -2302,7 +2360,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         "1000000000",
     });
     Readiness readiness = process.wait_for_readiness();
-    ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
     EXPECT_EQ(readiness.chain_state, "recovered");
 
     sched_coord_client_t scheduler =
@@ -2323,7 +2381,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
   }
 }
 
-TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
+TEST(HogDevnode, DataDirRejectsLegacyNetworkHashAfterFaucetInitialization)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2335,7 +2393,7 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
-  auto start_and_check = [&](std::string_view expected_state) {
+  auto start_and_check = [&] {
     HogDevnodeProcess process = HogDevnodeProcess::start({
         "--data-dir",
         data_dir.string(),
@@ -2343,7 +2401,7 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
         manifest_path.string(),
     });
     Readiness readiness = process.wait_for_readiness();
-    EXPECT_EQ(readiness.chain_state, expected_state);
+    EXPECT_EQ(readiness.chain_state, "fresh");
     EXPECT_EQ(
         readiness.network_hash,
         "00000000000000000000000000000000000000000000000000000000000000aa");
@@ -2355,7 +2413,7 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
             .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 0);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 1);
     EXPECT_EQ(format_network_hash(
                   tip.db_tip().value.proposal_header.network_hash),
               readiness.network_hash);
@@ -2363,7 +2421,7 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
     expect_clean_exit(process);
   };
 
-  start_and_check("fresh");
+  start_and_check();
   {
     HogDbDAO db = open_persistent_hog_db(data_dir);
     HogDbStatus<DbTip> tip = db.read_dbtip();
@@ -2372,8 +2430,14 @@ TEST(HogDevnode, DataDirMigratesLegacyGenesisNetworkHashAcrossRestart)
     ASSERT_TRUE(db.write_dbtip(*tip).has_value());
     ASSERT_TRUE(db.commit().has_value());
   }
-  start_and_check("recovered");
-  start_and_check("recovered");
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--bootstrap-manifest",
+          manifest_path.string(),
+      },
+      "does not match requested network hash");
 }
 
 TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)
@@ -2721,44 +2785,35 @@ TEST(HogDevnode, DataDirRejectsConcurrentSecondProcess)
   expect_clean_exit(first);
 }
 
-TEST(HogDevnode, DataDirRecoversCommittedChainWhenMetadataMissing)
+TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   initialize_persistent_data_dir(data_dir);
   ASSERT_TRUE(std::filesystem::remove(data_dir / "hog-devnode-data.json"));
 
-  HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--data-dir",
-      data_dir.string(),
-      "--dev-accounts",
-      "1",
-      "--dev-account-seed",
-      "groundhog-dev-accounts",
-      "--dev-account-tokens",
-      "1000000000",
-  });
-  Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
-  EXPECT_TRUE(std::filesystem::exists(data_dir / "hog-devnode-data.json"));
-
-  int status = process.terminate();
-  std::string stderr_output = process.read_remaining_stderr();
-  ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
-  EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
-  EXPECT_NE(stderr_output.find("committed chain state but no metadata"),
-            std::string::npos)
-      << stderr_output;
-  EXPECT_TRUE(process.read_remaining_stdout().empty());
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+          "--dev-accounts",
+          "1",
+          "--dev-account-seed",
+          "groundhog-dev-accounts",
+          "--dev-account-tokens",
+          "1000000000",
+      },
+      "committed chain state but no bootstrap metadata; reinitialize the data "
+      "dir");
 }
 
 TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {.count = 1,
+  write_test_data_dir_metadata(data_dir, {.user_account_count = 1,
                                           .seed = "groundhog-dev-accounts",
-                                          .storage_tokens = 1'000'000'000,
+                                          .user_storage_tokens = 1'000'000'000,
                                           .dev_wallet_profile = std::string(
                                               kDefaultDevWalletProfile)});
 
@@ -2773,7 +2828,7 @@ TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
   expect_clean_exit(process);
 }
 
@@ -2832,6 +2887,21 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataWithoutCommittedChain)
       "hog-devnode data metadata missing root.schemaVersion");
 }
 
+TEST(HogDevnode, DataDirRejectsLegacyBootstrapMetadata)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/1);
+
+  expect_startup_failure(
+      {
+          "--data-dir",
+          data_dir.string(),
+      },
+      "schemaVersion 1 uses the legacy bootstrap layout; reinitialize the data "
+      "dir");
+}
+
 TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
 {
   std::filesystem::path data_dir = make_test_data_dir();
@@ -2869,7 +2939,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
 
   {
     sched_coord_client_t scheduler =
@@ -2889,12 +2959,14 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     ASSERT_TRUE(fibonacci_contract);
 
     auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
+        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     const ContractAddress wallet_address =
-        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+        build_local_bootstrap_account_artifact({.user_account_count = 1})
+            .accounts[1]
+            .address;
     EXPECT_EQ(hex_string(wallet_address),
-              readiness.bootstrap_accounts[0].address);
+              readiness.bootstrap_accounts[1].address);
     const SHA256Hash deploy_nonce = make_nonce(7);
     const SHA256Hash contract_hash = sha256(*fibonacci_contract);
 
@@ -2969,7 +3041,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
 
   {
     sched_coord_client_t scheduler =
@@ -3008,7 +3080,9 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
             .first;
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
     const ContractAddress sponsor_wallet_address =
-        build_bootstrap_account_artifact({.count = 1}).accounts[0].address;
+        build_local_bootstrap_account_artifact({.user_account_count = 1})
+            .accounts[0]
+            .address;
     EXPECT_EQ(hex_string(sponsor_wallet_address),
               readiness.bootstrap_accounts[0].address);
 

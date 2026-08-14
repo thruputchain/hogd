@@ -51,6 +51,12 @@ set_tests_properties(abort_zombie PROPERTIES TIMEOUT 10)
 add_x23_test(abort_live)
 set_tests_properties(abort_live PROPERTIES TIMEOUT 10)
 
+add_x23_test(writebuf_fd_poison)
+set_tests_properties(writebuf_fd_poison PROPERTIES TIMEOUT 15)
+
+add_x23_test(poll_writer_uaf)
+set_tests_properties(poll_writer_uaf PROPERTIES TIMEOUT 15)
+
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
 list(APPEND TEST_EXECUTABLES test_canary)
@@ -107,7 +113,17 @@ add_x23_gtest(xdr)
 add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
-set_tests_properties(shutdown threadpool PROPERTIES TIMEOUT 10)
+set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+# threadpool gets the same budget as the stress tests above rather than
+# shutdown's 10s.  DestructionWakeupStress creates and destroys 10000
+# thread pools, and its cost tracks the host's CPU count (a pool
+# allocates one run queue per LLC bucket and always starts a qcbq
+# service thread), so on a big CI host under `ctest --parallel` it takes
+# a few seconds even without sanitizers -- 4.5s on the asyncio schedule
+# -- and runs past 10s under ASAN or TSAN.  It is checking for a lost
+# wakeup, which hangs rather than merely running slowly, so the larger
+# budget still catches what the test is for.
+set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
 endif()
 
 if(BENCHMARK_PATH)

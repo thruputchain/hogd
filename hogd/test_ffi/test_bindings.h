@@ -103,6 +103,7 @@ struct ForeignTracedInvokeResult {
 };
 
 // Type of the function pointer used within a mock contract.
+// Report failure by returning a panic code; see ForeignInvokeResult.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct ForeignInvokeResult (*ForeignEntryPoint)(void *foreign_context,
                                                         uint64_t method_number);

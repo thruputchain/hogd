@@ -291,7 +291,7 @@ kill_stale_processes
 echo 'clear benchmark work dirs'
 for node in "${NODE_IDS[@]}"; do
   for host in ${NODE_HOST_GROUPS[$node]}; do
-    remote_run "$host" "rm -rf $(printf '%q' "$(node_dir "$node")") && mkdir -p $(printf '%q' "$(node_log_dir "$node")")"
+    remote_run "$host" "rm -rf $(printf '%q' "$(node_dir "$node")") && mkdir -p $(printf '%q' "$(node_log_dir "$node")") $(printf '%q' "$(node_dir "$node")/event")"
   done
 done
 

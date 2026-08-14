@@ -67,6 +67,9 @@ Detached
 WriteBuffer::Service::worker(Service self, BufVec work)
 {
   RefPtr<WriteBuffer> wbref(*self.wb_);
+  // We need to release the mutex before destroying wbref, since wb_
+  // could be destroyed as soon as wbref goes out of scope.
+  Defer _unlock([&lk = self.lk_] { lk = {}; });
   for (;;) {
     while (!work.empty()) {
       if (self.tok_ && co_await self.cp_->write_wait(self.tok_))
