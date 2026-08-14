@@ -353,6 +353,39 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
 }
 
+// A zero [hog_delta] is untrusted input reachable via the DB RPC service. It
+// must be rejected as a recoverable error rather than terminating the mempool
+// at the fatal nonzero-delta invariant in [process_transfers_helper].
+TEST(Scheduler, ProcessTransfersZeroDeltaIsRejectedWithoutCrashing)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // A batch containing a zero delta is rejected wholesale and does not crash.
+  HogsTransferred zero_transfer;
+  zero_transfer.block = kBlock;
+  zero_transfer.deltas.push_back(
+      Delta{.address = account, .hog_delta = to_xdr(static_cast<int128_t>(0))});
+  scheduler->process_transfers(zero_transfer)();
+
+  // The scheduler is still healthy: a subsequent valid transfer applies
+  // normally and is not polluted by the rejected batch.
+  HogsTransferred valid_transfer;
+  valid_transfer.block = kBlock;
+  valid_transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  scheduler->process_transfers(valid_transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+}
+
 TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];

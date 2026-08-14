@@ -749,6 +749,20 @@ Scheduler::apply_committed_tx_hog_age(const SignedTransaction &tx,
 x23::Async<void>
 Scheduler::process_transfers(const HogsTransferred &transfers)
 {
+  // This callback is reachable by any client on the DB-facing RPC service, so
+  // treat its payload as untrusted. A [Delta] with a zero [hog_delta] is a
+  // no-op transfer that would otherwise trip the fatal nonzero-delta invariant
+  // in [process_transfers_helper] and terminate the mempool. Reject such a
+  // batch as a recoverable error instead of mutating scheduler state.
+  for (const Delta &delta : transfers.deltas) {
+    if (from_xdr(delta.hog_delta) == static_cast<int128_t>(0)) {
+      info("scheduler: rejecting hog transfer batch containing a zero "
+           "hog_delta for account {}",
+           show_byte_array(delta.address));
+      co_return;
+    }
+  }
+
   // We use [scheduler_->pending_hog_age_update_lock_] to synchronize hog age
   // updates with [MempoolDbRpc], which calls [scheduler_->process_transfers()].
   // We want to ensure that on a block commit, we are able to apply the pending
