@@ -43,11 +43,18 @@ log_callback_escape(Runtime::MethodID method_id, char const *what) noexcept
 InvokeStatus<void>
 MockContract::invoke(Runtime::MethodID method_id)
 {
-  // ForeignEntryPoint is an ordinary C function pointer: it is not declared
-  // noexcept and nothing stops an honest harness caller's callback from
-  // throwing. This is the only place the callback is called, and every path
-  // that reaches it runs below a noexcept C++ boundary that a throw would
-  // terminate the process at:
+  // ForeignEntryPoint is declared in a C header, but that only fixes its
+  // linkage and ABI -- it does not stop a callback from throwing, and the
+  // typedef is not noexcept. A callback compiled as C++ therefore can throw,
+  // which is exactly how the harness is driven in-process: this test suite's
+  // own callbacks, and the C++ PoC drivers on the issues below. (A C callback
+  // has no exceptions to throw, and the Rust harness in sdk_rs registers an
+  // `extern "C"` trampoline, so a Rust panic aborts at Rust's own unwind shim
+  // and never reaches us. Neither can trip this path.)
+  //
+  // This is the only place the callback is called, and every path that reaches
+  // it runs below a noexcept C++ boundary that a throw would terminate the
+  // process at:
   //
   //   * root_invoke() -- the root mock frame's own callback (#2693),
   //   * a nested Invoke syscall from a Wasmtime or RV32 parent, which runs in
@@ -57,12 +64,12 @@ MockContract::invoke(Runtime::MethodID method_id)
   //     wrap_after_parse()'s noexcept syscall body.
   //
   // Only the first of those had a catch above it, so the other paths crashed
-  // an honest C API caller (#2789). Catching here covers all of them at once
+  // an honest harness caller (#2789). Catching here covers all of them at once
   // and keeps the outer catches as backstops: translate any throw into the
   // structured Unrecoverable result the callback could have returned itself,
-  // and let the frame unwind through the normal error path (finish_frame() and
-  // MockRuntime::invoke_internal()'s mock-runtime stack pop still run) rather
-  // than through a stack unwind that skips them.
+  // and let the frame fail through the normal error path -- finish_frame() and
+  // MockRuntime::invoke_internal()'s mock-runtime stack pop still run, rather
+  // than being skipped by a stack unwind.
   ForeignInvokeResult res{};
   try {
     res = entry_point_(foreign_context_, method_id);
