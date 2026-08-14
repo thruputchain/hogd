@@ -11,7 +11,6 @@
 
 #include "event.hh"
 #include "exec_result.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/test.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
@@ -1032,26 +1031,17 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
   }
 }
 
-// tx_index is keyed by tx hash alone, so ingesting the same hash at a
-// second height replaces the receipt while the first height's
-// contract_index row stays durable.  Hydrating that stale row must not
-// splice block 11's payload into a block 10 result.  The DB is opened
-// inside the EXPECT_DEATH block so the fork happens before any RocksDB
-// background threads exist.
-TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
+// tx_index is keyed by (tx hash, block), so ingesting the same hash at two
+// heights yields two distinct receipts rather than the later one shadowing
+// the earlier.  get_events() hydrates each contract_index row from its exact
+// (hash, block) receipt, so a query for the height-10 emitter returns the
+// height-10 event -- never block 11's payload, and never a fatal
+// receipt-height mismatch (previously GetEventsShadowedReceiptBlockMismatch
+// died here; #3370).
+TEST_F(IndexDBTest, GetEventsSameHashAtTwoHeightsHydratesCorrectReceipt)
 {
-  if constexpr (!is_debug_build()) {
-    // The "CHECK FAILED" panic message this death test matches is only
-    // produced in debug builds (x23::panic is std::unreachable() under
-    // NDEBUG).  Matches RecoveryTests.RecoveredHighBitRCQLiveEntriesDiesOnLoad.
-    GTEST_SKIP();
-  }
-
-  // consume_events leaves its thread pool and RocksDB's background
-  // threads alive, so the default fork-only death test style forks a
-  // multi-threaded process.  "threadsafe" re-execs instead, which is
-  // what keeps this from flaking under CI.
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
 
   ContractAddress addr_c, addr_d;
   std::ranges::fill(addr_c, 0xC0);
@@ -1059,37 +1049,43 @@ TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
   SHA256Hash tx;
   std::ranges::fill(tx, 0x42);
 
+  TxEventLog at_10;
+  at_10.proposed_tx_hash = tx;
+  at_10.events.push_back(make_event(addr_c, 0, 0));
+
+  TxEventLog at_11;
+  at_11.proposed_tx_hash = tx;
+  at_11.events.push_back(make_event(addr_d, 0, 0));
+
+  ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{at_11}, {}));
+
+  // The height-10 emitter's history hydrates from the height-10 receipt --
+  // its own event, not block 11's addr_d payload, and no crash.
   {
-    auto db = IndexDB::make_new(tmp_dir_.directory());
-    ASSERT_TRUE(db.has_value());
-
-    TxEventLog at_10;
-    at_10.proposed_tx_hash = tx;
-    at_10.events.push_back(make_event(addr_c, 0, 0));
-
-    TxEventLog at_11;
-    at_11.proposed_tx_hash = tx;
-    at_11.events.push_back(make_event(addr_d, 0, 0));
-
-    ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));
-    ASSERT_TRUE(db->consume_events(11, std::vector{at_11}, {}));
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr_c}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   anchor_at_height(10)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 10);
+    EXPECT_EQ(page->events[0].emitted_event.contract_address, addr_c);
   }
 
-  const std::filesystem::path dir = tmp_dir_.directory();
-  EXPECT_DEATH(
-      {
-        auto db = IndexDB::open(dir);
-        ASSERT_TRUE(db.has_value());
-
-        EventFilterList filters;
-        filters.push_back(filter_with_contracts_no_topics({addr_c}));
-        auto page =
-            db->get_events(make_query(std::move(filters),
-                                      IterationOrder::IterationOrderAscending,
-                                      anchor_at_height(10)));
-        (void)page;
-      },
-      "CHECK FAILED");
+  // The height-11 emitter hydrates from the height-11 receipt.
+  {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr_d}));
+    auto page = db->get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   anchor_at_height(10)));
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(page->events.size(), 1);
+    EXPECT_EQ(page->events[0].block_height, 11);
+    EXPECT_EQ(page->events[0].emitted_event.contract_address, addr_d);
+  }
 }
 
 // NOLINTEND(misc-include-cleaner)
