@@ -321,12 +321,10 @@ public:
   // try_invoke, it is set to the frame's post-acquire two-phase-commit conflict
   // (kDbDiagnosticNone on a successful acquire).
   //
-  // Finishing a child frame commits it into its parent, which runs throwing STL
-  // allocations (auth-token ownership restoration, event/item/deployment
-  // merges). On allocation failure the child frame is still popped and an
-  // Unrecoverable SystemError is returned, so the noexcept caller
-  // (SystemCallHandler::finish_frame) never lets the exception terminate the
-  // executor (#3378), mirroring start_frame's admission path (#3058).
+  // On allocation failure while committing the child into its parent, the child
+  // is still popped and an Unrecoverable SystemError is returned, so the
+  // noexcept caller (SystemCallHandler::finish_frame) is never terminated
+  // (#3378).
   SystemStatus<std::pair<InvokeResult, bool>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,

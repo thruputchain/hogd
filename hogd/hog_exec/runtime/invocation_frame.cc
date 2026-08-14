@@ -418,13 +418,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
-      // Restoring forwarded auth-token ownership to the parent allocates
-      // unordered_set nodes and can throw under memory pressure. finish_frame()
-      // is called from SystemCallHandler::finish_frame()'s noexcept boundary,
-      // so contain the failure and report Unrecoverable rather than letting the
-      // exception terminate the executor (#3378), mirroring the transactional
-      // start_frame() admission path (#3058). The child frame is already
-      // popped, so the stack is left coherent.
+      // Contain the auth-token restore allocation at the noexcept
+      // finish_frame() boundary; the child is already popped (#3378).
       try {
         frame_stack_.back().commit_failed_child_frame();
       } catch (...) {
@@ -442,11 +437,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   if (stack_size >= 2) {
     // Commit the frame to it's parent
     // Accounts for whether or not the frame is set to manually revert.
-    // Merging a child into its parent allocates (auth-token restoration,
-    // event/item/deployment merges) and can throw under memory pressure. As on
-    // the revert path above, contain it at this noexcept boundary and report
-    // Unrecoverable instead of terminating; pop the child first so the stack is
-    // left coherent (#3378).
+    // Contain the commit's allocation at the noexcept finish_frame() boundary,
+    // popping the child so the stack stays coherent (#3378).
     try {
       if (frame_stack_.back().should_revert()) {
         frame_stack_[stack_size - 2].commit_manually_reverted_frame(
