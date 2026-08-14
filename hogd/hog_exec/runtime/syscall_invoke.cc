@@ -50,8 +50,14 @@ has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids) noexcept
     std::ranges::sort(sorted_ids);
     return std::ranges::adjacent_find(sorted_ids) != sorted_ids.end();
   } catch (std::exception const &e) {
-    error("unrecoverable: failed to allocate auth token duplicate buffer: {}",
-          e.what());
+    // The diagnostic formatting allocates; swallow a nested throw so it
+    // cannot cross this noexcept boundary (issue #3372).
+    try {
+      error("unrecoverable: failed to allocate auth token duplicate buffer: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("auth token duplicate-buffer diagnostic");
+    }
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 }
@@ -199,7 +205,12 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   try {
     calldata.resize_uninitialized(input_calldata.size());
   } catch (std::exception &e) {
-    error("unrecoverable: failed to resize calldata: {}", e.what());
+    // Swallow a nested throw from the diagnostic (issue #3372).
+    try {
+      error("unrecoverable: failed to resize calldata: {}", e.what());
+    } catch (...) {
+      report_dropped_log("Invoke calldata resize-failure diagnostic");
+    }
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
   if (!input_calldata.empty()) {
@@ -223,8 +234,13 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     owned_auth_token_ids_vec.resize(input_owned_auth_token_ids.size() /
                                     sizeof(uint32_t));
   } catch (std::exception &e) {
-    error("unrecoverable: failed to resize owned auth token ids vector: {}",
-          e.what());
+    // Swallow a nested throw from the diagnostic (issue #3372).
+    try {
+      error("unrecoverable: failed to resize owned auth token ids vector: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("Invoke owned-auth-token resize-failure diagnostic");
+    }
     return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
   }
 
