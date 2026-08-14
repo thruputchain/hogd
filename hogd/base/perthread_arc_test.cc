@@ -5,6 +5,7 @@
 #include <thread>
 #include <utility>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 
 namespace hogd {
@@ -387,6 +388,12 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
 // this expectation should be replaced with one that asserts a clean exit.
 TEST(PerThreadARCTest, ThreadExitBeforeShutdownTripsRefcountAssert)
 {
+  // Under NDEBUG the CHECK lowers to std::unreachable(), so it emits no
+  // "CHECK FAILED" message (and the failure path may be optimized away). Match
+  // the other CHECK-based death tests and only run this in debug builds.
+  if constexpr (!is_debug_build()) {
+    GTEST_SKIP() << "CHECK is compiled out under NDEBUG";
+  }
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_DEATH(
       {
