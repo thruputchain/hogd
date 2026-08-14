@@ -440,16 +440,28 @@ private:
   std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
       local_rv32_translations_;
 
-  // Addresses of distinct deployed contracts this transaction has resolved
-  // through the block-scoped snapshot cache. Bounds how much retained contract
-  // code a single transaction can force into the block cache: each recorded
-  // address warmed (or reused) a retained entry, so distinct retained code
-  // hashes are at most the size of this set, capped at
-  // kMaxDistinctContractResolutionsPerTx (#3375). Only addresses whose
-  // resolution reached a deployed contract are recorded, and the set is
-  // size-capped, so the contract-controlled key cannot grow it without bound.
+  // Distinct contract entries this transaction has caused the block-scoped
+  // snapshot cache to warm and retain (each up to kMaxContractSizeBytes, held
+  // for the rest of the block). Both warming paths are contract-controlled and
+  // run before the child spends gas, so they are bounded together against
+  // kMaxDistinctContractResolutionsPerTx (#3375); see
+  // distinct_contract_loads().
+  //
+  // - resolved_contract_addresses_: callee addresses resolved by invoke()
+  //   (resolve_runtime -> try_get_deployed_contract). Keyed by address because
+  //   the address is known before the warm, so the hot invoke path avoids an
+  //   extra deployment-metadata lookup; distinct retained hashes are at most
+  //   the number of distinct resolved addresses.
+  // - loaded_contract_hashes_: contract hashes loaded by DeployContract
+  //   (deploy_contract -> resolve_contract), which warms an existing contract
+  //   by hash before the deploy is committed and even if the transaction
+  //   reverts.
+  //
+  // Both sets are size-capped, so the contract-controlled keys cannot grow them
+  // without bound.
   std::unordered_set<ContractAddress, SipHash24Hasher>
       resolved_contract_addresses_;
+  std::unordered_set<SHA256Hash, SipHash24Hasher> loaded_contract_hashes_;
 
   ExecutionModeData execution_mode_data_;
 
@@ -509,6 +521,15 @@ private:
   // not rolled back by a revert).
   SystemStatus<std::unique_ptr<Runtime>>
   resolve_runtime(ContractAddress const &addr);
+
+  // Number of distinct contract entries this transaction has already caused the
+  // block-scoped snapshot cache to warm (invoke-resolved callees plus
+  // deploy-time loads). Used to bound contract-controlled cache retention per
+  // transaction against kMaxDistinctContractResolutionsPerTx (#3375).
+  size_t distinct_contract_loads() const
+  {
+    return resolved_contract_addresses_.size() + loaded_contract_hashes_.size();
+  }
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the

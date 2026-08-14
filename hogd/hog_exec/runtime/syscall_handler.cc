@@ -1305,14 +1305,15 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // can otherwise invoke many distinct already-deployed callees (even with
   // gas_limit=0 / TryInvoke, which faults the child spending no child gas) and
   // pin retained code bytes out of proportion to the gas it spends (#3375).
-  // Once the per-tx cap is reached, reject a new distinct resolution before the
-  // cold fetch/translate allocates. A previously-resolved address stays in the
-  // set and still resolves (a block-cache hit that retains nothing new), so
+  // This shares one per-tx budget with the DeployContract load path (see
+  // deploy_contract), so the two warming paths cannot together exceed the cap.
+  // Once the budget is spent, reject a new distinct resolution before the cold
+  // fetch/translate allocates. A previously-resolved address stays in the set
+  // and still resolves (a block-cache hit that retains nothing new), so
   // repeatedly invoking the same callee is unaffected. invoke() surfaces the
   // null runtime as kSyscallErrorCodeInvalidSyscallInput and starts no frame.
   if (!resolved_contract_addresses_.contains(addr) &&
-      resolved_contract_addresses_.size() >=
-          kMaxDistinctContractResolutionsPerTx) {
+      distinct_contract_loads() >= kMaxDistinctContractResolutionsPerTx) {
     return nullptr;
   }
 
@@ -1506,6 +1507,19 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   assert(!invocation_frame_stack_.empty());
   CHECK(!is_read_only());
 
+  // Loading the contract below warms a full ContractCacheEntry (up to
+  // kMaxContractSizeBytes) into the block-scoped snapshot cache, retained for
+  // the rest of the block even if this deploy is not committed or the
+  // transaction reverts. Bound distinct such loads per transaction against the
+  // same budget invoke() resolution uses, so a contract cannot pin unbounded
+  // code by deploying many distinct already-stored hashes (#3375). Reject a new
+  // distinct load before it allocates; a hash already loaded this transaction
+  // retains nothing new and is unaffected.
+  if (!loaded_contract_hashes_.contains(contract_hash) &&
+      distinct_contract_loads() >= kMaxDistinctContractResolutionsPerTx) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
@@ -1519,6 +1533,10 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   }
   assert(contract_res.value() != nullptr);
   auto const &contract = *contract_res.value();
+
+  // Count this load against the per-tx contract-load budget now that it
+  // succeeded (see the budget check above and resolve_runtime, #3375).
+  loaded_contract_hashes_.insert(contract_hash);
 
   // Native (precompiled) contracts cannot be deployed - they are set up at
   // genesis and should not be redeployed by user transactions

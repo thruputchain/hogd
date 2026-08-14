@@ -18,23 +18,27 @@ namespace hogd {
 // through genesis (like StorageCostModelXdr) once that exists.
 inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
 
-// Maximum number of DISTINCT deployed contracts a single transaction may
-// resolve. The first resolution of a distinct callee warms a full
-// ContractCacheEntry (code up to kMaxContractSizeBytes) into the block-scoped
-// StorageSnapshotCache, where it is retained until the block's snapshot cache
-// is extracted. Callee resolution happens before the child frame runs or
-// spends gas, so a contract can invoke many distinct already-deployed callees
-// -- even with gas_limit=0 and TryInvoke, which faults the child without
-// charging child gas -- and pin retained code bytes out of proportion to the
-// gas it actually spends (#3375). Bounding the count of distinct resolutions
-// per transaction bounds a single transaction's retained code contribution at
-// kMaxDistinctContractResolutionsPerTx * kMaxContractSizeBytes (64 MiB here).
+// Maximum number of DISTINCT contract entries a single transaction may cause
+// the block-scoped StorageSnapshotCache to warm. Warming a distinct contract
+// fetches, deserializes, and retains a full ContractCacheEntry (code up to
+// kMaxContractSizeBytes) until the block's snapshot cache is extracted. Two
+// contract-controlled paths warm entries before the transaction pays for the
+// work: invoke() callee resolution (SystemCallHandler::resolve_runtime), which
+// runs before the child frame spends gas -- even for gas_limit=0 / TryInvoke,
+// which faults the child without charging child gas -- and DeployContract
+// (SystemCallHandler::deploy_contract), which loads an existing contract by
+// hash before the deploy commits and even if the transaction reverts. Without
+// a bound, either lets a contract pin retained code bytes out of proportion to
+// the gas it spends (#3375).
 //
-// Enforced deterministically per transaction in
-// SystemCallHandler::resolve_runtime(), before the cold fetch/translate
-// allocates, so the bound holds identically in proposal and validation. The
-// limit is generous relative to any legitimate transaction, which resolves few
-// distinct callees.
+// Both paths draw on this single per-transaction budget (see
+// SystemCallHandler::distinct_contract_loads()) and reject a new distinct load
+// before the cold fetch/translate allocates, so a transaction's retained code
+// contribution is bounded at kMaxDistinctContractResolutionsPerTx *
+// kMaxContractSizeBytes (64 MiB here). Enforcement is deterministic per
+// transaction, so the bound holds identically in proposal and validation, and
+// the limit is generous relative to any legitimate transaction, which touches
+// few distinct contracts.
 inline constexpr size_t kMaxDistinctContractResolutionsPerTx = 256;
 
 // Bound on the serialized Contract row hog_db accepts in

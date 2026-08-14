@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -676,6 +677,121 @@ TEST_P(SelectiveDeploymentTest, CapsDistinctContractResolutionsPerTransaction)
   ASSERT_TRUE(reinvoke_result.has_value());
   EXPECT_EQ(*reinvoke_result, SyscallErrorCode::kSyscallErrorCodeNone)
       << "re-invoking an already-resolved callee is not a new resolution";
+}
+
+// DeployContract loads a contract by hash (warming a full entry into the
+// block-scoped snapshot cache) before the deploy commits, so it draws on the
+// same per-transaction budget as invoke() resolution
+// (kMaxDistinctContractResolutionsPerTx). A contract cannot pin unbounded code
+// by deploying many distinct already-stored hashes (#3375): the root's own
+// resolution consumes one slot, so it can load
+// kMaxDistinctContractResolutionsPerTx
+// - 1 further distinct hashes; the next distinct load is rejected with
+// kSyscallErrorCodeInvalidSyscallInput before it warms, while re-loading an
+// already-loaded hash still succeeds.
+TEST_P(SelectiveDeploymentTest, CapsDistinctContractLoadsViaDeploy)
+{
+  constexpr size_t kExtra = 3;
+  constexpr size_t kContractCount =
+      kMaxDistinctContractResolutionsPerTx + kExtra;
+  // The root's own resolution consumes one slot.
+  constexpr size_t kAllowedLoads = kMaxDistinctContractResolutionsPerTx - 1;
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 0x5A;
+    return nonce;
+  }();
+
+  // Distinct stored (non-native) contracts; distinct code -> distinct hashes.
+  // DeployContract loads each by hash without instantiating a runtime, so the
+  // bytes need not be valid wasm.
+  std::vector<SHA256Hash> child_hashes;
+  child_hashes.reserve(kContractCount);
+  for (size_t i = 0; i < kContractCount; ++i) {
+    auto contract = std::make_shared<Contract>(ContractType::kWasmi);
+    contract->wasmi_contract() = ContractBlob{
+        .data = {static_cast<uint8_t>(i & 0xFF),
+                 static_cast<uint8_t>((i >> 8) & 0xFF), 0xAB, 0xCD}};
+    child_hashes.push_back(sha256(*contract));
+    write_contract(contract);
+  }
+
+  // Result of loading each distinct hash in order, plus a trailing re-load of
+  // the first (already-loaded) hash. Recorded by the root method.
+  std::vector<SyscallErrorCode> results;
+  results.reserve(kContractCount);
+  std::optional<SyscallErrorCode> reload_result;
+
+  // Distinct hashes give distinct deploy addresses under a fixed nonce; the
+  // trailing re-load reuses child_hashes.front() and so needs a different nonce
+  // to avoid a ContractAlreadyDeployed result (a distinct deploy address),
+  // which isolates the "already-loaded hash costs no budget" behavior being
+  // checked.
+  constexpr static SHA256Hash kReloadNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 0xA5;
+    return nonce;
+  }();
+
+  auto load_hash = [](NativeSyscallContext &ctx, SHA256Hash const &nonce,
+                      SHA256Hash const &hash) -> SyscallErrorCode {
+    auto r = ctx.handler().deploy_contract(nonce, hash);
+    // A block-abort SystemError should never occur here.
+    EXPECT_TRUE(r.has_value());
+    if (!r.has_value() || r.value().has_value()) {
+      return SyscallErrorCode::kSyscallErrorCodeNone;
+    }
+    return r.value().error().code();
+  };
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> root_fns;
+  root_fns.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        for (auto const &hash : child_hashes) {
+          results.push_back(load_hash(ctx, kDeployNonce, hash));
+        }
+        reload_result = load_hash(ctx, kReloadNonce, child_hashes.front());
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
+  native_map.emplace(0, std::make_unique<NativeContract>(std::move(root_fns)));
+  NativeContext native_context(std::move(native_map));
+
+  auto root_contract = make_native_contract(0);
+  write_contract(root_contract);
+  auto root_addr = make_contract_address(200);
+  write_deployment(root_addr, root_contract);
+
+  Transaction tx{
+      .invocation = Invocation{.invoked_address = root_addr,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = UINT64_MAX,
+                               .calldata = {}},
+      .uniquifier = make_new_uniquifier(),
+  };
+  auto handler = make_new_system_call_handler(tx, native_context);
+  auto result = handler.root_invoke();
+  ASSERT_TRUE(result.is_root_success());
+
+  ASSERT_EQ(results.size(), kContractCount);
+  for (size_t i = 0; i < kContractCount; ++i) {
+    if (i < kAllowedLoads) {
+      EXPECT_EQ(results[i], SyscallErrorCode::kSyscallErrorCodeNone)
+          << "distinct deploy-load " << i << " within the per-tx budget loads";
+    }
+    else {
+      EXPECT_EQ(results[i],
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)
+          << "distinct deploy-load " << i
+          << " beyond the per-tx budget is "
+             "rejected";
+    }
+  }
+  ASSERT_TRUE(reload_result.has_value());
+  EXPECT_EQ(*reload_result, SyscallErrorCode::kSyscallErrorCodeNone)
+      << "re-loading an already-loaded hash is not a new load";
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
