@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <thread>
 #include <utility>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 
 namespace hogd {
@@ -362,8 +362,8 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
   EXPECT_TRUE(shutdown_result);
 }
 
-// Repro for the CI use-after-free that aborts RpcLoadgenEventTest /
-// ERC20ExperimentTest teardown at perthread_arc.h:243
+// Failing regression repro for the CI use-after-free that aborts
+// RpcLoadgenEventTest / ERC20ExperimentTest teardown at perthread_arc.h:243
 // ("CHECK FAILED: count_.load(...) <= 0").
 //
 // A PerThreadARC keeps each touching thread's refcount in a thread_local slot
@@ -377,40 +377,39 @@ TEST(PerThreadARCTest, ReleaseSynchronizesBeforeRemoteSlotTeardown)
 //
 // Production hits this as a teardown race: an RPC/DB worker thread exits while
 // a BlockTX's PerThreadARC<BlockTX> is still live (not yet shut down), which is
-// why it only fails intermittently under load. This test forces the same
-// invariant violation deterministically so the abort reproduces without relying
-// on scheduler timing -- the existing regression tests above all take pains to
-// keep their worker threads alive until shutdown precisely to avoid it.
+// why it only fails intermittently under load. This forces the same invariant
+// violation deterministically -- the other regression tests above all take
+// pains to keep their worker threads alive until shutdown precisely to avoid
+// it.
 //
-// It is a death test because the defect manifests as a process abort, which can
-// only be observed from a subprocess. Once the lifetime bug is fixed (a thread
-// that touched the ARC may exit before shutdown without tripping the assert)
-// this expectation should be replaced with one that asserts a clean exit.
-TEST(PerThreadARCTest, ThreadExitBeforeShutdownTripsRefcountAssert)
+// The test asserts the *desired* behavior: a thread may touch the ARC and exit
+// before shutdown, and the process exits cleanly. Today the debug CHECK aborts
+// the child instead, so EXPECT_EXIT(ExitedWithCode(0)) FAILS in debug builds --
+// the repro this PR hands off -- and passes in release builds (where the CHECK
+// is compiled out). It flips fully green once the lifetime bug is fixed. It
+// runs in a death/exit subprocess so the abort is isolated from the rest of
+// base_test rather than taking the binary down.
+TEST(PerThreadARCTest, ThreadExitBeforeShutdownShouldNotAbort)
 {
-  // Under NDEBUG the CHECK lowers to std::unreachable(), so it emits no
-  // "CHECK FAILED" message (and the failure path may be optimized away). Match
-  // the other CHECK-based death tests and only run this in debug builds.
-  if constexpr (!is_debug_build()) {
-    GTEST_SKIP() << "CHECK is compiled out under NDEBUG";
-  }
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(
+  EXPECT_EXIT(
       {
         // Leaked deliberately: the ARC must still be alive (never shut down)
         // when the worker thread exits.
         auto *arc = new PerThreadARC<int>(0);
         std::thread worker([&] {
-          // A worker fully processes its work: acquire then release. The
-          // release returns false (not the last reference, no shutdown), so
-          // this thread's slot is left at kInitializedValue > 0.
+          // Fully process work: acquire then release. The release returns false
+          // (not the last reference, no shutdown), so this thread's slot is
+          // left at kInitializedValue > 0.
           arc->try_acquire_reference();
           arc->release_reference();
         });
-        // Thread exit runs TLStorage::remove() -> ~Refcount() with a live slot.
+        // Thread exit runs TLStorage::remove() -> ~Refcount(); with the bug it
+        // aborts here on CHECK(count_ <= 0) before reaching the exit below.
         worker.join();
+        std::exit(0);
       },
-      "CHECK FAILED: count_.load");
+      ::testing::ExitedWithCode(0), "");
 }
 
 } // namespace hogd
