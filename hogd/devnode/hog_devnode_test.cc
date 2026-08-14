@@ -1030,8 +1030,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact({});
-  GenesisConfigurationV2 genesis =
-      std::move(artifact.genesis_configuration_v2);
+  GenesisConfigurationV2 genesis = std::move(artifact.genesis_configuration_v2);
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 

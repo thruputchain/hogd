@@ -75,8 +75,7 @@ build_bootstrap_account_artifact(BootstrapAccountConfig const &config,
                                  StorageCostModel const &cost_model =
                                      StorageCostModel::default_cost_model());
 
-BootstrapAccountArtifact
-build_local_bootstrap_account_artifact(
+BootstrapAccountArtifact build_local_bootstrap_account_artifact(
     LocalBootstrapConfig const &config, NetworkHash const &network_hash = {},
     StorageCostModel const &cost_model =
         StorageCostModel::default_cost_model());
