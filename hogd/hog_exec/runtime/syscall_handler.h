@@ -139,6 +139,15 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // Admission checks a new invocation frame must pass: valid flags, auth
+  // tokens owned by the caller, and no reentrance. invoke() runs these before
+  // creating a child frame; the test FFI mock frame path enters at
+  // start_frame(), below invoke(), so it runs them itself (#3301). Failing is
+  // a no-op -- nothing here mutates the handler.
+  [[nodiscard]] SyscallStatus<void>
+  validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
+                          std::span<uint32_t const> owned_auth_token_ids) const;
+
   // Copy events from the currently active invocation frame.
   x23::Vec<TxEmittedEvent> copy_active_frame_events() const
   {

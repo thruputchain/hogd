@@ -775,31 +775,46 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
+SyscallStatus<void>
+SystemCallHandler::validate_new_invocation(
+    ContractAddress const &address, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids) const
+{
+  if (!validate_invoke_flags(flags)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (!invocation_frame_stack_.empty() &&
+      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
+  return {};
+}
+
 std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
                           std::span<uint32_t const> owned_auth_token_ids)
 {
+  // syscall_Invoke_inner() rejects undefined flags before we get here, so
+  // reaching this with invalid ones is a bug, not caller input. Asserted here
+  // even though validate_new_invocation() also checks it -- that check is for
+  // the test FFI boundary, which must report rather than abort.
   CHECK(validate_invoke_flags(flags));
+
   if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
-  // The SyscallError returns below all happen before a child frame is created,
-  // so they are complete no-ops: nothing is mutated, and the caller leaves its
-  // output state untouched.
-  if (!invocation_frame_stack_.empty() &&
-      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
-    return {SyscallError{
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-            0};
-  }
-
-  // reentrance guard
-  // check if the address is already on the stack
-  if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return {SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance}, 0};
+  // Rejected before a child frame is created, so this is a complete no-op:
+  // nothing is mutated, and the caller leaves its output state untouched.
+  if (auto admitted =
+          validate_new_invocation(address, flags, owned_auth_token_ids);
+      !admitted.has_value()) {
+    return {admitted.error(), 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
