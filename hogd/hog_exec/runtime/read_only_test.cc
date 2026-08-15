@@ -19,6 +19,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -27,6 +28,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -64,7 +66,7 @@ protected:
   }
 
   std::shared_ptr<Contract> contract_ =
-      hogd::load_contract("read_only_test.wasm");
+      hogd::load_rv32_contract("read_only_test.rv32a");
   ContractAddress const contract_addr_ = make_contract_address(0);
   ContractAddress const callee_addr_ = make_contract_address(2);
   using read_only_test_client_t =
@@ -112,10 +114,10 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     return std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_context.release(), true}},
+            {ContractType::kRv32, {rv32_context.release(), true}},
             {ContractType::kNative, {native_context.get(), false}}});
   };
 
@@ -193,10 +195,10 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
       std::make_unique<NativeContext>(std::move(contract_map));
 
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     return std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_context.release(), true}},
+            {ContractType::kRv32, {rv32_context.release(), true}},
             {ContractType::kNative, {native_context.get(), false}}});
   };
 
@@ -323,11 +325,11 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
   contract_map.emplace(2, std::move(contract_root));
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  Rv32Context rv32_context;
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {wasm_context.get(), false}},
+          {ContractType::kRv32, {&rv32_context, false}},
           {ContractType::kNative, {native_context.get(), false}},
       });
 
@@ -441,11 +443,11 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  Rv32Context rv32_context;
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {wasm_context.get(), false}},
+          {ContractType::kRv32, {&rv32_context, false}},
           {ContractType::kNative, {native_context.get(), false}},
       });
 
@@ -512,18 +514,18 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   }
 }
 
-// Verifies that read-only enforcement works when a WASM contract invokes the
+// Verifies that read-only enforcement works when an RV32 contract invokes the
 // native token precompile with the read-only flag. get_balance_of should
 // succeed; transfer should fail because modify_native_token_balance is blocked
 // in read-only mode.
-TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
+TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 {
   using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
 
   constexpr ContractAddress kObserverAddr = make_contract_address(12);
   constexpr ContractAddress kReceiverAddr = make_contract_address(13);
 
-  // Deploy the native token precompile so the WASM contract can invoke it
+  // Deploy the native token precompile so the RV32 contract can invoke it
   auto token_contract_xdr = make_native_contract(std::to_underlying(
       HogexecPrecompiledNativeContracts::kNativeContractHogToken));
   write_contract(token_contract_xdr);
@@ -532,7 +534,7 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
 
   setup_grant_storage_token(kObserverAddr, 12345);
 
-  // Set up multiplexed context with WASM and native runtimes
+  // Set up multiplexed context with RV32 and native runtimes
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(
       std::to_underlying(
@@ -540,16 +542,16 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  Rv32Context rv32_context;
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {wasm_context.get(), false}},
+          {ContractType::kRv32, {&rv32_context, false}},
           {ContractType::kNative, {native_context.get(), false}},
       });
 
   {
-    // WASM contract read-only invokes get_balance_of — should succeed
+    // RV32 contract read-only invokes get_balance_of — should succeed
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
@@ -572,8 +574,8 @@ TEST_P(ReadOnlyTest, WasmReadOnlyNativeTokenPrecompile)
   }
 
   {
-    // WASM contract read-only invokes transfer — should fail (frame reverts),
-    // but the WASM method handles the error and returns normally
+    // RV32 contract read-only invokes transfer — should fail (frame reverts),
+    // but the contract method handles the error and returns normally
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
@@ -604,7 +606,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 {
   deploy_callee();
 
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
@@ -625,7 +627,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
   deploy_callee();
 
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   auto handler_tx = SignedTransaction{
       .tx = Transaction{

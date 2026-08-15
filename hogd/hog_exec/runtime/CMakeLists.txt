@@ -92,11 +92,11 @@ add_library(runtime_test_objects OBJECT
   invoke_error_handling_test.cc
   invoke_tx_leak_test.cc
   manual_revert_comprehensive_test.cc
-  manual_revert_wasm_test.cc
-  manual_revert_caller_wasm_test.cc
-  return_fault_test_wasm_test.cc
-  nnint_output_fault_test_wasm_test.cc
-  output_alias_test_wasm_test.cc
+  manual_revert_rv32_test.cc
+  manual_revert_caller_rv32_test.cc
+  return_fault_test_rv32_test.cc
+  nnint_output_fault_test_rv32_test.cc
+  output_alias_test_rv32_test.cc
   native_contract_test.cc
   native_token_allowance_test.cc
   nnint_add_test.cc
@@ -123,7 +123,7 @@ add_library(runtime_test_objects OBJECT
   syscall_entry_outer_tests.cc
   syscall_error_handling_tests.cc
   syscall_misc_tests.cc
-  syscall_parse_hardening_wasm_test.cc
+  syscall_parse_hardening_rv32_test.cc
   syscall_parse_tests.cc
   tracing_tests.cc
   try_invoke_test.cc
@@ -404,5 +404,6 @@ add_dependencies(
 add_dependencies(
   runtime_test
   all_wasm_contracts
+  all_riscvs_built
   test_unknown_import_wasm
 )

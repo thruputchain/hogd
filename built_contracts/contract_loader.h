@@ -20,6 +20,10 @@ std::vector<std::filesystem::path> contract_search_directories();
 // file cannot be loaded.
 std::shared_ptr<Contract> load_contract(std::string_view filename);
 
+// Loads a compiled RV32 artifact (.rv32a) from the contract artifact search
+// path as a kRv32 contract. Panics if the file cannot be loaded.
+std::shared_ptr<Contract> load_rv32_contract(std::string_view filename);
+
 // Loads raw file contents from the contract artifact search path. Panics if the
 // file cannot be loaded or read.
 ContractBlob load_contract_blob(std::string_view filename);

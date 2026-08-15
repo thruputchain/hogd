@@ -17,14 +17,14 @@
 
 namespace hogd {
 
-class NnintOutputFaultTestWasmTest : public ::testing::Test,
+class NnintOutputFaultTestRv32Test : public ::testing::Test,
                                      public NativeContractTestFramework {
 public:
-  NnintOutputFaultTestWasmTest()
+  NnintOutputFaultTestRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb),
-      wasm_runtime_context_(make_hog_exec_context())
+      runtime_context_(make_hog_exec_context())
   {}
 
 protected:
@@ -33,7 +33,7 @@ protected:
     using nnint_output_fault_test_meta =
         ContractTraitMeta<nnint_output_fault_test::NnintOutputFaultTest>;
 
-    auto contract = nnint_output_fault_test_meta::load_wasm();
+    auto contract = nnint_output_fault_test_meta::load_rv32();
     write_contract(contract);
     write_deployment(kContractAddress, contract);
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -45,14 +45,14 @@ protected:
       ContractTraitClient<nnint_output_fault_test::NnintOutputFaultTest>(
           kContractAddress);
 
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
+  std::unique_ptr<RuntimeContext> runtime_context_;
 
   uint64_t nonce_ = 0;
 };
 
 // Valid first output pointer, invalid second output pointer.
 // Asserts that the valid first output is not overwritten on fault.
-TEST_F(NnintOutputFaultTestWasmTest, FaultValidFirst)
+TEST_F(NnintOutputFaultTestRv32Test, FaultValidFirst)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -61,13 +61,13 @@ TEST_F(NnintOutputFaultTestWasmTest, FaultValidFirst)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // Invalid first output pointer, valid second output pointer.
 // Asserts that the valid second output is not overwritten on fault.
-TEST_F(NnintOutputFaultTestWasmTest, FaultInvalidFirst)
+TEST_F(NnintOutputFaultTestRv32Test, FaultInvalidFirst)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -76,11 +76,11 @@ TEST_F(NnintOutputFaultTestWasmTest, FaultInvalidFirst)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-TEST_F(NnintOutputFaultTestWasmTest, ValidationFailure)
+TEST_F(NnintOutputFaultTestRv32Test, ValidationFailure)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -89,7 +89,7 @@ TEST_F(NnintOutputFaultTestWasmTest, ValidationFailure)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 

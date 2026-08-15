@@ -51,11 +51,6 @@ public:
   {}
 
 protected:
-  static std::unique_ptr<RuntimeContext> make_context()
-  {
-    return make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
-  };
-
   std::unique_ptr<RuntimeContext> runtime_context_;
 
   void SetUp() override { runtime_context_ = make_hog_exec_context(); }
@@ -63,7 +58,7 @@ protected:
 
 TEST_F(TracingTest, Sha256Repeated)
 {
-  auto contract = hogd::load_contract("sha256_wrapper.wasm");
+  auto contract = hogd::load_rv32_contract("sha256_wrapper.rv32a");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(contract_addr, contract);
@@ -125,8 +120,9 @@ TEST_F(TracingTest, Sha256Repeated)
 
 TEST_F(TracingTest, FibonacciNestedInvocation)
 {
-  auto fibonacci_contract = hogd::load_contract("fibonacci.wasm");
-  auto fibonacci_caller_contract = hogd::load_contract("fibonacci_call.wasm");
+  auto fibonacci_contract = hogd::load_rv32_contract("fibonacci.rv32a");
+  auto fibonacci_caller_contract =
+      hogd::load_rv32_contract("fibonacci_call.rv32a");
 
   auto fibonacci_addr = make_contract_address(0);
   auto fibonacci_caller_addr = make_contract_address(1);
@@ -222,7 +218,7 @@ TEST_F(TracingTest, NoSyscallTest)
   auto contract_addr = make_contract_address(0);
   auto client =
       ContractTraitClient<no_syscall_test::NoSyscallTest>(contract_addr);
-  auto contract = load_contract("no_syscall_test.wasm");
+  auto contract = load_rv32_contract("no_syscall_test.rv32a");
   write_contract(contract);
   write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -261,7 +257,7 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
   auto contract_addr = make_contract_address(0);
   auto client =
       ContractTraitClient<no_syscall_test::NoSyscallTest>(contract_addr);
-  auto contract = load_contract("no_syscall_test.wasm");
+  auto contract = load_rv32_contract("no_syscall_test.rv32a");
   write_contract(contract);
   write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);

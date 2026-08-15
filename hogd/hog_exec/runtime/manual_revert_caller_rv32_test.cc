@@ -10,6 +10,7 @@
 #include "exec_result.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -24,10 +25,10 @@ namespace hogd {
 //
 // Test fixture for manual revert caller WASM contract tests
 //
-class ManualRevertCallerWasmTest : public ::testing::TestWithParam<TestDB>,
+class ManualRevertCallerRv32Test : public ::testing::TestWithParam<TestDB>,
                                    public NativeContractTestFramework {
 public:
-  ManualRevertCallerWasmTest()
+  ManualRevertCallerRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
@@ -36,14 +37,14 @@ protected:
   void SetUp() override
   {
     // Load and deploy the manual_revert_test contract (target)
-    auto target_contract = hogd::load_contract("manual_revert_test.wasm");
+    auto target_contract = hogd::load_rv32_contract("manual_revert_test.rv32a");
     target_contract_addr_ = make_contract_address(0);
     write_contract(target_contract);
     write_deployment(target_contract_addr_, target_contract);
     setup_grant_storage_token(target_contract_addr_, 1'000'000'000);
 
     // Load and deploy the manual_revert_caller contract
-    auto caller_contract = hogd::load_contract("manual_revert_caller.wasm");
+    auto caller_contract = hogd::load_rv32_contract("manual_revert_caller.rv32a");
     caller_contract_addr_ = make_contract_address(1);
     write_contract(caller_contract);
     write_deployment(caller_contract_addr_, caller_contract);
@@ -58,14 +59,14 @@ protected:
 //
 // Test that basic cross-contract revert functionality works
 //
-TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
+TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
       ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
   // contract's address
@@ -126,13 +127,13 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
 }
 
 // Test nested manual revert scenarios across contracts
-TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
+TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
       ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
   // contract's address
@@ -194,14 +195,14 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
 }
 
 // Test error type revert scenarios across contracts
-TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
+TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
       ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
   // contract's address
@@ -263,14 +264,14 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
 }
 
 // Test storage manual revert scenarios across contracts
-TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
+TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
       ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
   // contract's address
@@ -332,14 +333,14 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
 }
 
 // Test that caller's state persists and can be checked
-TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
+TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
       ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
-  auto context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto context = make_hog_exec_context();
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
   // contract's address
@@ -414,7 +415,7 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
 
 // Check that the native contract test framework's implementation of static_key
 // matches the sdk's version
-TEST_P(ManualRevertCallerWasmTest, StaticKeyMacro)
+TEST_P(ManualRevertCallerRv32Test, StaticKeyMacro)
 {
   auto native_key =
       make_storage_key_matching_static_key_sdk_macro("caller_state");
@@ -429,7 +430,7 @@ TEST_P(ManualRevertCallerWasmTest, StaticKeyMacro)
   ASSERT_EQ(sdk_key, native_key);
 }
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertCallerWasmTest,
+INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertCallerRv32Test,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDb),
                          test_db_to_string);
