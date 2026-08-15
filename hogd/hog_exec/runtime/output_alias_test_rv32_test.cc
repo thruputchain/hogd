@@ -17,14 +17,14 @@
 
 namespace hogd {
 
-class OutputAliasTestWasmTest : public ::testing::Test,
+class OutputAliasTestRv32Test : public ::testing::Test,
                                 public NativeContractTestFramework {
 public:
-  OutputAliasTestWasmTest()
+  OutputAliasTestRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb),
-      wasm_runtime_context_(make_hog_exec_context())
+      runtime_context_(make_hog_exec_context())
   {}
 
 protected:
@@ -33,7 +33,7 @@ protected:
     using output_alias_test_meta =
         ContractTraitMeta<output_alias_test::OutputAliasTest>;
 
-    auto contract = output_alias_test_meta::load_wasm();
+    auto contract = output_alias_test_meta::load_rv32();
     write_contract(contract);
     write_deployment(kContractAddress, contract);
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -44,13 +44,13 @@ protected:
   ContractTraitClient<output_alias_test::OutputAliasTest> client_ =
       ContractTraitClient<output_alias_test::OutputAliasTest>(kContractAddress);
 
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
+  std::unique_ptr<RuntimeContext> runtime_context_;
 
   uint64_t nonce_ = 0;
 };
 
 // Two i128 output pointers at the exact same address must fault.
-TEST_F(OutputAliasTestWasmTest, NnintExactOverlap)
+TEST_F(OutputAliasTestRv32Test, NnintExactOverlap)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -59,12 +59,12 @@ TEST_F(OutputAliasTestWasmTest, NnintExactOverlap)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // Two i128 output pointers with partial overlap must fault.
-TEST_F(OutputAliasTestWasmTest, NnintPartialOverlap)
+TEST_F(OutputAliasTestRv32Test, NnintPartialOverlap)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -74,12 +74,12 @@ TEST_F(OutputAliasTestWasmTest, NnintPartialOverlap)
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // Non-overlapping outputs should not fault.
-TEST_F(OutputAliasTestWasmTest, NnintNoOverlap)
+TEST_F(OutputAliasTestRv32Test, NnintNoOverlap)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -88,12 +88,12 @@ TEST_F(OutputAliasTestWasmTest, NnintNoOverlap)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // output_written_len pointer inside the output span must fault.
-TEST_F(OutputAliasTestWasmTest, CalldataSpanWritableOverlap)
+TEST_F(OutputAliasTestRv32Test, CalldataSpanWritableOverlap)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -103,12 +103,12 @@ TEST_F(OutputAliasTestWasmTest, CalldataSpanWritableOverlap)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // Non-overlapping span and writable output should not fault.
-TEST_F(OutputAliasTestWasmTest, CalldataNoOverlap)
+TEST_F(OutputAliasTestRv32Test, CalldataNoOverlap)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -117,12 +117,12 @@ TEST_F(OutputAliasTestWasmTest, CalldataNoOverlap)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // Two input pointers at the same address should fault
-TEST_F(OutputAliasTestWasmTest, InputInputOverlapFault)
+TEST_F(OutputAliasTestRv32Test, InputInputOverlapFault)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -132,12 +132,12 @@ TEST_F(OutputAliasTestWasmTest, InputInputOverlapFault)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
 // Overlapping input with output should fault
-TEST_F(OutputAliasTestWasmTest, InputOutputOverlapFault)
+TEST_F(OutputAliasTestRv32Test, InputOutputOverlapFault)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -147,7 +147,7 @@ TEST_F(OutputAliasTestWasmTest, InputOutputOverlapFault)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 

@@ -21,10 +21,10 @@
 
 namespace hogd {
 
-class SyscallParseHardeningWasmTest : public ::testing::Test,
+class SyscallParseHardeningRv32Test : public ::testing::Test,
                                       public NativeContractTestFramework {
 public:
-  SyscallParseHardeningWasmTest()
+  SyscallParseHardeningRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb)
@@ -36,7 +36,7 @@ protected:
     using syscall_parse_hardening_test_meta = ContractTraitMeta<
         syscall_parse_hardening_test::SyscallParseHardeningTest>;
 
-    auto contract = syscall_parse_hardening_test_meta::load_wasm();
+    auto contract = syscall_parse_hardening_test_meta::load_rv32();
     write_contract(contract);
     write_deployment(kContractAddress, contract);
     setup_grant_storage_token(kContractAddress, 1'000'000'000);
@@ -58,7 +58,7 @@ protected:
 
 // Can't turn value that doesn't fit into an int32_t into a CryptographicScheme
 // enum (i32)
-TEST_F(SyscallParseHardeningWasmTest, VerifySignatureRejectsNoncanonicalScheme)
+TEST_F(SyscallParseHardeningRv32Test, VerifySignatureRejectsNoncanonicalScheme)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -72,7 +72,7 @@ TEST_F(SyscallParseHardeningWasmTest, VerifySignatureRejectsNoncanonicalScheme)
 }
 
 // OOB optional pointer that's not u64 max must fault in syscall parsing.
-TEST_F(SyscallParseHardeningWasmTest, ChangePubkeyOptionalPointerFaults)
+TEST_F(SyscallParseHardeningRv32Test, ChangePubkeyOptionalPointerFaults)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -86,7 +86,7 @@ TEST_F(SyscallParseHardeningWasmTest, ChangePubkeyOptionalPointerFaults)
 }
 
 // only uint64_max is a valid sentinel for optional pointer
-TEST_F(SyscallParseHardeningWasmTest,
+TEST_F(SyscallParseHardeningRv32Test,
        GetDeployAddressOptionalPointerSentinelBehavior)
 {
   auto handler = make_new_system_call_handler(

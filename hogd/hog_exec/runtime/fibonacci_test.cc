@@ -12,6 +12,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -20,6 +21,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -36,11 +38,9 @@ public:
   {}
 
 protected:
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
-
   static std::unique_ptr<RuntimeContext> make_context()
   {
-    return make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    return make_hog_exec_context();
   };
 
   std::unique_ptr<RuntimeContext> runtime_context_;
@@ -58,7 +58,7 @@ protected:
 // Simple test for sdk, to verify that calls actually happen.
 TEST_P(FibonacciTest, FibonacciCalls)
 {
-  auto contract = hogd::load_contract("fibonacci.wasm");
+  auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(contract_addr, contract);
@@ -83,7 +83,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
 
 TEST_P(FibonacciTest, FibonacciGasLimit)
 {
-  auto contract = hogd::load_contract("fibonacci.wasm");
+  auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(contract_addr, contract);
@@ -110,7 +110,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
 TEST_P(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
-  auto contract = hogd::load_contract("fibonacci.wasm");
+  auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   constexpr static ContractAddress kFibContractAddr = make_contract_address(0);
   write_contract(contract);
   write_deployment(kFibContractAddr, contract);
@@ -155,12 +155,12 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                             replay_cache_cost_charged(1) * 2);
 
   auto make_multiplexed_context = [&]() -> std::unique_ptr<MultiplexedContext> {
-    auto wasm_context = make_context();
+    auto rv32_context = std::make_unique<Rv32Context>();
 
     return std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
   };
 
   auto context = make_multiplexed_context();
