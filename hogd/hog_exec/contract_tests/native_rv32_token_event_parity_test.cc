@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -8,8 +9,10 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 #include "built_contracts/itc_erc20.h"
+#include "built_contracts/itc_erc20.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -82,6 +85,7 @@ public:
   constexpr static Runtime::MethodID kMethodTransferFrom = 2;
   constexpr static Runtime::MethodID kMethodInitialize = 3;
   constexpr static Runtime::MethodID kMethodMint = 4;
+  constexpr static Runtime::MethodID kMethodNettedNegativeApproval = 5;
 
   constexpr static int32_t kWrapperNativeId = 40;
 
@@ -108,6 +112,63 @@ public:
                     << std::string_view(reinterpret_cast<const char *>(
                                             Name.get().data()),
                                         Name.get().size());
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  }
+
+  // Invoke `Name` on the ERC20 contract deployed at `target` and require a
+  // contract-level rejection carrying exactly `expected`: the child frame
+  // must abort with that itc_erc20 error, rather than succeeding, faulting,
+  // or reporting some other error. A library exception or an abort payload
+  // that does not parse as an itc_erc20 exception lands in a different
+  // ContractErrorType alternative and is rejected here too.
+  template<StringLiteral Name, typename... Args>
+  static InvokeStatus<void>
+  call_expect_err(NativeSyscallContext &ctx, ContractAddress target,
+                  itc_erc20::ERC20Error expected, Args... args)
+  {
+    auto name_str =
+        std::string_view(reinterpret_cast<const char *>(Name.get().data()),
+                         Name.get().size());
+    auto client = ContractTraitClient<itc_erc20::ERC20>(target);
+    auto r = client.template invoke_opt<Name>(ctx, args...);
+    if (!r.has_value() || !r.value().has_value() ||
+        !r.value().value().has_value()) {
+      ADD_FAILURE() << "itc_erc20 call faulted instead of returning an ERC20 "
+                       "error: "
+                    << name_str;
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    auto const &result = r.value().value().value();
+    if (result.is_ok()) {
+      ADD_FAILURE() << "itc_erc20 call unexpectedly returned Ok: " << name_str;
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    auto reported = std::visit(
+        [](auto const &exception) -> std::optional<itc_erc20::ERC20Error> {
+          if constexpr (requires {
+                          {
+                            exception.exn
+                          } -> std::convertible_to<itc_erc20::ERC20Error>;
+                        }) {
+            return exception.exn;
+          }
+          else {
+            return std::nullopt;
+          }
+        },
+        result.err().variant_);
+    if (!reported.has_value()) {
+      ADD_FAILURE() << "itc_erc20 call aborted without a decodable itc_erc20 "
+                       "exception: "
+                    << name_str;
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    if (*reported != expected) {
+      ADD_FAILURE() << "itc_erc20 call reported error "
+                    << static_cast<int>(*reported) << ", expected "
+                    << static_cast<int>(expected) << ": " << name_str;
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
@@ -170,6 +231,25 @@ protected:
            ContractAddress target) -> InvokeStatus<void> {
           return call_ok<u8"mint">(ctx, target, kAlice,
                                    make_amount(kMintAmount));
+        });
+    // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
+    // allowance and then, as a sibling call in the same transaction, increment
+    // it straight back. The decrement must be rejected outright -- if it were
+    // instead staged and later netted away, its Approval event would still be
+    // published by the committing transaction.
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        kMethodNettedNegativeApproval,
+        [](NativeSyscallContext &ctx,
+           ContractAddress target) -> InvokeStatus<void> {
+          auto rejected = call_expect_err<u8"adjust_allowance">(
+              ctx, target, itc_erc20::ERC20Error::TooLarge, kSpender,
+              make_difference(-kAllowanceAmount));
+          if (!rejected.has_value()) {
+            return rejected.error();
+          }
+          return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
+                                               make_difference(
+                                                   kAllowanceAmount));
         });
     auto wrapper_contract = builder.build();
 
@@ -315,6 +395,50 @@ TEST_F(NativeRv32TokenEventParityTest,
   expect_events_match(rv32_approval, native_approval, "adjust_allowance");
   expect_events_match(rv32_transfer_from, native_transfer_from,
                       "transfer_from");
+}
+
+// hogd#1918: a decrement below a fresh allowance, followed by a sibling
+// increment that would net the pending NNInt delta back to zero, must publish
+// exactly ONE Approval event -- the increment's. The impact recorded on the
+// issue was event-side: the decrement returned Ok and its Approval event
+// survived into the committed log even though the committed allowance could
+// never have funded it, because the sibling increment left no invalid final
+// delta for commit-time validation to reject. run_op fails the test if the
+// transaction emits anything other than a single event, so the two-event
+// history is caught here on both the built WASM contract and the native
+// precompile. The return-value counterpart lives in
+// Erc20ParityTest.NegativeAllowanceNettingParity.
+TEST_F(NativeWasmTokenEventParityTest,
+       NettedNegativeApprovalEmitsOnlyTheValidEvent)
+{
+  // --- wasm itc_erc20: initialize (no balance needed for allowances). ---
+  run_setup(kMethodInitialize, kAlice, kWasmToken);
+  auto wasm_approval =
+      run_op(kMethodNettedNegativeApproval, kAlice, kWasmToken);
+
+  // --- native token: nothing to set up beyond SetUp(). ---
+  ContractAddress const native_token =
+      GenesisConfigurationLoader::kPresetNativeTokenAddress;
+  auto native_approval =
+      run_op(kMethodNettedNegativeApproval, kAlice, native_token);
+
+  // Sanity: the events really were emitted by the two different contracts.
+  ASSERT_TRUE(wasm_approval.has_value());
+  ASSERT_TRUE(native_approval.has_value());
+  EXPECT_EQ(wasm_approval->contract_address, kWasmToken);
+  EXPECT_EQ(native_approval->contract_address, native_token);
+
+  // The single surviving event is the increment's, identical on both backends.
+  expect_events_match(wasm_approval, native_approval,
+                      "netted negative approval");
+
+  // ...and it really is the increment's event, not the rejected decrement's:
+  // ApprovalEvent carries the diff, so a plain +kAllowanceAmount adjustment
+  // run afterwards emits a byte-identical event on each backend.
+  auto wasm_plain = run_op(kMethodAdjustAllowance, kAlice, kWasmToken);
+  auto native_plain = run_op(kMethodAdjustAllowance, kAlice, native_token);
+  expect_events_match(wasm_approval, wasm_plain, "wasm netted vs plain");
+  expect_events_match(native_approval, native_plain, "native netted vs plain");
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
