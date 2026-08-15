@@ -55,9 +55,7 @@ enum TestFFIErrorCode {
   // Contract failed wasm verification (e.g., memory exceeds limits)
   kTestFFIErrorCodeContractVerificationFailed = 6,
   // An argument violated a documented precondition (e.g. a negative
-  // storage-token grant, which would persist an invalid native-token balance,
-  // or a mock invocation frame opened for an address that already has an active
-  // frame, which production rejects as reentrance).
+  // storage-token grant, or a mock invocation frame production would not admit)
   kTestFFIErrorCodeInvalidArgument = 7,
 };
 
@@ -246,20 +244,12 @@ struct OpenSyscallHandlerResult open_mocked_syscall_handler(
     void *db, void *rc, struct FFISerializedAuthClaimData auth_claim_data,
     const uint8_t source_tx_hash[32], uint8_t enable_tracing);
 
-// invoke_flags must contain only defined, implemented InvokeFlag bits
-// (TryInvoke | ReadOnly), the same set production's SystemCallHandler::invoke()
-// admits. Anything else -- an undefined bit, a negative value, or the
-// defined-but-unimplemented DelegateCall -- is rejected with
-// kTestFFIErrorCodeInvalidArgument, and the rejected call is a complete no-op:
-// no frame is opened and the handler stays usable.
-//
-// Frames are also admitted under production's reentrance rule: an address that
-// already has a frame on the stack cannot be invoked again, and a frame opened
-// for one is rejected the same way (production returns
-// kSyscallErrorCodeReentrance from the equivalent kInvoke). That rejection is
-// likewise a no-op, so the caller owes no matching
-// finish_mock_invocation_frame() call. Callers nesting frames must give each
-// level a distinct invoked_address.
+// Frames are admitted on production's terms, so two rules bind the caller:
+// invoke_flags may contain only defined, implemented bits (TryInvoke |
+// ReadOnly), and an address that already has a frame on the stack cannot be
+// invoked again -- nested frames need distinct invoked_addresses. Either
+// violation returns kTestFFIErrorCodeInvalidArgument and opens no frame, so the
+// handler stays usable and no finish_mock_invocation_frame() is owed.
 enum TestFFIErrorCode
 open_mock_invocation_frame(void *syscall_handler,
                            struct FFISerializedInvocation invocation,

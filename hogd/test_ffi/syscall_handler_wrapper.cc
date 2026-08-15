@@ -251,28 +251,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // Mirror production's flag precondition. SystemCallHandler::invoke() opens
-  // with CHECK(validate_invoke_flags(flags)), admitting only
-  // TryInvoke | ReadOnly -- DelegateCall is defined but not yet implemented, so
-  // it is not in the valid set. Without this, a mock frame could carry bits no
-  // production frame can, which nothing reads today but would silently become a
-  // live divergence the moment DelegateCall or a new flag lands (#3302).
-  //
-  // The FFI boundary reports the rejection rather than aborting the way
-  // production's CHECK does: an undefined bit is a caller-supplied scalar
-  // violating a documented precondition, which is what
-  // kTestFFIErrorCodeInvalidArgument exists for (see
-  // setup_grant_contract_storage_tokens' negative-token rejection). Aborting
-  // here would defeat the point of returning structured errors to an honest
-  // caller. This runs before any state is touched, so a rejected open is a
-  // complete no-op.
-  if (!SystemCallHandler::validate_invoke_flags(invoke_flags)) {
-    error("invalid argument: start_mock_invocation_frame called with undefined "
-          "InvokeFlag bits: {}",
-          invoke_flags);
-    return kTestFFIErrorCodeInvalidArgument;
-  }
-
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
   if (auto *runtime = get_mock_runtime()) {
     auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
@@ -333,35 +311,18 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     frame_flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
-  // Reentrance guard, the last admission step before the frame is started, as
-  // in SystemCallHandler::invoke(): a frame may not be opened for an address
-  // that already has a frame on the stack. Production rejects such a kInvoke
-  // with kSyscallErrorCodeReentrance before creating any child frame, so
-  // without this check the harness can build a frame stack production could
-  // never produce (issue #3301). There is no bypass here and none in
-  // production either -- the per-test escape hatch invoke() used to consult was
-  // removed in #3346, so a test that wants a reentrant stack has no way to ask
-  // for one.
-  //
-  // The rejection is reported the way production reports it, in two places: the
-  // caller's synthetic kInvoke is traced as kSyscallErrorCodeReentrance with
-  // its gas untouched (production charges nothing for an invoke it refuses --
-  // syscall_Invoke_inner() returns the SyscallError with a zero gas amount),
-  // and the caller gets a structured error rather than an opened frame. The
-  // steps between the trace and here only compute locals (frame_invocation,
-  // frame_flags), so the rejected open leaves no trace of itself in the
-  // handler: start_frame() has not run, and neither stack below has been
-  // pushed. The caller therefore owes no matching finish.
-  //
-  // has_active_frame_for() is false on an empty stack, so this can only fire
-  // with a caller frame running: the trace started above is always the one
-  // finished here, and finish_syscall_trace() tolerates a trace that
-  // start_syscall_trace() dropped under memory pressure (#2644).
-  if (handler_.has_active_frame_for(invocation.invoked_address)) {
-    handler_.finish_syscall_trace(SyscallErrorCode::kSyscallErrorCodeReentrance,
-                                  current_gas);
-    error("invalid argument: start_mock_invocation_frame called for an address "
-          "that already has an active invocation frame (reentrance)");
+  // The admission checks invoke() runs before creating a child frame: undefined
+  // flag bits (#3302) and reentrance (#3301). Auth-token ownership is vacuous
+  // until the API below can pass tokens. Only locals have been computed by this
+  // point, so a refusal pushes no frame and the caller owes no finish; the
+  // caller's synthetic kInvoke is traced with production's syscall error and no
+  // gas charged, matching a refused kInvoke.
+  if (auto admitted = handler_.validate_new_invocation(
+          invocation.invoked_address, frame_flags, std::span<uint32_t const>{});
+      !admitted.has_value()) {
+    handler_.finish_syscall_trace(admitted.error().code(), current_gas);
+    error("invalid argument: mock invocation frame not admitted: {}",
+          admitted.error().code());
     return kTestFFIErrorCodeInvalidArgument;
   }
 

@@ -1,35 +1,11 @@
 // Regression test for issue #3301. See test_ffi_test_helpers.h.
 //
-// A manually-opened mock invocation frame must be admitted under production's
-// reentrance rule. SystemCallHandler::invoke() refuses a kInvoke whose address
-// already has a frame on the stack, returning kSyscallErrorCodeReentrance
-// before any child frame is created. start_mock_invocation_frame() reaches
-// SystemCallHandler::start_frame() directly, below that check, so it used to
-// admit the reentrant frame and let the harness build a frame stack production
-// could never produce.
-//
-// Nothing sanctioned that gap. The per-test escape hatch invoke() used to
-// consult (hack_dont_use_test_bypass_allow_reentrance) was opt-in, read only
-// inside invoke(), and never set by the mocked FFI handler -- and it is gone
-// entirely as of #3346, so neither pathway offers a way to ask for a reentrant
-// stack now.
-//
-// The tests below pin the mock pathway to the production behavior:
-//
-//   1. ReentrantMockFrameRejectedAndTraced: opening a second frame for an
-//      address that already has one is rejected with a structured FFI error, and
-//      the parent's synthetic kInvoke is traced as kSyscallErrorCodeReentrance
-//      with the parent's gas untouched -- production charges nothing for an
-//      invoke it refuses.
-//   2. ReentranceGuardRejectedOpenLeavesFrameStackUsable: the rejection is a
-//      no-op. No frame was pushed, so the caller owes no matching finish: the
-//      parent is still the innermost frame, a distinct-address child still opens
-//      on top of it, and the handler closes cleanly at the end.
-//   3. ReentranceGuardChecksEntireStack: an address held by a grandparent is
-//      rejected too, not just the innermost frame's -- invoke() scans the whole
-//      stack.
-//   4. FinishedFrameAddressIsReusable: the guard is about *active* frames. Once
-//      a child has finished, its address is free again for a sibling frame.
+// start_mock_invocation_frame() enters at SystemCallHandler::start_frame(),
+// below the reentrance check invoke() makes, so it used to admit a frame for an
+// address that already had one -- a stack production cannot build, since
+// invoke() refuses that kInvoke with kSyscallErrorCodeReentrance. Both paths
+// now share validate_new_invocation(), and neither offers a way to opt out
+// (#3346 removed the per-test bypass).
 
 #include <utility>
 
@@ -87,12 +63,9 @@ free_finish_result(ForeignTracedInvokeResult const &res)
 
 } // namespace
 
-// The core regression assertion. A frame is open for 0xA0; opening a second one
-// for 0xA0 is refused, and the refusal is reported the way production reports
-// it: the caller gets an error instead of a frame, and the parent's synthetic
-// kInvoke carries kSyscallErrorCodeReentrance with the parent's gas unchanged
-// and no child trace attached. Before the fix the second open returned
-// kTestFFIErrorCodeNone.
+// A second frame for a live address is refused, and the refusal is reported the
+// way production reports one: the caller's synthetic kInvoke carries
+// kSyscallErrorCodeReentrance, with its gas unchanged and no child trace.
 TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
 {
   auto *db = make_db();
@@ -108,12 +81,10 @@ TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   ContractAddress const kAddr{0xA0};
-  ASSERT_EQ(open_frame(handler.syscall_handler,
-                       make_invocation(kAddr, 0x1111)),
+  ASSERT_EQ(open_frame(handler.syscall_handler, make_invocation(kAddr, 0x1111)),
             kTestFFIErrorCodeNone);
 
-  // Same address, parent still active: production's kInvoke would answer
-  // kSyscallErrorCodeReentrance (code 4).
+  // Same address, parent still active.
   EXPECT_EQ(open_frame(handler.syscall_handler, make_invocation(kAddr, 0x2222)),
             kTestFFIErrorCodeInvalidArgument);
 
@@ -125,8 +96,7 @@ TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
   x23::deserialize(&trace, x23::BufView{parent_finish.serialized_trace.data,
                                         parent_finish.serialized_trace.len});
 
-  // The refused invoke is still recorded: production traces the syscall its
-  // caller attempted, with the reentrance status.
+  // The refused invoke is still traced, as production traces a refused syscall.
   ASSERT_EQ(trace.system_calls.size(), 1U);
   auto const &invoke_trace = trace.system_calls[0];
   EXPECT_EQ(invoke_trace.body.syscall_number(), SyscallNo::kInvoke);
@@ -145,12 +115,9 @@ TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
             kTestFFIErrorCodeNone);
 }
 
-// The rejection must not disturb the frame stacks it declined to advance.
-// start_mock_invocation_frame() pushes onto three stacks (the handler's
-// invocation frames, the mock runtimes, and the stashed parent traces), and a
-// rejected open pushes onto none of them -- so the caller owes no finish for the
-// frame that never opened. If the reject path had advanced one stack, the
-// mismatched finishes below would fault or the close would refuse.
+// A rejected open advances none of the three stacks it would have pushed
+// (invocation frames, mock runtimes, stashed traces), so the caller owes no
+// finish for it. Advancing one would make the finishes below mismatch.
 TEST(TestBindingsTest, ReentranceGuardRejectedOpenLeavesFrameStackUsable)
 {
   auto *db = make_db();
@@ -180,8 +147,8 @@ TEST(TestBindingsTest, ReentranceGuardRejectedOpenLeavesFrameStackUsable)
                        make_invocation(ContractAddress{0xB0}, 0x3333)),
             kTestFFIErrorCodeNone);
 
-  // Exactly two finishes are owed: the child and the parent. A third would fault
-  // on an empty mock runtime stack (#2589).
+  // Exactly two finishes are owed; a third would fault on an empty stack
+  // (#2589).
   auto child_finish = finish_frame_ok(handler.syscall_handler);
   free_finish_result(child_finish);
   auto parent_finish = finish_frame_ok(handler.syscall_handler);
@@ -191,8 +158,7 @@ TEST(TestBindingsTest, ReentranceGuardRejectedOpenLeavesFrameStackUsable)
             kTestFFIErrorCodeNone);
 }
 
-// invoke() scans the whole invocation stack, not just the innermost frame, so an
-// address held by a grandparent is reentrant too.
+// The whole stack is scanned, so a grandparent's address is reentrant too.
 TEST(TestBindingsTest, ReentranceGuardChecksEntireStack)
 {
   auto *db = make_db();
@@ -227,10 +193,8 @@ TEST(TestBindingsTest, ReentranceGuardChecksEntireStack)
             kTestFFIErrorCodeNone);
 }
 
-// The guard is about frames that are *active*, matching
-// InvocationFrameStack::has_active_frame_for(). A finished frame's address is
-// free again, so sequential sibling calls to the same contract -- which
-// production admits -- keep working.
+// The rule is about *active* frames: once a child finishes, its address is free
+// again, so sequential sibling calls to one contract still work.
 TEST(TestBindingsTest, FinishedFrameAddressIsReusable)
 {
   auto *db = make_db();
