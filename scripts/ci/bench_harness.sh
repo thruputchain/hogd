@@ -311,6 +311,11 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # users' processes [ps] sees nothing and this degrades to the old
 # fire-and-forget behaviour, which is the floor rather than a regression.
 #
+# The signal itself is sent unprivileged and only escalated to [sudo] when the
+# unprivileged [killall] cannot reach something, so that a host with no
+# passwordless sudoers rule still gets reaped rather than failing every reap
+# before it has signalled anything.
+#
 # The names are matched literally, with [grep -xF] over [ps -eo comm=], because
 # [killall] targets them literally. [pgrep -x] would not do: it anchors its
 # operand but still reads it as a regular expression, so the configured
@@ -345,19 +350,38 @@ wait_gone() {
   done
 }
 
+# Runs one [killall] -- \$1 is the signal, the rest is the command that runs it
+# -- and reports whether the signal was delivered. [-q] silences killall's own
+# "no process found", so a nonzero exit that says nothing means only that
+# nothing matched, while a nonzero exit that says something is killall or sudo
+# failing.
+try_signal() {
+  sig=\$1
+  shift
+  signal_err=\$("\$@" -q "-\$sig" \$procs 2>&1)
+  status=\$?
+  [ "\$status" -eq 0 ] || [ -z "\$signal_err" ]
+}
+
 # Sends \$1 to every named process. Returns nonzero only when the signal could
 # not be sent at all, which has to be told apart from a process that refused to
-# die: [-q] silences killall's own "no process found", so a nonzero exit that
-# still says something is sudo or killall failing rather than an absence of
-# processes to kill.
+# die.
+#
+# The unprivileged [killall] goes first and [sudo] is only the fallback for
+# processes this user does not own. The benchmark processes are started by this
+# same user, so plain [killall] reaches them; reaping through [sudo -n] first
+# makes every reap depend on a passwordless sudoers rule, and on a host without
+# one every reap fails with "sudo: a password is required" and every host is
+# left unreaped -- which is how a previous run's hog-mempool survived to fail
+# the next run's bind on 10.100.0.110:8075.
 signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
-  status=\$?
-  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
-    return 1
-  fi
-  return 0
+  try_signal "\$1" killall && return 0
+  direct_err=\$signal_err
+
+  try_signal "\$1" sudo -n /usr/bin/killall && return 0
+  echo "cannot signal processes: \$direct_err" >&2
+  echo "cannot signal processes with sudo: \$signal_err" >&2
+  return 1
 }
 
 # Signal first and ask questions after: a host that will not report its
