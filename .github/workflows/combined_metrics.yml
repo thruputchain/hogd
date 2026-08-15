@@ -45,17 +45,14 @@ jobs:
                       ${{ secrets.HOGD_TO_HOGX_KEY }}
             - name: Run hog schedule
               run: |
-                  BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
-                  echo "Branch name: $BRANCH_NAME"
-                  hog_sched \
-                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
-                    --key=github_repo --value=${{ github.repository }} \
-                    --key=git_commit --value=${{ github.sha }} \
-                    --key=git_branch --value=$BRANCH_NAME \
-                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                    --timeout-sec=3600 \
-                    ./scripts/schedules/combined_metrics.toml
+                  ssh hog11 'gdb -q -batch \
+                    -ex "set pagination off" \
+                    -ex "info threads" \
+                    -ex "bt 50" \
+                    -ex "thread apply all bt 10" \
+                    /tmp/hogjob-hogci/release/hogd/hog_mempool/hog-mempool \
+                    /tmp/hogjob-hogci/hog-mempool.3966843.core'
+                  exit 1
             - name: Print Log Download Instructions
               if: always()
               uses: ./.github/actions/print-log-instructions
