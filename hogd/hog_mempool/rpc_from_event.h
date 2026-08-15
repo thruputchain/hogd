@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <system_error>
 #include <thread>
 
 #include "event_rpc.hh"
@@ -50,13 +51,29 @@ public:
     EventCard card;
     CHECK(Registration::registration().event_registered(&card));
 
-    auto ret = co_await create_client<EventSched1>(
-        server_address_to_sockaddr(card.address_for_sched), /*retry=*/false,
-        kEventSchedulerRpcMaxMessageSize);
-    if (!ret)
-      panic("rpc_from_event get_client connect failed: {}",
-            ret.error().error_code().message());
-    co_return std::move(*ret);
+    const sockaddr_storage address =
+        server_address_to_sockaddr(card.address_for_sched);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (true) {
+      try {
+        auto ret = co_await create_client<EventSched1>(
+            address, /*retry=*/false, kEventSchedulerRpcMaxMessageSize);
+        if (ret) {
+          co_return std::move(*ret);
+        }
+        warn_every_n_sec(5.0F, "event callback RPC client is not ready: {}",
+                         ret.error().error_code().message());
+      } catch (const std::system_error &e) {
+        warn_every_n_sec(5.0F, "event callback RPC client failed: {}",
+                         e.what());
+      }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        panic("rpc_from_event get_client timed out connecting to {}",
+              card.address_for_sched);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
   }
 
   static EventCard wait_for_registration()

@@ -447,19 +447,6 @@ for node in "${NODE_IDS[@]}"; do
     --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT" --metrics-port "$AUTH_HTTP_PORT"
 done
 
-echo 'wait for event indexer RPC servers'
-for node in "${NODE_IDS[@]}"; do
-  wait_control_log_line "node${node}_event" "PORT event.indexer=$EVENT_INDEXER_PORT"
-done
-
-echo 'launch indexers'
-for node in "${NODE_IDS[@]}"; do
-  event_host="${EVENT_HOSTS[$node]}"
-  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
-    "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
-    --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
-done
-
 echo 'wait for mempool coordinator RPC servers'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_mempool" \
@@ -488,8 +475,13 @@ for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_event" 'event initialization complete.'
 done
 
-echo 'launch hog-exec shards'
+echo 'launch indexers and hog-exec shards'
 for node in "${NODE_IDS[@]}"; do
+  event_host="${EVENT_HOSTS[$node]}"
+  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
+    "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
+    --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
+
   coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
   bind_ip="$(hog_ip "${HOG_EXEC_HOSTS[$node]}")"
   control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_a" "$SLOT_A_CPUS" \
