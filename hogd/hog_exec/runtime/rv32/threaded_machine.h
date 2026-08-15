@@ -123,6 +123,14 @@ public:
   ThreadedMachinePreInstantiation &
   operator=(const ThreadedMachinePreInstantiation &) = delete;
 
+  // Size (in bytes) of the full, zero-padded initial memory image that every
+  // ThreadedMachine instantiation copies into its per-invocation memory slot.
+  // Equals the artifact's declared total memory size (<= kMaxMemoryBytes).
+  [[nodiscard]] size_t initial_memory_image_size() const noexcept
+  {
+    return initial_memory_image_.size();
+  }
+
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
                                   std::vector<uint8_t> initial_memory_image,

@@ -13,6 +13,20 @@ namespace hogd {
 
 class SystemCallHandler;
 
+// Gas charged per byte-block of the initial memory image copied when a
+// ThreadedMachine is instantiated: one gas unit per this many bytes (floored).
+// Instantiating a contract copies its full, zero-padded initial memory image
+// (up to rv32::kMaxMemoryBytes) into a fresh per-invocation slot before any
+// guest instruction runs, so this setup work scales with the artifact's memory
+// size and must be metered -- otherwise a caller can force repeated large host
+// copies for free by invoking with a zero (or below-cost) child gas limit (see
+// issue #3408). A byte-block rate keeps the charge negligible for the small
+// images typical contracts use while bounding the copy volume an attacker can
+// force per unit of gas. This is a host-side runtime charge applied at invoke
+// time, not baked into artifacts, so it is intentionally independent of the
+// artifact-committed rv32::kGasScheduleDigest.
+inline constexpr uint64_t kRv32InstantiationBytesPerGas = 256;
+
 // A translated and ready-to-instantiate RV32 contract.
 class Rv32Contract {
 public:
@@ -22,6 +36,15 @@ public:
   Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
+
+  // Gas cost of copying this contract's initial memory image during
+  // instantiate(). Charged before a machine is built (see Rv32Runtime::
+  // invoke_internal).
+  [[nodiscard]] uint64_t instantiation_gas_cost() const noexcept
+  {
+    return pre_instantiation_.initial_memory_image_size() /
+           kRv32InstantiationBytesPerGas;
+  }
 
 private:
   rv32::ThreadedMachinePreInstantiation pre_instantiation_;

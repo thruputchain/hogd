@@ -16,12 +16,14 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
+#include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -278,6 +280,89 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
   EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::None);
+}
+
+// Instantiating an RV32 machine copies the contract's full (zero-padded)
+// initial memory image before any metered instruction runs, so that copy is
+// charged a memory-proportional setup cost up front (issue #3408). Two
+// contracts with identical code but different declared memory sizes therefore
+// consume gas that differs by exactly the setup-cost delta, and a contract
+// cannot be invoked with a budget below its setup cost -- which previously
+// still performed the full copy while being charged nothing for it.
+TEST_P(Rv32FibonacciTest, InstantiationMemoryImageIsMetered)
+{
+  // Minimal contract: return an empty buffer immediately. a0..a2 carry the
+  // Return syscall args; the remaining argument registers are already zero.
+  const std::vector<uint32_t> words = {
+      rv32::test_program::addi(10, 0, static_cast<int32_t>(SyscallNo::kReturn)),
+      rv32::test_program::addi(11, 0, 0),
+      rv32::test_program::addi(12, 0, 0),
+      0x00000073U, // ecall
+  };
+  const std::vector<uint8_t> initial_memory(8, 0);
+
+  // Build the artifact, then stamp the declared total memory size. The image
+  // copied at instantiation is zero-padded out to this size, so it drives the
+  // setup cost independently of the (fixed) code.
+  auto make_artifact = [&](uint32_t memory_bytes) {
+    auto artifact = rv32::test_artifact::build_artifact(words, initial_memory);
+    for (size_t i = 0; i < sizeof(memory_bytes); ++i) {
+      artifact[rv32::kArtifactMemoryBytesOffset + i] =
+          static_cast<uint8_t>(memory_bytes >> (i * 8));
+    }
+    return artifact;
+  };
+
+  auto deploy = [&](std::vector<uint8_t> const &artifact, uint64_t seed) {
+    ContractBlob blob;
+    blob.data.append_range(artifact);
+    auto contract = std::make_shared<Contract>(ContractType::kRv32);
+    contract->rv32_contract() = std::move(blob);
+    auto addr = make_contract_address(seed);
+    write_contract(contract);
+    write_deployment(addr, contract);
+    setup_grant_storage_token(addr, 1'000'000'000);
+    return addr;
+  };
+
+  auto invoke = [&](ContractAddress const &addr, GasAmount gas_limit) {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{.invocation =
+                                Invocation{.invoked_address = addr,
+                                           .entrypoint = ContractEntrypointID{},
+                                           .gas_limit = gas_limit,
+                                           .calldata = Calldata{}},
+                            .uniquifier = make_new_uniquifier()}},
+        runtime_context_);
+    return handler.root_invoke();
+  };
+
+  // 64 bytes is below one per-gas block, so the small contract's setup cost is
+  // zero; the large contract copies the maximum image.
+  const auto small_addr = deploy(make_artifact(64), 30);
+  const auto large_addr = deploy(make_artifact(rv32::kMaxMemoryBytes), 31);
+
+  const auto small = invoke(small_addr, kSufficientGas);
+  const auto large = invoke(large_addr, kSufficientGas);
+  ASSERT_TRUE(small.is_root_success());
+  ASSERT_TRUE(large.is_root_success());
+
+  // The code is identical, so the only gas difference is the metered copy.
+  constexpr uint64_t kMaxImageSetupCost =
+      rv32::kMaxMemoryBytes / kRv32InstantiationBytesPerGas;
+  EXPECT_EQ(static_cast<uint64_t>(large.gas_consumed_) -
+                static_cast<uint64_t>(small.gas_consumed_),
+            kMaxImageSetupCost);
+
+  // A budget below the setup cost is rejected up front (no copy performed)
+  // rather than instantiating the machine and running out of gas after the
+  // fact -- the large-memory contract can no longer be invoked for free.
+  constexpr uint64_t kBelowSetupCost = kMaxImageSetupCost - 1;
+  EXPECT_FALSE(invoke(large_addr, kBelowSetupCost).is_root_success());
+  // The same tiny budget is ample for the zero-setup small contract.
+  EXPECT_TRUE(invoke(small_addr, kBelowSetupCost).is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
