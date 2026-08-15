@@ -114,8 +114,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
     return claim;
   }();
 
-  auto erc20_contract = erc20_meta::load_rv32();
-  auto wallet_contract = wallet_meta::load_rv32();
+  auto erc20_contract = erc20_meta::load_wasm();
+  auto wallet_contract = wallet_meta::load_wasm();
   assert(erc20_contract);
   assert(wallet_contract);
 
