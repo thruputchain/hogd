@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -51,8 +52,24 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_contract_hash,
                              ContractAddress &output_deployed_address) noexcept
 {
-  auto status =
-      syscall_handler.deploy_contract(input_nonce, input_contract_hash);
+  // deploy_contract() resolves the supplied contract hash before rejecting a
+  // missing contract, which warms the snapshot contract/deployment caches via
+  // allocating map inserts (SynchronizedMap::insert) even for an absent hash
+  // that is ultimately rejected. Those allocations can throw std::bad_alloc,
+  // which must not cross this noexcept boundary: translate it to a structured
+  // Unrecoverable result instead of terminating hogexec (issue #3400).
+  SystemStatus<SyscallStatus<ContractAddress>> status;
+  try {
+    status = syscall_handler.deploy_contract(input_nonce, input_contract_hash);
+  } catch (std::exception &e) {
+    // Swallow a nested throw from the diagnostic (issue #3372).
+    try {
+      error("unrecoverable: DeployContract resolution failed: {}", e.what());
+    } catch (...) {
+      report_dropped_log("DeployContract resolution-failure diagnostic");
+    }
+    return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+  }
   if (!status) {
     return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
