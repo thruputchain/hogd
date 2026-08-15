@@ -351,8 +351,19 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
           *try_invoke_conflict_out = db_proxy_.last_push_conflict();
         }
 
-        std::get<ProposalModeData>(execution_mode_data)
-            .log_nondeterministic_bit(acq_success);
+        // Contain the proposal-bit vector growth at the noexcept
+        // finish_frame() boundary: log_nondeterministic_bit appends via
+        // emplace_back, which can throw std::bad_alloc. Left uncaught it would
+        // escape SystemCallHandler::finish_frame() noexcept and terminate the
+        // executor. Pop the child and report Unrecoverable, mirroring the
+        // adjacent commit/auth-token containment (#3378, #3380).
+        try {
+          std::get<ProposalModeData>(execution_mode_data)
+              .log_nondeterministic_bit(acq_success);
+        } catch (...) {
+          frame_stack_.pop_back();
+          return SystemError{SystemErrorCode::Unrecoverable};
+        }
       }
       else if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
         auto bit = std::get<ViewingModeData>(execution_mode_data)
