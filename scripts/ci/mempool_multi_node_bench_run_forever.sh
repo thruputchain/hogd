@@ -265,10 +265,23 @@ kill_stale_processes() {
   ci_remote_killall_hosts "loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
+# See the note on the same function in mempool_multi_node_bench.sh: the
+# host-wide sweep below is a no-op wherever [sudo -n killall] needs a password,
+# so a run that ends without the schedule's own shutdown leaves this suite's
+# servers holding their fixed ports for the next run to fail on. The control
+# server is the parent of what it started, so stopping through it needs no
+# privilege, and it waits for each child to exit before returning. This
+# variant's mempool runs without a timeout, so nothing else bounds how long a
+# leaked one keeps its ports.
+stop_launched_processes() {
+  ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"
+}
+
 cleanup() {
   local exit_code=$1
   ci_enter_cleanup
   stop_live_log_streams
+  stop_launched_processes
   kill_stale_processes
   exit "$exit_code"
 }

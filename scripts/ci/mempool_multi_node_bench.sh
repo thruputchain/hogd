@@ -300,11 +300,44 @@ kill_stale_processes() {
   ci_remote_killall_hosts "loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
+# Stops everything this suite launched, through the control servers that
+# launched it. Every other benchmark script does this on the way out
+# (exec_scaling.sh, mempool_bench.sh, metrics.sh, event_bench.sh); this one did
+# not, and left [kill_stale_processes] as the only teardown it had.
+#
+# That is not a teardown these hosts actually have. The sweep signals with
+# [sudo -n /usr/bin/killall], which every run on this fleet reports as
+#
+#   [hog4] cannot signal processes: sudo: a password is required
+#   warning: could not reap processes on hog4 (status 3)
+#
+# on all eight hosts, so it reaps nothing. A run that ends without reaching the
+# schedule's own shutdown -- killed at the job timeout, disconnected from a
+# host, cancelled -- therefore leaves this suite's servers running on their
+# fixed ports, and the next run binds those same ports: run #1869 died twice
+# over on ports a previous run had left occupied, with
+# "bind(10.100.0.105:8040): Address already in use" from both of node 0's
+# hog-exec slots and the same on the mempool's 8075.
+#
+# The control server is the parent of what it started, so stopping through it
+# needs no privilege and does not depend on the sweep being fixed. It is also
+# synchronous: [ciserver_stop] waits for each child to exit before returning,
+# so the ports are released by the time this returns rather than on the way to
+# being released.
+stop_launched_processes() {
+  ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${ALL_HOSTS[@]}"
+}
+
 cleanup() {
   local exit_code=$1
   ci_enter_cleanup
   stop_live_log_streams
+  # Results are published first: the logs it collects come off the hosts over
+  # ssh and do not depend on the processes still running, but a stop that hangs
+  # must not be able to cost us the diagnostics for the failure being cleaned
+  # up after.
   publish_results
+  stop_launched_processes
   kill_stale_processes
   exit "$exit_code"
 }
