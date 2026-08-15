@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "built_contracts/itc_erc20.h"
+#include "built_contracts/itc_erc20.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -23,7 +24,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -1573,11 +1573,9 @@ TEST_F(Erc20ParityTest, NegativeAllowanceNettingParity)
   EXPECT_EQ(records[0][1],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
       << "a decrement below a fresh allowance must abort at invoke";
-  auto rejected_error = step_erc20_error<u8"adjust_allowance">(records[0]);
-  ASSERT_TRUE(rejected_error.has_value())
-      << "step 0 did not abort with a decodable itc_erc20 exception";
-  EXPECT_EQ(*rejected_error, itc_erc20::ERC20Error::TooLarge)
-      << "the rejected decrement must report TooLarge specifically";
+  EXPECT_EQ(step_erc20_error<u8"adjust_allowance">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge))
+      << "the rejected decrement must abort with a decodable TooLarge";
 
   // Step 1: the sibling increment is unaffected by the aborted decrement.
   ASSERT_GE(records[1].size(), 2U);
@@ -1626,11 +1624,9 @@ TEST_F(Erc20ParityTest, UnfundedTransferNettedByLaterCreditParity)
   EXPECT_EQ(records[0][1],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
       << "a transfer from a zero balance must abort at invoke";
-  auto rejected_error = step_erc20_error<u8"transfer">(records[0]);
-  ASSERT_TRUE(rejected_error.has_value())
-      << "step 0 did not abort with a decodable itc_erc20 exception";
-  EXPECT_EQ(*rejected_error, itc_erc20::ERC20Error::TooLarge)
-      << "the unfunded transfer must report TooLarge specifically";
+  EXPECT_EQ(step_erc20_error<u8"transfer">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge))
+      << "the unfunded transfer must abort with a decodable TooLarge";
 
   // Step 1: the delegated pull is a legitimate, fully-funded transfer.
   ASSERT_GE(records[1].size(), 2U);

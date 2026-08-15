@@ -12,6 +12,7 @@
 #include <variant>
 
 #include "built_contracts/itc_erc20.h"
+#include "built_contracts/itc_erc20.hh"
 #include "contract.hh"
 #include "event.hh"
 #include "exec_result.hh"
@@ -20,7 +21,6 @@
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
