@@ -537,6 +537,18 @@ InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
   return get_item_view(get_addrkey(data_key));
 }
 
+ItemView *
+InvocationFrameStack::peek_item_view(StorageKeyContractData const &data_key)
+{
+  auto addrkey = get_addrkey(data_key);
+  for (auto &frame : std::ranges::reverse_view(frame_stack_)) {
+    if (auto *view = frame.get_item_view(addrkey)) {
+      return view;
+    }
+  }
+  return nullptr;
+}
+
 AuthToken const *
 InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 {

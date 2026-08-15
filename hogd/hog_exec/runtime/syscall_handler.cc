@@ -1606,6 +1606,25 @@ SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                              bool load_from_snapshot)
 {
+  if (!load_from_snapshot) {
+    // Non-forced read: only a pre-existing NNInt write (in this frame or a
+    // parent) yields a value; every other key resolves to (nullopt, 0). Peek
+    // read-only so that reads over distinct absent keys neither accumulate
+    // unbounded retained frame state nor let an allocation failure escape the
+    // noexcept syscall body. See issue #3385.
+    ItemView *item_view = invocation_frame_stack_.peek_item_view(storage_key);
+    if (item_view != nullptr) {
+      if (auto const *nnint_item = item_view->get<NNIntItem>()) {
+        if (nnint_item->base_value_.has_value()) {
+          return {std::make_pair(from_xdr(*nnint_item->base_value_),
+                                 from_xdr(nnint_item->add_value_))};
+        }
+        return {std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_))};
+      }
+    }
+    return {std::make_pair(std::nullopt, 0)};
+  }
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
@@ -1613,11 +1632,6 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     if (nnint_item->base_value_.has_value()) {
       return {std::make_pair(from_xdr(*nnint_item->base_value_),
                              from_xdr(nnint_item->add_value_))};
-    }
-    // If we're not loading from the snapshot, we can return nullopt for the
-    // base value.
-    if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, from_xdr(nnint_item->add_value_))};
     }
 
     auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
@@ -1640,17 +1654,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
   }
 
   if (item_view->get<DeletedItem>()) {
-    if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, 0)};
-    }
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    if (!load_from_snapshot) {
-      return {std::make_pair(std::nullopt, 0)};
-    }
-
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
       auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
@@ -1661,9 +1668,8 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     auto const &base_item = unmodified_item->base_item();
     auto type = base_item.type();
     if (!type) {
-      assert(load_from_snapshot);
-      // We are in load_from_snapshot mode, so we return KeyNotExist instead of
-      // std::nullopt, mirroring the behavior above of the DeletedItem case.
+      // We return KeyNotExist instead of std::nullopt, mirroring the behavior
+      // above of the DeletedItem case.
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
     }
@@ -1677,9 +1683,6 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
   // the value written at this key is not an NNInt, so we return an
   // InvalidSyscallInput error. This mirrors the case above, where the snapshot
   // *type != kNNInt.
-  if (!load_from_snapshot) {
-    return {std::make_pair(std::nullopt, 0)};
-  }
   return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 

@@ -266,6 +266,29 @@ TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 }
 
+TEST_F(InvocationFrameTest, PeekItemViewDoesNotRetainView)
+{
+  // peek_item_view is a read-only lookup: unlike get_item_view it must not
+  // create a retained view for an absent key. This is what lets a non-forced
+  // NonnegativeIntGet read over distinct absent keys without accumulating
+  // unbounded per-key frame state (#3385).
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+
+  StorageKeyContractData key{};
+  key[0] = 42;
+
+  // Absent key: peek returns nullptr and leaves nothing behind, so a repeat
+  // peek still finds nothing.
+  ASSERT_EQ(stack.peek_item_view(key), nullptr);
+  ASSERT_EQ(stack.peek_item_view(key), nullptr);
+
+  // get_item_view, by contrast, materializes a view, which peek then observes.
+  ASSERT_NE(stack.get_item_view(key), nullptr);
+  ASSERT_NE(stack.peek_item_view(key), nullptr);
+}
+
 TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
 {
   InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);

@@ -419,6 +419,11 @@ public:
   ItemView *get_item_view(StorageKeyContractData const &data_key);
   ItemView *get_item_view(AddressAndKey const &addrkey);
 
+  // Read-only lookup across the frame stack that, unlike get_item_view, never
+  // creates a retained view. Returns nullptr if no frame holds a view for the
+  // key. Reference invalidated by any call to add_item_view/get_item_view.
+  ItemView *peek_item_view(StorageKeyContractData const &data_key);
+
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {
     StorageKey key(StorageKeyType::ContractData);
