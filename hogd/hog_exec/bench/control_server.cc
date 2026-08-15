@@ -41,21 +41,25 @@ namespace hogd {
 namespace {
 
 // NOLINTBEGIN(misc-include-cleaner)
+// Observes the child's exit without reaping it. Leaving the zombie in place
+// keeps the kernel from handing the pid to anyone else, and the pid doubles as
+// the process group id every launched process is given, so a stop that arrives
+// after the child has already died still has a group id it can safely signal.
+// [reap_child] collects the zombie once the group has been dealt with.
 std::optional<int>
 wait_for_child(pid_t child_pid)
 {
-  int status;
-  auto result = waitpid(child_pid, &status, 0);
-
-  if (result == -1) {
-    error("waitpid failed for child {}: {}", child_pid, Errno{});
+  siginfo_t child_info{};
+  if (waitid(P_PID, static_cast<id_t>(child_pid), &child_info,
+             WEXITED | WNOWAIT) == -1) {
+    error("waitid failed for child {}: {}", child_pid, Errno{});
     return std::nullopt;
   }
 
   int exit_code = 0;
 
-  if (WIFEXITED(status)) {
-    exit_code = WEXITSTATUS(status);
+  if (child_info.si_code == CLD_EXITED) {
+    exit_code = child_info.si_status;
     if (exit_code == 0) {
       info("Child process {} exited successfully with code {}", child_pid,
            exit_code);
@@ -64,8 +68,9 @@ wait_for_child(pid_t child_pid)
       error("Child process {} exited with error code {}", child_pid, exit_code);
     }
   }
-  else if (WIFSIGNALED(status)) {
-    int signal_num = WTERMSIG(status);
+  else if (child_info.si_code == CLD_KILLED ||
+           child_info.si_code == CLD_DUMPED) {
+    int signal_num = child_info.si_status;
     error("Child process {} terminated by signal {} ({})", child_pid,
           signal_num, strsignal(signal_num));
     // chatgpt says this matches the behavior of most shells
@@ -73,11 +78,22 @@ wait_for_child(pid_t child_pid)
   }
   else {
     error("Child process {} terminated with unknown status {}", child_pid,
-          status);
+          child_info.si_code);
     exit_code = -1;
   }
 
   return exit_code;
+}
+
+// Collects the zombie left behind by [wait_for_child]. After this the pid, and
+// the process group named after it, may be reused by anyone, so nothing may
+// signal that group again.
+void
+reap_child(pid_t child_pid)
+{
+  if (waitpid(child_pid, nullptr, 0) == -1) {
+    error("waitpid failed to reap child {}: {}", child_pid, Errno{});
+  }
 }
 // NOLINTEND(misc-include-cleaner)
 
@@ -206,6 +222,25 @@ public:
     if (pid == 0) {
       // Child process
 
+      // Put the child in a process group of its own, named after its pid, so
+      // that [stop_process_group] can reach everything the launched program
+      // spawns and not just the program itself. This is what a stop has to
+      // signal: the benchmark scripts launch a shell that execs a server, and
+      // some of those servers -- chuckd, which forks its own scpd -- leave
+      // children behind that go on holding fixed ports after the server they
+      // belong to is gone, wedging the next run's bind.
+      //
+      // Done in the child rather than only in the parent because the group has
+      // to exist before execvp; the parent repeats it to close the race. A
+      // failure here is fatal on purpose: a child left in the server's own
+      // group would make a later group signal target the control server.
+      if (setpgid(0, 0) == -1) {
+        // NOLINTBEGIN(modernize-use-std-print)
+        info("setpgid failed: {}", strerror(errno));
+        // NOLINTEND(modernize-use-std-print)
+        _exit(EXIT_FAILURE);
+      }
+
       // Redirect stdout and stderr to temp files
       if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
           dup2(stderr_fd, STDERR_FILENO) == -1) {
@@ -261,7 +296,17 @@ public:
     close(stdout_fd);
     close(stderr_fd);
 
+    // The other half of the setpgid race: whichever of parent and child runs
+    // first wins, and the loser sees EACCES (the child has already execvp'd)
+    // or ESRCH (it is already gone). Neither is an error here -- the child
+    // establishes the group itself and exits if it cannot -- so only an
+    // unexpected errno is worth saying anything about.
+    if (setpgid(pid, pid) == -1 && errno != EACCES && errno != ESRCH) {
+      error("failed to set process group for child {}: {}", pid, Errno{});
+    }
+
     // Start thread to wait for child process
+    child_pid_ = pid;
     waitpid_thread_ =
         std::jthread([pid, this]() { wait_for_child_process(pid); });
 
@@ -273,10 +318,44 @@ public:
     };
   }
 
+  // Reaps the zombie [wait_for_child] deliberately leaves behind, for the
+  // paths that drop a Subprocess without going through [ciserver_stop].
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  ~Subprocess() { wait_for_shutdown(); }
+
   std::optional<int> get_exit_code()
   {
     std::lock_guard lock(exit_code_mutex_);
     return exit_code_;
+  }
+
+  // Signals everything the launched program left running, itself included.
+  // Sent to the whole group rather than the one pid the server forked, because
+  // that pid is usually a shell that execs the real server, and the processes
+  // that outlive a benchmark are the ones the server itself spawned. Safe to
+  // call after the child has already exited -- [wait_for_child] leaves the
+  // zombie in place until [wait_for_shutdown], so the group id cannot have
+  // been reused by then, and an empty group just yields ESRCH.
+  void stop_process_group()
+  {
+    if (child_pid_ < 0 || reaped_) {
+      return;
+    }
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    if (getpgid(child_pid_) != child_pid_) {
+      // setpgid did not take, so there is no group of our own to signal and a
+      // group signal would land on the control server. Reach the child alone.
+      error("child {} is not its own process group leader; signalling it alone",
+            child_pid_);
+      kill(child_pid_, SIGTERM);
+      return;
+    }
+
+    if (kill(-child_pid_, SIGTERM) == -1 && errno != ESRCH) {
+      error("failed to signal process group {}: {}", child_pid_, Errno{});
+    }
+    // NOLINTEND(misc-include-cleaner)
   }
 
   void wait_for_shutdown()
@@ -284,6 +363,10 @@ public:
     if (waitpid_thread_.joinable()) {
       waitpid_thread_.request_stop();
       waitpid_thread_.join();
+    }
+    if (child_pid_ >= 0 && !reaped_) {
+      reap_child(child_pid_);
+      reaped_ = true;
     }
   }
 
@@ -306,6 +389,9 @@ private:
 
   std::mutex exit_code_mutex_;
   std::optional<int> exit_code_ = std::nullopt;
+
+  pid_t child_pid_ = -1;
+  bool reaped_ = false;
 
   std::jthread waitpid_thread_;
 };
@@ -374,10 +460,12 @@ public:
     std::lock_guard lock(running_pid_mutex_);
 
     for (auto &[pid, subprocess] : subprocesses_) {
-      if (!subprocess->get_exit_code().has_value()) {
-        info("stopping running process: {}", pid);
-        kill(pid, SIGTERM); // NOLINT(misc-include-cleaner)
-      }
+      // Signalled whether or not the process this server forked is still
+      // running: a server that has already died on its own -- crashed, or
+      // exited after its work was done -- is exactly the case that leaves its
+      // own children behind, and those are what the next run collides with.
+      info("stopping process group: {}", pid);
+      subprocess->stop_process_group();
 
       subprocess->wait_for_shutdown();
     }
