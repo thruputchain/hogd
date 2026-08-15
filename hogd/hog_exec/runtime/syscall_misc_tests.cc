@@ -67,21 +67,6 @@ protected:
     setup_grant_storage_token(kTargetAddress, 1'000'000'000);
   }
 
-  // Deploys the wasm build at the target address. Only for tests of
-  // wasm-ABI-specific behavior (raw exports outside the gh_* entrypoint
-  // scheme); the rv32 halt-code semantics have their own coverage in
-  // rv32_runtime_context_test. Dies with the wasm runtime.
-  void deploy_wasm_target()
-  {
-    using syscall_misc_tests_meta =
-        ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
-
-    auto contract = syscall_misc_tests_meta::load_wasm();
-    write_contract(contract);
-    write_deployment(kTargetAddress, contract);
-    setup_grant_storage_token(kTargetAddress, 1'000'000'000);
-  }
-
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
   constexpr static ContractAddress kTargetAddress = make_contract_address(1);
 
@@ -696,10 +681,10 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
 
 TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 {
-  // The 0xFF raw export only exists in the wasm build (see lib.rs); an rv32
-  // entrypoint that halts without a Return syscall is covered separately by
-  // rv32_runtime_context_test's halt-code tests.
-  deploy_wasm_target();
+  // The contract invokes raw entrypoint 0xFF on the target, whose body
+  // returns without calling the Return syscall; on rv32 the contract asserts
+  // the child frame faults (the SDK dispatcher ebreaks on wrapper return).
+  deploy_target();
 
   auto handler = make_new_system_call_handler(
       Transaction{
