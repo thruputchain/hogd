@@ -134,4 +134,26 @@ expect_contains 'replay of an unknown label says so' \
   'no control log record for node1_mempool' "$out"
 expect_contains 'replay of an unknown label runs on' 'REACHED' "$out"
 
+# Log milestones provide non-invasive RPC readiness and preserve diagnostics.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out "/tmp/mempool err.log"
+wait_control_log_line node0_mempool "PORT mempool.executor=8071"
+echo REACHED
+') && status=0 || status=$?
+expect_status 'log milestone appears' 0 "$status"
+expect_contains 'log milestone runs on' 'REACHED' "$out"
+expect_contains 'log milestone quotes the remote path' '/tmp/mempool\\\ err.log' "$out"
+
+out=$(REMOTE_RUN_FAILS=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_line node0_mempool "PORT mempool.executor=8071"
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'log milestone timeout ends the script' 1 "$status"
+expect_lacks 'log milestone timeout stops the script' 'NOT REACHED' "$out"
+expect_contains 'log milestone timeout names the process' \
+  'waiting for node0_mempool to report: PORT mempool.executor=8071' "$out"
+expect_contains 'log milestone timeout replays logs' \
+  'node0_mempool on hog7' "$out"
+
 exit "$fail"
