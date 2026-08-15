@@ -27,6 +27,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "precompiles.hh"
 #include "rpc_types.hh"
@@ -34,7 +35,7 @@
 #include "types.hh"
 
 //
-// Side-by-side event-parity test: runs the canonical wasm `itc_erc20` contract
+// Side-by-side event-parity test: runs the canonical rv32 `itc_erc20` contract
 // and the precompiled native token contract through the same transfer/allowance
 // operations and asserts the emitted events are byte-identical, modulo the
 // emitting contract address.
@@ -49,22 +50,22 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class NativeWasmTokenEventParityTest : public ::testing::Test,
+class NativeRv32TokenEventParityTest : public ::testing::Test,
                                        public NativeContractTestFramework {
 public:
-  NativeWasmTokenEventParityTest()
+  NativeRv32TokenEventParityTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb)
   {}
 
-  // Actor addresses, shared identically across both the wasm and native runs so
+  // Actor addresses, shared identically across both the rv32 and native runs so
   // that the only legitimate difference between emitted events is the emitting
   // contract address.
   constexpr static ContractAddress kAlice = make_contract_address(201);
   constexpr static ContractAddress kBob = make_contract_address(202);
   constexpr static ContractAddress kSpender = make_contract_address(203);
-  constexpr static ContractAddress kWasmToken = make_contract_address(204);
+  constexpr static ContractAddress kRv32Token = make_contract_address(204);
 
   // Amounts used by the wrapper methods (event payloads must match across
   // runs). The transfer amounts must exceed the native token's one-time
@@ -115,12 +116,12 @@ public:
 protected:
   void SetUp() override
   {
-    // Deploy the canonical wasm itc_erc20 contract.
+    // Deploy the canonical rv32 itc_erc20 contract.
     using meta = ContractTraitMeta<itc_erc20::ERC20>;
-    auto wasm_contract = meta::load_wasm();
-    write_contract(wasm_contract);
-    write_deployment(kWasmToken, wasm_contract);
-    setup_grant_storage_token(kWasmToken, 1'000'000'000);
+    auto rv32_contract = meta::load_rv32();
+    write_contract(rv32_contract);
+    write_deployment(kRv32Token, rv32_contract);
+    setup_grant_storage_token(kRv32Token, 1'000'000'000);
 
     // Deploy the precompiled native token at the preset address.
     auto token_contract = make_native_contract(std::to_underlying(
@@ -182,13 +183,13 @@ protected:
     auto native_context =
         std::make_unique<NativeContext>(std::move(native_map));
 
-    // Multiplex the native engine with the wasmi engine so the wrapper (native)
-    // can cross-call the wasm token.
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    // Multiplex the native engine with the rv32 engine so the wrapper (native)
+    // can cross-call the rv32 token.
+    auto rv32_context = std::make_unique<Rv32Context>();
     multiplexed_context_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_context.release(), true}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
 
     // Deploy the wrapper at both the Alice and Spender addresses so that the
     // msg_sender seen by the token equals the acting party.
@@ -266,19 +267,19 @@ protected:
 
   // Assert two events are identical except for the emitting contract address.
   static void
-  expect_events_match(std::optional<TxEmittedEvent> const &wasm_ev,
+  expect_events_match(std::optional<TxEmittedEvent> const &rv32_ev,
                       std::optional<TxEmittedEvent> const &native_ev,
                       char const *label)
   {
-    ASSERT_TRUE(wasm_ev.has_value()) << label;
+    ASSERT_TRUE(rv32_ev.has_value()) << label;
     ASSERT_TRUE(native_ev.has_value()) << label;
-    EXPECT_EQ(wasm_ev->num_topics, 3U) << label;
-    EXPECT_EQ(wasm_ev->num_topics, native_ev->num_topics) << label;
-    ASSERT_EQ(wasm_ev->serialized_event.size(),
+    EXPECT_EQ(rv32_ev->num_topics, 3U) << label;
+    EXPECT_EQ(rv32_ev->num_topics, native_ev->num_topics) << label;
+    ASSERT_EQ(rv32_ev->serialized_event.size(),
               native_ev->serialized_event.size())
         << label;
-    EXPECT_TRUE(std::equal(wasm_ev->serialized_event.begin(),
-                           wasm_ev->serialized_event.end(),
+    EXPECT_TRUE(std::equal(rv32_ev->serialized_event.begin(),
+                           rv32_ev->serialized_event.end(),
                            native_ev->serialized_event.begin()))
         << label << ": serialized event bytes differ (topics + data)";
   }
@@ -286,15 +287,15 @@ protected:
   std::unique_ptr<MultiplexedContext> multiplexed_context_;
 };
 
-TEST_F(NativeWasmTokenEventParityTest,
-       TransferAllowanceEventsMatchWasmAndNative)
+TEST_F(NativeRv32TokenEventParityTest,
+       TransferAllowanceEventsMatchRv32AndNative)
 {
-  // --- wasm itc_erc20: initialize + mint to Alice, then the three ops. ---
-  run_setup(kMethodInitialize, kAlice, kWasmToken);
-  run_setup(kMethodMint, kAlice, kWasmToken);
-  auto wasm_transfer = run_op(kMethodTransfer, kAlice, kWasmToken);
-  auto wasm_approval = run_op(kMethodAdjustAllowance, kAlice, kWasmToken);
-  auto wasm_transfer_from = run_op(kMethodTransferFrom, kSpender, kWasmToken);
+  // --- rv32 itc_erc20: initialize + mint to Alice, then the three ops. ---
+  run_setup(kMethodInitialize, kAlice, kRv32Token);
+  run_setup(kMethodMint, kAlice, kRv32Token);
+  auto rv32_transfer = run_op(kMethodTransfer, kAlice, kRv32Token);
+  auto rv32_approval = run_op(kMethodAdjustAllowance, kAlice, kRv32Token);
+  auto rv32_transfer_from = run_op(kMethodTransferFrom, kSpender, kRv32Token);
 
   // --- native token: balance was granted in SetUp, so just the three ops. ---
   ContractAddress const native_token =
@@ -305,14 +306,14 @@ TEST_F(NativeWasmTokenEventParityTest,
       run_op(kMethodTransferFrom, kSpender, native_token);
 
   // Sanity: the events really were emitted by the two different contracts.
-  ASSERT_TRUE(wasm_transfer.has_value());
+  ASSERT_TRUE(rv32_transfer.has_value());
   ASSERT_TRUE(native_transfer.has_value());
-  EXPECT_EQ(wasm_transfer->contract_address, kWasmToken);
+  EXPECT_EQ(rv32_transfer->contract_address, kRv32Token);
   EXPECT_EQ(native_transfer->contract_address, native_token);
 
-  expect_events_match(wasm_transfer, native_transfer, "transfer");
-  expect_events_match(wasm_approval, native_approval, "adjust_allowance");
-  expect_events_match(wasm_transfer_from, native_transfer_from,
+  expect_events_match(rv32_transfer, native_transfer, "transfer");
+  expect_events_match(rv32_approval, native_approval, "adjust_allowance");
+  expect_events_match(rv32_transfer_from, native_transfer_from,
                       "transfer_from");
 }
 

@@ -170,9 +170,9 @@ public:
   }
 
   void deploy_built_contract_to_address(const ContractAddress &address,
-                                        std::string_view wasm_filename)
+                                        std::string_view artifact_filename)
   {
-    std::shared_ptr<Contract> contract = load_contract(wasm_filename);
+    std::shared_ptr<Contract> contract = load_rv32_contract(artifact_filename);
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
     CHECK(get_db()
@@ -183,7 +183,9 @@ public:
                   address,
                   DeployedContractHash{.hash = contract_hash,
                                        .contract_size =
-                                           static_cast<uint32_t>(bytes.size())})
+                                           static_cast<uint32_t>(bytes.size()),
+                                       .contract_type =
+                                           contract->contract_type()})
               .has_value());
     CHECK(get_db()
               .write_address_auth_data(address, make_default_auth_data())
@@ -221,7 +223,7 @@ public:
   }
 
 private:
-  static constexpr std::string kTestContractFileName = "fibonacci.wasm";
+  static constexpr std::string kTestContractFileName = "fibonacci.rv32a";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
@@ -275,7 +277,8 @@ private:
 
   void init_contracts()
   {
-    std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
+    std::shared_ptr<Contract> contract =
+        load_rv32_contract(kTestContractFileName);
 
     // Write contract to hog_db.
     auto bytes = x23::serialize(*contract);
@@ -291,7 +294,9 @@ private:
           get_db()
               .write_address_metadata(
                   address, DeployedContractHash{.hash = contract_hash,
-                                                .contract_size = contract_size})
+                                                .contract_size = contract_size,
+                                                .contract_type =
+                                                    contract->contract_type()})
               .has_value());
       CHECK(get_db()
                 .write_address_auth_data(address, make_default_auth_data())

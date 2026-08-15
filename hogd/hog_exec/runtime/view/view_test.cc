@@ -30,6 +30,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/view/view.h"
 #include "invoke_args.hh"
@@ -61,12 +62,12 @@ public:
 
   void SetUp() override
   {
-    auto fib_contract = fibonacci_meta::load_wasm();
+    auto fib_contract = fibonacci_meta::load_rv32();
     framework_.write_contract(fib_contract);
     framework_.write_deployment(kFibAddress, fib_contract);
     framework_.setup_grant_storage_token(kFibAddress, 1'000'000'000);
 
-    auto ro_contract = read_only_meta::load_wasm();
+    auto ro_contract = read_only_meta::load_rv32();
     framework_.write_contract(ro_contract);
     framework_.write_deployment(kReadOnlyAddress, ro_contract);
     framework_.setup_grant_storage_token(kReadOnlyAddress, 1'000'000'000);
@@ -153,10 +154,10 @@ protected:
       std::unordered_map<int32_t, std::unique_ptr<NativeContract>> map;
       map.emplace(0, std::move(nc));
       native_context = std::make_unique<NativeContext>(std::move(map));
-      auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+      auto rv32_context = std::make_unique<Rv32Context>();
       context = std::make_unique<MultiplexedContext>(
           std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-              {ContractType::kWasmi, {wasm_context.release(), true}},
+              {ContractType::kRv32, {rv32_context.release(), true}},
               {ContractType::kNative, {native_context.get(), false}}});
     }
 
@@ -405,7 +406,7 @@ TEST_F(ViewTest, ViewOutputCorrectWithParentFrame)
   EXPECT_FALSE(buf.empty());
 }
 
-TEST_F(ViewTest, ViewDeterministicWasm)
+TEST_F(ViewTest, ViewDeterministicRv32)
 {
   static constexpr ContractAddress kNativeAddr =
       NativeContractTestFramework::make_contract_address(10);

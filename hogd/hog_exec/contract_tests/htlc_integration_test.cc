@@ -24,6 +24,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -42,7 +43,7 @@ public:
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb),
-      wasm_runtime_context_(make_hog_exec_context())
+      rv32_runtime_context_(make_hog_exec_context())
   {}
 
 protected:
@@ -58,9 +59,9 @@ protected:
     wallet_secret_key_ = secret_key;
 
     // Load contracts
-    auto htlc_contract = htlc_meta::load_wasm();
-    auto erc20_contract = erc20_meta::load_wasm();
-    auto wallet_contract = wallet_meta::load_wasm();
+    auto htlc_contract = htlc_meta::load_rv32();
+    auto erc20_contract = erc20_meta::load_rv32();
+    auto wallet_contract = wallet_meta::load_rv32();
 
     // Deploy contracts
     write_contract(htlc_contract);
@@ -113,7 +114,7 @@ protected:
   ContractTraitClient<simple_wallet::SimpleWallet> wallet_client_ =
       ContractTraitClient<simple_wallet::SimpleWallet>(kWalletContractAddress);
 
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
+  std::unique_ptr<RuntimeContext> rv32_runtime_context_;
 
   Ed25519PublicKey wallet_public_key_;
   Ed25519SecretKey wallet_secret_key_;
@@ -152,7 +153,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -186,7 +187,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -222,7 +223,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -247,7 +248,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
@@ -276,7 +277,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
@@ -313,7 +314,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -335,7 +336,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -355,7 +356,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -428,14 +429,14 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     auto native_runtime_context =
         std::make_unique<NativeContext>(std::move(native_contract_map));
 
-    // Get WASM context and precompiles context
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    // Get RV32 context and precompiles context
+    auto rv32_context = std::make_unique<Rv32Context>();
     auto precompiles_context = make_hog_exec_precompiles_context();
 
-    // Create MultiplexedContext with our native contract and WASM context
+    // Create MultiplexedContext with our native contract and RV32 context
     auto balance_check_context = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_context.release(), true}},
+            {ContractType::kRv32, {rv32_context.release(), true}},
             {ContractType::kNative, {native_runtime_context.get(), false}}});
 
     // Deploy the native contract

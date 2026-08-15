@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 // Miscellaneous end to end tests on syscall behavior,
-// implemented within a wasm contract.
+// implemented within a contract.
 // These tests are just wrappers around the tests in the syscall_misc_tests
 // contract.
 
@@ -40,7 +40,7 @@ protected:
         ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
 
     // Load contract
-    auto contract = syscall_misc_tests_meta::load_wasm();
+    auto contract = syscall_misc_tests_meta::load_rv32();
 
     // Deploy contract
     write_contract(contract);
@@ -57,6 +57,21 @@ protected:
   // rejects an invoke of a contract already on the invocation stack, so the
   // helper has to run at a different address.
   void deploy_target()
+  {
+    using syscall_misc_tests_meta =
+        ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+
+    auto contract = syscall_misc_tests_meta::load_rv32();
+    write_contract(contract);
+    write_deployment(kTargetAddress, contract);
+    setup_grant_storage_token(kTargetAddress, 1'000'000'000);
+  }
+
+  // Deploys the wasm build at the target address. Only for tests of
+  // wasm-ABI-specific behavior (raw exports outside the gh_* entrypoint
+  // scheme); the rv32 halt-code semantics have their own coverage in
+  // rv32_runtime_context_test. Dies with the wasm runtime.
+  void deploy_wasm_target()
   {
     using syscall_misc_tests_meta =
         ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
@@ -628,7 +643,7 @@ TEST_F(SyscallMiscTests, TestDeployContractAlreadyDeployed)
 {
   using syscall_misc_tests_meta =
       ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
-  auto contract = syscall_misc_tests_meta::load_wasm();
+  auto contract = syscall_misc_tests_meta::load_rv32();
   auto contract_hash = sha256(*contract);
 
   auto handler = make_new_system_call_handler(
@@ -681,7 +696,10 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
 
 TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 {
-  deploy_target();
+  // The 0xFF raw export only exists in the wasm build (see lib.rs); an rv32
+  // entrypoint that halts without a Return syscall is covered separately by
+  // rv32_runtime_context_test's halt-code tests.
+  deploy_wasm_target();
 
   auto handler = make_new_system_call_handler(
       Transaction{

@@ -11,6 +11,7 @@ target_link_libraries(mempool_test_infra
 )
 add_dependencies(mempool_test_infra
   all_wasm_contracts
+  all_riscvs_built
 )
 
 add_library(mempool_test_objects OBJECT

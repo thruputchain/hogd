@@ -2,8 +2,8 @@ add_library(contract_tests_objects OBJECT
     contract_tests_main.cc
     payment_channel_integration_test.cc
     htlc_integration_test.cc
-    tuple_return_wasm_test.cc
-    native_wasm_token_event_parity_test.cc
+    tuple_return_rv32_test.cc
+    native_rv32_token_event_parity_test.cc
 )
 
 target_link_libraries(
@@ -37,4 +37,9 @@ target_link_libraries(
   contract_loader
   GTest::gtest
 )
+add_dependencies(
+  contract_tests
+  all_riscvs_built
+)
+
 gtest_discover_tests(contract_tests)

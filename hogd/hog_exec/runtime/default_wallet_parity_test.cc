@@ -35,6 +35,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -67,7 +68,7 @@ TEST(DefaultWalletPrecompile, ConstructsAndCoversAllEntrypoints)
   ASSERT_NE(contract, nullptr);
 }
 
-// Differential test: the native default_wallet precompile vs the wasm
+// Differential test: the native default_wallet precompile vs the rv32
 // reference build, driven through identical operations under the REAL cost
 // model. The reference contract's behavior is the spec, exactly as built —
 // parity, not improvement. Records compare byte-for-byte:
@@ -91,9 +92,9 @@ protected:
   static constexpr ContractAddress kMissingAddr = make_contract_address(240);
 
   PubkeyAccountPreimage native_preimage_{};
-  PubkeyAccountPreimage wasm_preimage_{};
+  PubkeyAccountPreimage rv32_preimage_{};
   ContractAddress native_wallet_{};
-  ContractAddress wasm_wallet_{};
+  ContractAddress rv32_wallet_{};
   std::unique_ptr<MultiplexedContext> ctx_;
 
   static PubkeyAccountPreimage make_preimage(uint8_t seed)
@@ -116,10 +117,10 @@ protected:
       native_map.emplace(id, std::move(c));
     }
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     ctx_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
   }
@@ -127,32 +128,32 @@ protected:
   void setup_wallets_and_targets()
   {
     native_preimage_ = make_preimage(1);
-    wasm_preimage_ = make_preimage(2);
+    rv32_preimage_ = make_preimage(2);
     // .value() throws on the (unreachable) empty case: pubkey_auth_address
     // only fails if the preimage cannot be serialized.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     native_wallet_ = pubkey_auth_address(native_preimage_).value();
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    wasm_wallet_ = pubkey_auth_address(wasm_preimage_).value();
+    rv32_wallet_ = pubkey_auth_address(rv32_preimage_).value();
 
     auto native_obj = make_native_contract(kNativeWalletId);
     write_contract(native_obj);
     write_deployment(native_wallet_, native_obj);
     setup_grant_storage_token(native_wallet_, 1'000'000'000);
 
-    auto wasm_obj = wallet_meta::load_wasm();
-    ASSERT_TRUE(wasm_obj);
-    write_contract(wasm_obj);
-    write_deployment(wasm_wallet_, wasm_obj);
-    setup_grant_storage_token(wasm_wallet_, 1'000'000'000);
+    auto rv32_obj = wallet_meta::load_rv32();
+    ASSERT_TRUE(rv32_obj);
+    write_contract(rv32_obj);
+    write_deployment(rv32_wallet_, rv32_obj);
+    setup_grant_storage_token(rv32_wallet_, 1'000'000'000);
 
-    auto echo_obj = echo_meta::load_wasm();
+    auto echo_obj = echo_meta::load_rv32();
     ASSERT_TRUE(echo_obj);
     write_contract(echo_obj);
     write_deployment(kEchoAddr, echo_obj);
     setup_grant_storage_token(kEchoAddr, 1'000'000'000);
 
-    auto abort_obj = mrt_meta::load_wasm();
+    auto abort_obj = mrt_meta::load_rv32();
     ASSERT_TRUE(abort_obj);
     write_contract(abort_obj);
     write_deployment(kAbortAddr, abort_obj);
@@ -270,9 +271,9 @@ protected:
   {
     auto native = run_wallet_raw_tx(native_wallet_, native_preimage_, method_id,
                                     raw_calldata);
-    auto wasm = run_wallet_raw_tx(wasm_wallet_, wasm_preimage_, method_id,
+    auto rv32 = run_wallet_raw_tx(rv32_wallet_, rv32_preimage_, method_id,
                                   raw_calldata);
-    EXPECT_EQ(native, wasm);
+    EXPECT_EQ(native, rv32);
   }
 
   // cxs(kWalletExceptionSelector, wallet_error): abort payload the wallet
@@ -303,8 +304,8 @@ protected:
   {
     auto native =
         run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
-    auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
-    EXPECT_EQ(native, wasm);
+    auto rv32 = run_wallet_execute_tx(rv32_wallet_, rv32_preimage_, calls);
+    EXPECT_EQ(native, rv32);
   }
 
   // expect_parity, plus an absolute success check on the native record so a
@@ -314,8 +315,8 @@ protected:
   {
     auto native =
         run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
-    auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
-    EXPECT_EQ(native, wasm);
+    auto rv32 = run_wallet_execute_tx(rv32_wallet_, rv32_preimage_, calls);
+    EXPECT_EQ(native, rv32);
     ASSERT_GE(native.size(), 2U);
     EXPECT_EQ(native[0], 1);
     EXPECT_EQ(native[1], static_cast<uint8_t>(ExecResult::ExecResultOK));
@@ -473,9 +474,9 @@ TEST_F(DefaultWalletParityTest, WrongClaimTypeInvalidAuthClaim)
   calls.push_back(echo_call(4));
   auto native = run_wallet_execute_tx(native_wallet_, native_preimage_, calls,
                                       AuthClaim{});
-  auto wasm =
-      run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls, AuthClaim{});
-  EXPECT_EQ(native, wasm);
+  auto rv32 =
+      run_wallet_execute_tx(rv32_wallet_, rv32_preimage_, calls, AuthClaim{});
+  EXPECT_EQ(native, rv32);
 }
 
 // Pubkey claim whose derived address is not the wallet's address.
@@ -488,29 +489,29 @@ TEST_F(DefaultWalletParityTest, MismatchedPreimageInvalidAuthClaim)
   auto other = make_pubkey_claim(make_preimage(3));
   auto native =
       run_wallet_execute_tx(native_wallet_, native_preimage_, calls, other);
-  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls, other);
-  EXPECT_EQ(native, wasm);
+  auto rv32 = run_wallet_execute_tx(rv32_wallet_, rv32_preimage_, calls, other);
+  EXPECT_EQ(native, rv32);
 }
 
-// Non-root invocation (wasm reference): a native driver invokes the wasm
-// wallet; the wasm reference rejects with NotRootInvocation. The native
+// Non-root invocation (rv32 reference): a native driver invokes the rv32
+// wallet; the rv32 reference rejects with NotRootInvocation. The native
 // wallet's root guard is now a CHECK (resolution enforces root-only
 // reachability), so the native side is tested separately as a death test
 // (NonRootInvocationNativeChecks below).
-TEST_F(DefaultWalletParityTest, NonRootInvocationWasmReferenceRejects)
+TEST_F(DefaultWalletParityTest, NonRootInvocationRv32ReferenceRejects)
 {
   setup_wallets_and_targets();
 
   wallet_calls_t calls;
   calls.push_back(echo_call(4));
 
-  static constexpr ContractAddress kWasmDriverAddr = make_contract_address(231);
-  auto wasm_result_key = make_storage_key("wasm_result");
+  static constexpr ContractAddress kRv32DriverAddr = make_contract_address(231);
+  auto rv32_result_key = make_storage_key("rv32_result");
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0, make_wallet_capture_driver(wasm_wallet_, wasm_result_key,
+    fns.emplace(0, make_wallet_capture_driver(rv32_wallet_, rv32_result_key,
                                               calls));
     extra.emplace(kDriverBaseId + 1,
                   std::make_unique<NativeContract>(std::move(fns)));
@@ -519,22 +520,22 @@ TEST_F(DefaultWalletParityTest, NonRootInvocationWasmReferenceRejects)
 
   auto obj = make_native_contract(kDriverBaseId + 1);
   write_contract(obj);
-  write_deployment(kWasmDriverAddr, obj);
-  setup_grant_storage_token(kWasmDriverAddr, 1'000'000'000);
+  write_deployment(kRv32DriverAddr, obj);
+  setup_grant_storage_token(kRv32DriverAddr, 1'000'000'000);
 
-  auto wasm_record = run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
+  auto rv32_record = run_capture_tx(kRv32DriverAddr, rv32_result_key, *ctx_);
 
   // Record layout from run_capture_tx + make_wallet_capture_driver:
   // [commit, 0x00=invoke-accepted, frame_status, abort_payload].
   auto expected =
       wallet_error_abort_bytes(default_wallet::WalletError::NotRootInvocation);
-  ASSERT_EQ(wasm_record.size(), 3U + expected.size());
-  EXPECT_EQ(wasm_record[0], static_cast<uint8_t>(ExecResult::ExecResultOK));
-  EXPECT_EQ(wasm_record[1], 0x00); // invoke succeeded, frame ran
-  EXPECT_EQ(wasm_record[2],
+  ASSERT_EQ(rv32_record.size(), 3U + expected.size());
+  EXPECT_EQ(rv32_record[0], static_cast<uint8_t>(ExecResult::ExecResultOK));
+  EXPECT_EQ(rv32_record[1], 0x00); // invoke succeeded, frame ran
+  EXPECT_EQ(rv32_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
   EXPECT_TRUE(
-      std::equal(expected.begin(), expected.end(), wasm_record.begin() + 3));
+      std::equal(expected.begin(), expected.end(), rv32_record.begin() + 3));
 }
 
 // Non-root invocation (native): the native wallet's root guard is now a CHECK
@@ -672,8 +673,8 @@ TEST_F(DefaultWalletParityTest, ReturnDataOneOverFails)
   wallet_calls_t calls;
   calls.push_back(echo_call(1018)); // total = 1025 -> ReturnDataTooLarge
   auto native = run_wallet_execute_tx(native_wallet_, native_preimage_, calls);
-  auto wasm = run_wallet_execute_tx(wasm_wallet_, wasm_preimage_, calls);
-  EXPECT_EQ(native, wasm);
+  auto rv32 = run_wallet_execute_tx(rv32_wallet_, rv32_preimage_, calls);
+  EXPECT_EQ(native, rv32);
   // root_success=1 for Abort (only Fault yields 0); the revert is signalled
   // by the commit result: ExecResultTxRootFrameReverted confirms the wallet
   // aborted and no state was committed.
@@ -723,21 +724,21 @@ TEST_F(DefaultWalletParityTest, DeployHappyPath)
   make_ctx();
   // Deployable target: any contract present in the DB by hash. echo is
   // already written by setup; reuse its hash.
-  auto echo_obj = echo_meta::load_wasm();
+  auto echo_obj = echo_meta::load_rv32();
   SHA256Hash target_hash = sha256(*echo_obj);
   SHA256Hash nonce{};
   nonce.fill(9);
 
   auto native = run_wallet_deploy_tx(native_wallet_, native_preimage_, nonce,
                                      target_hash);
-  auto wasm =
-      run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, target_hash);
+  auto rv32 =
+      run_wallet_deploy_tx(rv32_wallet_, rv32_preimage_, nonce, target_hash);
 
   // Status + commit parity (indices per run_wallet_root_tx record layout).
   ASSERT_GE(native.size(), 2U);
-  ASSERT_GE(wasm.size(), 2U);
-  EXPECT_EQ(native[0], wasm[0]);
-  EXPECT_EQ(native[1], wasm[1]);
+  ASSERT_GE(rv32.size(), 2U);
+  EXPECT_EQ(native[0], rv32[0]);
+  EXPECT_EQ(native[1], rv32[1]);
   EXPECT_EQ(native[0], 1);
 
   // Each backend's returned bytes are its own expected deploy address
@@ -750,8 +751,8 @@ TEST_F(DefaultWalletParityTest, DeployHappyPath)
   expect_addr(native,
               SystemCallHandler::static_get_deploy_address(native_wallet_,
                                                            nonce, target_hash));
-  expect_addr(wasm,
-              SystemCallHandler::static_get_deploy_address(wasm_wallet_, nonce,
+  expect_addr(rv32,
+              SystemCallHandler::static_get_deploy_address(rv32_wallet_, nonce,
                                                            target_hash));
 }
 
@@ -765,9 +766,9 @@ TEST_F(DefaultWalletParityTest, DeployUnknownHashFaults)
   nonce.fill(10);
   auto native =
       run_wallet_deploy_tx(native_wallet_, native_preimage_, nonce, bogus);
-  auto wasm = run_wallet_deploy_tx(wasm_wallet_, wasm_preimage_, nonce, bogus);
+  auto rv32 = run_wallet_deploy_tx(rv32_wallet_, rv32_preimage_, nonce, bogus);
   // Address-independent outcome: full byte comparison applies.
-  EXPECT_EQ(native, wasm);
+  EXPECT_EQ(native, rv32);
 }
 
 // Malformed calldata never reaches the method body: the sdk entrypoint glue
@@ -866,9 +867,9 @@ TEST_F(DefaultWalletParityTest, ForwardedAuthHandleRejected)
 
   static constexpr ContractAddress kNativeDriverAddr =
       make_contract_address(230);
-  static constexpr ContractAddress kWasmDriverAddr = make_contract_address(231);
+  static constexpr ContractAddress kRv32DriverAddr = make_contract_address(231);
   auto native_result_key = make_storage_key("native_result");
-  auto wasm_result_key = make_storage_key("wasm_result");
+  auto rv32_result_key = make_storage_key("rv32_result");
 
   auto make_driver = [&](ContractAddress const &wallet,
                          StorageKeyContractData const &result_key) {
@@ -879,7 +880,7 @@ TEST_F(DefaultWalletParityTest, ForwardedAuthHandleRejected)
   };
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
   extra.emplace(kDriverBaseId, make_driver(native_wallet_, native_result_key));
-  extra.emplace(kDriverBaseId + 1, make_driver(wasm_wallet_, wasm_result_key));
+  extra.emplace(kDriverBaseId + 1, make_driver(rv32_wallet_, rv32_result_key));
   make_ctx(std::move(extra));
 
   auto deploy_driver = [&](int32_t id, ContractAddress const &addr) {
@@ -889,12 +890,12 @@ TEST_F(DefaultWalletParityTest, ForwardedAuthHandleRejected)
     setup_grant_storage_token(addr, 1'000'000'000);
   };
   deploy_driver(kDriverBaseId, kNativeDriverAddr);
-  deploy_driver(kDriverBaseId + 1, kWasmDriverAddr);
+  deploy_driver(kDriverBaseId + 1, kRv32DriverAddr);
 
   auto native_record =
       run_capture_tx(kNativeDriverAddr, native_result_key, *ctx_);
-  auto wasm_record = run_capture_tx(kWasmDriverAddr, wasm_result_key, *ctx_);
-  EXPECT_EQ(native_record, wasm_record);
+  auto rv32_record = run_capture_tx(kRv32DriverAddr, rv32_result_key, *ctx_);
+  EXPECT_EQ(native_record, rv32_record);
 
   // Absolute check: [commit, tag=0x00, frame_status=Abort, DecodingArgs].
   auto expected = decoding_args_abort_bytes();
@@ -938,7 +939,7 @@ TEST_F(DefaultWalletParityTest, ZeroByteChildReturn)
   expect_parity_success(calls);
 }
 
-// A callee that returns a minted auth handle: the wasm wallet fetches the
+// A callee that returns a minted auth handle: the rv32 wallet fetches the
 // handle list and drops it, the native wallet passes an empty fetch span —
 // the observable wallet behavior must match regardless.
 TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)

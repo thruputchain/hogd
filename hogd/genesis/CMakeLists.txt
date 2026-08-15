@@ -59,4 +59,9 @@ target_link_libraries(genesis_test
   GTest::gtest
 )
 
+add_dependencies(
+  genesis_test
+  all_riscvs_built
+)
+
 gtest_discover_tests(genesis_test)
