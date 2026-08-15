@@ -405,16 +405,16 @@ TEST_F(NativeRv32TokenEventParityTest,
 // never have funded it, because the sibling increment left no invalid final
 // delta for commit-time validation to reject. run_op fails the test if the
 // transaction emits anything other than a single event, so the two-event
-// history is caught here on both the built WASM contract and the native
+// history is caught here on both the built RV32 contract and the native
 // precompile. The return-value counterpart lives in
 // Erc20ParityTest.NegativeAllowanceNettingParity.
-TEST_F(NativeWasmTokenEventParityTest,
+TEST_F(NativeRv32TokenEventParityTest,
        NettedNegativeApprovalEmitsOnlyTheValidEvent)
 {
-  // --- wasm itc_erc20: initialize (no balance needed for allowances). ---
-  run_setup(kMethodInitialize, kAlice, kWasmToken);
-  auto wasm_approval =
-      run_op(kMethodNettedNegativeApproval, kAlice, kWasmToken);
+  // --- rv32 itc_erc20: initialize (no balance needed for allowances). ---
+  run_setup(kMethodInitialize, kAlice, kRv32Token);
+  auto rv32_approval =
+      run_op(kMethodNettedNegativeApproval, kAlice, kRv32Token);
 
   // --- native token: nothing to set up beyond SetUp(). ---
   ContractAddress const native_token =
@@ -423,21 +423,21 @@ TEST_F(NativeWasmTokenEventParityTest,
       run_op(kMethodNettedNegativeApproval, kAlice, native_token);
 
   // Sanity: the events really were emitted by the two different contracts.
-  ASSERT_TRUE(wasm_approval.has_value());
+  ASSERT_TRUE(rv32_approval.has_value());
   ASSERT_TRUE(native_approval.has_value());
-  EXPECT_EQ(wasm_approval->contract_address, kWasmToken);
+  EXPECT_EQ(rv32_approval->contract_address, kRv32Token);
   EXPECT_EQ(native_approval->contract_address, native_token);
 
   // The single surviving event is the increment's, identical on both backends.
-  expect_events_match(wasm_approval, native_approval,
+  expect_events_match(rv32_approval, native_approval,
                       "netted negative approval");
 
   // ...and it really is the increment's event, not the rejected decrement's:
   // ApprovalEvent carries the diff, so a plain +kAllowanceAmount adjustment
   // run afterwards emits a byte-identical event on each backend.
-  auto wasm_plain = run_op(kMethodAdjustAllowance, kAlice, kWasmToken);
+  auto rv32_plain = run_op(kMethodAdjustAllowance, kAlice, kRv32Token);
   auto native_plain = run_op(kMethodAdjustAllowance, kAlice, native_token);
-  expect_events_match(wasm_approval, wasm_plain, "wasm netted vs plain");
+  expect_events_match(rv32_approval, rv32_plain, "rv32 netted vs plain");
   expect_events_match(native_approval, native_plain, "native netted vs plain");
 }
 

@@ -504,7 +504,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
 // the transaction commits with the allowance at the granted value -- there is
 // no accepted-but-invalid pending delta for a later sibling call to net away
 // (hogd#1918). The netting sequence itself is pinned, against this precompile
-// and the WASM itc_erc20 reference side by side, by
+// and the RV32 itc_erc20 reference side by side, by
 // Erc20ParityTest.NegativeAllowanceNettingParity.
 TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
 {
@@ -1557,7 +1557,7 @@ TEST_F(NativeTokenAllowanceTest,
 // A delegated zero transfer over fresh keys succeeds at invoke, including the
 // zero allowance debit, but cannot commit: the two fresh native-balance rows
 // each have to fund their own creation cost from a zero credit. Storage-cost
-// parity with the contract-data-backed WASM token is deliberately outside the
+// parity with the contract-data-backed RV32 token is deliberately outside the
 // ERC20 parity harness (which runs with zero costs), so pin this native
 // accounting edge separately here.
 TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
