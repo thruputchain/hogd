@@ -44,7 +44,8 @@ protected:
     setup_grant_storage_token(target_contract_addr_, 1'000'000'000);
 
     // Load and deploy the manual_revert_caller contract
-    auto caller_contract = hogd::load_rv32_contract("manual_revert_caller.rv32a");
+    auto caller_contract =
+        hogd::load_rv32_contract("manual_revert_caller.rv32a");
     caller_contract_addr_ = make_contract_address(1);
     write_contract(caller_contract);
     write_deployment(caller_contract_addr_, caller_contract);
