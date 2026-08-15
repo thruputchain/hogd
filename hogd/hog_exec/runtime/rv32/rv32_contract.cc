@@ -75,10 +75,26 @@ from_trampoline_result(TrampolineResult result)
 std::pair<InvokeStatus<void>, GasAmount>
 Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
+  // Instantiating the ThreadedMachine copies the contract's full initial memory
+  // image into a fresh per-invocation slot before any guest instruction runs
+  // (see ThreadedMachine's constructor). That setup work scales with the
+  // artifact's declared memory size, so meter it up front: if the invocation
+  // budget cannot cover the copy, fail as out-of-gas *without* building the
+  // machine (and thus without performing the copy); otherwise charge the cost
+  // by running the machine on the remaining budget. Without this a caller could
+  // issue unbounded child Invokes with a zero (or below-cost) gas limit and
+  // force repeated large host-memory copies while being charged nothing for
+  // them (issue #3408).
+  const uint64_t setup_cost = contract_->instantiation_gas_cost();
+  if (gas_limit < setup_cost) {
+    return {InvokeError{InvokeErrorCode::OutOfGas}, gas_limit};
+  }
+  const uint64_t run_gas_limit = gas_limit - setup_cost;
+
   auto machine_noexcept =
       [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
     try {
-      rv32::ThreadedMachine machine = contract_->instantiate(gas_limit);
+      rv32::ThreadedMachine machine = contract_->instantiate(run_gas_limit);
       machine.seed_method_id(method_id);
       return machine;
     } catch (std::exception const &e) {
