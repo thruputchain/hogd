@@ -15,6 +15,7 @@ add_dependencies(
   loadgen
   all_wasm_contracts
   all_wasm_headers
+  all_riscvs_built # both experiments load .rv32a artifacts at runtime
 )
 
 target_include_directories(loadgen PRIVATE
