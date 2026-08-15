@@ -346,55 +346,6 @@ for node in "${NODE_IDS[@]}"; do
   "$WAIT_PORT" "$(hog_ip "${LOADGEN_HOSTS[$node]}")" "$LOADGEN_HTTP_PORT"
 done
 
-echo 'launch hog-exec shards'
-for node in "${NODE_IDS[@]}"; do
-  coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
-  bind_ip="$(hog_ip "${HOG_EXEC_HOSTS[$node]}")"
-  control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_a" "$SLOT_A_CPUS" \
-    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_A_PORT" --metrics-port "$HOG_EXEC_SLOT_A_HTTP_PORT"
-  control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_b" "$SLOT_B_CPUS" \
-    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
-done
-
-echo 'launch event and indexer'
-for node in "${NODE_IDS[@]}"; do
-  event_host="${EVENT_HOSTS[$node]}"
-  control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
-    "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
-    --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
-  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
-    "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
-    --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
-done
-
-echo 'launch hog-db and auth'
-for node in "${NODE_IDS[@]}"; do
-  control_start_with_ulimit "${HOG_DB_HOSTS[$node]}" "node${node}_hog_db" "$SLOT_A_CPUS" \
-    "$HOG_DB_BINARY" --db-path "$(node_dir "$node")/hog-db" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOG_DB_HOSTS[$node]}")" \
-    --coordinator-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_DB_PORT" --executor-port "$DB_EXECUTOR_PORT" \
-    --mempool-port "$DB_MEMPOOL_PORT" --auth-port "$DB_AUTH_PORT" --metrics-port "$DB_HTTP_PORT"
-  control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \
-    "$AUTH_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_AUTH_PORT" --bind-ip "$(hog_ip "${AUTH_HOSTS[$node]}")" \
-    --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT" --metrics-port "$AUTH_HTTP_PORT"
-done
-
-echo 'launch coordinators'
-for node in "${NODE_IDS[@]}"; do
-  control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
-    "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
-    --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
-    --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
-    --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
-    --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
-    --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
-done
-
-echo 'stream coordinator stdout logs'
-for node in "${NODE_IDS[@]}"; do
-  start_log_stream "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" stdout \
-    "$(get_record_stdout_path "node${node}_chuckd")"
-done
-
 echo 'launch mempools'
 node0_mempool_host="${MEMPOOL_HOSTS[0]}"
 node1_mempool_host="${MEMPOOL_HOSTS[1]}"
@@ -464,6 +415,81 @@ start_log_stream "$node1_mempool_host" node1_mempool stdout \
   "$(get_record_stdout_path node1_mempool)"
 start_log_stream "$node1_mempool_host" node1_mempool stderr \
   "$(get_record_stderr_path node1_mempool)"
+
+echo 'wait for mempool database RPC servers'
+for node in "${NODE_IDS[@]}"; do
+  "$WAIT_PORT" "$(hog_ip "${MEMPOOL_HOSTS[$node]}")" "$MEMPOOL_DB_PORT"
+done
+
+echo 'launch hog-db'
+for node in "${NODE_IDS[@]}"; do
+  control_start_with_ulimit "${HOG_DB_HOSTS[$node]}" "node${node}_hog_db" "$SLOT_A_CPUS" \
+    "$HOG_DB_BINARY" --db-path "$(node_dir "$node")/hog-db" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOG_DB_HOSTS[$node]}")" \
+    --coordinator-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_DB_PORT" --executor-port "$DB_EXECUTOR_PORT" \
+    --mempool-port "$DB_MEMPOOL_PORT" --auth-port "$DB_AUTH_PORT" --metrics-port "$DB_HTTP_PORT"
+done
+
+echo 'wait for remaining mempool registration RPC servers'
+for node in "${NODE_IDS[@]}"; do
+  mempool_ip="$(hog_ip "${MEMPOOL_HOSTS[$node]}")"
+  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EVENT_PORT"
+  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_EXECUTOR_PORT"
+  "$WAIT_PORT" "$mempool_ip" "$MEMPOOL_AUTH_PORT"
+done
+
+echo 'launch hog-exec shards, event, and auth'
+for node in "${NODE_IDS[@]}"; do
+  coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
+  bind_ip="$(hog_ip "${HOG_EXEC_HOSTS[$node]}")"
+  control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_a" "$SLOT_A_CPUS" \
+    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_A_PORT" --metrics-port "$HOG_EXEC_SLOT_A_HTTP_PORT"
+  control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_b" "$SLOT_B_CPUS" \
+    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
+
+  event_host="${EVENT_HOSTS[$node]}"
+  control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
+    "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
+    --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
+
+  control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \
+    "$AUTH_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_AUTH_PORT" --bind-ip "$(hog_ip "${AUTH_HOSTS[$node]}")" \
+    --db-port "$AUTH_DB_PORT" --mempool-port "$AUTH_MEMPOOL_PORT" --metrics-port "$AUTH_HTTP_PORT"
+done
+
+echo 'wait for event indexer RPC servers'
+for node in "${NODE_IDS[@]}"; do
+  "$WAIT_PORT" "$(hog_ip "${EVENT_HOSTS[$node]}")" "$EVENT_INDEXER_PORT"
+done
+
+echo 'launch indexers'
+for node in "${NODE_IDS[@]}"; do
+  event_host="${EVENT_HOSTS[$node]}"
+  control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
+    "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
+    --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
+done
+
+echo 'wait for mempool coordinator RPC servers'
+for node in "${NODE_IDS[@]}"; do
+  "$WAIT_PORT" "$(hog_ip "${MEMPOOL_HOSTS[$node]}")" "$MEMPOOL_COORDINATOR_PORT"
+done
+
+echo 'launch coordinators'
+for node in "${NODE_IDS[@]}"; do
+  control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
+    "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
+    --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
+    --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
+    --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
+    --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
+    --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
+done
+
+echo 'stream coordinator stdout logs'
+for node in "${NODE_IDS[@]}"; do
+  start_log_stream "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" stdout \
+    "$(get_record_stdout_path "node${node}_chuckd")"
+done
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
 node0_mempool_pid=$!
