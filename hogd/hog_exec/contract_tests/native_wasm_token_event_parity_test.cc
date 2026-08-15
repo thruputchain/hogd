@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -8,6 +9,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
@@ -18,6 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -114,12 +117,15 @@ public:
   }
 
   // Invoke `Name` on the ERC20 contract deployed at `target` and require a
-  // contract-level rejection: the child frame must abort carrying an ERC20
-  // error, rather than succeeding or faulting.
+  // contract-level rejection carrying exactly `expected`: the child frame
+  // must abort with that itc_erc20 error, rather than succeeding, faulting,
+  // or reporting some other error. A library exception or an abort payload
+  // that does not parse as an itc_erc20 exception lands in a different
+  // ContractErrorType alternative and is rejected here too.
   template<StringLiteral Name, typename... Args>
-  static InvokeStatus<void> call_expect_err(NativeSyscallContext &ctx,
-                                            ContractAddress target,
-                                            Args... args)
+  static InvokeStatus<void>
+  call_expect_err(NativeSyscallContext &ctx, ContractAddress target,
+                  itc_erc20::ERC20Error expected, Args... args)
   {
     auto name_str =
         std::string_view(reinterpret_cast<const char *>(Name.get().data()),
@@ -133,8 +139,35 @@ public:
                     << name_str;
       return InvokeError{InvokeErrorCode::Deterministic};
     }
-    if (r.value().value().value().is_ok()) {
+    auto const &result = r.value().value().value();
+    if (result.is_ok()) {
       ADD_FAILURE() << "itc_erc20 call unexpectedly returned Ok: " << name_str;
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    auto reported = std::visit(
+        [](auto const &exception) -> std::optional<itc_erc20::ERC20Error> {
+          if constexpr (requires {
+                          {
+                            exception.exn
+                          } -> std::convertible_to<itc_erc20::ERC20Error>;
+                        }) {
+            return exception.exn;
+          }
+          else {
+            return std::nullopt;
+          }
+        },
+        result.err().variant_);
+    if (!reported.has_value()) {
+      ADD_FAILURE() << "itc_erc20 call aborted without a decodable itc_erc20 "
+                       "exception: "
+                    << name_str;
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    if (*reported != expected) {
+      ADD_FAILURE() << "itc_erc20 call reported error "
+                    << static_cast<int>(*reported) << ", expected "
+                    << static_cast<int>(expected) << ": " << name_str;
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
@@ -208,7 +241,8 @@ protected:
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> InvokeStatus<void> {
           auto rejected = call_expect_err<u8"adjust_allowance">(
-              ctx, target, kSpender, make_difference(-kAllowanceAmount));
+              ctx, target, itc_erc20::ERC20Error::TooLarge, kSpender,
+              make_difference(-kAllowanceAmount));
           if (!rejected.has_value()) {
             return rejected.error();
           }

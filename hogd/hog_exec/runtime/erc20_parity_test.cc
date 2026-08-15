@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -10,6 +11,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "built_contracts/itc_erc20.h"
@@ -21,6 +23,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -77,6 +80,59 @@ using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 // (the encoded Result<void, ERC20Error> variant) and the abort path (the
 // literal bytes a manual revert / fault leaves behind).
 using CapturedRecord = std::vector<uint8_t>;
+
+// The itc_erc20 error carried by a decoded contract Result, or nullopt when
+// the result is Ok or the abort payload was not an itc_erc20 exception (a
+// library exception, or a body that did not parse -- ContractErrorType keeps
+// those as distinct variant alternatives). Matching on the payload type
+// rather than on a hard-coded selector keeps this honest if the generated
+// exception ever changes shape.
+template<typename ResultT>
+std::optional<itc_erc20::ERC20Error>
+erc20_error_of(ResultT const &result)
+{
+  if (result.is_ok()) {
+    return std::nullopt;
+  }
+  return std::visit(
+      [](auto const &exception) -> std::optional<itc_erc20::ERC20Error> {
+        if constexpr (requires {
+                        {
+                          exception.exn
+                        } -> std::convertible_to<itc_erc20::ERC20Error>;
+                      }) {
+          return exception.exn;
+        }
+        else {
+          return std::nullopt;
+        }
+      },
+      result.err().variant_);
+}
+
+// The itc_erc20 error a captured step aborted with. Returns nullopt unless
+// the step ran a child frame that aborted with a decodable itc_erc20
+// exception -- so callers pin *which* error a rejection reported, not merely
+// that the frame aborted.
+template<StringLiteral Name>
+std::optional<itc_erc20::ERC20Error>
+step_erc20_error(CapturedRecord const &record)
+{
+  // [0] is the capture tag (0x00 == a child frame ran), [1] the frame status,
+  // and the rest is the literal return/abort payload.
+  if (record.size() < 2 || record[0] != 0x00 ||
+      static_cast<InvocationFrameStatusCode>(record[1]) !=
+          InvocationFrameStatusCode::Abort) {
+    return std::nullopt;
+  }
+  auto payload = std::as_bytes(std::span(record.data() + 2, record.size() - 2));
+  auto decoded =
+      erc20_meta::decode_return<Name>(payload, /*manually_reverted=*/true);
+  if (!decoded.has_value()) {
+    return std::nullopt;
+  }
+  return erc20_error_of(*decoded);
+}
 
 } // namespace
 
@@ -1511,11 +1567,17 @@ TEST_F(Erc20ParityTest, NegativeAllowanceNettingParity)
   ASSERT_EQ(records.size(), 4U);
 
   // Step 0: the decrement below a fresh (zero) allowance is rejected at
-  // invoke, not deferred to commit and netted away.
+  // invoke, not deferred to commit and netted away. The records compare equal
+  // byte-for-byte above, so pinning the error on one backend pins both.
   ASSERT_GE(records[0].size(), 2U);
   EXPECT_EQ(records[0][1],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
       << "a decrement below a fresh allowance must abort at invoke";
+  auto rejected_error = step_erc20_error<u8"adjust_allowance">(records[0]);
+  ASSERT_TRUE(rejected_error.has_value())
+      << "step 0 did not abort with a decodable itc_erc20 exception";
+  EXPECT_EQ(*rejected_error, itc_erc20::ERC20Error::TooLarge)
+      << "the rejected decrement must report TooLarge specifically";
 
   // Step 1: the sibling increment is unaffected by the aborted decrement.
   ASSERT_GE(records[1].size(), 2U);
@@ -1557,11 +1619,18 @@ TEST_F(Erc20ParityTest, UnfundedTransferNettedByLaterCreditParity)
   ASSERT_EQ(records.size(), 5U);
 
   // Step 0: the unfunded transfer aborts at invoke. Under the netting bug it
-  // returned Ok and published a Transfer event the caller could not fund.
+  // returned Ok and published a Transfer event the caller could not fund. The
+  // records compare equal byte-for-byte above, so pinning the error on one
+  // backend pins both.
   ASSERT_GE(records[0].size(), 2U);
   EXPECT_EQ(records[0][1],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
       << "a transfer from a zero balance must abort at invoke";
+  auto rejected_error = step_erc20_error<u8"transfer">(records[0]);
+  ASSERT_TRUE(rejected_error.has_value())
+      << "step 0 did not abort with a decodable itc_erc20 exception";
+  EXPECT_EQ(*rejected_error, itc_erc20::ERC20Error::TooLarge)
+      << "the unfunded transfer must report TooLarge specifically";
 
   // Step 1: the delegated pull is a legitimate, fully-funded transfer.
   ASSERT_GE(records[1].size(), 2U);
