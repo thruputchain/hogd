@@ -1305,7 +1305,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)
 {
   while (!ready()) {
-    ready_.wait(false, std::memory_order_acquire);
+    co_await ready_waiters_.wait(false);
   }
   if (context.protocol != 0) {
     co_return SchedulerProposalResult(

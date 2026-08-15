@@ -2246,9 +2246,16 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
             std::future_status::timeout);
   EXPECT_FALSE(server.mempool_coord_rpc().ready());
   EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
+  std::promise<void> proposal_suspended;
+  auto proposal_suspended_future = proposal_suspended.get_future();
   auto pending_proposal = std::async(std::launch::async, [&] {
-    return server.mempool_coord_rpc().schedulercoord_propose_block(0, {})();
+    auto proposal =
+        server.mempool_coord_rpc().schedulercoord_propose_block(0, {});
+    proposal_suspended.set_value();
+    return proposal();
   });
+  EXPECT_EQ(proposal_suspended_future.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
   EXPECT_EQ(pending_proposal.wait_for(std::chrono::milliseconds(100)),
             std::future_status::timeout);
   EXPECT_EQ(server.mempool_coord_rpc()

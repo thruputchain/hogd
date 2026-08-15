@@ -126,7 +126,8 @@ public:
     }
     co_await Health::instance().set_status(Health::Status::kOk);
     ready_.store(true, std::memory_order_release);
-    ready_.notify_all();
+    ready_waiters_.store(true);
+    ready_waiters_.broadcast(&default_threadpool());
   }
 
   static x23::Async<coord_sched_client_t> get_client()
@@ -783,6 +784,7 @@ private:
 
   std::atomic<size_t> num_coordinators_registered_ = 0;
   std::atomic<bool> ready_ = false;
+  x23::CoroFutex<bool> ready_waiters_{false};
   std::atomic<bool> initialized_ = false;
 
   std::chrono::steady_clock::time_point last_commit_ =
