@@ -146,7 +146,7 @@ protected:
     using syscall_misc_tests_meta =
         ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
 
-    auto contract = syscall_misc_tests_meta::load_wasm();
+    auto contract = syscall_misc_tests_meta::load_rv32();
     ContractAddress contract_address =
         NativeContractTestFramework::make_contract_address(1);
     snapshot_server->impl()->setup_create_contract(*contract);
