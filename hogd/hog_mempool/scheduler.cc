@@ -110,19 +110,31 @@ Scheduler::write_all_average_hog_ages_to_db()
 
   PerThread<HogAgeBatch> ages_by_thread;
   accounts_.for_each_parallel(
-      [&](const std::pair<ContractAddress, AccountState> &p) {
-        const HogAge &age = p.second.hog_age;
+      [&](std::pair<const ContractAddress, AccountState> &p) {
+        AccountState &account_state = p.second;
+        // Skip accounts whose hog age has not changed since the last write.
+        // Persisting every cached account on every transfer callback would make
+        // each callback's work proportional to all accounts the scheduler has
+        // ever observed rather than to the accounts that actually changed (see
+        // GitHub issue #3404).
+        if (!account_state.hog_age_dirty) {
+          return;
+        }
+        const HogAge &age = account_state.hog_age;
         CHECK_EQ(p.first, age.address);
         ages_by_thread->push_back(age);
+        account_state.hog_age_dirty = false;
       });
 
   HogAgeBatch ages;
-  ages.reserve(accounts_.size());
   {
     auto ul = ages_by_thread.lock_threads();
     ages_by_thread.for_each(ul, [&ages](HogAgeBatch &per_thread_ages) {
       ages += per_thread_ages;
     });
+  }
+  if (ages.empty()) {
+    co_return;
   }
   CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
            DbSchedResult::DbSchedResultOK);
@@ -161,6 +173,7 @@ Scheduler::commit_pending_nomination(BlockID block_id)
   for (const auto &[account, hog_age] : pending_nomination_.hog_ages) {
     auto [account_state, lock] = get_account_state(account);
     account_state->hog_age = hog_age;
+    account_state->hog_age_dirty = true;
   }
   refresh_ready_accounts(pending_nomination_.touched_accounts);
   refresh_accounts_excluded_from_block();
@@ -257,6 +270,7 @@ Scheduler::apply_committed_block_hog_ages(
 
     auto [account_state, lock] = get_account_state(account);
     account_state->hog_age = hog_age;
+    account_state->hog_age_dirty = true;
     touched_accounts.insert(account);
   }
   refresh_ready_accounts(touched_accounts);
@@ -638,7 +652,9 @@ Scheduler::process_transfers_helper(const Delta &delta,
   CHECK_NE(num_received, static_cast<int128_t>(0));
 
   const ContractAddress &account = delta.address;
-  auto [averages, lock] = get_cached_hog_age(account);
+  auto [account_state, lock] = get_account_state(account);
+  const HogAge *averages = &account_state->hog_age;
+  CHECK_EQ(averages->address, account);
   HogAge new_averages = *averages;
 
   uint128_t received_hogs = from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
@@ -691,6 +707,7 @@ Scheduler::process_transfers_helper(const Delta &delta,
   // mutate it above. Thus, I keep it const and I do a const cast below since
   // I am sure I want to write it here.
   *const_cast<HogAge *>(averages) = new_averages;
+  account_state->hog_age_dirty = true;
 }
 
 bool

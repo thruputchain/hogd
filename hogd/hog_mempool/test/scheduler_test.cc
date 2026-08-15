@@ -353,6 +353,62 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
 }
 
+// Regression test for GitHub issue #3404. A transfer receiver stays cached in
+// the scheduler even after it has no scheduler work, so persisting the whole
+// cache on every transfer callback would rewrite accounts the callback never
+// touched. [write_all_average_hog_ages_to_db()] must persist only the accounts
+// whose hog age actually changed.
+TEST(Scheduler, WriteAllPersistsOnlyChangedHogAges)
+{
+  constexpr BlockHeight kTransferBlock = 7;
+  constexpr auto kReceived = static_cast<uint128_t>(5'000'000'000);
+  // Sentinel that only exists in the in-memory cache; it must never be written
+  // to hogdb because the account it belongs to is not part of any transfer.
+  constexpr BlockHeight kStaleAge = 999'999;
+  const ContractAddress &touched = MempoolTestInfra::kAccountAddresses[0];
+  const ContractAddress &untouched = MempoolTestInfra::kAccountAddresses[1];
+
+  MempoolTestInfra server;
+  server.set_hogs(touched, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_hogs(untouched, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Load [untouched] into the scheduler cache (as reading a transfer receiver
+  // would) and then corrupt only its cached copy. Because nothing legitimately
+  // changed it, it must not be persisted.
+  scheduler->read_average_hog_ages({untouched})();
+  {
+    auto [age, lock] = scheduler->get_cached_hog_age(untouched);
+    age->average_ages[kHogAgeGroupReceived] = kStaleAge;
+  }
+
+  // A transfer that only touches [touched].
+  HogsTransferred transfer;
+  transfer.block = kTransferBlock;
+  transfer.deltas.push_back(
+      Delta{.address = touched,
+            .hog_delta = to_xdr(static_cast<int128_t>(kReceived))});
+  scheduler->process_transfers(transfer)();
+  scheduler->write_all_average_hog_ages_to_db()();
+
+  // Reload both accounts from hogdb, overwriting the in-memory copies.
+  scheduler->read_average_hog_ages({touched, untouched})();
+
+  // [touched] was changed by the transfer, so hogdb has its new received hogs.
+  {
+    const auto [age, lock] = scheduler->get_cached_hog_age(touched);
+    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), kReceived);
+    EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kTransferBlock);
+  }
+  // [untouched] was not part of the transfer, so the stale cached sentinel must
+  // never have been persisted.
+  {
+    const auto [age, lock] = scheduler->get_cached_hog_age(untouched);
+    EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 0);
+  }
+}
+
 TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
