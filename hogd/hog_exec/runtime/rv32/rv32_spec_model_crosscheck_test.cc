@@ -17,6 +17,7 @@
 #include "hogd/hog_exec/runtime/rv32/spec_model.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
 // This is an in-tree spec-model cross-check, not an external differential
 // oracle. It is designed to catch local VM regressions quickly while
@@ -438,11 +439,95 @@ compare_to_machine(const CrosscheckCase &test_case)
       << describe_divergence(expected_state, actual_state);
 }
 
+// The production ThreadedMachine cannot seed registers directly, so the
+// initial register file is materialized by a lui/addi prologue executed (and
+// charged) identically by the spec model.
+std::vector<spec::SpecInstruction>
+register_prologue(std::array<uint32_t, kRegisterCount> const &regs)
+{
+  std::vector<spec::SpecInstruction> prologue;
+  for (size_t i = 1; i < regs.size(); ++i) {
+    const uint32_t value = regs[i];
+    if (value == 0) {
+      continue;
+    }
+    const auto rd = static_cast<uint8_t>(i);
+    const uint32_t hi = (value + 0x800U) & 0xfffff000U;
+    const auto lo = static_cast<int32_t>(value - hi);
+    if (hi != 0) {
+      prologue.push_back(spec(u_type(0x37U, rd, hi), Op::kLui, rd, 0, 0,
+                              std::bit_cast<int32_t>(hi)));
+      if (lo != 0) {
+        prologue.push_back(op_imm(Op::kAddi, rd, rd, lo));
+      }
+    }
+    else {
+      prologue.push_back(op_imm(Op::kAddi, rd, 0, lo));
+    }
+  }
+  return prologue;
+}
+
+void
+compare_to_threaded_machine(const CrosscheckCase &test_case)
+{
+  std::vector<spec::SpecInstruction> instructions =
+      register_prologue(test_case.initial_regs);
+  const uint64_t gas_limit =
+      test_case.gas_limit + (instructions.size() * kBaseInstructionGas);
+  instructions.insert(instructions.end(), test_case.instructions.begin(),
+                      test_case.instructions.end());
+
+  spec::SpecState expected;
+  expected.memory = test_case.initial_memory;
+  expected.gas_remaining = gas_limit;
+  const StepResult expected_result = spec::run_spec(expected, instructions);
+
+  const std::vector<uint32_t> words = words_for(instructions);
+  const std::vector<uint8_t> bytes = test_program::code_from_words(words);
+  auto pre = ThreadedMachinePreInstantiation::create(
+      bytes, test_case.initial_memory, /*memory_start=*/0,
+      static_cast<uint32_t>(test_case.initial_memory.size()), /*trace=*/false);
+  ASSERT_TRUE(pre.has_value()) << test_case.name;
+  ThreadedMachine machine(*pre, gas_limit);
+  RecordingHost host;
+  const StepResult actual_result = machine.run(host);
+
+  EXPECT_EQ(actual_result, expected_result) << test_case.name;
+
+  // The consensus contract on a trap is {trap class, gas, halt state}; pc,
+  // registers, and memory are frame-local state a trap discards, and the
+  // block-metered engine may have executed a speculative suffix the
+  // per-instruction spec model never reached. On a clean halt the full state
+  // is compared.
+  EXPECT_EQ(machine.trap(), expected.trap) << test_case.name;
+  EXPECT_EQ(machine.gas_remaining(), expected.gas_remaining) << test_case.name;
+  EXPECT_EQ(machine.halted(), expected.halted) << test_case.name;
+  if (expected.trap == Trap::kNone) {
+    EXPECT_EQ(machine.halt_code(), expected.halt_code) << test_case.name;
+    EXPECT_EQ(machine.pc(), expected.pc) << test_case.name;
+    for (size_t i = 0; i < expected.regs.size(); ++i) {
+      EXPECT_EQ(machine.reg(i), expected.regs[i])
+          << test_case.name << " x" << i;
+    }
+    EXPECT_TRUE(std::ranges::equal(machine.memory(), expected.memory))
+        << test_case.name;
+  }
+}
+
 TEST(Rv32SpecModelCrosscheckTest, randomizedProgramsMatchSpec)
 {
   for (const CrosscheckCase &test_case : make_random_crosscheck_cases()) {
     SCOPED_TRACE(test_case.name);
     compare_to_machine(test_case);
+  }
+}
+
+TEST(Rv32SpecModelCrosscheckTest, randomizedProgramsMatchSpecOnThreadedMachine)
+{
+  for (const CrosscheckCase &test_case : make_random_crosscheck_cases()) {
+    SCOPED_TRACE(test_case.name);
+    compare_to_threaded_machine(test_case);
   }
 }
 
@@ -519,6 +604,88 @@ TEST(Rv32SpecModelCrosscheckTest, semanticTrapsMatchSpec)
   });
 
   compare_to_machine(CrosscheckCase{
+      .name = "out_of_gas_before_first_mutation",
+      .instructions = {op_imm(Op::kAddi, 1, 0, 1),
+                       spec(0x00000073U, Op::kEcall)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 0,
+  });
+}
+
+TEST(Rv32SpecModelCrosscheckTest, semanticTrapsMatchSpecOnThreadedMachine)
+{
+  std::array<uint32_t, kRegisterCount> regs = {};
+  std::vector<uint8_t> memory(64, 0xa5);
+
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "taken_branch_to_bad_pc",
+      .instructions = {op_imm(Op::kAddi, 1, 0, 1),
+                       spec(branch(0, 1, 1, 12), Op::kBeq, 0, 1, 1, 12),
+                       op_imm(Op::kAddi, 2, 0, 99)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "jal_to_bad_pc",
+      .instructions = {spec(j_type(1, 8), Op::kJal, 1, 0, 0, 8)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "jalr_to_bad_pc",
+      .instructions = {op_imm(Op::kAddi, 1, 0, 13),
+                       spec(jalr(2, 1, 0), Op::kJalr, 2, 1, 0, 0),
+                       spec(0x00000073U, Op::kEcall)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  regs[1] = 3;
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "unaligned_load",
+      .instructions = {spec(load(2, 2, 1, 0), Op::kLw, 2, 1, 0, 0),
+                       spec(0x00000073U, Op::kEcall)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  regs[1] = 68;
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "out_of_bounds_store",
+      .instructions = {spec(store(1, 2, 0, 2), Op::kSw, 0, 1, 2, 0),
+                       spec(0x00000073U, Op::kEcall)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  regs = {};
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "ebreak_trap",
+      .instructions = {op_imm(Op::kAddi, 1, 0, 7),
+                       spec(0x00100073U, Op::kEbreak)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  compare_to_threaded_machine(CrosscheckCase{
+      .name = "unimp_trap",
+      .instructions = {op_imm(Op::kAddi, 1, 0, 7),
+                       spec(0xc0001073U, Op::kUnimp)},
+      .initial_regs = regs,
+      .initial_memory = memory,
+      .gas_limit = 10,
+  });
+
+  compare_to_threaded_machine(CrosscheckCase{
       .name = "out_of_gas_before_first_mutation",
       .instructions = {op_imm(Op::kAddi, 1, 0, 1),
                        spec(0x00000073U, Op::kEcall)},
