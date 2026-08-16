@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "auth_claim.hh"
+#include "auth_token.hh"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -29,6 +30,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -148,6 +150,30 @@ public:
     ASSERT_FALSE(syscall_res2.has_value());
     ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
     ASSERT_EQ(gas_consumed2, 10);
+
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  }
+
+  // See the #1759 block at the bottom of this file. A frame with no gas left
+  // must not turn a transaction-fatal error into a frame-local out-of-gas
+  // that a parent frame could catch.
+  template<HostFnErrorCode Code> void run_fatal_error_at_zero_gas_test()
+  {
+    auto context = make_hog_exec_context();
+    auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+    ASSERT_TRUE(handler
+                    .start_frame(kPlaceholderInvocation,
+                                 std::to_underlying(InvokeFlag::None),
+                                 std::span<uint32_t>{})
+                    .has_value());
+
+    auto [syscall_res, gas_consumed] =
+        wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(0),
+                                           kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                           0);
+    ASSERT_FALSE(syscall_res.has_value());
+    ASSERT_EQ(syscall_res.error().code(), Code);
 
     auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
   }
@@ -521,6 +547,308 @@ TEST_F(SyscallErrorHandlingTest,
   auto status = ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
   ASSERT_TRUE(status.has_value());
   ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// A syscall entered with the frame's gas already exhausted must not succeed.
+//
+// A wasm engine can enter `marmot.syscall` with host-visible fuel already
+// saturated to zero: the fuel checkpoint that would have trapped the contract
+// sits after the call boundary, not before it, so the first over-budget
+// operation the host sees is the syscall itself. wrap_after_parse is the
+// backstop -- it rewrites any handleable syscall result to OutOfGas once the
+// syscall's cost meets or exceeds the gas remaining at entry.
+//
+// The comparison is `>=`, and that is load-bearing. Under `>`, a syscall whose
+// gas cost is zero -- MintAuthToken and Return both are -- would succeed at
+// zero remaining gas, which is the shape reported in #1759: mint a fresh auth
+// token in a frame that should already have failed out-of-gas, hand it back
+// through Return, and let the parent frame commit and consume a capability the
+// child never paid for. The tests below pin the boundary from both sides so
+// the comparison cannot be quietly loosened.
+
+namespace {
+
+// The shape of a zero-cost syscall (MintAuthToken, Return, ...): succeeds, and
+// reports no gas. This is the case that `>` would let through.
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+free_success_syscall_func()
+{
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+// The shape of syscall_Return_inner: reports no gas, and signals a successful
+// frame return through the error channel.
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+free_return_syscall_func()
+{
+  return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
+}
+
+constexpr GasAmount kFixedSyscallCost = 100;
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+fixed_cost_syscall_func()
+{
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{kFixedSyscallCost}};
+}
+
+} // namespace
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+struct FreeSuccessSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &free_success_syscall_func;
+
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+struct FreeReturnSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &free_return_syscall_func;
+
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+struct FixedCostSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = &fixed_cost_syscall_func;
+
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+static_assert(is_syscall_meta<FreeSuccessSyscallMeta>);
+static_assert(is_syscall_meta<FreeReturnSyscallMeta>);
+static_assert(is_syscall_meta<FixedCostSyscallMeta>);
+
+// A zero-cost syscall is exactly the case that distinguishes `>=` from `>`.
+// If this test starts failing, an over-budget contract can mutate frame state
+// for free.
+TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtZeroGasIsOutOfGas)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<FreeSuccessSyscallMeta>(handler, make_null_context(0),
+                                         kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                         0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_consumed, 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// The second half of the #1759 chain: Return is what carries the child frame's
+// outputs into the parent, and it is also zero-cost. At zero gas it must not
+// be allowed to report a successful frame return.
+TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<FreeReturnSyscallMeta>(handler, make_null_context(0),
+                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_consumed, 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// The other side of the boundary: the rewrite must not swallow syscalls the
+// frame can actually afford, or every zero-cost syscall becomes unusable.
+TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<FreeSuccessSyscallMeta>(handler, make_null_context(1),
+                                         kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                         0);
+  ASSERT_TRUE(syscall_res.has_value());
+  ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  ASSERT_EQ(gas_consumed, 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// Pins the comparison itself at a nonzero cost: a syscall that costs exactly
+// the gas remaining is not affordable, one gas more is.
+TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [at_cost, gas_at_cost] =
+      wrap_outer<FixedCostSyscallMeta>(handler,
+                                       make_null_context(kFixedSyscallCost),
+                                       kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
+  ASSERT_FALSE(at_cost.has_value());
+  ASSERT_EQ(at_cost.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_at_cost, kFixedSyscallCost);
+
+  auto [above_cost, gas_above_cost] =
+      wrap_outer<FixedCostSyscallMeta>(handler,
+                                       make_null_context(kFixedSyscallCost + 1),
+                                       kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
+  ASSERT_TRUE(above_cost.has_value());
+  ASSERT_EQ(*above_cost, SyscallErrorCode::kSyscallErrorCodeNone);
+  ASSERT_EQ(gas_above_cost, kFixedSyscallCost);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// The wasmtime trampoline does `set_fuel(gas_remaining - gas_consumed)` behind
+// an `assert!(gas_consumed <= gas_remaining)`. wrap_after_parse is what makes
+// that subtraction safe: the gas it reports back is clamped to the gas the
+// frame actually had. Uncapped, a syscall entered on an over-consumed store
+// would abort the process from inside the FFI boundary.
+TEST_F(SyscallErrorHandlingTest, ReportedGasNeverExceedsGasRemaining)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  // error_syscall_func reports 1000 gas regardless of what the frame has left.
+  for (GasAmount gas_remaining : {GasAmount{0}, GasAmount{1}, GasAmount{999},
+                                  GasAmount{1000}, GasAmount{1001}}) {
+    auto [syscall_res, gas_consumed] =
+        wrap_outer<ErrorSyscallMeta<HostFnErrorCode::Return>>(
+            handler, make_null_context(gas_remaining), kNoTracingSyscall, 0, 0,
+            0, 0, 0, 0, 0);
+    ASSERT_FALSE(syscall_res.has_value());
+    ASSERT_LE(gas_consumed, gas_remaining)
+        << "gas_remaining = " << gas_remaining;
+  }
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// An exhausted frame is not a licence to downgrade a transaction-fatal error
+// into a frame-local out-of-gas: Abandon and friends stay themselves, so a
+// parent frame cannot catch them.
+TEST_F(SyscallErrorHandlingTest, AbandonAtZeroGasIsNotMaskedAsOutOfGas)
+{
+  run_fatal_error_at_zero_gas_test<HostFnErrorCode::Abandon>();
+}
+
+TEST_F(SyscallErrorHandlingTest,
+       ValidationFailureAtZeroGasIsNotMaskedAsOutOfGas)
+{
+  run_fatal_error_at_zero_gas_test<HostFnErrorCode::ValidationFailure>();
+}
+
+TEST_F(SyscallErrorHandlingTest, UnrecoverableAtZeroGasIsNotMaskedAsOutOfGas)
+{
+  run_fatal_error_at_zero_gas_test<HostFnErrorCode::Unrecoverable>();
+}
+
+// The same boundary, driven through the real syscall implementations rather
+// than synthetic metas. MintAuthToken and Return are the two zero-cost
+// syscalls #1759 chained together, so they are the ones that have to hold.
+
+TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  AuthTokenNode root_node{.consumer_address =
+                              kPlaceholderInvocation.invoked_address,
+                          .payload = x23::serialize(99U),
+                          .child_nodes = {}};
+  auto serialized_root = x23::serialize(root_node);
+
+  NativeSyscallContext ctx(handler, 0);
+  uint32_t token_id = 0;
+  auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+      BlockHeight{1000},
+      std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                     serialized_root.data()),
+                                 serialized_root.size()},
+      token_id);
+
+  ASSERT_FALSE(mint_res.has_value());
+  ASSERT_EQ(mint_res.error().code(), HostFnErrorCode::OutOfGas);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  NativeSyscallContext ctx(handler, 0);
+  std::array<std::byte, 4> ret_buf{};
+  auto ret_res =
+      ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{ret_buf},
+                                      false, std::span<const std::byte>{});
+
+  // OutOfGas, not Return: Return is what commits the frame to its parent.
+  ASSERT_FALSE(ret_res.has_value());
+  ASSERT_EQ(ret_res.error().code(), HostFnErrorCode::OutOfGas);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
