@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -760,6 +761,133 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   // output buffer was empty (old behavior recorded an empty buffer here).
   ASSERT_EQ(traced_buffer.size(), 9U);
   EXPECT_EQ(std::memcmp(traced_buffer.data(), "RETURNED!", 9), 0);
+}
+
+namespace {
+
+// #1759: a syscall the runtime entered with the frame's gas already exhausted
+// must have been rewritten to OutOfGas.
+//
+// The engines do not all check the budget before crossing a call boundary --
+// wasmtime's fuel checkpoint sits after `Operator::Call`, so an over-budget
+// contract can arrive at the host with its remaining gas already saturated to
+// zero. The trace is where that is visible after the fact: an entry with
+// gas_remaining_at_start == 0 that did NOT fail is a syscall that ran, mutated
+// frame state, and reported success in a frame with nothing left to pay with.
+// That is the reported exploit shape (MintAuthToken then Return, both
+// zero-cost, both in an exhausted child frame).
+//
+// This holds for every syscall, in every frame, on every engine, so it is
+// cheap to assert over any trace a test already has in hand.
+void
+expect_no_syscall_succeeded_on_exhausted_frame(
+    InvocationFrameTrace const &frame)
+{
+  for (auto const &syscall_trace : frame.system_calls) {
+    if (syscall_trace.gas_remaining_at_start == 0) {
+      EXPECT_EQ(syscall_trace.status.error(), HostFnErrorCode::OutOfGas)
+          << "syscall " << static_cast<int64_t>(
+                 std::to_underlying(syscall_trace.body.syscall_number()))
+          << " was entered with no gas remaining and did not fail out-of-gas";
+    }
+
+    if (syscall_trace.body.syscall_number() != SyscallNo::kInvoke) {
+      continue;
+    }
+    auto const &invoke_trace = syscall_trace.body.invoke();
+    if (invoke_trace.outputs == nullptr ||
+        invoke_trace.outputs->child_trace == nullptr) {
+      continue;
+    }
+    expect_no_syscall_succeeded_on_exhausted_frame(
+        *invoke_trace.outputs->child_trace);
+  }
+}
+
+} // namespace
+
+// Sweeps the gas limit across the range where a real wasm contract runs out
+// mid-execution, so the frame is exhausted at a wide spread of points --
+// including, on an engine whose fuel checkpoint sits after the call boundary,
+// exactly at a syscall. Whatever the limit, no syscall may report success on
+// an exhausted frame.
+//
+// wasm is the engine that matters here: the rv32 machine settles its gas
+// deficit before the syscall (see rv32/threaded_machine.h), while wasmtime's
+// fuel is checked on the far side of `Operator::Call`.
+//
+// The sweep calibrates itself off one full run rather than hard-coding a gas
+// number. The whole point of the reported bug is that the dangerous limit is
+// whichever one lands the fuel counter on zero at a call, and that moves with
+// instruction costs, the wasm-meter, and the compiler backend -- a pinned
+// constant would silently stop covering the boundary.
+TEST_F(TracingTest, NoSyscallSucceedsOnAnExhaustedFrame)
+{
+  auto contract = hogd::load_contract("sha256_wrapper.wasm");
+  auto contract_addr = make_contract_address(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto client =
+      ContractTraitClient<sha256_wrapper::Sha256Wrapper>(contract_addr);
+
+  constexpr uint32_t kRepeats = 5;
+  // Enough sample points to land on a range of exhaustion sites without
+  // turning this into a long-running test.
+  constexpr GasAmount kSweepPoints = 200;
+
+  x23::Vec<uint8_t, 0xffffffff> data = {1, 2, 3, 4, 5};
+
+  // Calibrate against a run that comfortably completes, so the sweep brackets
+  // the real exhaustion point.
+  GasAmount full_run_gas = 0;
+  {
+    auto handler = make_new_system_call_handler(
+        Transaction{.invocation = client.make_invocation<u8"sha256_repeated">(
+                        1'000'000, kRepeats, data),
+                    .uniquifier = make_new_uniquifier()},
+        *runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    full_run_gas = res.gas_consumed_;
+  }
+  ASSERT_GT(full_run_gas, 0U);
+
+  // Sweep a little past the real cost so the tail of the range completes.
+  GasAmount const sweep_max = full_run_gas + (full_run_gas / 8);
+  GasAmount const step = std::max<GasAmount>(1, sweep_max / kSweepPoints);
+
+  bool saw_success = false;
+  bool saw_failure = false;
+
+  for (GasAmount gas_limit = 0; gas_limit <= sweep_max; gas_limit += step) {
+    auto handler = make_new_system_call_handler(
+        Transaction{.invocation = client.make_invocation<u8"sha256_repeated">(
+                        gas_limit, kRepeats, data),
+                    .uniquifier = make_new_uniquifier()},
+        *runtime_context_);
+    handler.enable_tracing();
+    auto res = handler.root_invoke();
+
+    if (res.is_root_success()) {
+      saw_success = true;
+    }
+    else {
+      saw_failure = true;
+    }
+
+    auto const *trace = handler.get_trace();
+    ASSERT_NE(trace, nullptr) << "gas_limit = " << gas_limit;
+
+    SCOPED_TRACE(testing::Message() << "gas_limit = " << gas_limit);
+    expect_no_syscall_succeeded_on_exhausted_frame(*trace);
+  }
+
+  // Guard the sweep itself: if the calibration drifts so that every run lands
+  // on the same side, the test stops covering the boundary it exists for.
+  EXPECT_TRUE(saw_failure) << "sweep never exhausted the frame";
+  EXPECT_TRUE(saw_success) << "sweep never reached a completing run";
 }
 
 // NOLINTEND(bugprone-exception-escape)
