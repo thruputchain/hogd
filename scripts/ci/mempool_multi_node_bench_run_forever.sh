@@ -115,11 +115,16 @@ set -euo pipefail
 ulimit -c unlimited || true
 ${quoted_cmd} &
 child=\$!
-trap 'kill -TERM "\$child" 2>/dev/null || true' TERM INT HUP
+stopped=0
+trap 'stopped=1; kill -TERM "\$child" 2>/dev/null || true' TERM INT HUP
 set +e
 wait "\$child"
 status=\$?
-[ \$status -gt 128 ] && { wait "\$child"; status=\$?; }
+if [ \$stopped -eq 1 ]; then
+  wait "\$child"
+  reaped=\$?
+  [ \$reaped -ne 127 ] && status=\$reaped
+fi
 set -e
 [ \$status -eq 124 ] && status=0
 exit \$status

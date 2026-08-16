@@ -118,9 +118,19 @@ EOF
 # the command in the background and forward the stop to it.
 #
 # A trapped signal makes [wait] return 128+signal without reaping the child, so
-# the child's own status needs a second [wait]. 124 is [timeout] reaping a
-# mempool that outlived the load, which is this benchmark's expected end rather
-# than a failure.
+# the child's own status then needs a second [wait]. Which of the two happened
+# cannot be read off that status: a child killed by a signal of its own reports
+# 128+signal too, and has already been reaped. Waiting again on a reaped child
+# returns 127, so keying the second wait on the status would turn every crash
+# into a bare 127 and lose the signal -- and the signal is the whole point of
+# the status here, as this suite's own reports show ("mempool exit status 134
+# (killed by signal 6: SIGABRT)"). The trap records that it fired instead, and
+# the second wait keeps the first status if the child turns out to have been
+# reaped already, which is the race where the stop and the child's own exit
+# land together.
+#
+# 124 is [timeout] reaping a mempool that outlived the load, which is this
+# benchmark's expected end rather than a failure.
 make_ulimit_forwarding_script() {
   local quoted_cmd
   quoted_cmd=$(quote_cmd "$@")
@@ -129,11 +139,16 @@ set -euo pipefail
 ulimit -c unlimited || true
 ${quoted_cmd} &
 child=\$!
-trap 'kill -TERM "\$child" 2>/dev/null || true' TERM INT HUP
+stopped=0
+trap 'stopped=1; kill -TERM "\$child" 2>/dev/null || true' TERM INT HUP
 set +e
 wait "\$child"
 status=\$?
-[ \$status -gt 128 ] && { wait "\$child"; status=\$?; }
+if [ \$stopped -eq 1 ]; then
+  wait "\$child"
+  reaped=\$?
+  [ \$reaped -ne 127 ] && status=\$reaped
+fi
 set -e
 [ \$status -eq 124 ] && status=0
 exit \$status
