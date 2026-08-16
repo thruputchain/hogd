@@ -79,6 +79,64 @@ wait_for_child(pid_t child_pid)
 
   return exit_code;
 }
+
+// How long the members of a stopped launch's process group get to exit on
+// SIGTERM before they are escalated to SIGKILL, and how long the SIGKILL then
+// gets to take effect. These are the inner bound; [ci_reap_program] in
+// scripts/ci/bench_harness.sh is the outer one and waits longer.
+constexpr auto kGroupTermTimeout = std::chrono::seconds{10};
+constexpr auto kGroupKillTimeout = std::chrono::seconds{5};
+constexpr auto kGroupPollInterval = std::chrono::milliseconds{20};
+
+// A process group outlives its leader: it exists for as long as any member
+// does, so [kill] answers ESRCH only once the last one is gone. That is what
+// makes the group the right handle for this -- the launches that strand a
+// socket are the ones whose root died on its own, like a [chuckd.dev] that
+// panics and leaves its [scpd.dev] holding 127.0.0.1:4400 with nobody left to
+// signal it.
+//
+// The group's own leader must already have been reaped before this can ever
+// answer true: a zombie is still a member.
+bool
+process_group_is_empty(pid_t pgid)
+{
+  return kill(-pgid, 0) == -1 && errno == ESRCH;
+}
+
+bool
+wait_for_empty_process_group(pid_t pgid,
+                             std::chrono::steady_clock::duration timeout)
+{
+  auto const deadline = std::chrono::steady_clock::now() + timeout;
+  while (true) {
+    if (process_group_is_empty(pgid))
+      return true;
+    if (std::chrono::steady_clock::now() >= deadline)
+      return false;
+    std::this_thread::sleep_for(kGroupPollInterval);
+  }
+}
+
+// Waits out the SIGTERM already sent to [pgid], escalating to SIGKILL, and
+// does not return until the group is empty or has outlived both signals.
+//
+// A member that has merely been signalled is still a member holding a socket:
+// [ciserver_stop]'s callers launch the next benchmark within seconds and bind
+// the same fixed ports, so returning before the group has drained hands them a
+// bind they are going to lose.
+void
+drain_process_group(pid_t pgid)
+{
+  if (wait_for_empty_process_group(pgid, kGroupTermTimeout))
+    return;
+
+  info("process group {} alive after SIGTERM, escalating to SIGKILL", pgid);
+  kill(-pgid, SIGKILL);
+  if (wait_for_empty_process_group(pgid, kGroupKillTimeout))
+    return;
+
+  error("process group {} still has members after SIGKILL", pgid);
+}
 // NOLINTEND(misc-include-cleaner)
 
 std::string
@@ -400,20 +458,31 @@ public:
     std::lock_guard lock(running_pid_mutex_);
 
     for (auto &[pid, subprocess] : subprocesses_) {
-      if (!subprocess->get_exit_code().has_value()) {
+      bool const root_running = !subprocess->get_exit_code().has_value();
+      if (root_running) {
         info("stopping running process: {}", pid);
-        // Signal the whole group the launch leads, not just its root: the
-        // grandchildren the benchmarks fork hold listening sockets that the
-        // next benchmark step has to bind. Fall back to the root alone if the
-        // group is already gone, which is what ESRCH here means.
-        // NOLINTBEGIN(misc-include-cleaner)
-        if (kill(-pid, SIGTERM) == -1) {
-          kill(pid, SIGTERM);
-        }
-        // NOLINTEND(misc-include-cleaner)
       }
 
+      // Signal the whole group the launch leads, not just its root: the
+      // grandchildren the benchmarks fork hold listening sockets that the next
+      // benchmark step has to bind. The group is signalled even when the root
+      // has already exited, which is precisely when a grandchild is left with
+      // nobody to stop it -- a [chuckd.dev] that panics on startup takes
+      // itself out and strands the [scpd.dev] it forked on 127.0.0.1:4400.
+      //
+      // ESRCH with the root still running means [setpgid] never took and there
+      // is no group to signal, so fall back to the root alone.
+      // NOLINTBEGIN(misc-include-cleaner)
+      if (kill(-pid, SIGTERM) == -1 && root_running) {
+        kill(pid, SIGTERM);
+      }
+      // NOLINTEND(misc-include-cleaner)
+
+      // Reap the root before draining the group: until [waitpid] has taken it,
+      // its zombie is still a member and the group could never look empty.
       subprocess->wait_for_shutdown();
+
+      drain_process_group(pid);
     }
 
     subprocesses_.clear();
