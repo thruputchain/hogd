@@ -24,7 +24,7 @@ echo 'build gcc debug'
 
 export DEFAULT_THREADPOOL_SIZE=1
 echo 'run gcc tests'
-ctest --test-dir build/gcc --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_report.sh --test-dir build/gcc --parallel --timeout 100 --output-on-failure
 unset DEFAULT_THREADPOOL_SIZE
 
 """

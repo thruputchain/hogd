@@ -35,13 +35,13 @@ echo 'build clang asan'
 ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm tests'
-ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_report.sh --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
 
 echo 'build clang asan release'
 ./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm asan tests release'
-ctest --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_report.sh --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
 
 # Gcc doesn't support ignorelist with ubsan, so the ubsan build is clang-only.
 echo 'build clang ubsan'
@@ -50,7 +50,7 @@ echo 'build clang ubsan'
 echo 'run llvm ubsan tests'
 export UBSAN_OPTIONS=print_stacktrace=1
 export HOG_DEVNODE_EXIT_TIMEOUT_SECS=30
-ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_report.sh --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
 
 """
 after = """
@@ -111,14 +111,14 @@ echo 'build gcc asan'
 ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests'
-ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_report.sh --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
 # gcc release seems to be more likely broken than clang release?
 echo 'build gcc asan release'
 ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests release'
-ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_report.sh --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
 
 """
 after = """
