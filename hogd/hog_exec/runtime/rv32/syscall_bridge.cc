@@ -74,18 +74,22 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::continue_with(static_cast<uint32_t>(result.result_code),
                                      result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Return):
-    // Return and Exit terminate the VM invocation cleanly after committing the
-    // same guest-memory output writes the WASM path would expose.
+    // Return terminates the VM invocation cleanly after committing the same
+    // guest-memory output writes the WASM path would expose.
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
     return HostResult::halt(0, result.gas_consumed);
   case std::to_underlying(HostFnErrorCode::Exit):
+    // Exit is a deterministic frame abort on every runtime; the trampoline
+    // result_code is not an exit status. Memory still commits, matching the
+    // live-memory production bridge.
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
-    return HostResult::halt(static_cast<uint32_t>(result.result_code),
-                            result.gas_consumed);
+    return HostResult::deterministic_trap(result.gas_consumed,
+                                          static_cast<uint32_t>(
+                                              result.result_code));
   case std::to_underlying(HostFnErrorCode::OutOfGas):
     // The bridge returns out_of_gas before writing any guest memory, so there
     // is nothing to roll back; complete_ecall no longer snapshots memory.

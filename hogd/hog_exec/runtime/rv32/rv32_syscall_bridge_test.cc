@@ -534,7 +534,7 @@ TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
   EXPECT_EQ(memory, before);
 }
 
-TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
+TEST(Rv32SyscallBridgeTest, mapsReturnPanicToHaltZero)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(64);
@@ -542,7 +542,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
-  // capture_entry writes 0xa5 to scratch byte 7; both halt paths must commit
+  // capture_entry writes 0xa5 to scratch byte 7; the halt path must commit
   // that scratch back to guest memory (the guest-visible Return output buffer
   // is delivered the same way).
   captured.result = {.result_code = 3,
@@ -553,16 +553,27 @@ TEST(Rv32SyscallBridgeTest, mapsReturnAndExitPanicsToHalt)
   EXPECT_EQ(result.halt_code(), 0U);
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(memory[7], 0xa5U);
+}
 
-  memory[7] = 0;
-  captured.result = {.result_code = 9,
-                     .panic = std::to_underlying(HostFnErrorCode::Exit),
-                     .gas_consumed = 4};
-  result = bridge.ecall(view, EcallArgs{});
-  EXPECT_EQ(result.status, HostStatus::kHalt);
-  EXPECT_EQ(result.halt_code(), 9U);
-  EXPECT_EQ(result.gas_consumed, 4U);
-  EXPECT_EQ(memory[7], 0xa5U);
+TEST(Rv32SyscallBridgeTest, mapsExitPanicToDeterministicTrap)
+{
+  std::array<uint32_t, kRegisterCount> registers = {};
+  std::vector<uint8_t> memory(64);
+  CapturedCall captured;
+  SyscallBridgeHost bridge(&captured, capture_entry);
+  MachineView view(0, 10, registers, memory);
+
+  for (const int32_t result_code : {0, 9}) {
+    memory[7] = 0;
+    captured.result = {.result_code = result_code,
+                       .panic = std::to_underlying(HostFnErrorCode::Exit),
+                       .gas_consumed = 4};
+    HostResult result = bridge.ecall(view, EcallArgs{});
+    EXPECT_EQ(result.status, HostStatus::kTrap);
+    EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
+    EXPECT_EQ(result.gas_consumed, 4U);
+    EXPECT_EQ(memory[7], 0xa5U);
+  }
 }
 
 TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)

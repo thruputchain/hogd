@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 
@@ -24,7 +25,12 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
 {
   auto it = contexts_.find(deployed_contract.hash.contract_type);
   if (it == contexts_.end()) {
-    return nullptr;
+    // verify_contract rejects unregistered types before deployment, so a
+    // deployed contract with one is an internal inconsistency, not a
+    // contract fault.
+    error("Unrecoverable: no runtime context registered for contract type {}",
+          deployed_contract.hash.contract_type);
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
   return it->second.first->make_new_runtime(deployed_contract, syscall_handler);
 }
