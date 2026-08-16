@@ -134,9 +134,12 @@ FAKE_PS
 # [killall -q -SIG names...] records the signal it was asked for and clears
 # $ALIVE_FILE only for the signals in $DIES_ON, standing in for a process that
 # ignores SIGTERM. $KILLALL_FAILS makes it fail the way a host does when the
-# processes belong to another user: nonzero, with a complaint on stderr. A
-# signal that matches nothing exits 1 silently, which is what [killall -q] does
-# and must not be read as a failure.
+# processes belong to another user: nonzero, with a complaint on stderr.
+# $KILLALL_PARTIAL complains the same way but still delivers the signal, which
+# is what killall does when only *some* of the names were out of reach -- it
+# reports the whole run as a failure either way. A signal that matches nothing
+# exits 1 silently, which is what [killall -q] does and must not be read as a
+# failure.
 cat >"$reap_bin/killall" <<'FAKE_KILLALL'
 #!/usr/bin/env bash
 signal=""
@@ -148,6 +151,11 @@ done
 echo "$signal" >>"$SIGNAL_FILE"
 if [[ -n ${KILLALL_FAILS:-} ]]; then
   echo "hog-mempool(1234): Operation not permitted" >&2
+  exit 1
+fi
+if [[ -n ${KILLALL_PARTIAL:-} ]]; then
+  echo "hog-exec(1234): Operation not permitted" >&2
+  [[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
   exit 1
 fi
 [[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
@@ -191,7 +199,8 @@ run_reap() {
   reap_output=$(
     PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
       SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
-      KILLALL_FAILS="${KILLALL_FAILS:-}" SUDO_FAILS="${SUDO_FAILS:-}" \
+      KILLALL_FAILS="${KILLALL_FAILS:-}" \
+      KILLALL_PARTIAL="${KILLALL_PARTIAL:-}" SUDO_FAILS="${SUDO_FAILS:-}" \
       bash -c "$(ci_reap_program "${3:-hog-mempool hog-exec}" 1 1)" 2>&1
   ) || reap_status=$?
 }
@@ -246,6 +255,16 @@ check_eq "denied killall escalates to sudo" "0" "$reap_status"
 check_eq "sudo fallback delivers the same signal" "TERM TERM" \
   "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
 
+# [killall] reports the whole run as a failure when it could not signal *some*
+# of the names, so a round that reached the stale process but not a
+# differently-owned one still bought a grace period that has to be waited out.
+# Treating that as "could not signal" and returning early would hand the caller
+# a host where the signalled process is still holding its port.
+KILLALL_PARTIAL=1 SUDO_FAILS=1 run_reap "hog-mempool" "TERM KILL"
+check_eq "partially delivered signal is still waited out" "0" "$reap_status"
+check_eq "partially delivered signal is not escalated" "TERM" \
+  "$(cat "$signal_file")"
+
 # A host where neither route can signal has not been shown to have a process
 # refusing to die, so it must not report one: that reading fails the benchmark
 # step, and sends whoever reads it after a process nothing ever signalled.
@@ -256,8 +275,8 @@ check_contains "unsendable signal names the unprivileged failure" \
   "$reap_output"
 check_contains "unsendable signal names the sudo failure" \
   "via sudo: sudo: a password is required" "$reap_output"
-check_eq "unsendable signal does not wait out the timeouts" "TERM" \
-  "$(cat "$signal_file")"
+check_eq "unsendable signal is still escalated before it is reported" \
+  "TERM KILL" "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
 if [[ "$reap_output" == *"alive after SIGKILL"* ]]; then
   echo "FAIL unsendable signal must not claim a SIGKILL survivor"
   fail=1

@@ -351,11 +351,14 @@ wait_gone() {
   done
 }
 
-# Sends \$1 to every named process. Returns nonzero only when the signal could
-# not be sent at all, which has to be told apart from a process that refused to
-# die: [-q] silences killall's own "no process found", so a nonzero exit that
-# still says something is sudo or killall failing rather than an absence of
-# processes to kill.
+# What the last [signal_all] could not deliver, empty when it delivered.
+signal_failure=
+
+# Sends \$1 to every named process, recording in \$signal_failure the complaint
+# from a signal that could not be sent at all -- which has to be told apart
+# from a process that refused to die: [-q] silences killall's own "no process
+# found", so a nonzero exit that still says something is sudo or killall
+# failing rather than an absence of processes to kill.
 #
 # The unprivileged [killall] goes first and [sudo -n] is only the fallback. The
 # benchmark processes are started by this same user, so signalling them needs
@@ -368,24 +371,43 @@ wait_gone() {
 # starts its own coordinator on the same host, whose freshly forked scpd cannot
 # bind and dies, taking the coordinator down with "transport is closed".
 signal_all() {
+  signal_failure=
+
   plain_err=\$(\$killall_bin -q "-\$1" \$procs 2>&1) && return 0
   [ -n "\$plain_err" ] || return 0
 
   sudo_err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1) && return 0
   [ -n "\$sudo_err" ] || return 0
 
-  echo "cannot signal processes: \$plain_err; via sudo: \$sudo_err" >&2
+  signal_failure="\$plain_err; via sudo: \$sudo_err"
   return 1
 }
 
 # Signal first and ask questions after: a host that will not report its
 # processes must still have them reaped.
-signal_all TERM || exit 3
+#
+# A signal that could not be delivered is recorded rather than returned on:
+# [killall] fails as a whole when it could not signal *some* of the names, so a
+# round that reached the stale hog-mempool but not a hog-exec owned by someone
+# else must still wait out the grace period it just bought. Bailing here would
+# hand the caller back a host where the process that was signalled is still on
+# its way out and still holding its port -- the very race this wait exists to
+# close.
+signal_all TERM
 wait_gone "\$term_timeout" && exit 0
 
 echo "alive after SIGTERM, escalating to SIGKILL:\$(survivors)" >&2
-signal_all KILL || exit 3
+signal_all KILL
 wait_gone "\$kill_timeout" && exit 0
+
+# Whatever is still here either refused to die or was never signalled, and the
+# two must not be confused: a host that could not deliver the signal has not
+# been shown to have a process refusing to die, and must not be reported as
+# though it had.
+if [ -n "\$signal_failure" ]; then
+  echo "cannot signal processes: \$signal_failure" >&2
+  exit 3
+fi
 
 echo "alive after SIGKILL:\$(survivors)" >&2
 exit 2
