@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -23,6 +25,7 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -570,7 +573,7 @@ TEST_F(TraceShapeTest, VerifySignatureTraceIsExact)
   const auto signature_opt =
       ed25519_sign(secret_key, x23::BufView(message.data(), message.size()));
   ASSERT_TRUE(signature_opt.has_value());
-  const Ed25519Signature signature = *signature_opt;
+  const Ed25519Signature signature = signature_opt.value();
 
   auto addr =
       deploy_sdk_contract<ed25519_verify_wrapper::Ed25519VerifyWrapper>();
