@@ -408,7 +408,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
         }
       },
       [&](ContractAddress const &addr, DeployedContractHash const &hash) {
-        auto r = itx->request_deploy_contract(addr, hash);
+        auto r = itx->request_deploy_contract(addr, hash,
+                                              std::to_underlying(
+                                                  StorageDeltaFlags::None));
         if (!r.has_value()) {
           error("failed to write genesis block deployment: {}", r.error());
           failure = true;

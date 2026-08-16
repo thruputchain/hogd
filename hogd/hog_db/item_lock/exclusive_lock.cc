@@ -36,6 +36,15 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
   if (after->is_deletion()) {
     return 0;
   }
+  if (after->is_deploy_contract()) {
+    // Read the change in place rather than via to_new_deployment(), which
+    // would copy the whole DeployedContractData into an optional just to
+    // read one field out of it.
+    auto const *deployment = after->get_inner<DeployedContractData>();
+    CHECK_PTR(deployment);
+    return ctx.cost_model->get_deployment_cost(
+        deployment->deployed_contract_hash());
+  }
   if (after->is_auth_data()) {
     auto const &auth_data = after->to_auth_data();
     x23assert(auth_data.has_value());
