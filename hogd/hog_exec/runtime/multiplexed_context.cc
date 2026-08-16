@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 
