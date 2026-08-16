@@ -1,11 +1,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "built_contracts/ed25519_verify_wrapper.h"
+#include "built_contracts/fibonacci.h"
+#include "built_contracts/fibonacci_call.h"
+#include "built_contracts/manual_revert_test.h"
 #include "built_contracts/no_syscall_test.h"
 #include "built_contracts/read_only_test.h"
 #include "built_contracts/sha256_wrapper.h"
@@ -19,6 +25,7 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -83,13 +90,63 @@ get_calldata_entry(GasAmount gas, Calldata const &calldata)
 }
 
 SyscallTrace
-return_entry(GasAmount gas, std::span<const uint8_t> buffer)
+return_entry(GasAmount gas, std::span<const uint8_t> buffer,
+             bool revert_frame = false)
 {
   SyscallTraceBody body(SyscallNo::kReturn);
   body.return_trace().inputs.buffer.append_range(buffer);
-  body.return_trace().inputs.revert_frame = false;
+  body.return_trace().inputs.revert_frame = revert_frame;
   return make_entry(gas, gas, std::move(body),
                     HostFunctionStatusXdr(HostFnErrorCode::Return));
+}
+
+SyscallTrace
+bytestring_get_len_entry(GasAmount gas, StorageKeyContractData const &key,
+                         uint32_t length)
+{
+  SyscallTraceBody body(SyscallNo::kBytestringGetLen);
+  body.bytestring_get_len().inputs.key = key;
+  body.bytestring_get_len().outputs =
+      SyscallBytestringGetLenOutputs{.length = length};
+  return make_entry(gas, gas, std::move(body), ok_status());
+}
+
+SyscallTrace
+bytestring_get_entry(GasAmount gas, StorageKeyContractData const &key,
+                     std::span<const uint8_t> value)
+{
+  SyscallTraceBody body(SyscallNo::kBytestringGet);
+  body.bytestring_get().inputs.key = key;
+  SyscallBytestringGetOutputs outputs;
+  outputs.bytestring.append_range(value);
+  body.bytestring_get().outputs = std::move(outputs);
+  return make_entry(gas, gas, std::move(body), ok_status());
+}
+
+SyscallTrace
+get_returned_buffer_entry(GasAmount gas, std::span<const uint8_t> buffer)
+{
+  SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
+  SyscallGetReturnedBufferOutputs outputs;
+  outputs.buffer.append_range(buffer);
+  body.get_returned_buffer().outputs = std::move(outputs);
+  return make_entry(gas, gas, std::move(body), ok_status());
+}
+
+std::vector<uint8_t>
+from_hex(std::string_view hex)
+{
+  std::vector<uint8_t> bytes;
+  bytes.reserve(hex.size() / 2);
+  for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+    auto nibble = [](char c) -> uint8_t {
+      return c >= 'a' ? static_cast<uint8_t>(c - 'a' + 10)
+                      : static_cast<uint8_t>(c - '0');
+    };
+    bytes.push_back(
+        static_cast<uint8_t>((nibble(hex[i]) << 4U) | nibble(hex[i + 1])));
+  }
+  return bytes;
 }
 
 } // namespace
@@ -115,10 +172,11 @@ protected:
 
   constexpr static GasAmount kGasLimit = 100'000;
 
-  template<typename Trait> ContractAddress deploy_sdk_contract()
+  template<typename Trait>
+  ContractAddress deploy_sdk_contract(uint64_t addr_seed = 0)
   {
     auto contract = ContractTraitMeta<Trait>::load_rv32();
-    auto addr = make_contract_address(0);
+    auto addr = make_contract_address(addr_seed);
     write_contract(contract);
     write_deployment(addr, contract);
     setup_grant_storage_token(addr, 1'000'000'000);
@@ -273,6 +331,286 @@ TEST_F(TraceShapeTest, InvalidSyscallFallbackTraceIsExact)
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
+}
+
+TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
+{
+  auto fibonacci_addr = deploy_sdk_contract<fibonacci::Fibonacci>(0);
+  auto caller_addr = deploy_sdk_contract<fibonacci_call::FibonacciCaller>(1);
+  ContractTraitClient<fibonacci_call::FibonacciCaller> caller(caller_addr);
+
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  caller.make_invocation<u8"initialize">(
+                                      kGasLimit, fibonacci_addr),
+                              .uniquifier = make_new_uniquifier()}},
+        runtime_context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    advance_block();
+  }
+
+  const SignedTransaction tx{
+      .tx =
+          Transaction{.invocation = caller.make_invocation<u8"call_fibonacci">(
+                          kGasLimit, uint32_t{5}, uint64_t{50'000}),
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, runtime_context_);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  // The caller derives its storage key by hashing the SDK static_key
+  // preimage (length-prefixed "FibonacciContractCaller" plus the field tag),
+  // loads the stored fibonacci address, and cross-calls it.
+  const std::vector<uint8_t> key_preimage =
+      from_hex("18174669626f6e61636369436f6e747261637443616c6c65720100");
+  const SHA256Hash storage_key = sha256(std::span<const uint8_t>(key_preimage));
+  const Invocation inner =
+      ContractTraitClient<fibonacci::Fibonacci>(fibonacci_addr)
+          .make_invocation<u8"slow_fibonacci">(50'000, uint32_t{5});
+  const auto fib_entrypoint = inner.entrypoint;
+  const Calldata &inner_calldata = inner.calldata;
+
+  SyscallTraceVec expected;
+  expected.push_back(get_calldata_entry(99'918, tx.tx.invocation.calldata));
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256);
+    body.sha256().inputs.input.append_range(key_preimage);
+    body.sha256().outputs = SyscallSHA256Outputs{.hash = storage_key};
+    expected.push_back(make_entry(98'930,
+                                  98'930 - SHA256HashCost(key_preimage.size()),
+                                  std::move(body), ok_status()));
+  }
+  expected.push_back(bytestring_get_len_entry(95'676, storage_key, 32));
+  expected.push_back(
+      bytestring_get_entry(95'661, storage_key,
+                           std::span<const uint8_t>(fibonacci_addr.begin(),
+                                                    fibonacci_addr.end())));
+  {
+    SyscallTraceBody body(SyscallNo::kInvoke);
+    body.invoke().inputs.address = fibonacci_addr;
+    body.invoke().inputs.calldata.append_range(inner_calldata);
+    body.invoke().inputs.inputs = CopyableInvokeInputs{
+        .entrypoint_id = sdk_method_id(fib_entrypoint),
+        .gas_limit = 50'000,
+        .flags = std::to_underlying(InvokeFlag::None),
+    };
+    InvocationFrameTrace child;
+    child.invocation = Invocation{
+        .invoked_address = fibonacci_addr,
+        .entrypoint = fib_entrypoint,
+        .gas_limit = 50'000,
+        .calldata = {},
+    };
+    child.invocation.calldata = inner_calldata;
+    child.system_calls.push_back(get_calldata_entry(49'918, inner_calldata));
+    child.system_calls.push_back(return_entry(49'658, inner_calldata));
+    child.status = InvocationFrameOutput(InvocationFrameStatusCode::Return);
+    child.status.return_buffer().append_range(inner_calldata);
+    body.invoke().outputs =
+        SyscallInvokeOutputs{.child_trace = std::move(child)};
+    // The kInvoke entry's gas delta is the child frame's total consumption.
+    expected.push_back(
+        make_entry(95'548, 95'206, std::move(body), ok_status()));
+  }
+  expected.push_back(get_returned_buffer_entry(95'177, inner_calldata));
+  expected.push_back(return_entry(95'067, {}));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+}
+
+TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
+{
+  auto fibonacci_addr = deploy_sdk_contract<fibonacci::Fibonacci>(0);
+  auto caller_addr = deploy_sdk_contract<fibonacci_call::FibonacciCaller>(1);
+  ContractTraitClient<fibonacci_call::FibonacciCaller> caller(caller_addr);
+
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  caller.make_invocation<u8"initialize">(
+                                      kGasLimit, fibonacci_addr),
+                              .uniquifier = make_new_uniquifier()}},
+        runtime_context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    advance_block();
+  }
+
+  const SignedTransaction tx{
+      .tx = Transaction{
+          .invocation =
+              caller.make_invocation<u8"call_fibonacci_expect_out_of_gas">(
+                  kGasLimit, uint32_t{20}, uint64_t{1000}),
+          .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, runtime_context_);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  const std::vector<uint8_t> key_preimage =
+      from_hex("18174669626f6e61636369436f6e747261637443616c6c65720100");
+  const SHA256Hash storage_key = sha256(std::span<const uint8_t>(key_preimage));
+  const Invocation inner =
+      ContractTraitClient<fibonacci::Fibonacci>(fibonacci_addr)
+          .make_invocation<u8"slow_fibonacci">(1000, uint32_t{20});
+  const auto fib_entrypoint = inner.entrypoint;
+  const Calldata &inner_calldata = inner.calldata;
+
+  SyscallTraceVec expected;
+  expected.push_back(get_calldata_entry(99'898, tx.tx.invocation.calldata));
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256);
+    body.sha256().inputs.input.append_range(key_preimage);
+    body.sha256().outputs = SyscallSHA256Outputs{.hash = storage_key};
+    expected.push_back(make_entry(98'911,
+                                  98'911 - SHA256HashCost(key_preimage.size()),
+                                  std::move(body), ok_status()));
+  }
+  expected.push_back(bytestring_get_len_entry(95'657, storage_key, 32));
+  expected.push_back(
+      bytestring_get_entry(95'642, storage_key,
+                           std::span<const uint8_t>(fibonacci_addr.begin(),
+                                                    fibonacci_addr.end())));
+  {
+    SyscallTraceBody body(SyscallNo::kInvoke);
+    body.invoke().inputs.address = fibonacci_addr;
+    body.invoke().inputs.calldata.append_range(inner_calldata);
+    body.invoke().inputs.inputs = CopyableInvokeInputs{
+        .entrypoint_id = sdk_method_id(fib_entrypoint),
+        .gas_limit = 1000,
+        .flags = std::to_underlying(InvokeFlag::None),
+    };
+    InvocationFrameTrace child;
+    child.invocation = Invocation{
+        .invoked_address = fibonacci_addr,
+        .entrypoint = fib_entrypoint,
+        .gas_limit = 1000,
+        .calldata = {},
+    };
+    child.invocation.calldata = inner_calldata;
+    child.system_calls.push_back(get_calldata_entry(918, inner_calldata));
+    child.status = InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+    body.invoke().outputs =
+        SyscallInvokeOutputs{.child_trace = std::move(child)};
+    // The out-of-gas child consumes its entire 1000-gas limit.
+    expected.push_back(
+        make_entry(95'530, 94'530, std::move(body), ok_status()));
+  }
+  expected.push_back(return_entry(94'468, {}));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+}
+
+TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
+{
+  auto addr = deploy_sdk_contract<manual_revert_test::ManualRevertTest>();
+  ContractTraitClient<manual_revert_test::ManualRevertTest> client(addr);
+  const SignedTransaction tx{
+      .tx =
+          Transaction{.invocation =
+                          client.make_invocation<u8"test_basic_manual_revert">(
+                              kGasLimit, true),
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, runtime_context_);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  // CXS encoding of the thrown ManualRevertTestError::BasicRevert exception.
+  const std::vector<uint8_t> abort_buffer = from_hex("ffb6f18780ef7b828201");
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
+  EXPECT_TRUE(std::ranges::equal(output.abort_buffer(), abort_buffer));
+
+  // static_key! derivation of the contract's test storage key; the value it
+  // writes before aborting is recorded in the trace even though the frame's
+  // writes are discarded.
+  const std::vector<uint8_t> key_bytes = from_hex(
+      "c3d09081ec06ff964889b704181ca39a3398d69782d8479a434deb039b6075ec");
+  StorageKeyContractData key{};
+  std::ranges::copy(key_bytes, key.begin());
+  const std::string_view value_str = "state_before_revert";
+  const std::vector<uint8_t> value(value_str.begin(), value_str.end());
+
+  SyscallTraceVec expected;
+  expected.push_back(get_calldata_len_entry(
+      99'887, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'863, tx.tx.invocation.calldata));
+  {
+    SyscallTraceBody body(SyscallNo::kBytestringSet);
+    body.bytestring_set().inputs.key = key;
+    body.bytestring_set().inputs.bytestring.append_range(value);
+    body.bytestring_set().inputs.flags = 0;
+    expected.push_back(
+        make_entry(99'759, 99'759, std::move(body), ok_status()));
+  }
+  expected.push_back(return_entry(99'650, abort_buffer, /*revert_frame=*/true));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+  EXPECT_EQ(handler.get_trace()->status.status_code(),
+            InvocationFrameStatusCode::Abort);
+  EXPECT_EQ(handler.get_trace()->storage_writes.size(), 1U);
+}
+
+TEST_F(TraceShapeTest, VerifySignatureTraceIsExact)
+{
+  std::array<std::byte, 32> seed{};
+  seed.fill(std::byte{7});
+  const auto [public_key, secret_key] =
+      ed25519_keygen_from_seed(std::span<const std::byte, 32>(seed));
+  const x23::Vec<uint8_t, 0xffffffff> message = {0xde, 0xad, 0xbe, 0xef};
+  const auto signature_opt =
+      ed25519_sign(secret_key, x23::BufView(message.data(), message.size()));
+  ASSERT_TRUE(signature_opt.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const Ed25519Signature signature = *signature_opt;
+
+  auto addr =
+      deploy_sdk_contract<ed25519_verify_wrapper::Ed25519VerifyWrapper>();
+  ContractTraitClient<ed25519_verify_wrapper::Ed25519VerifyWrapper> client(
+      addr);
+  const SignedTransaction tx{
+      .tx =
+          Transaction{.invocation = client.make_invocation<u8"ed25519_verify">(
+                          kGasLimit, message, signature, public_key),
+                      .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, runtime_context_);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  SyscallTraceVec expected;
+  expected.push_back(get_calldata_len_entry(
+      99'917, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'893, tx.tx.invocation.calldata));
+  {
+    // Signature verification charges no direct host gas.
+    SyscallTraceBody body(SyscallNo::kVerifySignature);
+    body.verify_signature().inputs.scheme =
+        std::to_underlying(CryptographicScheme::Ed25519);
+    body.verify_signature().inputs.signature.append_range(signature);
+    body.verify_signature().inputs.public_key.append_range(public_key);
+    body.verify_signature().inputs.message.append_range(message);
+    expected.push_back(
+        make_entry(99'812, 99'812, std::move(body), ok_status()));
+  }
+  const std::vector<uint8_t> true_cxs = {0x01};
+  expected.push_back(return_entry(99'725, true_cxs));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
 }
 
 } // namespace hogd

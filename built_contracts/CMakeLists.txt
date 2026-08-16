@@ -393,6 +393,7 @@ add_contract_header(payment_channel "${CURRENT_RELATIVE_SOURCE_DIR}/payment_chan
 add_contract_header(return_fault_test)
 add_contract_header(tuple_return)
 add_contract_header(no_syscall_test)
+add_contract_header(ed25519_verify_wrapper)
 add_contract_header(syscall_misc_tests)
 add_contract_header(syscall_parse_hardening_test)
 add_contract_header(nnint_output_fault_test)
