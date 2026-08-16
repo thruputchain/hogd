@@ -679,8 +679,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
 
   auto [syscall_res, gas_consumed] =
       wrap_outer<FreeReturnSyscallMeta>(handler, make_null_context(0),
-                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                        0);
+                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 0);
@@ -725,16 +724,18 @@ TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
                                std::span<uint32_t>{})
                   .has_value());
 
-  auto [at_cost, gas_at_cost] = wrap_outer<FixedCostSyscallMeta>(
-      handler, make_null_context(kFixedSyscallCost), kNoTracingSyscall, 0, 0, 0,
-      0, 0, 0, 0);
+  auto [at_cost, gas_at_cost] =
+      wrap_outer<FixedCostSyscallMeta>(handler,
+                                       make_null_context(kFixedSyscallCost),
+                                       kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_FALSE(at_cost.has_value());
   ASSERT_EQ(at_cost.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_at_cost, kFixedSyscallCost);
 
-  auto [above_cost, gas_above_cost] = wrap_outer<FixedCostSyscallMeta>(
-      handler, make_null_context(kFixedSyscallCost + 1), kNoTracingSyscall, 0,
-      0, 0, 0, 0, 0, 0);
+  auto [above_cost, gas_above_cost] =
+      wrap_outer<FixedCostSyscallMeta>(handler,
+                                       make_null_context(kFixedSyscallCost + 1),
+                                       kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
   ASSERT_TRUE(above_cost.has_value());
   ASSERT_EQ(*above_cost, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_above_cost, kFixedSyscallCost);
@@ -817,9 +818,9 @@ TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
   uint32_t token_id = 0;
   auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
       BlockHeight{1000},
-      std::span<const std::byte>{
-          reinterpret_cast<const std::byte *>(serialized_root.data()),
-          serialized_root.size()},
+      std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                     serialized_root.data()),
+                                 serialized_root.size()},
       token_id);
 
   ASSERT_FALSE(mint_res.has_value());
@@ -841,9 +842,9 @@ TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
 
   NativeSyscallContext ctx(handler, 0);
   std::array<std::byte, 4> ret_buf{};
-  auto ret_res = ctx.syscall<SyscallNo::kReturn>(
-      std::span<const std::byte>{ret_buf}, false,
-      std::span<const std::byte>{});
+  auto ret_res =
+      ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{ret_buf},
+                                      false, std::span<const std::byte>{});
 
   // OutOfGas, not Return: Return is what commits the frame to its parent.
   ASSERT_FALSE(ret_res.has_value());

@@ -786,7 +786,8 @@ expect_no_syscall_succeeded_on_exhausted_frame(
   for (auto const &syscall_trace : frame.system_calls) {
     if (syscall_trace.gas_remaining_at_start == 0) {
       EXPECT_EQ(syscall_trace.status.error(), HostFnErrorCode::OutOfGas)
-          << "syscall " << static_cast<int64_t>(
+          << "syscall "
+          << static_cast<int64_t>(
                  std::to_underlying(syscall_trace.body.syscall_number()))
           << " was entered with no gas remaining and did not fail out-of-gas";
     }
