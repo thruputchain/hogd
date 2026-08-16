@@ -1,9 +1,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
-#include <exception>
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -19,7 +17,7 @@ syscall_GetDeployAddress_inner(
     SystemCallHandler &syscall_handler,
     const ContractAddress *optional_input_caller_address,
     const SHA256Hash &input_nonce, const SHA256Hash &input_contract_hash,
-    ContractAddress &output_to_be_deployed) noexcept
+    ContractAddress &output_to_be_deployed)
 {
   if (optional_input_caller_address) {
     output_to_be_deployed = SystemCallHandler::static_get_deploy_address(
@@ -34,13 +32,8 @@ syscall_GetDeployAddress_inner(
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetDeployAddress>()) {
-    try {
-      trace_data->outputs.emplace(SyscallGetDeployAddressOutputs{
-          .to_be_deployed = output_to_be_deployed});
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-    }
+    trace_data->outputs.emplace(SyscallGetDeployAddressOutputs{
+        .to_be_deployed = output_to_be_deployed});
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
@@ -49,7 +42,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_nonce,
                              const SHA256Hash &input_contract_hash,
-                             ContractAddress &output_deployed_address) noexcept
+                             ContractAddress &output_deployed_address)
 {
   auto status =
       syscall_handler.deploy_contract(input_nonce, input_contract_hash);
@@ -65,13 +58,8 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kDeployContract>()) {
-    try {
-      trace_data->outputs.emplace(SyscallDeployContractOutputs{
-          .deployed_address = output_deployed_address});
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-    }
+    trace_data->outputs.emplace(SyscallDeployContractOutputs{
+        .deployed_address = output_deployed_address});
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};

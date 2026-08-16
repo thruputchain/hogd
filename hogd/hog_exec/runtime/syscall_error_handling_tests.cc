@@ -36,7 +36,7 @@ namespace {
 
 template<HostFnErrorCode Code>
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-error_syscall_func() noexcept
+error_syscall_func()
 {
   return {HostFnError{Code}, WrappedGasAmount{1000}};
 }
@@ -180,7 +180,7 @@ TEST_F(SyscallErrorHandlingTest, GasLimitOverridesExit)
 
 namespace {
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-noreturn_failing_syscall_func() noexcept
+noreturn_failing_syscall_func()
 {
   return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{1000}};
 }
@@ -222,7 +222,7 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
 namespace {
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-noerror_syscall_func() noexcept
+noerror_syscall_func()
 {
   return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
           WrappedGasAmount{1000}};
@@ -423,6 +423,84 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
   // The gas consumed must be 0
   ASSERT_EQ(gas.get(), 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+namespace {
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+bad_alloc_syscall_func()
+{
+  throw std::bad_alloc{};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+non_std_exception_syscall_func()
+{
+  throw 42; // NOLINT(hicpp-exception-baseclass)
+}
+
+} // namespace
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+template<auto Func> struct ThrowingSyscallMeta {
+  constexpr static bool kIsReadOnlySyscall = false;
+  constexpr static auto kInnerFunc = Func;
+
+  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
+  constexpr static bool kCanReturn = true;
+  constexpr static std::array<std::string_view, 0> kInputNames = {};
+  constexpr static std::array<std::string_view, 0> kOutputNames = {};
+  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
+};
+
+static_assert(is_syscall_meta<ThrowingSyscallMeta<&bad_alloc_syscall_func>>);
+
+// An exception escaping a syscall body (e.g. std::bad_alloc from an
+// allocating storage/cache insert) must be translated to a structured
+// Unrecoverable error at the wrap_after_parse boundary instead of
+// terminating hogexec (issue #3400 and siblings).
+TEST_F(SyscallErrorHandlingTest, ThrowingSyscallTranslatedToUnrecoverable)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<ThrowingSyscallMeta<&bad_alloc_syscall_func>>(
+          handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0,
+          0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
+  ASSERT_EQ(gas_consumed, 0);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<ThrowingSyscallMeta<&non_std_exception_syscall_func>>(
+          handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0,
+          0, 0);
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
+  ASSERT_EQ(gas_consumed, 0);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
