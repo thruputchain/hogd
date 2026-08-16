@@ -585,9 +585,10 @@ TEST_P(SelectiveDeploymentTest,
          "validation rejects a malformed attached rv32 contract";
 }
 
-// A deployed contract whose type has no registered runtime context must fail
-// deterministically at invoke, consuming no gas.
-TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsDeterministic)
+// A deployed contract whose type has no registered runtime context should be
+// impossible (verify_contract rejects unknown types before deployment), so
+// invoking one is Unrecoverable, consuming no gas.
+TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
 {
   auto contract = std::make_shared<Contract>(ContractType::kMockTest);
   contract->mock_contract_id() = 42;
@@ -617,7 +618,7 @@ TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsDeterministic)
 
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
   EXPECT_EQ(res.gas_consumed_, 0U);
 }
 

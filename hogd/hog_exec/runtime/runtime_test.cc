@@ -37,10 +37,10 @@ TEST(RuntimeTest, MethodIDFormat)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-// A routing miss returns a null runtime through a successful status; the
-// caller (SystemCallHandler::invoke) turns that into a deterministic syscall
-// rejection with zero gas.
-TEST(MultiplexedContextTest, UnregisteredTypeYieldsNullRuntime)
+// verify_contract rejects unknown types at deploy time, so reaching
+// make_new_runtime with one is an internal inconsistency, not a contract
+// fault: Unrecoverable.
+TEST(MultiplexedContextTest, UnregisteredTypeAtInvokeIsUnrecoverable)
 {
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{});
@@ -51,8 +51,8 @@ TEST(MultiplexedContextTest, UnregisteredTypeYieldsNullRuntime)
       .contract_type = ContractType::kMockTest,
   });
   auto runtime = context.make_new_runtime(deployed, nullptr);
-  ASSERT_TRUE(runtime.has_value());
-  EXPECT_EQ(runtime.value(), nullptr);
+  ASSERT_FALSE(runtime.has_value());
+  EXPECT_EQ(runtime.error().code(), SystemErrorCode::Unrecoverable);
 }
 
 TEST(MultiplexedContextTest, UnregisteredTypeVerifyIsDeterministic)
