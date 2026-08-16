@@ -29,13 +29,13 @@ struct Thing : RefCount {
   }
 };
 
-// Both RefPtr assignment operators drop the reference they hold before
-// reading the source (refcnt.h:135 unrefs and then reads other.p_;
-// refcnt.h:145 resets and then calls movefrom).  Dropping the last
-// reference destroys the old object, so any source whose value the
-// destruction changes -- or whose storage the destruction frees -- is
-// read after the fact.  See issue #1158; PR #1157 landed the first of
-// these as a DISABLED_ reproducer.
+// Both RefPtr assignment operators used to drop the reference they held
+// before capturing the source.  These tests check that the source is now
+// captured before destroying the old pointee can mutate it or free its
+// storage.
+//
+// See issue #1158; PR #1157 landed CopyAssignLinkedListAdvance as a
+// DISABLED_ reproducer.
 //
 // RefPtr<T> can't be a member of T (RefOps eagerly needs complete type),
 // so split into a complete base and derived classes that add state.
@@ -54,8 +54,8 @@ struct Link : ListNode {
 
 // Destroying a Clearer nulls a RefPtr held elsewhere -- a stand-in for
 // any destructor with side effects on refcounted state.  Nothing is
-// freed out from under the assignment here, so these two tests fail
-// deterministically in a plain build, no sanitizer required.
+// freed out from under the assignment here, so the old decrement-first
+// ordering made these tests fail deterministically without a sanitizer.
 struct Clearer : ListNode {
   RefPtr<ListNode> *victim = nullptr;
   ~Clearer() override
@@ -75,7 +75,7 @@ TEST(refcnt, CopyAssignSourceMutatedByOldObjectDestructor)
   c->victim = &src;
   RefPtr<ListNode> head(*c);
 
-  head = src; // unref(c) runs ~Clearer, which nulls src
+  head = src; // head retains tail before ~Clearer nulls src
   EXPECT_EQ(head.get(), tail);
 }
 
@@ -89,15 +89,13 @@ TEST(refcnt, MoveAssignSourceMutatedByOldObjectDestructor)
   c->victim = &src;
   RefPtr<ListNode> head(*c);
 
-  head = std::move(src); // reset() runs ~Clearer, which nulls src
+  head = std::move(src); // src is moved before ~Clearer assigns nullptr
   EXPECT_EQ(head.get(), tail);
 }
 
-// head = head->next where head is sole owner: the unref destroys the
-// node the source RefPtr lives in, so the source is read (and, when
-// moving, written) after its storage is freed.  ASAN reports
-// heap-use-after-free in refcnt.h; without a sanitizer these read
-// whatever the allocator left behind.
+// Here head is the sole owner of a node containing the source RefPtr.
+// Assignment must capture the source before releasing head destroys that
+// node.  The old decrement-first ordering caused a heap-use-after-free.
 TEST(refcnt, CopyAssignLinkedListAdvance)
 {
   auto *tail = new Link;
