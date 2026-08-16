@@ -573,7 +573,8 @@ TEST_F(TraceShapeTest, VerifySignatureTraceIsExact)
   const auto signature_opt =
       ed25519_sign(secret_key, x23::BufView(message.data(), message.size()));
   ASSERT_TRUE(signature_opt.has_value());
-  const Ed25519Signature signature = signature_opt.value();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const Ed25519Signature signature = *signature_opt;
 
   auto addr =
       deploy_sdk_contract<ed25519_verify_wrapper::Ed25519VerifyWrapper>();
