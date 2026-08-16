@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
@@ -27,6 +28,7 @@
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -497,6 +499,132 @@ TEST_F(Rv32ProductionMappingTest,
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::ValidationFailure);
   EXPECT_EQ(handler.try_commit_transaction(),
             ExecResult::ExecResultTxValidationFailure);
+}
+
+TEST_F(Rv32ProductionMappingTest, UnboundedLoopIsTerminatedByGasMeter)
+{
+  // A genuine infinite loop (self-jump), not a slow-but-bounded recursion:
+  // only the meter can end it.
+  auto addr = deploy_words({rv32::test_program::j_type(0, 0)}, 0);
+
+  constexpr GasAmount kGasLimit = 10'000;
+  auto result = invoke_deployed(addr, kGasLimit);
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.gas_consumed_, kGasLimit);
+}
+
+TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
+{
+  // The guest fetches its own address, invokes it, and returns the syscall
+  // result code: the invoke must be rejected pre-frame with
+  // kSyscallErrorCodeReentrance and the guest keeps running.
+  std::vector<uint8_t> initial_memory(256);
+  const CopyableInvokeInputs inputs{
+      .entrypoint_id = 0,
+      .gas_limit = 1000,
+      .flags = std::to_underlying(InvokeFlag::None),
+  };
+  std::memcpy(&initial_memory[64], &inputs, sizeof(inputs));
+
+  constexpr int32_t kGetCurrentAddressSyscallNo = 19;
+  constexpr int32_t kInvokeSyscallNo = 5;
+  std::vector<uint32_t> program;
+  append_syscall(program, {kGetCurrentAddressSyscallNo, /*out_ptr=*/0});
+  append_syscall(program, {kInvokeSyscallNo, /*address_ptr=*/0,
+                           /*calldata_ptr=*/0, /*calldata_len=*/0,
+                           /*tokens_ptr=*/0, /*tokens_len=*/0,
+                           /*inputs_ptr=*/64, /*outputs_ptr=*/96});
+  program.push_back(rv32::test_program::store(0, 10, 128, 2));
+  append_syscall(program, {kReturnSyscallNo, 128, 4, 0, 0, 0});
+  auto addr = deploy_words(program, 0, std::move(initial_memory));
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 100'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+      runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.return_buffer().size(), 4U);
+  const std::vector<uint8_t> expected = {
+      std::to_underlying(SyscallErrorCode::kSyscallErrorCodeReentrance), 0, 0,
+      0};
+  EXPECT_TRUE(std::ranges::equal(output.return_buffer(), expected));
+}
+
+TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
+{
+  // The rv32 twin of wasm's FollowBadWithGood: two try-invokes of a child
+  // that faults deterministically, then a clean Return from the caller. Both
+  // child outputs report Fault and the transaction still succeeds.
+  auto trap_addr = deploy_words({kEbreak}, 1);
+
+  std::vector<uint8_t> initial_memory(256);
+  for (size_t i = 0; i < trap_addr.size(); ++i) {
+    initial_memory[i] = static_cast<uint8_t>(trap_addr[i]);
+  }
+  const CopyableInvokeInputs inputs{
+      .entrypoint_id = 0,
+      .gas_limit = 1000,
+      .flags = std::to_underlying(InvokeFlag::TryInvoke),
+  };
+  std::memcpy(&initial_memory[64], &inputs, sizeof(inputs));
+
+  constexpr int32_t kInvokeSyscallNo = 5;
+  std::vector<uint32_t> program;
+  append_syscall(program, {kInvokeSyscallNo, 0, 0, 0, 0, 0, /*inputs=*/64,
+                           /*outputs=*/96});
+  append_syscall(program, {kInvokeSyscallNo, 0, 0, 0, 0, 0, /*inputs=*/64,
+                           /*outputs=*/108});
+  append_syscall(program,
+                 {kReturnSyscallNo, /*buffer=*/96, /*len=*/24, 0, 0, 0});
+  auto addr = deploy_words(program, 0, std::move(initial_memory));
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 100'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+      runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.return_buffer().size(), 24U);
+  CopyableInvokeOutputs first;
+  CopyableInvokeOutputs second;
+  std::memcpy(&first, output.return_buffer().data(), sizeof(first));
+  std::memcpy(&second, output.return_buffer().data() + 12, sizeof(second));
+  EXPECT_EQ(first.frame_status, InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(second.frame_status, InvocationFrameStatusCode::Fault);
+}
+
+TEST_F(Rv32ProductionMappingTest,
+       DeploymentRowWithoutContractRowIsUnrecoverable)
+{
+  // A deployment row whose contract row is missing is an inconsistent DB
+  // state; resolution fails and must surface as Unrecoverable, not a
+  // contract-attributable fault.
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact({kEbreak}, std::vector<uint8_t>{0}));
+  auto addr = make_contract_address(0);
+  write_deployment(addr, contract);
+
+  auto result = invoke_deployed(addr, 10'000);
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
 TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
