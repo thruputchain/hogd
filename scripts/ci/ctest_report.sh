@@ -42,27 +42,27 @@ CTEST_FAILURE_REPORT_LINES=${CTEST_FAILURE_REPORT_LINES:-400}
 # logs. ctest resolves --test-dir the same way: last occurrence wins, and
 # without one it tests the current directory.
 ctest_test_dir() {
-    local test_dir="."
-    local expecting_value=0
-    local arg
+  local test_dir="."
+  local expecting_value=0
+  local arg
 
-    for arg in "$@"; do
-        if [ "$expecting_value" -eq 1 ]; then
-            test_dir=$arg
-            expecting_value=0
-            continue
-        fi
-        case "$arg" in
-            --test-dir)
-                expecting_value=1
-                ;;
-            --test-dir=*)
-                test_dir=${arg#--test-dir=}
-                ;;
-        esac
-    done
+  for arg in "$@"; do
+    if [ "$expecting_value" -eq 1 ]; then
+      test_dir=$arg
+      expecting_value=0
+      continue
+    fi
+    case "$arg" in
+    --test-dir)
+      expecting_value=1
+      ;;
+    --test-dir=*)
+      test_dir=${arg#--test-dir=}
+      ;;
+    esac
+  done
 
-    printf '%s\n' "$test_dir"
+  printf '%s\n' "$test_dir"
 }
 
 # Replays one block per failing test. Best effort: a missing or unreadable log
@@ -70,18 +70,18 @@ ctest_test_dir() {
 # that has already failed, and must not become the reason the failure is
 # misread.
 replay_ctest_failures() {
-    local test_dir=$1
-    local temporary_dir="$test_dir/Testing/Temporary"
-    local failed_log="$temporary_dir/LastTestsFailed.log"
-    local output_log="$temporary_dir/LastTest.log"
+  local test_dir=$1
+  local temporary_dir="$test_dir/Testing/Temporary"
+  local failed_log="$temporary_dir/LastTestsFailed.log"
+  local output_log="$temporary_dir/LastTest.log"
 
-    if [ ! -r "$failed_log" ] || [ ! -r "$output_log" ]; then
-        echo "ctest_report: no captured output to replay" \
-            "($failed_log / $output_log unreadable)" >&2
-        return
-    fi
+  if [ ! -r "$failed_log" ] || [ ! -r "$output_log" ]; then
+    echo "ctest_report: no captured output to replay" \
+      "($failed_log / $output_log unreadable)" >&2
+    return
+  fi
 
-    awk -v tail_lines="$CTEST_FAILURE_REPORT_LINES" '
+  awk -v tail_lines="$CTEST_FAILURE_REPORT_LINES" '
         # LastTestsFailed.log holds one "<number>:<name>" line per failing test.
         NR == FNR {
             name = $0
@@ -151,23 +151,23 @@ replay_ctest_failures() {
 }
 
 main() {
-    local test_dir
-    local status=0
+  local test_dir
+  local status=0
 
-    ctest "$@" || status=$?
-    if [ "$status" -eq 0 ]; then
-        return 0
-    fi
+  ctest "$@" || status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
 
-    test_dir=$(ctest_test_dir "$@")
-    echo
-    echo "===== ctest failed (status $status);" \
-        "replaying the failing tests' output ====="
-    echo "(repeated here because the copy printed during the run is past the" \
-        "end of the retrievable job log)"
-    replay_ctest_failures "$test_dir"
+  test_dir=$(ctest_test_dir "$@")
+  echo
+  echo "===== ctest failed (status $status);" \
+    "replaying the failing tests' output ====="
+  echo "(repeated here because the copy printed during the run is past the" \
+    "end of the retrievable job log)"
+  replay_ctest_failures "$test_dir"
 
-    return "$status"
+  return "$status"
 }
 
 main "$@"
