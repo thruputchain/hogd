@@ -1,7 +1,9 @@
-# RV32 fuzz targets (local-only)
+# RV32 fuzz targets
 
 Two coverage-guided libFuzzer targets, built only with `-DBUILD_FUZZERS=ON`
-(default OFF, excluded from `all`, no CI). Require a clang/libc++ toolchain.
+(default OFF, excluded from `all`). Require a clang/libc++ toolchain. A
+nightly CI sweep runs both from the committed seed corpus
+(`.github/workflows/fuzz_rv32_engine_diff.yml`).
 
 - `rv32_fuzz_artifact` -- the artifact deploy path. Raw bytes exercise every
   header/digest rejection; a fixup phase assembles a well-formed artifact around
