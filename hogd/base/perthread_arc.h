@@ -4,6 +4,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <exception>
 #include <utility>
 
 #include "hogd/base/log.h"
@@ -80,7 +81,7 @@ public:
 
   // Returns true if the value should be destroyed.
   bool release_reference() noexcept
-  {
+  try {
     // The fast path: Decrease the current threadlocal count by 1.
     // If the threadlocal count is still positive, then shutdown has not yet
     // been initiated.
@@ -127,6 +128,9 @@ public:
         shutdown_pending_refcount_.fetch_sub(1, std::memory_order_acq_rel);
     CHECK(prev > 0);
     return prev == 1;
+  } catch (const std::exception &e) {
+    panic("unhandled exception in PerThreadARC::release_reference: {}",
+          e.what());
   }
 
   // Initiates shutdown of the value.
