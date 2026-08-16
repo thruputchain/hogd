@@ -307,9 +307,7 @@ gtest_discover_tests(contract_loader_test)
 #     ("no #[contract] entry-point symbols found"). hash_bug additionally has no
 #     sdk dep, so the rv32 runtime never links.
 #   - nocontract_wallet: client-stub-only crate, not built for either target.
-#   - cxs_roundtrip, txs_roundtrip: their image overflows the rv32 RAM region
-#     (rust-lld: "section will not fit in region 'RAM'").
-message(STATUS "RV32 contracts: building 27 spec contracts (excluding raw contracts, cxs_roundtrip, txs_roundtrip)")
+message(STATUS "RV32 contracts: building 29 spec contracts (excluding raw contracts)")
 add_riscv_builds(
   CONTRACTS
     fibonacci
@@ -339,6 +337,8 @@ add_riscv_builds(
     delegate_call_test
     ed25519_verify_wrapper
     view_gateway_test
+    cxs_roundtrip
+    txs_roundtrip
 )
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types

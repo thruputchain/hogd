@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -235,12 +236,12 @@ protected:
     std::unique_ptr<NativeContract> native_contract =
         std::make_unique<NativeContract>(std::move(fns));
 
-    auto cxs_contract = hogd::load_contract("cxs_roundtrip.wasm");
+    auto cxs_contract = hogd::load_rv32_contract("cxs_roundtrip.rv32a");
     write_contract(cxs_contract);
     write_deployment(cxs_contract_addr_, cxs_contract);
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
 
-    auto txs_contract = hogd::load_contract("txs_roundtrip.wasm");
+    auto txs_contract = hogd::load_rv32_contract("txs_roundtrip.rv32a");
     write_contract(txs_contract);
     write_deployment(txs_contract_addr_, txs_contract);
     setup_grant_storage_token(txs_contract_addr_, 1'000'000'000);
@@ -260,11 +261,11 @@ protected:
     setup_grant_storage_token(native_contract_addr_,
                               replay_cache_cost_charged(1));
 
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     multiplexed_context_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_runtime_context.release(), true}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
   }
 
   using cxs_client_t = ContractTraitClient<cxs_roundtrip::CxsRoundtrip>;
