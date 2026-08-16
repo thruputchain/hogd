@@ -87,8 +87,9 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.gas_consumed);
     }
-    return HostResult::deterministic_trap(
-        result.gas_consumed, static_cast<uint32_t>(result.result_code));
+    return HostResult::deterministic_trap(result.gas_consumed,
+                                          static_cast<uint32_t>(
+                                              result.result_code));
   case std::to_underlying(HostFnErrorCode::OutOfGas):
     // The bridge returns out_of_gas before writing any guest memory, so there
     // is nothing to roll back; complete_ecall no longer snapshots memory.

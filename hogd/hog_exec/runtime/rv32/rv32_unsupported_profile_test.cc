@@ -142,10 +142,12 @@ TEST(Rv32UnsupportedProfileTest,
     auto threaded = parse_threaded_artifact(
         std::span<const uint8_t>(artifact.data(), artifact.size()));
     ASSERT_TRUE(threaded.has_value());
-    auto created = ThreadedMachinePreInstantiation::create(
-        threaded->code, threaded->initial_memory,
-        threaded->initial_memory_start, threaded->memory_bytes,
-        /*trace=*/false);
+    auto created =
+        ThreadedMachinePreInstantiation::create(threaded->code,
+                                                threaded->initial_memory,
+                                                threaded->initial_memory_start,
+                                                threaded->memory_bytes,
+                                                /*trace=*/false);
     ASSERT_FALSE(created.has_value());
     EXPECT_EQ(created.error(), test_case.expected_error);
   }

@@ -570,7 +570,8 @@ TEST(Rv32ProgramTest, construction_traps_bad_pc_for_invalid_initial_pc)
   Machine out_of_range(program, 31, 5, /*initial_pc=*/8);
   EXPECT_EQ(out_of_range.trap(), Trap::kBadPc);
   EXPECT_EQ(out_of_range.step(), StepResult::kTrap);
-  EXPECT_EQ(out_of_range.gas_remaining(), 5U); // never executed, nothing charged
+  EXPECT_EQ(out_of_range.gas_remaining(),
+            5U); // never executed, nothing charged
   out_of_range.reset(9);
   EXPECT_EQ(out_of_range.trap(), Trap::kBadPc);
   EXPECT_EQ(out_of_range.gas_remaining(), 9U);

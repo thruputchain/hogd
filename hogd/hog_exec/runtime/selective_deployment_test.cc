@@ -5,6 +5,7 @@
 #include <memory>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "exec_result.hh"

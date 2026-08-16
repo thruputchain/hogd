@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -14,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -21,6 +24,8 @@
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "invoke_args.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -281,10 +286,9 @@ protected:
   constexpr static int32_t kExitSyscallNo = 8;
   constexpr static int32_t kBytestringSetSyscallNo = 15;
 
-  ContractAddress deploy_words(std::vector<uint32_t> const &words,
-                               uint64_t addr_seed,
-                               std::vector<uint8_t> initial_memory =
-                                   std::vector<uint8_t>(256))
+  ContractAddress
+  deploy_words(std::vector<uint32_t> const &words, uint64_t addr_seed,
+               std::vector<uint8_t> initial_memory = std::vector<uint8_t>(256))
   {
     auto contract = std::make_shared<Contract>(ContractType::kRv32);
     contract->rv32_contract().data.append_range(
@@ -313,15 +317,14 @@ protected:
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{
-                            .invoked_address = addr,
-                            .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = gas_limit,
-                            .calldata = Calldata{},
-                        },
-                    .uniquifier = make_new_uniquifier()}},
+                Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = gas_limit,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     return handler.root_invoke();
   }
@@ -505,8 +508,7 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   write_contract(contract);
   write_deployment(addr, contract);
 
-  auto deployed =
-      get_storage_snapshot_cache()->try_get_deployed_contract(addr);
+  auto deployed = get_storage_snapshot_cache()->try_get_deployed_contract(addr);
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
@@ -565,8 +567,9 @@ TEST(Rv32ContractTest, VerifyRejectsGarbageBlob)
 
 TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
 {
-  std::vector<uint8_t> artifact = rv32::test_artifact::build_artifact(
-      {rv32::test_program::addi(1, 0, 1)}, std::vector<uint8_t>{0});
+  std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
+                                          std::vector<uint8_t>{0});
   EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::None);
 
   artifact.resize(artifact.size() / 2);
@@ -577,8 +580,9 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
 {
   // 0x53 is an F-extension opcode: the artifact parses structurally but the
   // instruction decode in Rv32Contract::create must reject it.
-  const std::vector<uint8_t> artifact = rv32::test_artifact::build_artifact(
-      {0x00000053U}, std::vector<uint8_t>{0});
+  const std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact({0x00000053U},
+                                          std::vector<uint8_t>{0});
   EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
 
   ContractBlob blob;
