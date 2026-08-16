@@ -60,12 +60,10 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include "contract.hh"
 #include "db_conflict.hh"
@@ -83,7 +81,6 @@
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
-#include "hogd/hog_db/db_hash.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
