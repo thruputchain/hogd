@@ -291,9 +291,9 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # The program [ci_remote_reap] runs on one host to reap [$1] (a space-separated
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
-# both, and 3 if the signals could not be sent at all -- a host whose [killall]
-# or [sudo] is broken has not been shown to have a process refusing to die, and
-# must not be reported as though it had.
+# both, and 3 if the signals could not be sent at all -- a host with no working
+# [killall] has not been shown to have a process refusing to die, and must not
+# be reported as though it had.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
 # bare [killall <names>] hands the caller back a host where the processes have
@@ -323,6 +323,12 @@ procs='$1'
 term_timeout=$2
 kill_timeout=$3
 
+# The unprivileged signal goes through whatever [killall] the host puts on
+# PATH; the [sudo] fallback names /usr/bin/killall outright, because that is
+# the path a sudoers rule can be written against.
+killall_bin=\$(command -v killall 2>/dev/null) || killall_bin=
+[ -n "\$killall_bin" ] || killall_bin=/usr/bin/killall
+
 survivors() {
   found=
   live=\$(ps -eo comm= 2>/dev/null) || live=
@@ -350,14 +356,26 @@ wait_gone() {
 # die: [-q] silences killall's own "no process found", so a nonzero exit that
 # still says something is sudo or killall failing rather than an absence of
 # processes to kill.
+#
+# The unprivileged [killall] goes first and [sudo -n] is only the fallback. The
+# benchmark processes are started by this same user, so signalling them needs
+# no elevation, and the bench fleet does not grant passwordless sudo: reaping
+# through [sudo -n] alone fails there with "sudo: a password is required" on
+# every host, which is tolerated as a warning and leaves every stale process
+# exactly where it was. That is not academic -- it is how a [scpd.dev] forked
+# by one suite's [chuckd.dev] outlives the suite (the control server stops only
+# the child it started) and is still holding 127.0.0.1:4400 when the next suite
+# starts its own coordinator on the same host, whose freshly forked scpd cannot
+# bind and dies, taking the coordinator down with "transport is closed".
 signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
-  status=\$?
-  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
-    return 1
-  fi
-  return 0
+  plain_err=\$(\$killall_bin -q "-\$1" \$procs 2>&1) && return 0
+  [ -n "\$plain_err" ] || return 0
+
+  sudo_err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1) && return 0
+  [ -n "\$sudo_err" ] || return 0
+
+  echo "cannot signal processes: \$plain_err; via sudo: \$sudo_err" >&2
+  return 1
 }
 
 # Signal first and ask questions after: a host that will not report its
