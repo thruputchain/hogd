@@ -36,7 +36,29 @@
 
 set -uo pipefail
 
-CTEST_FAILURE_REPORT_LINES=${CTEST_FAILURE_REPORT_LINES:-400}
+CTEST_FAILURE_REPORT_LINES_DEFAULT=400
+CTEST_FAILURE_REPORT_LINES=${CTEST_FAILURE_REPORT_LINES:-$CTEST_FAILURE_REPORT_LINES_DEFAULT}
+
+# A cap that isn't a positive integer is worse than no override at all, and it
+# fails two different ways. At 0, negative, or empty, every line trips the drop
+# condition and the replay collapses to its own "output omitted" notice -- the
+# run loses exactly what this script exists to keep. At a non-numeric value awk
+# compares the line count against a string rather than a number, the condition
+# is never true, and the cap silently stops applying at all. Fall back to the
+# default and say so. There is no upper bound on purpose: raising the cap past
+# the retrievable window is the point of the override when someone is chasing a
+# long report, and they are the ones who know how much they need.
+ctest_report_lines_ok=1
+case "$CTEST_FAILURE_REPORT_LINES" in
+'' | *[!0-9]*) ctest_report_lines_ok=0 ;;
+*) [ "$CTEST_FAILURE_REPORT_LINES" -gt 0 ] || ctest_report_lines_ok=0 ;;
+esac
+if [ "$ctest_report_lines_ok" -eq 0 ]; then
+  echo "ctest_report: CTEST_FAILURE_REPORT_LINES=$CTEST_FAILURE_REPORT_LINES" \
+    "is not a positive integer;" \
+    "using $CTEST_FAILURE_REPORT_LINES_DEFAULT" >&2
+  CTEST_FAILURE_REPORT_LINES=$CTEST_FAILURE_REPORT_LINES_DEFAULT
+fi
 
 # Finds the build directory ctest was pointed at, so we know where it left its
 # logs. ctest resolves --test-dir the same way: last occurrence wins, and

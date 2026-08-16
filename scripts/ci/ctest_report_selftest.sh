@@ -207,6 +207,26 @@ check_not_contains "the head is dropped by the cap" "$output" \
 check_contains "the drop is stated, not silent" "$output" \
   "line(s) of output omitted"
 
+echo "=== a cap that is not a positive integer falls back, loudly"
+
+for bad_cap in "not-a-number" "-5" "0" "00" ""; do
+  export CTEST_FAILURE_REPORT_LINES="$bad_cap"
+  output=$("$CTEST_REPORT" --test-dir "$BUILD_DIR" 2>&1)
+  unset CTEST_FAILURE_REPORT_LINES
+  # awk reads a non-numeric cap as 0 and would drop every line, leaving only
+  # the omission notice -- the one outcome this script must never produce.
+  check_contains "cap '$bad_cap' still replays the output" "$output" \
+    "assertion failed: the interesting part"
+  check_not_contains "cap '$bad_cap' drops nothing" "$output" \
+    "line(s) of output omitted"
+done
+
+export CTEST_FAILURE_REPORT_LINES="not-a-number"
+output=$("$CTEST_REPORT" --test-dir "$BUILD_DIR" 2>&1)
+unset CTEST_FAILURE_REPORT_LINES
+check_contains "a rejected cap says so" "$output" \
+  "is not a positive integer; using 400"
+
 echo "=== a run with no captured logs still reports ctest's failure"
 
 BUILD_DIR="$WORK_DIR/build-nologs"

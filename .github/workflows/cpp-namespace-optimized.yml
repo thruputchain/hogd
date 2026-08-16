@@ -91,6 +91,14 @@ jobs:
       - name: Protocol Check
         run : ./scripts/check-protocol.sh
 
+      # ctest_report.sh is only exercised by the nightly schedules, and only on
+      # the path where they have already failed. Run its selftest here so a
+      # regression in it is caught on the PR that causes it, rather than by a
+      # scheduled run losing the output it was added to preserve. Hermetic and
+      # sub-second: a fake ctest on PATH and logs under mktemp.
+      - name: ctest_report Selftest
+        run: ./scripts/ci/ctest_report_selftest.sh
+
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
