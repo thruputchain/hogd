@@ -88,6 +88,7 @@ add_executable(
   item_lock/nnint128_lock_test.cc
   item_lock/replay_cache_lock_test.cc
   mock_authdb_rpc.cc
+  permanent_exclusive_narrow_wai_test.cc
   recovery_tests.cc
   rpc_context_lifetime_test.cc
   rpc_from_exec_test.cc
