@@ -9,6 +9,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
@@ -779,30 +780,48 @@ namespace {
 //
 // This holds for every syscall, in every frame, on every engine, so it is
 // cheap to assert over any trace a test already has in hand.
-void
-expect_no_syscall_succeeded_on_exhausted_frame(
-    InvocationFrameTrace const &frame)
+//
+// Returns the number of syscalls that were entered on an exhausted frame, so
+// callers can report how much of the boundary they actually reached -- an
+// assertion that never fires is not the same thing as an assertion that held.
+//
+// Walks the tree with an explicit worklist rather than recursing: trace depth
+// is bounded by the frame-stack cap, but misc-no-recursion is on in tidy and
+// an iterative walk is no harder to read than the recursive one.
+size_t
+check_no_syscall_succeeded_on_exhausted_frame(InvocationFrameTrace const &root)
 {
-  for (auto const &syscall_trace : frame.system_calls) {
-    if (syscall_trace.gas_remaining_at_start == 0) {
-      EXPECT_EQ(syscall_trace.status.error(), HostFnErrorCode::OutOfGas)
-          << "syscall "
-          << static_cast<int64_t>(
-                 std::to_underlying(syscall_trace.body.syscall_number()))
-          << " was entered with no gas remaining and did not fail out-of-gas";
-    }
+  size_t exhausted_frame_entries = 0;
+  std::vector<InvocationFrameTrace const *> worklist{&root};
 
-    if (syscall_trace.body.syscall_number() != SyscallNo::kInvoke) {
-      continue;
+  while (!worklist.empty()) {
+    auto const *frame = worklist.back();
+    worklist.pop_back();
+
+    for (auto const &syscall_trace : frame->system_calls) {
+      if (syscall_trace.gas_remaining_at_start == 0) {
+        exhausted_frame_entries++;
+        EXPECT_EQ(syscall_trace.status.error(), HostFnErrorCode::OutOfGas)
+            << "syscall "
+            << static_cast<int64_t>(
+                   std::to_underlying(syscall_trace.body.syscall_number()))
+            << " was entered with no gas remaining and did not fail "
+               "out-of-gas";
+      }
+
+      if (syscall_trace.body.syscall_number() != SyscallNo::kInvoke) {
+        continue;
+      }
+      auto const &invoke_trace = syscall_trace.body.invoke();
+      if (invoke_trace.outputs == nullptr ||
+          invoke_trace.outputs->child_trace == nullptr) {
+        continue;
+      }
+      worklist.push_back(&*invoke_trace.outputs->child_trace);
     }
-    auto const &invoke_trace = syscall_trace.body.invoke();
-    if (invoke_trace.outputs == nullptr ||
-        invoke_trace.outputs->child_trace == nullptr) {
-      continue;
-    }
-    expect_no_syscall_succeeded_on_exhausted_frame(
-        *invoke_trace.outputs->child_trace);
   }
+
+  return exhausted_frame_entries;
 }
 
 } // namespace
@@ -815,13 +834,27 @@ expect_no_syscall_succeeded_on_exhausted_frame(
 //
 // wasm is the engine that matters here: the rv32 machine settles its gas
 // deficit before the syscall (see rv32/threaded_machine.h), while wasmtime's
-// fuel is checked on the far side of `Operator::Call`.
+// fuel is checked on the far side of `Operator::Call`. Note that a kWasmi
+// contract runs on wasmtime -- make_hog_exec_wasm_context maps the (currently
+// only) RuntimeEngine enumerator onto a WasmtimeContext -- so this really is
+// exercising the engine the report was about, despite the type name.
 //
 // The sweep calibrates itself off one full run rather than hard-coding a gas
 // number. The whole point of the reported bug is that the dangerous limit is
 // whichever one lands the fuel counter on zero at a call, and that moves with
 // instruction costs, the wasm-meter, and the compiler backend -- a pinned
 // constant would silently stop covering the boundary.
+//
+// Coverage caveat, deliberately not an assertion: whether any syscall is
+// actually entered on an exhausted frame depends on where the backend's fuel
+// checkpoints land, so a sweep at coarse increments can straddle the
+// success/failure boundary without ever reaching zero remaining gas. The test
+// records how many such entries it saw so a vacuous run is visible rather than
+// silently green. It is not asserted to be nonzero, because that would pin an
+// assumption about Winch's fuel placement that hogd does not otherwise make --
+// deterministic coverage of the zero-gas boundary lives in
+// syscall_error_handling_tests.cc, which constructs gas_remaining == 0
+// directly instead of hoping an engine produces it.
 TEST_F(TracingTest, NoSyscallSucceedsOnAnExhaustedFrame)
 {
   auto contract = hogd::load_contract("sha256_wrapper.wasm");
@@ -861,6 +894,7 @@ TEST_F(TracingTest, NoSyscallSucceedsOnAnExhaustedFrame)
 
   bool saw_success = false;
   bool saw_failure = false;
+  size_t exhausted_frame_entries = 0;
 
   for (GasAmount gas_limit = 0; gas_limit <= sweep_max; gas_limit += step) {
     auto handler = make_new_system_call_handler(
@@ -882,13 +916,21 @@ TEST_F(TracingTest, NoSyscallSucceedsOnAnExhaustedFrame)
     ASSERT_NE(trace, nullptr) << "gas_limit = " << gas_limit;
 
     SCOPED_TRACE(testing::Message() << "gas_limit = " << gas_limit);
-    expect_no_syscall_succeeded_on_exhausted_frame(*trace);
+    exhausted_frame_entries +=
+        check_no_syscall_succeeded_on_exhausted_frame(*trace);
   }
 
   // Guard the sweep itself: if the calibration drifts so that every run lands
   // on the same side, the test stops covering the boundary it exists for.
   EXPECT_TRUE(saw_failure) << "sweep never exhausted the frame";
   EXPECT_TRUE(saw_success) << "sweep never reached a completing run";
+
+  // How much of the zero-gas boundary this run actually reached. See the
+  // coverage caveat above: reported, not asserted, so that a sweep which never
+  // lands on an exhausted-frame syscall reads as zero coverage in the test
+  // output instead of passing silently.
+  RecordProperty("exhausted_frame_syscall_entries",
+                 static_cast<int>(exhausted_frame_entries));
 }
 
 // NOLINTEND(bugprone-exception-escape)
