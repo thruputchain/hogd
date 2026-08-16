@@ -6,7 +6,6 @@
 #include <span>
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"

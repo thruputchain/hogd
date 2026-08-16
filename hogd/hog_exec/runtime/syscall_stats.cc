@@ -2,7 +2,6 @@
 
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"

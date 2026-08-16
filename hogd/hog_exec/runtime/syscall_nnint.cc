@@ -4,7 +4,6 @@
 #include <optional>
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
