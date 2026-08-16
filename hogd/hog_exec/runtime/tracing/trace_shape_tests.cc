@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -10,6 +9,7 @@
 #include "built_contracts/no_syscall_test.h"
 #include "built_contracts/read_only_test.h"
 #include "built_contracts/sha256_wrapper.h"
+#include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -19,12 +19,15 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -131,10 +134,10 @@ TEST_F(TraceShapeTest, Sha256WrapperTraceIsExact)
   auto addr = deploy_sdk_contract<sha256_wrapper::Sha256Wrapper>();
   ContractTraitClient<sha256_wrapper::Sha256Wrapper> client(addr);
   const SignedTransaction tx{
-      .tx = Transaction{.invocation =
-                            client.make_invocation<u8"sha256">(kGasLimit,
-                                                               input),
-                        .uniquifier = make_new_uniquifier()}};
+      .tx =
+          Transaction{.invocation =
+                          client.make_invocation<u8"sha256">(kGasLimit, input),
+                      .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
@@ -154,8 +157,7 @@ TEST_F(TraceShapeTest, Sha256WrapperTraceIsExact)
     SyscallTraceBody body(SyscallNo::kSHA256);
     body.sha256().inputs.input.append_range(input);
     body.sha256().outputs = SyscallSHA256Outputs{.hash = expected_hash};
-    expected.push_back(make_entry(99'816,
-                                  99'816 - SHA256HashCost(input.size()),
+    expected.push_back(make_entry(99'816, 99'816 - SHA256HashCost(input.size()),
                                   std::move(body), ok_status()));
   }
   expected.push_back(return_entry(98'494, expected_hash));
@@ -185,9 +187,8 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
   ContractTraitClient<read_only_test::ReadOnlyTest> client(addr);
   const SignedTransaction tx{
       .tx = Transaction{
-          .invocation =
-              client.make_invocation<u8"write_storage_and_log_event">(
-                  kGasLimit),
+          .invocation = client.make_invocation<u8"write_storage_and_log_event">(
+              kGasLimit),
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
@@ -211,15 +212,15 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags = 0;
-    expected.push_back(make_entry(99'779, 99'779, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(99'779, 99'779, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
-    expected.push_back(make_entry(99'769, 99'769, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(99'769, 99'769, std::move(body), ok_status()));
   }
   expected.push_back(return_entry(99'706, {}));
 
