@@ -279,11 +279,13 @@ protected:
   constexpr static int32_t kSha256SyscallNo = 0;
   constexpr static int32_t kReturnSyscallNo = 6;
   constexpr static int32_t kExitSyscallNo = 8;
+  constexpr static int32_t kBytestringSetSyscallNo = 15;
 
   ContractAddress deploy_words(std::vector<uint32_t> const &words,
-                               uint64_t addr_seed)
+                               uint64_t addr_seed,
+                               std::vector<uint8_t> initial_memory =
+                                   std::vector<uint8_t>(256))
   {
-    const std::vector<uint8_t> initial_memory(256);
     auto contract = std::make_shared<Contract>(ContractType::kRv32);
     contract->rv32_contract().data.append_range(
         rv32::test_artifact::build_artifact(words, initial_memory));
@@ -410,6 +412,88 @@ TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
 
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.gas_consumed_, kGasLimit);
+}
+
+TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
+{
+  // A storage write against a no-longer-current block returns Abandon from
+  // the syscall; the production runtime must surface it as Abandon, not fold
+  // it into a deterministic fault.
+  std::vector<uint32_t> program;
+  append_syscall(program,
+                 {kBytestringSetSyscallNo, /*key_ptr=*/0, /*value_ptr=*/32,
+                  /*value_len=*/4, /*flags=*/0});
+  auto addr = deploy_words(program, 0);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 1'000'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+      runtime_context_);
+
+  auto storage_snapshot_cache = get_storage_snapshot_cache();
+  advance_block();
+  auto result = handler.root_invoke();
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Abandon);
+}
+
+TEST_F(Rv32ProductionMappingTest,
+       ValidationModeTryInvokeWithoutProposalBitsMapsToValidationFailure)
+{
+  // In validation mode, a successfully-returning TryInvoke child must consume
+  // a nondeterministic proposal bit; with none supplied the frame finish fails
+  // ValidationFailure, which the production runtime must surface unchanged.
+  constexpr int32_t kInvokeSyscallNo = 5;
+  std::vector<uint32_t> target_program;
+  append_syscall(target_program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+  auto target = deploy_words(target_program, 1);
+
+  std::vector<uint8_t> initial_memory(256);
+  for (size_t i = 0; i < target.size(); ++i) {
+    initial_memory[i] = static_cast<uint8_t>(target[i]);
+  }
+  const CopyableInvokeInputs inputs{
+      .entrypoint_id = 0,
+      .gas_limit = 1000,
+      .flags = std::to_underlying(InvokeFlag::TryInvoke),
+  };
+  std::memcpy(&initial_memory[32], &inputs, sizeof(inputs));
+
+  std::vector<uint32_t> program;
+  append_syscall(program, {kInvokeSyscallNo, /*address_ptr=*/0,
+                           /*calldata_ptr=*/0, /*calldata_len=*/0,
+                           /*tokens_ptr=*/0, /*tokens_len=*/0,
+                           /*inputs_ptr=*/32, /*outputs_ptr=*/64});
+  auto addr = deploy_words(program, 0, std::move(initial_memory));
+
+  Transaction tx{
+      .invocation =
+          Invocation{
+              .invoked_address = addr,
+              .entrypoint = entrypoint_from_method_id(0),
+              .gas_limit = 1'000'000,
+              .calldata = Calldata{},
+          },
+      .uniquifier = make_new_uniquifier(),
+  };
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  auto handler =
+      make_new_system_call_handler_validation(tx, runtime_context_,
+                                              NondeterministicProposalData{});
+
+  auto result = handler.root_invoke();
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::ValidationFailure);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
 }
 
 TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
