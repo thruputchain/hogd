@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -29,6 +32,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
 #include "invoke_args.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
