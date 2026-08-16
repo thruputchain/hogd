@@ -11,13 +11,18 @@
 #include <memory>
 
 #include "built_contracts/syscall_misc_tests.h"
+#include "exec_result.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -761,6 +766,141 @@ TEST_F(SyscallMiscTests, TestReturnWithAuthTokenIds)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// ── Error-code precedence pins ──────────────────────────────────────
+
+// #37: at the per-tx RCQ observation cap, an empty-queue read reports
+// kRetrocausalQueueReadLimitReached (the cap check precedes the empty check)
+// while a wrong-type key still reports kInvalidSyscallInput (the item-type
+// dispatch precedes the cap check).
+TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
+{
+  {
+    auto handler = make_new_system_call_handler(
+        Transaction{.invocation =
+                        client_.make_invocation<u8"internal_rcq_obs_cap_seed">(
+                            UINT64_MAX,
+                            uint32_t{kMaxConcurrentRcqReadsPerTx + 1}),
+                    .uniquifier =
+                        Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+        *runtime_context_);
+    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    // Commit so the reading transaction observes the entries as concurrent.
+    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  }
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_rcq_cap_precedence">(
+                          UINT64_MAX, uint32_t{kMaxConcurrentRcqReadsPerTx}),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// #38: with no child return buffer, a misaligned restored-auth-token span
+// still reports kNoReturnBufferAvailable: the buffer-availability check
+// precedes the alignment check (the opposite convention from GetCalldata).
+TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation = client_.make_invocation<
+                      u8"test_get_returned_buffer_no_buffer_beats_misaligned">(
+                      UINT64_MAX),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// #39: forwarding an unowned auth token on a self-invoke reports
+// kInvalidSyscallInput, not kReentrance: token ownership is checked before
+// reentrance.
+TEST_F(SyscallMiscTests, InvokeUnownedTokenBeatsReentrance)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_invoke_unowned_token_beats_reentrance">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// #41: a mutable syscall with an out-of-bounds argument pointer inside a
+// read-only frame reports kSyscallErrorCodeFault, not the read-only
+// kInvalidSyscallInput: the argument parse check precedes the read-only check.
+TEST_F(SyscallMiscTests, ReadOnlyFaultBeatsReadOnlyRejection)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_readonly_fault_beats_readonly_rejection">(UINT64_MAX,
+                                                                kTargetAddress),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// #40: reentrance beats resolution. The misc contract runs as the configured
+// default wallet at an UNDEPLOYED address, so its own frame address violates
+// both the reentrance check and (for a nested invoke, which has no wallet
+// fallback) resolution; the self-invoke must report kReentrance.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class SyscallMiscDefaultWalletTest : public ::testing::Test,
+                                     public NativeContractTestFramework {
+public:
+  SyscallMiscDefaultWalletTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDb, /*empty_genesis=*/false)
+  {}
+};
+
+TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
+{
+  using syscall_misc_tests_meta =
+      ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
+  auto contract = syscall_misc_tests_meta::load_rv32();
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(
+      NativeContractTestFramework::make_deployed_contract_hash(contract));
+  run_genesis_initialization(builder.build_or_panic(*get_default_cost_model()),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+  write_contract(contract);
+
+  auto rv32_ctx = std::make_unique<Rv32Context>();
+  MultiplexedContext ctx(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kRv32, {rv32_ctx.release(), true}},
+      });
+
+  ContractAddress undeployed = make_contract_address(77);
+  ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client(undeployed);
+  SignedTransaction stx{
+      .tx = Transaction{
+          .invocation =
+              client.make_invocation<u8"test_invoke_self_is_reentrance">(
+                  UINT64_MAX),
+          .uniquifier = make_new_uniquifier()}};
+
+  auto handler = make_new_system_call_handler(stx, ctx);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
