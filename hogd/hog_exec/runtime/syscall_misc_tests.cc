@@ -9,8 +9,11 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <unordered_map>
+#include <utility>
 
 #include "built_contracts/syscall_misc_tests.h"
+#include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"

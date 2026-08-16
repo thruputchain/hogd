@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <initializer_list>
 #include <utility>
 
 #include "built_contracts/syscall_misc_tests.h"
@@ -10,6 +12,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "invoke_args.hh"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -134,10 +137,10 @@ TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
   auto addr = deploy_misc_contract();
   ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client(addr);
   const SignedTransaction tx{
-      .tx = Transaction{
-          .invocation = client.make_invocation<
-              u8"test_invoke_unowned_token_beats_reentrance">(kGasLimit),
-          .uniquifier = make_new_uniquifier()}};
+      .tx = Transaction{.invocation = client.make_invocation<
+                            u8"test_invoke_unowned_token_beats_reentrance">(
+                            kGasLimit),
+                        .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
