@@ -16,6 +16,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "contract.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -24,6 +25,7 @@
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/item_lock/new_deployment_lock.h"
 #include "hogd/hog_db/item_lock/nnint128_lock.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db.h"

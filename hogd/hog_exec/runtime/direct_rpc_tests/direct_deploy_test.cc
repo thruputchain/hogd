@@ -3,7 +3,10 @@
 #include <cstdint>
 #include <utility>
 
+#include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -46,11 +49,10 @@ public:
   }
 
   // Funds [addr], stores a deployable contract, and returns its hash.
-  DeployedContractHash setup_deployable_address(ContractAddress const &addr,
-                                                int32_t contract_id)
+  DeployedContractHash setup_deployable_address(ContractAddress const &addr)
   {
     setup_grant_storage_token(addr, 1'000'000'000);
-    auto contract = make_native_contract(contract_id);
+    auto contract = make_native_contract(0);
     write_contract(contract);
     return make_deployed_contract_hash(contract);
   }
@@ -63,7 +65,7 @@ public:
 TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
 {
   auto contract_addr = make_contract_address(0);
-  auto deployment_hash = setup_deployable_address(contract_addr, 0);
+  auto deployment_hash = setup_deployable_address(contract_addr);
   auto addrkey = metadata_key(contract_addr);
 
   // TX1: deploy with exclusive lock
@@ -84,7 +86,9 @@ TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
 
   auto deployed = lookup_deployment_from_db(contract_addr);
   ASSERT_TRUE(deployed.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(*deployed, deployment_hash);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // Control for the test above: identical concurrent deploys are admitted
@@ -93,7 +97,7 @@ TEST_P(DirectDeployTest, ExclusiveLockConcurrentDeploy)
 TEST_P(DirectDeployTest, NoExclusiveLockConcurrentDeployIsAdmitted)
 {
   auto contract_addr = make_contract_address(1);
-  auto deployment_hash = setup_deployable_address(contract_addr, 0);
+  auto deployment_hash = setup_deployable_address(contract_addr);
   auto addrkey = metadata_key(contract_addr);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -114,7 +118,7 @@ TEST_P(DirectDeployTest, NoExclusiveLockConcurrentDeployIsAdmitted)
 TEST_P(DirectDeployTest, ExclusiveLockDeployBlockedByExistingHolder)
 {
   auto contract_addr = make_contract_address(2);
-  auto deployment_hash = setup_deployable_address(contract_addr, 0);
+  auto deployment_hash = setup_deployable_address(contract_addr);
   auto addrkey = metadata_key(contract_addr);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -137,7 +141,7 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployBlockedByExistingHolder)
 TEST_P(DirectDeployTest, ExclusiveLockDeployStaysLockedAfterCommit)
 {
   auto contract_addr = make_contract_address(3);
-  auto deployment_hash = setup_deployable_address(contract_addr, 0);
+  auto deployment_hash = setup_deployable_address(contract_addr);
   auto addrkey = metadata_key(contract_addr);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -155,7 +159,9 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployStaysLockedAfterCommit)
 
   auto deployed = lookup_deployment_from_db(contract_addr);
   ASSERT_TRUE(deployed.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(*deployed, deployment_hash);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 // An exclusive deploy locks its own address only.
@@ -163,7 +169,7 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployDoesNotBlockOtherAddresses)
 {
   auto locked_addr = make_contract_address(4);
   auto other_addr = make_contract_address(5);
-  auto deployment_hash = setup_deployable_address(locked_addr, 0);
+  auto deployment_hash = setup_deployable_address(locked_addr);
   setup_grant_storage_token(other_addr, 1'000'000'000);
 
   auto tx1 = make_new_per_tx_db_proxy();
@@ -181,10 +187,12 @@ TEST_P(DirectDeployTest, ExclusiveLockDeployDoesNotBlockOtherAddresses)
 
   auto locked_deployment = lookup_deployment_from_db(locked_addr);
   ASSERT_TRUE(locked_deployment.has_value());
-  EXPECT_EQ(*locked_deployment, deployment_hash);
   auto other_deployment = lookup_deployment_from_db(other_addr);
   ASSERT_TRUE(other_deployment.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(*locked_deployment, deployment_hash);
   EXPECT_EQ(*other_deployment, deployment_hash);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectDeployTest,
