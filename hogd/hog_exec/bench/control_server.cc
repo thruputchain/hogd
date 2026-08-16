@@ -206,6 +206,24 @@ public:
     if (pid == 0) {
       // Child process
 
+      // Lead a process group of our own, so that [ciserver_stop] can signal
+      // everything this launch spawned rather than only its root. The
+      // benchmarks launch processes that fork children of their own --
+      // [chuckd.dev] forks [scpd.dev], which holds 127.0.0.1:4400 and
+      // 127.0.0.1:3300 -- and a grandchild that outlives the stop keeps those
+      // ports, so the next benchmark's [scpd.dev] cannot bind them and its
+      // coordinator dies on "transport is closed".
+      //
+      // The parent repeats this call after the fork: whichever runs first
+      // wins, and the loser's EACCES is ignored, so the group exists before
+      // either side can try to signal it.
+      if (setpgid(0, 0) == -1) {
+        // NOLINTBEGIN(modernize-use-std-print)
+        info("setpgid failed: {}", strerror(errno));
+        // NOLINTEND(modernize-use-std-print)
+        _exit(EXIT_FAILURE);
+      }
+
       // Redirect stdout and stderr to temp files
       if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
           dup2(stderr_fd, STDERR_FILENO) == -1) {
@@ -244,6 +262,14 @@ public:
     }
 
     // Parent process
+
+    // The child's own [setpgid] may not have run yet, and [ciserver_stop] can
+    // arrive before it does. Racing the child to the same call closes that
+    // window; EACCES just means the child got there first, and ESRCH that it
+    // has already exited.
+    if (setpgid(pid, pid) == -1 && errno != EACCES && errno != ESRCH) {
+      error("failed to set process group for child {}: {}", pid, Errno{});
+    }
 
     // Restore parent's original stderr in case child affected it
     if (dup2(parent_stderr, STDERR_FILENO) == -1) {
@@ -376,7 +402,15 @@ public:
     for (auto &[pid, subprocess] : subprocesses_) {
       if (!subprocess->get_exit_code().has_value()) {
         info("stopping running process: {}", pid);
-        kill(pid, SIGTERM); // NOLINT(misc-include-cleaner)
+        // Signal the whole group the launch leads, not just its root: the
+        // grandchildren the benchmarks fork hold listening sockets that the
+        // next benchmark step has to bind. Fall back to the root alone if the
+        // group is already gone, which is what ESRCH here means.
+        // NOLINTBEGIN(misc-include-cleaner)
+        if (kill(-pid, SIGTERM) == -1) {
+          kill(pid, SIGTERM);
+        }
+        // NOLINTEND(misc-include-cleaner)
       }
 
       subprocess->wait_for_shutdown();

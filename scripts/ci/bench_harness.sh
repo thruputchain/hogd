@@ -291,9 +291,9 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # The program [ci_remote_reap] runs on one host to reap [$1] (a space-separated
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
-# both, and 3 if the signals could not be sent at all -- a host whose [killall]
-# or [sudo] is broken has not been shown to have a process refusing to die, and
-# must not be reported as though it had.
+# both, and 3 if the signals could not be sent at all -- a host where neither
+# [killall] nor [sudo] can deliver one has not been shown to have a process
+# refusing to die, and must not be reported as though it had.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
 # bare [killall <names>] hands the caller back a host where the processes have
@@ -345,19 +345,46 @@ wait_gone() {
   done
 }
 
-# Sends \$1 to every named process. Returns nonzero only when the signal could
-# not be sent at all, which has to be told apart from a process that refused to
-# die: [-q] silences killall's own "no process found", so a nonzero exit that
-# still says something is sudo or killall failing rather than an absence of
-# processes to kill.
-signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+# Delivers \$1 to every named process with the [killall] in \$2..., and reports
+# whether the signal was sent at all -- which has to be told apart from a
+# process that refused to die: [-q] silences killall's own "no process found",
+# so a nonzero exit that still says something is killall failing rather than an
+# absence of processes to kill. The complaint is left in \$signal_err for the
+# caller to report if nothing else works.
+try_signal() {
+  signal=\$1
+  shift
+  signal_err=\$("\$@" -q "-\$signal" \$procs 2>&1)
   status=\$?
-  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
-    return 1
+  [ "\$status" -eq 0 ] || [ -z "\$signal_err" ]
+}
+
+# Sends \$1 to every named process, unprivileged first and escalating to [sudo]
+# only if that could not deliver it.
+#
+# Every process this reaps was started by the same user that runs the reap, so
+# no privilege is needed to signal it; [sudo] is the escalation for a stale
+# process left behind by somebody else. Reaching for [sudo -n] first reaps
+# nothing at all on a bench host that has no passwordless sudo rule -- it
+# answers "sudo: a password is required" and the reap gives up before it has
+# signalled anything. That is how a [scpd.dev] orphaned by its [chuckd.dev]
+# survives into the next run still holding 127.0.0.1:4400, so the coordinator
+# that starts the next one dies on "transport is closed" and nothing ever
+# listens on its 7888. Nothing clears that by itself: the run that fails this
+# way orphans the next [scpd.dev] in turn, and every run after it fails
+# identically until a human logs in and kills it.
+signal_all() {
+  if try_signal "\$1" killall; then
+    return 0
   fi
-  return 0
+  unprivileged_err=\$signal_err
+
+  if try_signal "\$1" sudo -n /usr/bin/killall; then
+    return 0
+  fi
+
+  echo "cannot signal processes: \$unprivileged_err (sudo: \$signal_err)" >&2
+  return 1
 }
 
 # Signal first and ask questions after: a host that will not report its

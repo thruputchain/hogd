@@ -131,12 +131,33 @@ cat >"$reap_bin/ps" <<'FAKE_PS'
 cat "$ALIVE_FILE" 2>/dev/null
 FAKE_PS
 
-# [sudo -n /usr/bin/killall -q -SIG names...] records the signal it was asked
-# for and clears $ALIVE_FILE only for the signals in $DIES_ON, standing in for
-# a process that ignores SIGTERM. $SUDO_FAILS makes it fail the way a host with
-# no killall or no passwordless sudo does: nonzero, with a complaint on stderr.
-# A signal that matches nothing exits 1 silently, which is what [killall -q]
-# does and must not be read as a failure.
+# [killall -q -SIG names...] records the signal it was asked for and clears
+# $ALIVE_FILE only for the signals in $DIES_ON, standing in for a process that
+# ignores SIGTERM. $KILLALL_FAILS makes it fail the way a host whose stale
+# process belongs to another user does: nonzero, with a complaint on stderr. A
+# signal that matches nothing exits 1 silently, which is what [killall -q]
+# does and must not be read as a failure. Every attempt is recorded before it
+# can fail, so $SIGNAL_FILE shows what the reap tried as well as what landed.
+cat >"$reap_bin/killall" <<'FAKE_KILLALL'
+#!/usr/bin/env bash
+signal=""
+for arg in "$@"; do
+  case $arg in
+  -TERM | -KILL) signal=${arg#-} ;;
+  esac
+done
+echo "$signal" >>"$SIGNAL_FILE"
+if [[ -n ${KILLALL_FAILS:-} ]]; then
+  echo "killall: hog-mempool(1234): Operation not permitted" >&2
+  exit 1
+fi
+[[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
+[[ -s "$ALIVE_FILE" ]] || exit 1
+FAKE_KILLALL
+
+# [sudo -n /usr/bin/killall ...] is the escalation, and behaves the same once
+# it has run. $SUDO_FAILS makes it fail the way a bench host with no
+# passwordless sudo rule does.
 cat >"$reap_bin/sudo" <<'FAKE_SUDO'
 #!/usr/bin/env bash
 signal=""
@@ -153,7 +174,7 @@ fi
 [[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
 [[ -s "$ALIVE_FILE" ]] || exit 1
 FAKE_SUDO
-chmod +x "$reap_bin/ps" "$reap_bin/sudo"
+chmod +x "$reap_bin/ps" "$reap_bin/killall" "$reap_bin/sudo"
 
 reap_status=0
 reap_output=""
@@ -170,7 +191,7 @@ run_reap() {
   reap_output=$(
     PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
       SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
-      SUDO_FAILS="${SUDO_FAILS:-}" \
+      KILLALL_FAILS="${KILLALL_FAILS:-}" SUDO_FAILS="${SUDO_FAILS:-}" \
       bash -c "$(ci_reap_program "${3:-hog-mempool hog-exec}" 1 1)" 2>&1
   ) || reap_status=$?
 }
@@ -208,15 +229,36 @@ run_reap "chuckdXdev" "" "chuckd.dev scpd.dev"
 check_eq "a name is not matched as a pattern" "0" "$reap_status"
 check_eq "an unsignalled process is not waited on" "TERM" "$(cat "$signal_file")"
 
-# A host whose killall or sudo is broken has not been shown to have a process
-# refusing to die, so it must not report one: that reading fails the benchmark
-# step, and sends whoever reads it after a process nothing ever signalled.
+# A bench host with no passwordless sudo rule is the normal case, and reaching
+# for [sudo -n] there reaps nothing at all: the whole point of signalling
+# unprivileged first is that these processes belong to the user doing the
+# reaping, so the run that inherits the host is not handed a stale [scpd.dev]
+# still holding 127.0.0.1:4400.
 SUDO_FAILS=1 run_reap "hog-mempool" "TERM KILL"
+check_eq "no passwordless sudo still reaps" "0" "$reap_status"
+check_eq "unprivileged signal is not escalated to sudo" "TERM" \
+  "$(cat "$signal_file")"
+
+# [sudo] is still the escalation for a process this user cannot signal, which
+# is the one case the unprivileged killall cannot handle on its own.
+KILLALL_FAILS=1 run_reap "hog-mempool" "TERM KILL"
+check_eq "process owned by another user reaps via sudo" "0" "$reap_status"
+check_eq "unprivileged failure escalates to sudo" "TERM TERM" \
+  "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
+
+# A host whose killall and sudo are both broken has not been shown to have a
+# process refusing to die, so it must not report one: that reading fails the
+# benchmark step, and sends whoever reads it after a process nothing ever
+# signalled.
+KILLALL_FAILS=1 SUDO_FAILS=1 run_reap "hog-mempool" "TERM KILL"
 check_eq "unsendable signal is not reported as a survivor" "3" "$reap_status"
 check_contains "unsendable signal says what went wrong" \
-  "cannot signal processes: sudo: a password is required" "$reap_output"
-check_eq "unsendable signal does not wait out the timeouts" "TERM" \
-  "$(cat "$signal_file")"
+  "cannot signal processes: killall: hog-mempool(1234): Operation not permitted" \
+  "$reap_output"
+check_contains "unsendable signal names the sudo failure too" \
+  "(sudo: sudo: a password is required)" "$reap_output"
+check_eq "unsendable signal does not wait out the timeouts" "TERM TERM" \
+  "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
 if [[ "$reap_output" == *"alive after SIGKILL"* ]]; then
   echo "FAIL unsendable signal must not claim a SIGKILL survivor"
   fail=1
