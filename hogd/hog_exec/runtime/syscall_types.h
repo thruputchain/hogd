@@ -33,10 +33,11 @@ private:
 //     #2562) are best-effort diagnostics: they report and drop the record/log
 //     line, then let the syscall finish with its real result (mirroring
 //     SystemCallHandler::start_frame()'s drop-and-continue, #2473).
-//   - the per-syscall bodies that materialize the optional XDR trace-output
-//     record (`trace_data->outputs.emplace(...)`) cannot faithfully record the
-//     syscall if that fails, so they report here and then return
-//     HostFnErrorCode::Unrecoverable rather than dropping it silently.
+//   - wrap_after_parse()'s exception boundary around the inner syscall bodies
+//     (issue #3400): the bodies themselves are not noexcept and may throw
+//     freely (including from the XDR trace-output emplace); the boundary
+//     translates the exception to HostFnErrorCode::Unrecoverable and falls
+//     back to this reporter if formatting its own diagnostic throws.
 inline void
 report_dropped_syscall_trace(char const *what) noexcept
 {

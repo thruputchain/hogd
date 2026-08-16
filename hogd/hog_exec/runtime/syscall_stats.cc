@@ -1,6 +1,5 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
-#include <exception>
 #include <utility>
 
 #include "ffi_enums.hh"
@@ -20,21 +19,15 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
                                        WrappedGasAmount remaining_gas,
                                        TransactionStatistic input_statistic,
-                                       uint64_t &output_result) noexcept
+                                       uint64_t &output_result)
 {
   switch (input_statistic) {
   case TransactionStatistic::GasRemaining:
     output_result = remaining_gas.get();
     if (auto *trace_data = syscall_handler.get_syscall_trace_data<
                            SyscallNo::kGetTransactionStatistics>()) {
-      try {
-        trace_data->outputs.emplace(
-            SyscallGetTransactionStatisticsOutputs{.result = output_result});
-      } catch (std::exception &e) {
-        report_dropped_syscall_trace(e.what());
-        return {HostFnError{HostFnErrorCode::Unrecoverable},
-                WrappedGasAmount{0}};
-      }
+      trace_data->outputs.emplace(
+          SyscallGetTransactionStatisticsOutputs{.result = output_result});
     }
     return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
   default:

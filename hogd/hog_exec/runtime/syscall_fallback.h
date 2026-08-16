@@ -14,7 +14,7 @@
 namespace hogd {
 
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-no_syscall_func_inner() noexcept
+no_syscall_func_inner()
 {
   return {SyscallErrorCode::kSyscallErrorCodeNoSyscall,
           WrappedGasAmount{kNoSyscallCost}};

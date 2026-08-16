@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <exception>
 #include <span>
 #include <utility>
 
@@ -25,7 +24,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<std::byte> output_bytestring,
-                            RuntimeMemoryLength &output_written_len) noexcept
+                            RuntimeMemoryLength &output_written_len)
 {
   auto status = syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
@@ -43,14 +42,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kBytestringGet>()) {
-    try {
-      CHECK(bs->size() <= kBytestringMaxLen);
-      trace_data->outputs.emplace(
-          SyscallBytestringGetOutputs{.bytestring = *bs});
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-    }
+    CHECK(bs->size() <= kBytestringMaxLen);
+    trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -59,7 +52,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
-                               RuntimeMemoryLength &output_length) noexcept
+                               RuntimeMemoryLength &output_length)
 {
   auto status = syscall_handler.get_bytestring(input_key);
   if (!status) {
@@ -75,13 +68,8 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kBytestringGetLen>()) {
-    try {
-      trace_data->outputs.emplace(
-          SyscallBytestringGetLenOutputs{.length = output_length});
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-    }
+    trace_data->outputs.emplace(
+        SyscallBytestringGetLenOutputs{.length = output_length});
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -91,7 +79,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,
-                            StorageDeltaFlagSet input_flags) noexcept
+                            StorageDeltaFlagSet input_flags)
 {
   if (input_bytestring.size() > kBytestringMaxLen) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
