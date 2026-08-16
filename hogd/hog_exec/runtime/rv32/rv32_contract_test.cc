@@ -581,8 +581,8 @@ TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
                            /*outputs=*/96});
   append_syscall(program, {kInvokeSyscallNo, 0, 0, 0, 0, 0, /*inputs=*/64,
                            /*outputs=*/108});
-  append_syscall(program, {kReturnSyscallNo, /*buffer=*/96, /*len=*/24, 0, 0,
-                           0});
+  append_syscall(program,
+                 {kReturnSyscallNo, /*buffer=*/96, /*len=*/24, 0, 0, 0});
   auto addr = deploy_words(program, 0, std::move(initial_memory));
 
   auto handler = make_new_system_call_handler(
@@ -608,7 +608,8 @@ TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
   EXPECT_EQ(second.frame_status, InvocationFrameStatusCode::Fault);
 }
 
-TEST_F(Rv32ProductionMappingTest, DeploymentRowWithoutContractRowIsUnrecoverable)
+TEST_F(Rv32ProductionMappingTest,
+       DeploymentRowWithoutContractRowIsUnrecoverable)
 {
   // A deployment row whose contract row is missing is an inconsistent DB
   // state; resolution fails and must surface as Unrecoverable, not a

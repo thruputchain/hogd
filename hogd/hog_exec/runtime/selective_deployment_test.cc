@@ -13,12 +13,11 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/runtime/contract_trait_client.h"
-#include "invoke_args.hh"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -29,6 +28,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
+#include "invoke_args.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -640,9 +640,9 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
           CopyableInvokeOutputs outputs{};
           auto r = ctx.syscall<SyscallNo::kInvoke>(
               target,
-              std::span<const std::byte>(
-                  reinterpret_cast<const std::byte *>(calldata.data()),
-                  calldata.size()),
+              std::span<const std::byte>(reinterpret_cast<const std::byte *>(
+                                             calldata.data()),
+                                         calldata.size()),
               std::span<uint32_t>{}, inputs, outputs);
           if (!r.has_value()) {
             ADD_FAILURE() << "invoke " << i << " host error: "
