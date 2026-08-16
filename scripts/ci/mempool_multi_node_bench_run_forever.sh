@@ -102,6 +102,30 @@ exec ${quoted_cmd}
 EOF
 }
 
+# See the note on the same function in mempool_multi_node_bench.sh. A stop
+# reaches the shell the control server forked, not the benchmark under it, so a
+# script that cannot [exec] its command away has to forward the stop itself.
+# This variant's mempool runs without a timeout, so a mempool left behind by a
+# cancelled run keeps ports 8070-8075 until someone clears it by hand.
+make_ulimit_forwarding_script() {
+  local quoted_cmd
+  quoted_cmd=$(quote_cmd "$@")
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+${quoted_cmd} &
+child=\$!
+trap 'kill -TERM "\$child" 2>/dev/null || true' TERM INT HUP
+set +e
+wait "\$child"
+status=\$?
+[ \$status -gt 128 ] && { wait "\$child"; status=\$?; }
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
+}
+
 declare -a CONTROL_LOG_RECORDS=()
 declare -a LIVE_TAIL_PIDS=()
 PUBLISHED_RESULTS=0
@@ -400,30 +424,8 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-node0_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd "${node0_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
-node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
+node0_mempool_script=$(make_ulimit_forwarding_script "${node0_mempool_cmd[@]}")
+node1_mempool_script=$(make_ulimit_forwarding_script "${node1_mempool_cmd[@]}")
 
 control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"

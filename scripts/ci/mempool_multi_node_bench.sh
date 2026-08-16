@@ -105,6 +105,41 @@ exec ${quoted_cmd}
 EOF
 }
 
+# Like [make_ulimit_exec_script], but for a command whose exit status has to be
+# post-processed, so the launched shell cannot [exec] the command away and
+# stays in the tree as its parent.
+#
+# That parent is what a stop reaches. [ciserver_stop] signals the pid the
+# control server forked, which for a script that does not [exec] is this shell
+# and not the benchmark under it, so killing the shell on its own leaves the
+# benchmark running and still holding its ports -- for the mempool, 8070-8075.
+# The only thing left to catch that is the host-wide sweep, which reaps nothing
+# wherever [sudo -n killall] needs a password, as it does on this fleet. So run
+# the command in the background and forward the stop to it.
+#
+# A trapped signal makes [wait] return 128+signal without reaping the child, so
+# the child's own status needs a second [wait]. 124 is [timeout] reaping a
+# mempool that outlived the load, which is this benchmark's expected end rather
+# than a failure.
+make_ulimit_forwarding_script() {
+  local quoted_cmd
+  quoted_cmd=$(quote_cmd "$@")
+  cat <<EOF
+set -euo pipefail
+ulimit -c unlimited || true
+${quoted_cmd} &
+child=\$!
+trap 'kill -TERM "\$child" 2>/dev/null || true' TERM INT HUP
+set +e
+wait "\$child"
+status=\$?
+[ \$status -gt 128 ] && { wait "\$child"; status=\$?; }
+set -e
+[ \$status -eq 124 ] && status=0
+exit \$status
+EOF
+}
+
 declare -a CONTROL_LOG_RECORDS=()
 declare -a LIVE_TAIL_PIDS=()
 PUBLISHED_RESULTS=0
@@ -459,30 +494,8 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-node0_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
-node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
+node0_mempool_script=$(make_ulimit_forwarding_script timeout 360s "${node0_mempool_cmd[@]}")
+node1_mempool_script=$(make_ulimit_forwarding_script timeout 360s "${node1_mempool_cmd[@]}")
 
 control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
