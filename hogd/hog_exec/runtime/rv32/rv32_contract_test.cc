@@ -357,6 +357,33 @@ TEST_F(Rv32ProductionMappingTest, ExitSyscallIsDeterministicFault)
   EXPECT_LT(result.gas_consumed_, 10'000U);
 }
 
+TEST_F(Rv32ProductionMappingTest, ZeroMemoryContractVerifiesAndExecutes)
+{
+  // memory_bytes == 0 artifacts are valid; a zero-memory contract can still
+  // Return an empty buffer.
+  std::vector<uint32_t> program;
+  append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+  const std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact(program, std::span<const uint8_t>{});
+
+  ContractBlob blob;
+  blob.data.append_range(artifact);
+  Contract verify_contract_xdr(ContractType::kRv32);
+  verify_contract_xdr.rv32_contract() = blob;
+  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr),
+            InvokeErrorCode::None);
+
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract() = std::move(blob);
+  auto addr = make_contract_address(0);
+  write_contract(contract);
+  write_deployment(addr, contract);
+  setup_grant_storage_token(addr, 1'000'000'000);
+
+  auto result = invoke_deployed(addr, 10'000);
+  ASSERT_TRUE(result.is_root_success());
+}
+
 TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
 {
   std::vector<uint32_t> program;
