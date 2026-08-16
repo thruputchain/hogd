@@ -349,6 +349,14 @@ exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
 }
 
 extern "C" TrampolineResult
+zero_code_exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                     uint32_t, uint32_t)
+{
+  return make_exit_result(0);
+}
+
+extern "C" TrampolineResult
 return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
              uint32_t)
@@ -1789,20 +1797,28 @@ TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
   EXPECT_EQ(result.gas_consumed_, (3U * rv32::kBaseInstructionGas) + 4U);
 }
 
-TEST_F(Rv32RuntimeContextTest, NonzeroExitHaltCodeMapsToDeterministic)
+TEST_F(Rv32RuntimeContextTest, ExitPanicMapsToDeterministicRegardlessOfCode)
 {
-  auto rv32_context = rv32::RuntimeContext(
-      {{kRv32ContractId, make_single_ecall_image(&exit_entry)}});
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
+  // Parity with the wasm runtime and production Rv32Runtime: Exit is always a
+  // deterministic failure; the trampoline result_code is not an exit status.
+  auto expect_deterministic = [&](HostFn8 entry) {
+    auto rv32_context = rv32::RuntimeContext(
+        {{kRv32ContractId, make_single_ecall_image(entry)}});
+    auto contract = make_rv32_contract_xdr();
+    install_contract(contract);
 
-  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                              rv32_context);
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                     rv32_context);
 
-  auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+    auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
 
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  };
+
+  expect_deterministic(&exit_entry);
+  expect_deterministic(&zero_code_exit_entry);
 }
 
 TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
