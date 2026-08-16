@@ -8,6 +8,7 @@
 #include <set>
 #include <utility>
 
+#include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "rpc_types.hh"
@@ -99,6 +100,23 @@ make_consume_uniquifier_delta(ContractAddress const &addr,
                                .key = StorageKey(StorageKeyType::ReplayCache)},
       .delta = std::move(delta),
       .flags = std::to_underlying(StorageDeltaFlags::None)};
+}
+
+FlaggedStorageDelta
+make_deploy_delta(ContractAddress const &addr, std::uint8_t hash_byte,
+                  StorageDeltaFlagSet flags)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
+  DeployedContractHash hash{};
+  hash.hash.fill(hash_byte);
+  hash.contract_size = 32;
+  hash.contract_type = ContractType::kWasmi;
+  delta.deployed_contract_hash() = hash;
+  return FlaggedStorageDelta{
+      .addrkey = AddressAndKey{.address = addr,
+                               .key = StorageKey(StorageKeyType::Metadata)},
+      .delta = std::move(delta),
+      .flags = flags};
 }
 
 class RpcFromExecDiagnosticsTest : public ::testing::Test {
@@ -319,6 +337,69 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedDataPushRetainsNoEntries)
   EXPECT_EQ(itx->get_savepoint_head(), 0U);
   EXPECT_EQ(itx->change_entry_count_for_testing(), 0U);
   EXPECT_EQ(itx->balance_entry_count_for_testing(), 0U);
+}
+
+// Regression test for #1189: request_one dropped [flags] on the floor for
+// kDeltaTypeDeployContract deltas, so an exclusive lock requested on a deploy
+// was silently downgraded to an ordinary reservation -- MockDB blocked the
+// second deploy, hog_db did not. The two tests below pin both halves: the
+// flag now blocks, and its absence still admits an identical concurrent
+// deploy (so the block above comes from the flag, not from the deploy path
+// having become conflict-happy).
+TEST_F(RpcFromExecDiagnosticsTest, DeployContractExclusiveFlagBlocksConcurrent)
+{
+  StorageDeltaBatch exclusive;
+  exclusive.push_back(
+      make_deploy_delta(addr_, 0xD1,
+                        std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  auto r1 = rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1},
+                                              exclusive);
+  ASSERT_EQ(r1.error(), RPCError::kRPCNone);
+
+  // Same address, same contract hash: without the exclusive lock this would
+  // be admitted alongside (see the control test below).
+  StorageDeltaBatch concurrent;
+  concurrent.push_back(
+      make_deploy_delta(addr_, 0xD1,
+                        std::to_underlying(StorageDeltaFlags::None)));
+  auto r2 = rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2},
+                                              concurrent);
+  ASSERT_EQ(r2.error(), RPCError::kRPCStorageWriteFailed);
+
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(r2.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(r2.conflict().conflicts().size(), 1U);
+    EXPECT_EQ(r2.conflict().conflicts()[0].addrkey.key.key_type(),
+              StorageKeyType::Metadata);
+    EXPECT_EQ(r2.conflict().conflicts()[0].code,
+              DbConflictCode::kDbConflictExclusiveLock);
+  }
+  else {
+    ASSERT_EQ(r2.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(r2.conflict().first().addrkey.key.key_type(),
+              StorageKeyType::Metadata);
+    EXPECT_EQ(r2.conflict().first().code,
+              DbConflictCode::kDbConflictExclusiveLock);
+  }
+}
+
+TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
+{
+  StorageDeltaBatch first;
+  first.push_back(
+      make_deploy_delta(addr_, 0xD2,
+                        std::to_underlying(StorageDeltaFlags::None)));
+  auto r1 =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1}, first);
+  ASSERT_EQ(r1.error(), RPCError::kRPCNone);
+
+  StorageDeltaBatch second;
+  second.push_back(
+      make_deploy_delta(addr_, 0xD2,
+                        std::to_underlying(StorageDeltaFlags::None)));
+  auto r2 =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, second);
+  EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 
 } // namespace

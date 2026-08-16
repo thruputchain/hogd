@@ -36,6 +36,13 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
   if (after->is_deletion()) {
     return 0;
   }
+  if (after->is_deploy_contract()) {
+    auto const &deployment = after->to_new_deployment();
+    x23assert(deployment.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return ctx.cost_model->get_deployment_cost(
+        deployment->deployed_contract_hash());
+  }
   if (after->is_auth_data()) {
     auto const &auth_data = after->to_auth_data();
     x23assert(auth_data.has_value());
