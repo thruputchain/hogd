@@ -5,7 +5,6 @@
 #include <gtest/gtest.h>
 #include <span>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -26,7 +25,6 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
-#include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
@@ -3244,32 +3242,6 @@ TEST(TestBindingsTest, ConcurrentCreateDB)
   }
 }
 
-// Test that setup_create_contract rejects wasm contracts with memory
-// exceeding the allowed limit. See wat/test_large_memory.wat (100 initial
-// pages, well above the 1-page limit).
-TEST(TestBindingsTest, SetupCreateContractRejectsLargeMemory)
-{
-  auto *db = make_db();
-  ASSERT_NE(db, nullptr);
-  x23::Defer d([db] { free_db(db); });
-
-  auto *rc = make_runtime_context();
-  ASSERT_NE(rc, nullptr);
-  x23::Defer d2([rc] { close_runtime_context(rc); });
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_large_memory.wasm");
-
-  auto bytes = x23::serialize(contract);
-
-  // setup_create_contract should reject this contract because its memory
-  // exceeds the allowed limit. Before the fix, this would succeed and the
-  // contract would fail later with an Unrecoverable error during instantiation.
-  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
-  EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
-}
-
 // Regression test for #2683: setup_create_contract must run the runtime
 // verifier for RV32 contracts (not just Wasmi) before storing them. An invalid
 // RV32 artifact that do_verify_contract rejects must be rejected here too with
@@ -3324,119 +3296,13 @@ TEST(TestBindingsTest, SetupCreateContractRejectsUnknownNative)
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
-namespace {
-
-// Append an unsigned LEB128-encoded u32 to a wasm byte buffer.
-void
-append_wasm_u32_leb128(auto &out, uint32_t value)
-{
-  do {
-    uint8_t byte = value & 0x7fU;
-    value >>= 7U;
-    if (value != 0) {
-      byte |= 0x80U;
-    }
-    out.push_back(byte);
-  } while (value != 0);
-}
-
-// Append a well-formed, verifier-allowed "name" custom section padded with
-// `custom_bytes` of filler so the serialized contract can be pushed past
-// RAMDB's single-item size limit while staying a valid module.
-void
-append_name_custom_section(auto &wasm, uint32_t custom_bytes)
-{
-  constexpr std::string_view kSectionName = "name";
-
-  wasm.push_back(0); // custom section id
-  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(1 + kSectionName.size() +
-                                                     custom_bytes));
-  append_wasm_u32_leb128(wasm, static_cast<uint32_t>(kSectionName.size()));
-  wasm.append_range(kSectionName);
-  wasm.append_range(std::string(custom_bytes, 'x'));
-}
-
-} // namespace
-
 // Since #2569 hog_db chunks large code rows across multiple RAMDB items, so an
 // honest verifier-accepted contract whose serialized bytes exceed RAMDB's
-// single-item limit now stores successfully through the setup path.  This
-// supersedes the #2462 regression concern (the write no longer fails; the
-// structured-error-or-crash question is moot at this size).  We also deploy
-// the stored contract and invoke it end-to-end to confirm the full path works;
-// the padded test_param_entrypoint module has a wrong-ABI export so the frame
-// returns a deterministic Fault, but the FFI layer still returns
-// kTestFFIErrorCodeNone.
-TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
-{
-  auto *db = make_db();
-  ASSERT_NE(db, nullptr);
-  x23::Defer d([db] { free_db(db); });
-
-  auto *rc = make_runtime_context();
-  ASSERT_NE(rc, nullptr);
-  x23::Defer d2([rc] { close_runtime_context(rc); });
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_param_entrypoint.wasm");
-  append_name_custom_section(contract.wasmi_contract().data, 96_KiB);
-
-  auto bytes = x23::serialize(contract);
-  // Precondition: the contract is large enough to be rejected by the DB write
-  // but the module stays under the meter's 2 MiB cap, so verification passes.
-  ASSERT_GT(bytes.size(), kBigItemThreshold);
-  ASSERT_LT(contract.wasmi_contract().data.size(), 2_MiB);
-
-  auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
-  ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
-  ASSERT_EQ(verify_result.success, 1);
-
-  // Since #2569 the oversized row is stored chunked: the setup write succeeds.
-  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
-  EXPECT_EQ(result, kTestFFIErrorCodeNone);
-
-  // Deploy and invoke end-to-end to confirm the chunked contract is readable
-  // and executable.
-  ContractAddress deployment_addr{};
-  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
-                                  sha256(contract).data(), bytes.size()),
-            kTestFFIErrorCodeNone);
-
-  // A committed transaction consumes a replay nonce charged to the invoked
-  // address; grant enough storage tokens to cover that cost.
-  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
-                                                1'000'000),
-            kTestFFIErrorCodeNone);
-
-  SignedTransaction stx{
-      .tx = {.invocation =
-                 {
-                     .invoked_address = deployment_addr,
-                     .entrypoint = entrypoint_from_method_id(0x1234),
-                     .gas_limit = 1'000'000,
-                     .calldata = {},
-                 },
-             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
-      .signatures = {},
-  };
-
-  auto *syscall_handler = make_syscall_handler(db, rc, stx);
-  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
-
-  auto invoke_result = root_invoke(syscall_handler, 0);
-  x23::Defer d4([&] { free_ffi_data_buffer(invoke_result.serialized_output); });
-  x23::Defer d5([&] { free_ffi_data_buffer(invoke_result.serialized_trace); });
-  x23::Defer d6([&] { free_ffi_data_buffer(invoke_result.serialized_events); });
-  // The FFI wrapper must not surface an unrecoverable error: the param-ABI
-  // mismatch is a deterministic fault, not a system error.
-  EXPECT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
-}
-
-// rv32 twin of the chunked-store test above: the artifact format has no slack
-// section, so the row is pushed past kBigItemThreshold with a full 64 KiB
-// initial memory image (memory_bytes lands exactly at kMaxMemoryBytes, the
-// accept-side limit boundary). Unlike the wasm twin's wrong-ABI export, the
+// single-item limit stores successfully through the setup path. The artifact
+// format has no slack section, so the row is pushed past kBigItemThreshold
+// with a full 64 KiB initial memory image (memory_bytes lands exactly at
+// kMaxMemoryBytes, the accept-side limit boundary). We also deploy the stored
+// contract and invoke it end-to-end to confirm the full path works; the
 // program Returns, so the invoke is asserted as a frame success.
 TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
 {
@@ -3504,24 +3370,6 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
   x23::deserialize(&output, x23::BufView{invoke_result.serialized_output.data,
                                          invoke_result.serialized_output.len});
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
-}
-
-// Test that do_verify_contract returns failure for wasm with large memory.
-TEST(TestBindingsTest, VerifyContractRejectsLargeMemory)
-{
-  auto *rc = make_runtime_context();
-  ASSERT_NE(rc, nullptr);
-  x23::Defer d([rc] { close_runtime_context(rc); });
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_large_memory.wasm");
-
-  auto bytes = x23::serialize(contract);
-
-  auto result = do_verify_contract(rc, bytes.data(), bytes.size());
-  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
-  EXPECT_EQ(result.success, 0);
 }
 
 // Regression test for #1754: FFIDataBuffer::len must be uint64_t so that

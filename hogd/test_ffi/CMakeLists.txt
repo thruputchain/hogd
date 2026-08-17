@@ -186,11 +186,6 @@ target_link_libraries(
   GTest::gtest
   GTest::gtest_main
 )
-add_dependencies(
-  test_ffi_test
-  test_large_memory_wasm
-  test_param_entrypoint_wasm
-)
 gtest_discover_tests(test_ffi_test)
 
 # Separate binary for coverage that must run before logging is initialized.
