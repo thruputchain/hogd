@@ -339,6 +339,7 @@ add_riscv_builds(
     view_gateway_test
     cxs_roundtrip
     txs_roundtrip
+    hash_bug
 )
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types
