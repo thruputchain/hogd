@@ -8,29 +8,30 @@
 // then finish_syscall_trace() -- so every record production opens is closed on
 // every path.
 //
-// The mock path had no such bracket. start_syscall_trace() appended the record
-// first, and several throwing operations ran afterward:
+// The mock path had no such bracket: it closed the record on exactly one of its
+// exits, the admission refusal. Two others left it open.
 //
-//   * the SyscallInvokeInputs copy, which owns the child's variable-length
-//     calldata (finding 002),
-//   * the clamped Invocation copy, which owns it again,
-//   * the EmptyRuntime preallocation and the two stack reserve() calls
-//     (the originally reported #2747 failure point).
+//   * A std::bad_alloc from the throwing work after the append -- the
+//     SyscallInvokeInputs copy that owns the child's variable-length calldata
+//     (finding 002), the clamped Invocation copy that owns it again, the
+//     EmptyRuntime preallocation and the two stack reserve() calls (the
+//     originally reported failure point) -- unwound into
+//     open_mock_invocation_frame()'s catch, which handed the caller a
+//     structured unrecoverable FFI error.
+//   * The start_frame() admission-failure return (#3058) returned the same
+//     error directly, with no allocation failure in this function at all.
 //
-// A std::bad_alloc from any of them unwound into open_mock_invocation_frame()'s
-// catch, which handed the caller a structured unrecoverable FFI error -- and
-// left the appended record behind, still carrying the sentinels
+// Either way the appended record stayed behind carrying the sentinels
 // start_syscall_trace() writes for finish_syscall_trace() to overwrite
-// (gas_remaining_at_end == GasAmount max, status Unrecoverable, null outputs).
-// Finishing the parent then serialized a child Invoke that never opened a
-// frame. start_frame()'s own admission failure returned the same way, with the
-// same record left open.
+// (gas_remaining_at_end == GasAmount max, status Unrecoverable, null outputs),
+// and finishing the parent serialized a child Invoke that never opened a frame.
 //
-// The fix hoists every throwing step above start_syscall_trace() and completes
-// the record on both in-window failure returns, so no path can leave one open.
-// syscall_handler_wrapper.cc pins the two calls that stay inside the window
-// (the trace-input move and start_frame()) with static_asserts, since that half
-// of the invariant is a compile-time property.
+// The fix routes every exit through one self-disarming helper: a Defer
+// completes the record if the stack unwinds, the two structured-error returns
+// complete it with the more specific status they have, and the success path
+// disarms once start_frame() hands responsibility to
+// finish_mock_invocation_frame(). Finishing twice is what aborts (#2948), so
+// the helper -- not the call sites -- owns whether a finish is still owed.
 //
 // The allocation failures themselves can only be forced with a global allocator
 // hook, which this suite deliberately does not install (see
