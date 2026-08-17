@@ -803,9 +803,9 @@ make_rv32_contract_xdr()
 }
 
 std::shared_ptr<const Contract>
-make_wasmi_contract_xdr()
+make_non_mock_contract_xdr()
 {
-  auto contract = std::make_shared<Contract>(ContractType::kWasmi);
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
   return contract;
 }
 
@@ -1879,7 +1879,7 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsUndefinedRv32MockContract)
 TEST_F(Rv32RuntimeContextTest, VerifyRejectsNonMockContractWithoutAbort)
 {
   auto rv32_context = rv32::RuntimeContext({});
-  auto contract = make_wasmi_contract_xdr();
+  auto contract = make_non_mock_contract_xdr();
 
   EXPECT_EQ(rv32_context.verify_contract(*contract),
             InvokeErrorCode::Deterministic);
