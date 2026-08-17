@@ -110,7 +110,7 @@ make_deploy_delta(ContractAddress const &addr, std::uint8_t hash_byte,
   DeployedContractHash hash{};
   hash.hash.fill(hash_byte);
   hash.contract_size = 32;
-  hash.contract_type = ContractType::kWasmi;
+  hash.contract_type = ContractType::kRv32;
   delta.deployed_contract_hash() = hash;
   return FlaggedStorageDelta{
       .addrkey = AddressAndKey{.address = addr,

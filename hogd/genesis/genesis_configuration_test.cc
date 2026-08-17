@@ -273,7 +273,7 @@ TEST(GenesisConfigurationTest, BuilderHonorsDefaultWalletOverride)
   DeployedContractHash custom{};
   custom.hash.fill(0xAB);
   custom.contract_size = 7;
-  custom.contract_type = ContractType::kWasmi;
+  custom.contract_type = ContractType::kRv32;
 
   GenesisConfigurationBuilder builder;
   builder.set_default_wallet(custom);
@@ -282,7 +282,7 @@ TEST(GenesisConfigurationTest, BuilderHonorsDefaultWalletOverride)
 
   EXPECT_EQ(config.default_wallet.hash, custom.hash);
   EXPECT_EQ(config.default_wallet.contract_size, 7U);
-  EXPECT_EQ(config.default_wallet.contract_type, ContractType::kWasmi);
+  EXPECT_EQ(config.default_wallet.contract_type, ContractType::kRv32);
 }
 
 TEST(GenesisConfigurationTest, NativeDefaultWalletHashMatchesGenesisRecord)

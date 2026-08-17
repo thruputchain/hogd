@@ -1320,10 +1320,10 @@ TEST_F(HogDbTest, DbHashDeltaNewContractLockMatchesFullStateHash)
 // recompute, and the DAO reassembles the row byte-identically.
 TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 {
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.resize_uninitialized(2 * kBigItemThreshold);
-  for (size_t i = 0; i < contract.wasmi_contract().data.size(); ++i) {
-    contract.wasmi_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.resize_uninitialized(2 * kBigItemThreshold);
+  for (size_t i = 0; i < contract.rv32_contract().data.size(); ++i) {
+    contract.rv32_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
   }
 
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
@@ -1344,15 +1344,15 @@ TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 // leave earlier writes visible and the commit error would abort the node.
 TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
 {
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.resize_uninitialized(
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.resize_uninitialized(
       kMaxSerializedContractBytes + 1);
 
   // A row at exactly the bound is accepted (the preflight is >, not >=).
   // Blob of (bound - 8) serializes to exactly kMaxSerializedContractBytes:
   // 4-byte union tag + 4-byte opaque length + data (multiple of 4, no pad).
-  Contract at_bound_contract(ContractType::kWasmi);
-  at_bound_contract.wasmi_contract().data.resize_uninitialized(
+  Contract at_bound_contract(ContractType::kRv32);
+  at_bound_contract.rv32_contract().data.resize_uninitialized(
       kMaxSerializedContractBytes - 8);
   ASSERT_EQ(x23::xdr_size(at_bound_contract), kMaxSerializedContractBytes);
 
@@ -3877,7 +3877,7 @@ make_test_deployed_hash(std::string_view seed, uint32_t contract_size)
 {
   return DeployedContractHash{.hash = sha256(std::as_bytes(std::span(seed))),
                               .contract_size = contract_size,
-                              .contract_type = ContractType::kWasmi};
+                              .contract_type = ContractType::kRv32};
 }
 
 } // namespace
