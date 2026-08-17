@@ -18,6 +18,7 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/version.h"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -285,6 +286,110 @@ TEST_F(ViewGatewayRefreshTest, RefreshWithNoNewBlockIsHarmless)
   ViewGatewayResult r3 = gateway.viewgateway_view(make_read_query())();
   ASSERT_EQ(r3.outcome(), ViewGatewayOutcome::ViewGatewayOk);
   EXPECT_EQ(r3.payload().height, h1);
+
+  gateway.shut_down();
+}
+
+// viewgateway_intro: only the exact protocol commit is accepted; anything
+// else is ViewGatewayIntroMismatchedProtocol. Only the success arm was pinned
+// (via devnode) before. Also pins the shutdown arm of viewgateway_view: a
+// view after shut_down() is ViewGatewayInternalError, not a hang or a stale
+// answer.
+TEST_F(ViewGatewayRefreshTest, IntroMismatchAndViewAfterShutdown)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
+
+  EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{"not-a-protocol"}),
+            ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol);
+  EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{version::kHogdProtocol()}),
+            ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+
+  ViewGatewayResult before = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(before.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+
+  gateway.shut_down();
+
+  ViewGatewayResult after = gateway.viewgateway_view(make_read_query())();
+  EXPECT_EQ(after.outcome(), ViewGatewayOutcome::ViewGatewayInternalError);
+}
+
+// The abandon-rotate-retry machine, driven deterministically: a committed
+// block invalidates the gateway's viewing snapshot (they are siblings off the
+// same parent), but a repeat query of an already-cached key is served from
+// the ViewState's snapshot cache and legitimately reports the STALE height --
+// stale-but-consistent, never an error. A query that must touch the DB (an
+// uncached key) observes the invalidation as an Abandoned attempt,
+// run_view_with_retries rotates to a fresh snapshot, and the caller sees Ok
+// at the NEW height. Neither path may ever surface ViewGatewayAbandoned.
+TEST_F(ViewGatewayRefreshTest, RotationOnStaleSnapshotServesFreshHeight)
+{
+  commit_bytestring("value-0");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
+
+  ViewGatewayResult warm = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(warm.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  auto height = warm.payload().height;
+
+  for (int i = 1; i <= 4; ++i) {
+    commit_bytestring(std::format("value-{}", i));
+    framework_.advance_block();
+
+    // Cached key: Ok at whatever height the current snapshot has (stale
+    // until something forces a rotation) -- never an error.
+    ViewGatewayResult cached = gateway.viewgateway_view(make_read_query())();
+    ASSERT_EQ(cached.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_GE(cached.payload().height, height);
+
+    // Uncached key: the DB read sees the sibling-invalidated snapshot,
+    // the attempt abandons, and rotation must land on the new tip.
+    auto query = make_read_query();
+    ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
+    query.invocation = client.make_invocation<u8"read_value">(
+        UINT64_MAX, NativeContractTestFramework::make_storage_key(
+                        std::format("uncached_key_{}", i)));
+    ViewGatewayResult fresh = gateway.viewgateway_view(std::move(query))();
+    ASSERT_EQ(fresh.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    EXPECT_GT(fresh.payload().height, height);
+    height = fresh.payload().height;
+  }
+
+  gateway.shut_down();
+}
+
+// End-to-end proof that viewgateway_view actually APPLIES
+// normalize_public_view_query: a query carrying TryInvoke|DelegateCall
+// invoke flags still executes as a plain root view (Return), where the
+// un-normalized flags would be rejected by the view runner. The unit tests
+// pin what normalization strips; this pins that the RPC path calls it.
+TEST_F(ViewGatewayRefreshTest, ViewNormalizesFlagsEndToEnd)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
+                         1);
+
+  auto query = make_read_query();
+  query.invoke_flags = std::to_underlying(InvokeFlag::TryInvoke) |
+                       std::to_underlying(InvokeFlag::DelegateCall);
+
+  ViewGatewayResult r = gateway.viewgateway_view(std::move(query))();
+  ASSERT_EQ(r.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(r.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
 
   gateway.shut_down();
 }

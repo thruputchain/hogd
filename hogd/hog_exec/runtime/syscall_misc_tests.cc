@@ -630,6 +630,27 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
+// The Return length gate is strict (> kMaxReturnBufferLen): a child
+// returning exactly kMaxReturnBufferLen bytes finishes with frame status
+// Return, and the parent retrieves all kMaxReturnBufferLen bytes intact.
+// Pins the accept side of the boundary whose reject side is
+// TestReturnBufferTooLong.
+TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_return_buffer_exact_max">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
 // ── #35: DeployContract (already deployed) ──────────────────────────
 
 TEST_F(SyscallMiscTests, TestDeployContractAlreadyDeployed)

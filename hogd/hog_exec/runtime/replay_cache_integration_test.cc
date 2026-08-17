@@ -254,6 +254,28 @@ TEST_F(ReplayCacheIntegrationTest, UnexpiredHeightRunsBodyAndCommits)
   EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// The executor-side expiry comparison in replay_uniquifier_expired is strict
+// (block_expiry_height < executing height): expiry exactly at the executing
+// height runs the body and commits, one below is rejected. Pins the accept
+// side against a < -> <= drift, which would reject transactions the db-side
+// ReplayCacheLock (and other validators) accept.
+TEST_F(ReplayCacheIntegrationTest, ExpiryAtExecutingHeightAcceptedBoundary)
+{
+  advance_block();
+  advance_block();
+  const auto executing_height = static_cast<BlockHeight>(get_block_number());
+
+  EXPECT_EQ(run_and_commit(make_tx(0, /*nonce=*/21, executing_height - 1)),
+            ExecResult::ExecResultTxValidationFailure);
+
+  auto handler =
+      make_new_system_call_handler(make_tx(3, /*nonce=*/22, executing_height),
+                                   *ctx_);
+  EXPECT_TRUE(handler.root_invoke().is_root_success());
+  EXPECT_TRUE(body_ran_);
+  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 TEST_F(ReplayCacheIntegrationTest, ManualRevertBurnsNonce)
 {
   EXPECT_EQ(run_and_commit(make_tx(1, 200)),

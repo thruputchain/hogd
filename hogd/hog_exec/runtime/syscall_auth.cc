@@ -171,6 +171,12 @@ syscall_MintAuthToken_inner(
   }
   output_token_id = *status;
 
+  if (auto *trace_data =
+          syscall_handler.get_syscall_trace_data<SyscallNo::kMintAuthToken>()) {
+    trace_data->outputs.emplace(
+        SyscallMintAuthTokenOutputs{.token_id = output_token_id});
+  }
+
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 

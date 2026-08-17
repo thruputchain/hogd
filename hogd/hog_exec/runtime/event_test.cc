@@ -1160,7 +1160,40 @@ TEST(EventRpcValidationProposalData,
   auto status =
       consume_validation_handler.emit_events(ExecResult::ExecResultOK,
                                              std::move(proposed_tx))();
-  EXPECT_FALSE(status.has_value());
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error().code(), SystemErrorCode::Unrecoverable);
+}
+
+// EventServerProxy's RPC-error mapping: kRPCBadBlockID becomes Abandon (the
+// block is abandoned, the executor survives), anything else Unrecoverable.
+// A swapped mapping would turn an abandonable block into an executor
+// fail-stop or vice versa; no prior test asserted either arm on the proxy.
+// Also pins the PerTransactionEventServerProxy double-emit guard:
+// Unrecoverable with no RPC issued.
+TEST(EventServerProxyMapping, BadBlockIdIsAbandonAndDoubleEmitIsUnrecoverable)
+{
+  NativeContractTestFramework fw(
+      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
+
+  EventServerProxy proxy(x23::HostPort{"localhost", fw.get_event_exec_port()});
+
+  const BlockID unknown_block = 987654;
+
+  auto emit_status =
+      proxy.emit_event(unknown_block, 0, TxEventLog{}, ProposedTransaction{})();
+  ASSERT_FALSE(emit_status.has_value());
+  EXPECT_EQ(emit_status.error().code(), SystemErrorCode::Abandon);
+
+  // Double emit on the per-transaction wrapper: the first emit against the
+  // real open block succeeds, the second is rejected client-side as
+  // Unrecoverable.
+  PerTransactionEventServerProxy per_tx(proxy, fw.get_block_number(),
+                                        /*tx_id=*/12345);
+  auto first = per_tx.emit_events(TxEventLog{}, ProposedTransaction{})();
+  ASSERT_TRUE(first.has_value());
+  auto second = per_tx.emit_events(TxEventLog{}, ProposedTransaction{})();
+  ASSERT_FALSE(second.has_value());
+  EXPECT_EQ(second.error().code(), SystemErrorCode::Unrecoverable);
 }
 
 // NOLINTEND(bugprone-exception-escape)
