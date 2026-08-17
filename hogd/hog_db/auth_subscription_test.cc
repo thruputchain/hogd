@@ -21,6 +21,7 @@
 #include "auth_rpc.hh"
 #include "consensus.hh"
 #include "db_sched.hh"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/perthread.h"
@@ -770,10 +771,19 @@ TEST_F(AuthSubscriptionTest, SchedRpcRejectsFutureAuthRowBeforeTipUpdate)
 // behavior change landed, so it verifies rather than drives that change.
 TEST(MakeRpcClientTest, ConnectionRefusedReturnsUnexpected)
 {
-  // Reserve a loopback port, then release it so nothing is listening there;
-  // connecting to it is a deterministic ECONNREFUSED.
+  // Bind a loopback port and keep the socket open for the rest of the test. A
+  // socket that is bound but never listens still answers connect(2) with
+  // ECONNREFUSED, and holding it reserves the port: while it is bound, no other
+  // process on the machine can be handed that port and start listening on it.
+  //
+  // Releasing the port before connecting - what this test used to do - left a
+  // window where exactly that could happen. Under `ctest --parallel` on a
+  // many-core CI host, hundreds of sibling tests bind ephemeral ports for their
+  // own RPC servers, one of them picked up this port, and the connect the test
+  // expects to be refused succeeded instead.
   int probe = ::socket(AF_INET, SOCK_STREAM, 0);
   ASSERT_GE(probe, 0);
+  UniqueFd probe_guard(probe);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -783,7 +793,6 @@ TEST(MakeRpcClientTest, ConnectionRefusedReturnsUnexpected)
   socklen_t len = sizeof(addr);
   ASSERT_EQ(::getsockname(probe, reinterpret_cast<sockaddr *>(&addr), &len), 0);
   const uint16_t port = ntohs(addr.sin_port);
-  ASSERT_EQ(::close(probe), 0);
 
   x23::HostPort host_port{"127.0.0.1", port};
   ErrnoStatus<rpc_client_t<AuthDB1>> result =
