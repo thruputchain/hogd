@@ -1601,10 +1601,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
         co_await finish_block(block_id, i);
       }
       if (event_open) {
-        (void)co_await eventsched_abandon_block(block_id);
+        CHECK_EQ(co_await eventsched_abandon_block(block_id),
+                 RPCError::kRPCNone);
       }
       if (snapshot_open) {
-        (void)co_await abandon_snapshot(block_id);
+        CHECK_EQ(co_await abandon_snapshot(block_id),
+                 DbSchedResult::DbSchedResultOK);
       }
       {
         x23::CoroGuard scheduler_guard;
@@ -1664,12 +1666,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     ProposalTxs ceremony_proposal_txs;
     co_await t_to_parallel_batch(cache.result_tx_hashes,
                                  ceremony_proposal_txs.hash);
-    co_await t_to_parallel_batch(
-        cache.result_tx_nominations,
-        ceremony_proposal_txs.nondeterministic_data);
+    co_await t_to_parallel_batch(cache.result_tx_nominations,
+                                 ceremony_proposal_txs.nondeterministic_data);
     const DbBlockResult db_close = co_await close_snapshot(block_id);
-    const EventBlockResult event_close = co_await eventsched_close_block(
-        block_id, 1, ceremony_proposal_txs);
+    const EventBlockResult event_close =
+        co_await eventsched_close_block(block_id, 1, ceremony_proposal_txs);
     if (db_close.result() != DbSchedResult::DbSchedResultOK ||
         event_close.error() != RPCError::kRPCNone) {
       co_await cleanup();
@@ -2453,7 +2454,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
     co_return SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
   }
   co_return co_await schedulercoord_commit_block_impl(block_id,
-                                                       std::move(expected_value));
+                                                      std::move(
+                                                          expected_value));
 }
 
 x23::Async<SchedulerCommitOutcome>
