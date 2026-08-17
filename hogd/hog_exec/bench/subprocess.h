@@ -410,21 +410,35 @@ public:
     }
     if (own_process_group_) {
       info("stopping process group: {}", pid_);
-      kill(-pid_, SIGTERM); // NOLINT(misc-include-cleaner)
-      return;
     }
-    if (!get_exit_code().has_value()) {
+    else if (!get_exit_code().has_value()) {
       info("stopping running process: {}", pid_);
-      kill(pid_, SIGTERM); // NOLINT(misc-include-cleaner)
     }
+    signal_all(SIGTERM);
   }
 
-  void wait_for_shutdown()
+  // Waits for the launched process to exit and collects its status.
+  //
+  // [terminate] is a request, and this is where a process that declines it is
+  // dealt with: waiting on one unconditionally would hang the stop that called
+  // it -- holding the lock the control server needs to start anything else --
+  // and never reach [reap], which is where the SIGKILL lives. So the wait is
+  // bounded, and a process still running at the end of it is killed outright.
+  void
+  wait_for_shutdown(std::chrono::milliseconds term_grace = kSubprocessTermGrace)
   {
-    if (waitpid_thread_.joinable()) {
-      waitpid_thread_.request_stop();
-      waitpid_thread_.join();
+    if (!waitpid_thread_.joinable()) {
+      return;
     }
+    if (pid_ != -1 && !await_exit(term_grace)) {
+      error("process {} outlived SIGTERM after {}ms; sending SIGKILL", pid_,
+            term_grace.count());
+      signal_all(SIGKILL);
+    }
+    // SIGKILL cannot be declined, so the join is bounded by whatever the
+    // kernel needs to tear the process down.
+    waitpid_thread_.request_stop();
+    waitpid_thread_.join();
   }
 
   // Waits out whatever the launched process left behind, escalating to
@@ -456,6 +470,38 @@ public:
   }
 
 private:
+  // Signals the launched process and everything it started, or just the
+  // process itself if it never got a group of its own -- signalling the group
+  // it is in instead would be signalling this server.
+  void signal_all(int sig)
+  {
+    if (pid_ == -1) {
+      return;
+    }
+    if (own_process_group_) {
+      kill(-pid_, sig); // NOLINT(misc-include-cleaner)
+    }
+    else if (!get_exit_code().has_value()) {
+      kill(pid_, sig); // NOLINT(misc-include-cleaner)
+    }
+  }
+
+  // Waits up to [timeout] for the launched process to exit. Polled rather than
+  // waited on: [waitpid] is the [waitpid_thread_]'s to call, and this is what
+  // is left to a second caller that must not block on it forever.
+  bool await_exit(std::chrono::milliseconds timeout)
+  {
+    constexpr std::chrono::milliseconds kPollInterval{20};
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!get_exit_code().has_value()) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        return false;
+      }
+      std::this_thread::sleep_for(kPollInterval);
+    }
+    return true;
+  }
+
   void wait_for_child_process(pid_t child_pid)
   {
     info("waiting for child process: {}", child_pid);

@@ -191,6 +191,36 @@ exec sleep 300
       << "a process that ignored SIGTERM outlived stop";
 }
 
+// A launched process that declines SIGTERM must not hang the stop that asked
+// it to exit. The stop holds the control server's lock, so a wait with no end
+// to it takes the server with it -- and never reaches the SIGKILL.
+TEST_F(SubprocessTest, StopDoesNotWaitForeverOnTheLaunchedProcess)
+{
+  Subprocess proc;
+  ASSERT_NO_FATAL_FAILURE(launch_script(proc, R"(
+trap "" TERM
+echo $$ > "$PIDFILE"
+while :; do sleep 1; done
+)"));
+
+  pid_t helper = await_helper_pid();
+  ASSERT_GT(helper, 0);
+  ASSERT_EQ(helper, launched_pid_); // the launched process itself
+
+  auto start = std::chrono::steady_clock::now();
+  proc.terminate();
+  proc.wait_for_shutdown(kTermGrace);
+  EXPECT_TRUE(proc.reap(kTermGrace, kKillGrace));
+  auto elapsed = std::chrono::steady_clock::now() - start;
+
+  EXPECT_LT(elapsed, kTermGrace + kKillGrace)
+      << "stop waited past its own grace period";
+  EXPECT_TRUE(await_process_gone(helper))
+      << "a process that ignored SIGTERM outlived stop";
+  EXPECT_TRUE(proc.get_exit_code().has_value())
+      << "stop returned without collecting the process's status";
+}
+
 // The exit code of the launched process is what callers read to decide whether
 // a benchmark step passed; grouping and reaping must not disturb it.
 TEST_F(SubprocessTest, ReportsTheLaunchedProcessExitCode)
