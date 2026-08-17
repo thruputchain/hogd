@@ -131,14 +131,17 @@ cat >"$reap_bin/ps" <<'FAKE_PS'
 cat "$ALIVE_FILE" 2>/dev/null
 FAKE_PS
 
-# [sudo -n /usr/bin/killall -q -SIG names...] records the signal it was asked
-# for and clears $ALIVE_FILE only for the signals in $DIES_ON, standing in for
-# a process that ignores SIGTERM. $SUDO_FAILS makes it fail the way a host with
-# no killall or no passwordless sudo does: nonzero, with a complaint on stderr.
-# A signal that matches nothing exits 1 silently, which is what [killall -q]
-# does and must not be read as a failure.
-cat >"$reap_bin/sudo" <<'FAKE_SUDO'
+# [killall -q -SIG names...] records the signal it was asked for and clears
+# $ALIVE_FILE only for the signals in $DIES_ON, standing in for a process that
+# ignores SIGTERM. $KILLALL_FAILS makes it fail the way a host with no killall
+# does. A signal that matches nothing exits 1 silently, which is what
+# [killall -q] does and must not be read as a failure.
+cat >"$reap_bin/killall" <<'FAKE_KILLALL'
 #!/usr/bin/env bash
+if [[ -n ${KILLALL_FAILS:-} ]]; then
+  echo "killall: command not found" >&2
+  exit 127
+fi
 signal=""
 for arg in "$@"; do
   case $arg in
@@ -146,14 +149,25 @@ for arg in "$@"; do
   esac
 done
 echo "$signal" >>"$SIGNAL_FILE"
+[[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
+[[ -s "$ALIVE_FILE" ]] || exit 1
+FAKE_KILLALL
+
+# [sudo -n /usr/bin/killall ...] runs the killall it was handed, or refuses the
+# way a host without passwordless sudo does when $SUDO_FAILS is set. Refusing
+# before anything is recorded in $SIGNAL_FILE is the point: nothing has been
+# signalled yet, which is what makes the unprivileged retry correct rather than
+# a second kill.
+cat >"$reap_bin/sudo" <<'FAKE_SUDO'
+#!/usr/bin/env bash
+[[ $1 == -n ]] && shift
 if [[ -n ${SUDO_FAILS:-} ]]; then
   echo "sudo: a password is required" >&2
   exit 1
 fi
-[[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
-[[ -s "$ALIVE_FILE" ]] || exit 1
+exec killall "${@:2}"
 FAKE_SUDO
-chmod +x "$reap_bin/ps" "$reap_bin/sudo"
+chmod +x "$reap_bin/ps" "$reap_bin/killall" "$reap_bin/sudo"
 
 reap_status=0
 reap_output=""
@@ -170,7 +184,7 @@ run_reap() {
   reap_output=$(
     PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
       SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
-      SUDO_FAILS="${SUDO_FAILS:-}" \
+      SUDO_FAILS="${SUDO_FAILS:-}" KILLALL_FAILS="${KILLALL_FAILS:-}" \
       bash -c "$(ci_reap_program "${3:-hog-mempool hog-exec}" 1 1)" 2>&1
   ) || reap_status=$?
 }
@@ -208,14 +222,33 @@ run_reap "chuckdXdev" "" "chuckd.dev scpd.dev"
 check_eq "a name is not matched as a pattern" "0" "$reap_status"
 check_eq "an unsignalled process is not waited on" "TERM" "$(cat "$signal_file")"
 
-# A host whose killall or sudo is broken has not been shown to have a process
+# The bench hosts do not grant passwordless sudo, and demanding it turned every
+# reap on every host into a no-op: the stale [scpd.dev] that [chuckd] forks and
+# [control_server] does not track stayed on 127.0.0.1:4400, and the next suite's
+# chuckd died on its first SCP call. The processes belong to the user running
+# the reap, so a refused [sudo] must fall back to a plain [killall] and still
+# reap the host.
+SUDO_FAILS=1 run_reap "hog-mempool" "TERM KILL"
+check_eq "sudo-less host still reaps cleanly" "0" "$reap_status"
+check_eq "sudo-less host is signalled unprivileged" "TERM" "$(cat "$signal_file")"
+check_contains "sudo-less host says it fell back" \
+  "sudo cannot signal processes (sudo: a password is required)" "$reap_output"
+
+# The fallback carries the escalation too: a process that ignores SIGTERM is
+# still SIGKILLed, and only once, because the refused sudo is not retried.
+SUDO_FAILS=1 run_reap "hog-mempool" "KILL"
+check_eq "sudo-less escalation reaps cleanly" "0" "$reap_status"
+check_eq "sudo-less escalation still escalates" "TERM KILL" \
+  "$(tr '\n' ' ' <"$signal_file" | sed 's/ $//')"
+
+# A host whose killall is broken as well has not been shown to have a process
 # refusing to die, so it must not report one: that reading fails the benchmark
 # step, and sends whoever reads it after a process nothing ever signalled.
-SUDO_FAILS=1 run_reap "hog-mempool" "TERM KILL"
+SUDO_FAILS=1 KILLALL_FAILS=1 run_reap "hog-mempool" "TERM KILL"
 check_eq "unsendable signal is not reported as a survivor" "3" "$reap_status"
 check_contains "unsendable signal says what went wrong" \
-  "cannot signal processes: sudo: a password is required" "$reap_output"
-check_eq "unsendable signal does not wait out the timeouts" "TERM" \
+  "cannot signal processes: killall: command not found" "$reap_output"
+check_eq "unsendable signal does not wait out the timeouts" "" \
   "$(cat "$signal_file")"
 if [[ "$reap_output" == *"alive after SIGKILL"* ]]; then
   echo "FAIL unsendable signal must not claim a SIGKILL survivor"

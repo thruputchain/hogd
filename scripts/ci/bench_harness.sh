@@ -317,11 +317,23 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # [chuckd.dev] also matches a [chuckdXdev] that [killall] never signalled --
 # and a liveness check that answers "alive" about a process nothing is killing
 # waits out both timeouts and then fails the reap.
+#
+# The signal goes through [sudo] where that works and through a plain [killall]
+# where it does not. Requiring [sudo] outright is what made this reap a no-op:
+# the bench hosts do not grant passwordless sudo, so every host answered
+# "sudo: a password is required" and every reap reported "could not reap
+# processes" and moved on. The processes it targets belong to the same user
+# that runs the reap, so an unprivileged [killall] reaches them.
 ci_reap_program() {
   cat <<EOF
 procs='$1'
 term_timeout=$2
 kill_timeout=$3
+
+# Whether [sudo] is still worth trying on this host. Cleared the first time it
+# refuses, so a host without passwordless sudo says so once per reap rather
+# than once per signal.
+use_sudo=1
 
 survivors() {
   found=
@@ -345,13 +357,25 @@ wait_gone() {
   done
 }
 
-# Sends \$1 to every named process. Returns nonzero only when the signal could
-# not be sent at all, which has to be told apart from a process that refused to
-# die: [-q] silences killall's own "no process found", so a nonzero exit that
-# still says something is sudo or killall failing rather than an absence of
-# processes to kill.
+# Sends \$1 to every named process, privileged if it can and unprivileged if it
+# cannot. Returns nonzero only when the signal could not be sent either way,
+# which has to be told apart from a process that refused to die: [-q] silences
+# killall's own "no process found", so a nonzero exit that still says something
+# is sudo or killall failing rather than an absence of processes to kill.
 signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+  if [ "\$use_sudo" -eq 1 ]; then
+    err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+    status=\$?
+    if [ "\$status" -eq 0 ] || [ -z "\$err" ]; then
+      return 0
+    fi
+    # [sudo] refused before [killall] ever ran, so nothing has been signalled
+    # yet and the unprivileged path is still worth taking.
+    echo "sudo cannot signal processes (\$err); retrying as \$(id -un)" >&2
+    use_sudo=0
+  fi
+
+  err=\$(killall -q "-\$1" \$procs 2>&1)
   status=\$?
   if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
     echo "cannot signal processes: \$err" >&2
