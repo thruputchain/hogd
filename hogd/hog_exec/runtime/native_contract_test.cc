@@ -462,6 +462,142 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   ASSERT_EQ(res.gas_consumed_, 510);
 }
 
+// NativeContract::invoke error-precedence lattice at exact gas exhaustion
+// (gas_consumed == gas_limit): a fn returning success is upgraded to
+// OutOfGas (frame Fault), while fn-returned Abandon / ValidationFailure /
+// Unrecoverable pass through unchanged -- they must never be downgraded into
+// a parent-catchable frame Fault by the exact-exhaustion upgrade.
+TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
+{
+  constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
+  constexpr static ContractAddress kAddressEntry = test_contract_address(1);
+  constexpr static uint64_t kChildGas = 256;
+  // 256 as the kTxs-encoded big-endian u32 calldata.
+  static const Calldata kAmount{0x00, 0x00, 0x01, 0x00};
+
+  NativeContractBuilder builder_consumer;
+  builder_consumer.add<SerializationFormat::kTxs>(
+      0,
+      [](NativeSyscallContext &runtime,
+         uint32_t test_amount) -> InvokeStatus<int32_t> {
+        // Exhaust the limit exactly, then report success.
+        runtime.consume_gas(test_amount);
+        return 0;
+      });
+  builder_consumer.add<SerializationFormat::kTxs>(
+      1,
+      [](NativeSyscallContext &runtime,
+         uint32_t test_amount) -> InvokeStatus<int32_t> {
+        runtime.consume_gas(test_amount);
+        return InvokeError{InvokeErrorCode::Abandon};
+      });
+  builder_consumer.add<SerializationFormat::kTxs>(
+      2,
+      [](NativeSyscallContext &runtime,
+         uint32_t test_amount) -> InvokeStatus<int32_t> {
+        runtime.consume_gas(test_amount);
+        return InvokeError{InvokeErrorCode::ValidationFailure};
+      });
+  builder_consumer.add<SerializationFormat::kTxs>(
+      3,
+      [](NativeSyscallContext &runtime,
+         uint32_t test_amount) -> InvokeStatus<int32_t> {
+        runtime.consume_gas(test_amount);
+        return InvokeError{InvokeErrorCode::Unrecoverable};
+      });
+
+  NativeContractBuilder builder_entry;
+  builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+        auto invoke_consumer = [&](Runtime::MethodID method,
+                                   CopyableInvokeOutputs &outputs) {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = method,
+              .gas_limit = kChildGas,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          return ctx.syscall<SyscallNo::kInvoke>(kAddressConsumer, kAmount,
+                                                 std::span<uint32_t>{}, inputs,
+                                                 outputs);
+        };
+
+        // Success at exact exhaustion: upgraded to OutOfGas -> frame Fault.
+        CopyableInvokeOutputs success_outputs{};
+        auto success = invoke_consumer(0, success_outputs);
+        if (!success.has_value() ||
+            success.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            success_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "success at exact gas exhaustion must become an "
+                           "OutOfGas frame Fault";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Fatal codes at exact exhaustion stay themselves: the syscall
+        // errors, no frame Fault is reported.
+        CopyableInvokeOutputs fatal_outputs{};
+        auto abandon = invoke_consumer(1, fatal_outputs);
+        if (abandon.has_value() ||
+            abandon.error() != HostFnError{HostFnErrorCode::Abandon}) {
+          ADD_FAILURE() << "Abandon at exact gas exhaustion must stay Abandon";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        auto validation = invoke_consumer(2, fatal_outputs);
+        if (validation.has_value() ||
+            validation.error() !=
+                HostFnError{HostFnErrorCode::ValidationFailure}) {
+          ADD_FAILURE() << "ValidationFailure at exact gas exhaustion must "
+                           "stay ValidationFailure";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        auto unrecoverable = invoke_consumer(3, fatal_outputs);
+        if (unrecoverable.has_value() ||
+            unrecoverable.error() !=
+                HostFnError{HostFnErrorCode::Unrecoverable}) {
+          ADD_FAILURE() << "Unrecoverable at exact gas exhaustion must stay "
+                           "Unrecoverable";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder_consumer.build());
+  contract_map.emplace(1, builder_entry.build());
+
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
+  for (int32_t i = 0; i < 2; ++i) {
+    Contract contract(ContractType::kNative);
+    contract.native_contract_id() =
+        static_cast<HogexecPrecompiledNativeContracts>(i);
+    snapshot_server_->impl()->setup_create_contract(contract);
+    snapshot_server_->impl()->setup_create_deployment(
+        deployment_addrs[i],
+        DeployedContractHash{.hash = sha256(contract),
+                             .contract_size = 0,
+                             .contract_type = contract.contract_type()});
+  }
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = kAddressEntry,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+}
+
 namespace {
 auto
 make_bytestring(std::string_view str)
