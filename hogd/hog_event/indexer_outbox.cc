@@ -486,6 +486,14 @@ IndexerOutboxStore::finish_opening(UniqueFd directory_fd)
   if (!S_ISDIR(stat_buf.st_mode)) {
     return std::unexpected("indexer outbox path is not a directory");
   }
+  if ((stat_buf.st_mode & 07777) == 02700) {
+    if (fchmod(directory_fd.get(), 0700) != 0) {
+      return std::unexpected(
+          system_error("clear inherited setgid on indexer outbox directory",
+                       errno));
+    }
+    stat_buf.st_mode &= ~S_ISGID;
+  }
   if ((stat_buf.st_mode & 07777) != 0700) {
     return std::unexpected("indexer outbox directory permissions are not 0700");
   }
