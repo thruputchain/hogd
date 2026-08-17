@@ -114,6 +114,22 @@ target_link_libraries(
 set_property(TARGET control_server PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
+  subprocess_test
+  subprocess_test.cc
+)
+target_link_libraries(
+  subprocess_test
+  hogd
+  GTest::gtest_main
+)
+target_include_directories(
+  subprocess_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+gtest_discover_tests(subprocess_test)
+
+add_executable(
   control_cli
   control_cli.cc
 )

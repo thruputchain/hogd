@@ -1,21 +1,16 @@
 #include <atomic>
 #include <cassert>
-#include <cerrno>
 #include <chrono>
-#include <csignal>
 #include <cstddef>
 #include <cstdlib>
-#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <print>
-#include <string.h> // NOLINT(modernize-deprecated-headers)
 #include <string>
 #include <string_view>
-#include <sys/wait.h>
 #include <thread>
 #include <type_traits>
 #include <unistd.h>
@@ -27,288 +22,13 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
-#include "hogd/build_config.h"
 #include "hogd/hog_exec/bench/control_client.h"
+#include "hogd/hog_exec/bench/subprocess.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
-#include "x23/config.h"
-#include "x23/cpumap.h"
-#include "x23/fastclock.h"
 #include "x23/vec.h"
 
 namespace hogd {
-
-namespace {
-
-// NOLINTBEGIN(misc-include-cleaner)
-std::optional<int>
-wait_for_child(pid_t child_pid)
-{
-  int status;
-  auto result = waitpid(child_pid, &status, 0);
-
-  if (result == -1) {
-    error("waitpid failed for child {}: {}", child_pid, Errno{});
-    return std::nullopt;
-  }
-
-  int exit_code = 0;
-
-  if (WIFEXITED(status)) {
-    exit_code = WEXITSTATUS(status);
-    if (exit_code == 0) {
-      info("Child process {} exited successfully with code {}", child_pid,
-           exit_code);
-    }
-    else {
-      error("Child process {} exited with error code {}", child_pid, exit_code);
-    }
-  }
-  else if (WIFSIGNALED(status)) {
-    int signal_num = WTERMSIG(status);
-    error("Child process {} terminated by signal {} ({})", child_pid,
-          signal_num, strsignal(signal_num));
-    // chatgpt says this matches the behavior of most shells
-    exit_code = 128 + signal_num;
-  }
-  else {
-    error("Child process {} terminated with unknown status {}", child_pid,
-          status);
-    exit_code = -1;
-  }
-
-  return exit_code;
-}
-// NOLINTEND(misc-include-cleaner)
-
-std::string
-join_args(std::vector<std::string> const &args)
-{
-  if (args.empty()) {
-    return "";
-  }
-  std::string args_joined;
-  for (const auto &arg : args) {
-    args_joined += "\"" + arg + "\" ";
-  }
-  args_joined.pop_back(); // remove the last space
-  return args_joined;
-}
-} // namespace
-
-class Subprocess {
-public:
-  struct LaunchMetadata {
-    pid_t pid;
-    std::string stdout_path;
-    std::string stderr_path;
-  };
-
-  std::optional<pid_t>
-  launch_process(std::string const &program_name,
-                 std::vector<std::string> const &program_args,
-                 std::string const &cpu_affinity)
-  {
-    auto metadata =
-        launch_process_with_metadata(program_name, program_args, cpu_affinity);
-    if (!metadata) {
-      return std::nullopt;
-    }
-    return metadata->pid;
-  }
-
-  std::optional<LaunchMetadata>
-  launch_process_with_metadata(std::string const &program_name,
-                               std::vector<std::string> const &program_args,
-                               std::string const &cpu_affinity)
-  {
-    std::string full_program_name =
-        program_name.starts_with("/")
-            ? program_name
-            : std::string(kBuildRoot) + "/" + program_name;
-    info("starting process: {} {}", full_program_name, join_args(program_args));
-
-    std::optional<x23::CpuSet> cpu_set;
-    if (!cpu_affinity.empty()) {
-#if HAVE_SCHED_SETAFFINITY
-      cpu_set = x23::parse_cpuset(cpu_affinity);
-      if (!cpu_set->valid()) {
-        error("invalid cpu affinity string: {}", cpu_affinity);
-        return std::nullopt;
-      }
-      info("applying cpu affinity: {}", cpu_affinity);
-#else  // !HAVE_SCHED_SETAFFINITY
-      panic("cpu affinity is unsupported on this platform: {}", cpu_affinity);
-#endif // !HAVE_SCHED_SETAFFINITY
-    }
-
-    // Create temporary files
-    std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
-    std::string cur_ts =
-        std::to_string(x23::fastclock::now().time_since_epoch().count());
-    std::filesystem::path stdout_path =
-        temp_dir /
-        ("hogd_stdout_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
-    std::filesystem::path stderr_path =
-        temp_dir /
-        ("hogd_stderr_" + cur_ts + "_" + std::to_string(getpid()) + "_XXXXXX");
-
-    // Convert to C-style strings for mkstemp
-    std::string stdout_template = stdout_path.string();
-    std::string stderr_template = stderr_path.string();
-
-    // NOLINTBEGIN(misc-include-cleaner)
-    int stdout_fd = mkstemp(stdout_template.data());
-    int stderr_fd = mkstemp(stderr_template.data());
-    // NOLINTEND(misc-include-cleaner)
-
-    if (stdout_fd == -1 || stderr_fd == -1) {
-      error("failed to create temporary files: {}", Errno{});
-      if (stdout_fd != -1)
-        close(stdout_fd);
-      if (stderr_fd != -1)
-        close(stderr_fd);
-      return std::nullopt;
-    }
-
-    // Save the parent's original stdout/stderr before fork
-    int parent_stdout = dup(STDOUT_FILENO);
-    if (parent_stdout == -1) {
-      error("failed to save parent stdout: {}", Errno{});
-      close(stdout_fd);
-      close(stderr_fd);
-      return std::nullopt;
-    }
-
-    int parent_stderr = dup(STDERR_FILENO);
-    if (parent_stderr == -1) {
-      error("failed to save parent stderr: {}", Errno{});
-      close(stdout_fd);
-      close(stderr_fd);
-      return std::nullopt;
-    }
-
-    // Print temporary file paths BEFORE fork to ensure parent logging works
-    info("Child process output will be logged to:");
-    info("  stdout: {}", stdout_template);
-    info("  stderr: {}", stderr_template);
-
-    auto pid = fork();
-    if (pid < 0) {
-      error("fork failed: {}", Errno{});
-      close(parent_stderr);
-      close(parent_stdout);
-      close(stdout_fd);
-      close(stderr_fd);
-      return std::nullopt;
-    }
-
-    if (pid == 0) {
-      // Child process
-
-      // Redirect stdout and stderr to temp files
-      if (dup2(stdout_fd, STDOUT_FILENO) == -1 ||
-          dup2(stderr_fd, STDERR_FILENO) == -1) {
-        // NOLINTBEGIN(modernize-use-std-print)
-        info("dup2 failed: {}", strerror(errno));
-        // NOLINTEND(modernize-use-std-print)
-        _exit(EXIT_FAILURE);
-      }
-
-      // Close the original file descriptors
-      close(stdout_fd);
-      close(stderr_fd);
-
-      if (cpu_set.has_value()) {
-        Errno err = cpu_set->set_affinity();
-        if (err) {
-          info("sched_setaffinity failed: {}", err);
-          _exit(EXIT_FAILURE);
-        }
-      }
-
-      std::vector<char *> args;
-      args.push_back(const_cast<char *>(program_name.data()));
-
-      for (const auto &arg : program_args) {
-        args.push_back(const_cast<char *>(arg.c_str()));
-      }
-      args.push_back(nullptr);
-
-      // NOLINTBEGIN(modernize-use-std-print)
-      info("execvp: {} {}", full_program_name, join_args(program_args));
-      execvp(full_program_name.c_str(), args.data());
-      info("execvp failed: {}", strerror(errno));
-      // NOLINTEND(modernize-use-std-print)
-      _exit(EXIT_FAILURE);
-    }
-
-    // Parent process
-
-    // Restore parent's original stderr in case child affected it
-    if (dup2(parent_stderr, STDERR_FILENO) == -1) {
-      error("failed to restore parent stderr: {}", Errno{});
-    }
-    close(parent_stderr);
-
-    // Restore parent's original stdout in case child affected it
-    if (dup2(parent_stdout, STDOUT_FILENO) == -1) {
-      error("failed to restore parent stdout: {}", Errno{});
-    }
-    close(parent_stdout);
-
-    // Close the file descriptors in parent (they're only needed in child)
-    close(stdout_fd);
-    close(stderr_fd);
-
-    // Start thread to wait for child process
-    waitpid_thread_ =
-        std::jthread([pid, this]() { wait_for_child_process(pid); });
-
-    info("forked process: {}", pid);
-    return LaunchMetadata{
-        .pid = pid,
-        .stdout_path = stdout_template,
-        .stderr_path = stderr_template,
-    };
-  }
-
-  std::optional<int> get_exit_code()
-  {
-    std::lock_guard lock(exit_code_mutex_);
-    return exit_code_;
-  }
-
-  void wait_for_shutdown()
-  {
-    if (waitpid_thread_.joinable()) {
-      waitpid_thread_.request_stop();
-      waitpid_thread_.join();
-    }
-  }
-
-private:
-  void wait_for_child_process(pid_t child_pid)
-  {
-    info("waiting for child process: {}", child_pid);
-    auto res = wait_for_child(child_pid);
-
-    std::lock_guard lock(exit_code_mutex_);
-    CHECK(!exit_code_.has_value());
-    exit_code_ = res;
-    if (exit_code_.has_value()) {
-      info("child process: {} exited with code: {}", child_pid, *exit_code_);
-    }
-    else {
-      error("failed to wait for child process: {}", child_pid);
-    }
-  }
-
-  std::mutex exit_code_mutex_;
-  std::optional<int> exit_code_ = std::nullopt;
-
-  std::jthread waitpid_thread_;
-};
 
 class CIControlRpc {
 public:
@@ -344,7 +64,8 @@ public:
                              config.cpu_affinity.end());
     std::string program_name =
         std::string(config.program_name.begin(), config.program_name.end());
-    info("launching process: {} {}", program_name, join_args(program_args));
+    info("launching process: {} {}", program_name,
+         detail::join_args(program_args));
     auto launch_metadata =
         new_proc->launch_process_with_metadata(program_name, program_args,
                                                cpu_affinity);
@@ -373,13 +94,17 @@ public:
 
     std::lock_guard lock(running_pid_mutex_);
 
-    for (auto &[pid, subprocess] : subprocesses_) {
-      if (!subprocess->get_exit_code().has_value()) {
-        info("stopping running process: {}", pid);
-        kill(pid, SIGTERM); // NOLINT(misc-include-cleaner)
-      }
+    // Signal everything first, so that several subprocesses serve out their
+    // grace periods together rather than one after another.
+    for (auto &entry : subprocesses_) {
+      entry.second->terminate();
+    }
 
+    for (auto &[pid, subprocess] : subprocesses_) {
       subprocess->wait_for_shutdown();
+      if (!subprocess->reap()) {
+        error("processes started by {} could not be stopped", pid);
+      }
     }
 
     subprocesses_.clear();
