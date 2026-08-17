@@ -750,13 +750,13 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
       -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
     // Attempt to load syscall arguments from contract memory.
     AliasGuard guard;
-    auto parsed_args = std::tuple{parse<syscall_t::template offset_i<Is>(),
-                                        typename syscall_t::template arg_i<Is>>(
-        guard, context.memory, input_args)...};
+    auto parsed_args = std::tuple{
+        parse<syscall_t::template offset_i<Is>(),
+              typename syscall_t::template arg_i<Is>>(guard, context.memory,
+                                                      input_args)...};
 
-    return wrap_after_parse<SyscallMeta>(guard, handler,
-                                         context.gas_remaining, syscall_no,
-                                         std::move(parsed_args));
+    return wrap_after_parse<SyscallMeta>(guard, handler, context.gas_remaining,
+                                         syscall_no, std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 
   return res;

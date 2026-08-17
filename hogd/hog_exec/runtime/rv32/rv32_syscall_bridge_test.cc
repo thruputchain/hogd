@@ -154,8 +154,8 @@ struct SequencedGasCall {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 sequenced_gas_entry(ExternHostCallContext context,
-                    ExecutionContext exec_context, uint32_t, uint32_t,
-                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
+                    ExecutionContext exec_context, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   auto *captured = static_cast<SequencedGasCall *>(context);
   ++captured->calls;
@@ -165,8 +165,8 @@ sequenced_gas_entry(ExternHostCallContext context,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-throwing_entry(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t, uint32_t,
-               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
+throwing_entry(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t,
+               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   throw 1;
 }
@@ -190,10 +190,12 @@ parser_probe_entry(ExternHostCallContext, ExecutionContext context,
   case ParserProbeMode::kSpans:
   {
     auto input =
-        SyscallArgParams<std::span<const std::byte>>::parse(guard, context.memory, arg1,
-                                                            arg2);
-    auto output = SyscallArgParams<std::span<std::byte>>::parse(guard, context.memory,
-                                                                arg3, arg4);
+        SyscallArgParams<std::span<const std::byte>>::parse(guard,
+                                                            context.memory,
+                                                            arg1, arg2);
+    auto output =
+        SyscallArgParams<std::span<std::byte>>::parse(guard, context.memory,
+                                                      arg3, arg4);
     if (!SyscallArgParams<std::span<const std::byte>>::validate(input) ||
         !SyscallArgParams<std::span<std::byte>>::validate(output) ||
         !guard.check()) {
@@ -213,8 +215,7 @@ parser_probe_entry(ExternHostCallContext, ExecutionContext context,
   }
   case ParserProbeMode::kSignedI32:
   {
-    auto parsed =
-        SyscallArgParams<int32_t>::parse(guard, context.memory, arg1);
+    auto parsed = SyscallArgParams<int32_t>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<int32_t>::validate(parsed)) {
       return make_code_result(-2);
     }
@@ -263,7 +264,8 @@ require_last_result(const SyscallBridgeHost &bridge)
 {
   const auto result = bridge.last_result();
   EXPECT_TRUE(result.has_value());
-  return result.value_or(std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>{});
+  return result.value_or(
+      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>{});
 }
 
 constexpr uint32_t kSpansMode = static_cast<uint32_t>(ParserProbeMode::kSpans);

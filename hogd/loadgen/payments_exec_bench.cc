@@ -43,10 +43,9 @@ public:
           TestDB::kHogDb, /*empty_genesis=*/false);
       context_ = make_hog_exec_context();
 
-      ERC20ExperimentState exp(
-          ERC20PaymentsConfig{
-              .num_addresses = num_accounts,
-          });
+      ERC20ExperimentState exp(ERC20PaymentsConfig{
+          .num_addresses = num_accounts,
+      });
 
       auto init_result = exp.generate_experiment()();
       if (!init_result.has_value()) {

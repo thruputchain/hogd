@@ -269,17 +269,18 @@ make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-unrecoverable_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
-                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                    uint32_t, uint32_t)
+unrecoverable_entry(ExternHostCallContext /*unused*/,
+                    ExecutionContext /*unused*/, uint32_t, uint32_t, uint32_t,
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Unrecoverable);
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 validation_failure_entry(ExternHostCallContext /*unused*/,
-                         ExecutionContext /*unused*/, uint32_t, uint32_t, uint32_t,
-                         uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
+                         ExecutionContext /*unused*/, uint32_t, uint32_t,
+                         uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                         uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::ValidationFailure);
 }
@@ -301,25 +302,25 @@ throwing_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-host_out_of_gas_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
-                      uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                      uint32_t, uint32_t, uint32_t)
+host_out_of_gas_entry(ExternHostCallContext /*unused*/,
+                      ExecutionContext /*unused*/, uint32_t, uint32_t, uint32_t,
+                      uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::OutOfGas, 0);
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 exit_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
-                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                     uint32_t, uint32_t)
+           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+           uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Exit, 0);
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-return_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/, uint32_t,
+return_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-             uint32_t)
+             uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Return);
 }

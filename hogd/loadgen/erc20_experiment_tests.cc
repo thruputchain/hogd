@@ -60,10 +60,9 @@ protected:
   // initialization/mint blocks, then 100 wallet-authorized transfer work txs.
   void run_payments_experiment()
   {
-    auto state = std::make_shared<ERC20ExperimentState>(
-        ERC20PaymentsConfig{
-            .num_addresses = 10,
-        });
+    auto state = std::make_shared<ERC20ExperimentState>(ERC20PaymentsConfig{
+        .num_addresses = 10,
+    });
     auto result = state->generate_experiment()();
     ASSERT_TRUE(result.has_value());
 

@@ -14,9 +14,7 @@ namespace hogd {
 
 class ERC20ExperimentState : public ExperimentState {
 public:
-  ERC20ExperimentState(const ERC20PaymentsConfig &config)
-    : config_(config)
-  {}
+  ERC20ExperimentState(const ERC20PaymentsConfig &config) : config_(config) {}
 
   x23::Async<LoadgenStatus<LoadgenSuccessResult>> generate_experiment();
 
@@ -34,10 +32,7 @@ private:
   // instruction, so the same do_action + cross-called erc20 transfer/mint costs
   // ~2.4x the wasm gas (measured ~29k for a transfer vs ~12k on wasm); the rv32
   // envelope is sized to cover that plus first-touch storage on the mint path.
-  static GasAmount work_gas_limit()
-  {
-    return GasAmount{100'000};
-  }
+  static GasAmount work_gas_limit() { return GasAmount{100'000}; }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);
 

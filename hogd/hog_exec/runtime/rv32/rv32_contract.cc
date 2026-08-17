@@ -95,7 +95,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
         .gas_remaining = machine.gas_remaining(),
     };
 
-    auto [host_result, gas_consumed] = 
+    auto [host_result, gas_consumed] =
         syscall_entry(host_fn_ctx, context, pending_ecall->a0,
                       pending_ecall->a1, pending_ecall->a2, pending_ecall->a3,
                       pending_ecall->a4, pending_ecall->a5, pending_ecall->a6,
@@ -103,7 +103,8 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 
     if (host_result.has_value()) {
       result = machine.resume_from_ecall(
-          rv32::HostResult::continue_with(std::to_underlying(*host_result), gas_consumed));
+          rv32::HostResult::continue_with(std::to_underlying(*host_result),
+                                          gas_consumed));
       continue;
     }
 

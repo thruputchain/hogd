@@ -13,8 +13,10 @@ struct ExecutionContext {
   uint64_t gas_remaining;
 };
 
-using ExternHostCallContext = void*;
+using ExternHostCallContext = void *;
 
-using SyscallFunction = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>(*)(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+using SyscallFunction = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> (
+        *)(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t,
+           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 
-}
+} // namespace hogd

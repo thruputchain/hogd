@@ -24,8 +24,8 @@ namespace hogd {
 namespace {
 
 using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> (*)(
-    SystemCallHandler &, ExecutionContext, SyscallNo, uint32_t, uint32_t, uint32_t,
-    uint32_t, uint32_t, uint32_t, uint32_t) noexcept;
+    SystemCallHandler &, ExecutionContext, SyscallNo, uint32_t, uint32_t,
+    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) noexcept;
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
@@ -91,8 +91,8 @@ syscall_entry(ExternHostCallContext call_context, ExecutionContext context,
                 "type mismatch");
 
   return syscall_entry_inner(static_cast<SystemCallHandler *>(call_context),
-                          context, arg0, arg1, arg2, arg3, arg4, arg5,
-                          arg6, arg7);
+                             context, arg0, arg1, arg2, arg3, arg4, arg5, arg6,
+                             arg7);
 }
 
 } // namespace hogd

@@ -256,8 +256,9 @@ to_host_result(
 {
   const auto &[status, gas_consumed] = result;
   if (status.has_value()) {
-    return rv32::HostResult::continue_with(
-        static_cast<uint32_t>(std::to_underlying(*status)), gas_consumed);
+    return rv32::HostResult::continue_with(static_cast<uint32_t>(
+                                               std::to_underlying(*status)),
+                                           gas_consumed);
   }
   switch (status.error().code()) {
   case HostFnErrorCode::Return:
@@ -267,8 +268,8 @@ to_host_result(
   case HostFnErrorCode::OutOfGas:
     return rv32::HostResult::out_of_gas(gas_consumed);
   default:
-    return rv32::HostResult::trap(
-        gas_consumed, static_cast<uint32_t>(status.error().code()));
+    return rv32::HostResult::trap(gas_consumed,
+                                  static_cast<uint32_t>(status.error().code()));
   }
 }
 

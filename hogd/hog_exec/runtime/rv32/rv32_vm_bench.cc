@@ -906,11 +906,12 @@ artifact_bench_entry(ExternHostCallContext /*context*/,
     const auto input_offset = static_cast<size_t>(arg1);
     const auto input_size = static_cast<size_t>(arg2);
     const auto output_offset = static_cast<size_t>(arg3);
-    const auto digest = bench_sha256_digest(
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(context.memory.data()) + input_offset,
-                                 input_size));
+    const auto digest = bench_sha256_digest(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(context.memory.data()) + input_offset,
+        input_size));
     for (size_t i = 0; i < kSha256DigestBytes; ++i) {
-      reinterpret_cast<uint8_t*>(context.memory.data())[output_offset + i] = digest[i];
+      reinterpret_cast<uint8_t *>(context.memory.data())[output_offset + i] =
+          digest[i];
     }
     return {SyscallErrorCode::kSyscallErrorCodeNone, 4};
   }
@@ -924,7 +925,7 @@ bridge_noop_entry(ExternHostCallContext /*context*/, ExecutionContext context,
                   uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
   if (context.memory.size() > 0) {
-    reinterpret_cast<uint8_t*>(context.memory.data())[0] ^= 0x5aU;
+    reinterpret_cast<uint8_t *>(context.memory.data())[0] ^= 0x5aU;
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }

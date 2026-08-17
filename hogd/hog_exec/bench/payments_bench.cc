@@ -52,10 +52,9 @@ struct BenchmarkState : public CommonBenchState {
   {
     HogexecMetrics::launch_log_worker();
 
-    auto exp = ERC20ExperimentState(
-        ERC20PaymentsConfig{
-            .num_addresses = num_accounts_,
-        });
+    auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
+        .num_addresses = num_accounts_,
+    });
     auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       panic("Failed to generate erc20 payments experiment");
@@ -265,8 +264,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port, *num_accounts
-                           );
+  hogd::run_payments_bench(server_addrs, *exec_port, *coord_port,
+                           *num_accounts);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);

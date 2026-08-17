@@ -58,21 +58,23 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   last_result_ = result;
 
   if (result.first.has_value()) {
-    // TODO(geoff): why does this bridge handle things differently from the threaded implementation?
-    // Stems from legacy choices on the initial implementation, which we can probably remove.
+    // TODO(geoff): why does this bridge handle things differently from the
+    // threaded implementation? Stems from legacy choices on the initial
+    // implementation, which we can probably remove.
     if (*result.first == SyscallErrorCode::kSyscallErrorCodeFault) {
-      return HostResult::continue_with(std::to_underlying(*result.first), result.second);
+      return HostResult::continue_with(std::to_underlying(*result.first),
+                                       result.second);
     }
 
     if (!view.write_memory(0, memory)) {
       return HostResult::trap(result.second);
     }
 
-    return HostResult::continue_with(std::to_underlying(*result.first), result.second);
+    return HostResult::continue_with(std::to_underlying(*result.first),
+                                     result.second);
   }
 
-  switch(result.first.error().code())
-  {
+  switch (result.first.error().code()) {
   case HostFnErrorCode::NoneOrRecoverable:
     std::terminate();
   case HostFnErrorCode::OutOfGas:
@@ -100,7 +102,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   case HostFnErrorCode::Unrecoverable:
     // Unknown or fatal host panics trap without committing scratch memory.
     return HostResult::trap(result.second,
-      static_cast<uint32_t>(result.first.error().code()));
+                            static_cast<uint32_t>(result.first.error().code()));
   }
   std::terminate();
 }
