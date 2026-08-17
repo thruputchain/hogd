@@ -1468,7 +1468,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
   Contract oversized(ContractType::kRv32);
   oversized.rv32_contract().data.resize_uninitialized(kMaxContractSizeBytes +
-                                                       1);
+                                                      1);
   auto oversized_hash = sha256(oversized);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;

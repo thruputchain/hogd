@@ -72,8 +72,9 @@ make_entry(GasAmount gas_at_start, GasAmount gas_at_end, SyscallTraceBody body,
   };
 }
 
-// Test-only stub accepting any rv32-tagged blob, so DeployContract can run against
-// an opaque attached contract (same rationale as selective_deployment_test).
+// Test-only stub accepting any rv32-tagged blob, so DeployContract can run
+// against an opaque attached contract (same rationale as
+// selective_deployment_test).
 class NoopRv32Context : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*unused*/) const override

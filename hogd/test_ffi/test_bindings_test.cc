@@ -3456,8 +3456,9 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
   words.push_back(0x00000073U);
 
   Contract contract(ContractType::kRv32);
-  contract.rv32_contract().data.append_range(rv32::test_artifact::build_artifact(
-      words, std::vector<uint8_t>(64 * 1024, 0xA5)));
+  contract.rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact(words, std::vector<uint8_t>(64 * 1024,
+                                                                      0xA5)));
 
   auto bytes = x23::serialize(contract);
   ASSERT_GT(bytes.size(), kBigItemThreshold);
@@ -3500,9 +3501,8 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
   ASSERT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(invoke_result.serialized_output.data, nullptr);
   InvocationFrameOutput output;
-  x23::deserialize(&output,
-                   x23::BufView{invoke_result.serialized_output.data,
-                                invoke_result.serialized_output.len});
+  x23::deserialize(&output, x23::BufView{invoke_result.serialized_output.data,
+                                         invoke_result.serialized_output.len});
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 }
 

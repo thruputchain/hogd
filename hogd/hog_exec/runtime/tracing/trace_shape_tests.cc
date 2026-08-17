@@ -240,10 +240,10 @@ TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
   auto addr = deploy_sdk_contract<sha256_wrapper::Sha256Wrapper>();
   ContractTraitClient<sha256_wrapper::Sha256Wrapper> client(addr);
   const SignedTransaction tx{
-      .tx = Transaction{.invocation =
-                            client.make_invocation<u8"sha256_repeated">(
-                                kGasLimit, kRepeat, input),
-                        .uniquifier = make_new_uniquifier()}};
+      .tx =
+          Transaction{.invocation = client.make_invocation<u8"sha256_repeated">(
+                          kGasLimit, kRepeat, input),
+                      .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();

@@ -902,20 +902,21 @@ TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
 // A hand-written entrypoint record registered outside the #[contract] macro
 // (method id 0xFF) has a wrapper that returns without issuing the Return
 // syscall: verification passes, but dispatch ebreaks.
-TEST_F(SyscallMiscTests, RootInvokeOfEntrypointWithoutReturnSyscallIsDeterministicFault)
+TEST_F(SyscallMiscTests,
+       RootInvokeOfEntrypointWithoutReturnSyscallIsDeterministicFault)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              Invocation{
-                  .invoked_address = kContractAddress,
-                  .entrypoint = entrypoint_from_method_id(0xFF),
-                  .gas_limit = 100'000,
-                  .calldata = Calldata{},
-              },
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      Invocation{
+                          .invoked_address = kContractAddress,
+                          .entrypoint = entrypoint_from_method_id(0xFF),
+                          .gas_limit = 100'000,
+                          .calldata = Calldata{},
+                      },
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   auto result = handler.root_invoke();
   ASSERT_FALSE(result.is_root_success());

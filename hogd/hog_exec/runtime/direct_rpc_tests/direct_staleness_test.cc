@@ -163,7 +163,7 @@ TEST_F(DirectStalenessTest,
 
   Contract contract(ContractType::kRv32);
   contract.rv32_contract().data = {0x01, 0x02, 0x03, 0x04,
-                                    0x01, 0x00, 0x00, 0x00};
+                                   0x01, 0x00, 0x00, 0x00};
   auto contract_ptr = std::make_shared<const Contract>(contract);
   auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);
 
