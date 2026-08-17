@@ -291,9 +291,10 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # The program [ci_remote_reap] runs on one host to reap [$1] (a space-separated
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
-# both, and 3 if the signals could not be sent at all -- a host whose [killall]
-# or [sudo] is broken has not been shown to have a process refusing to die, and
-# must not be reported as though it had.
+# both, and 3 if the signals could not be sent at all -- a host with no
+# [killall] at all, or whose [killall] is refused both unprivileged and under
+# [sudo], has not been shown to have a process refusing to die, and must not be
+# reported as though it had.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
 # bare [killall <names>] hands the caller back a host where the processes have
@@ -350,14 +351,30 @@ wait_gone() {
 # die: [-q] silences killall's own "no process found", so a nonzero exit that
 # still says something is sudo or killall failing rather than an absence of
 # processes to kill.
+#
+# The unprivileged [killall] goes first because the benchmark processes are
+# started by this same user, over the same ssh login the reap arrives on:
+# [scripts/launch-multi.sh] and the schedule's own control_server reap already
+# kill them without sudo. Reaching for [sudo -n] first made passwordless sudo a
+# silent prerequisite of the whole reap, and a host that does not grant it stops
+# reaping anything -- which is how an orphaned [scpd.dev] outlives the chuckd
+# that forked it, keeps 127.0.0.1:4400, and leaves the next benchmark's chuckd
+# to die on "transport is closed" when its own scpd cannot bind. sudo stays as
+# the escalation for a process this user may not signal.
 signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+  err=\$(killall -q "-\$1" \$procs 2>&1)
   status=\$?
-  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
-    return 1
+  if [ "\$status" -eq 0 ] || [ -z "\$err" ]; then
+    return 0
   fi
-  return 0
+  sudo_err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+  status=\$?
+  if [ "\$status" -eq 0 ] || [ -z "\$sudo_err" ]; then
+    return 0
+  fi
+  echo "cannot signal processes: \$err" >&2
+  echo "cannot signal processes with sudo: \$sudo_err" >&2
+  return 1
 }
 
 # Signal first and ask questions after: a host that will not report its
