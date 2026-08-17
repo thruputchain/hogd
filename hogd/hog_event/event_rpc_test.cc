@@ -893,4 +893,41 @@ TEST_F(EventRpcTest, CommitBlockKeepsFinalFile)
   EXPECT_TRUE(std::filesystem::exists(final_file));
 }
 
+// Regression for #1960: a validator closes a candidate block's event context
+// to compute its event root before the block is accepted. Closing must publish
+// nothing -- the fan-out to indexers belongs to commit_block() alone -- so a
+// candidate that loses commit selection and is abandoned never reaches an
+// indexer, and leaves no events file behind.
+TEST_F(EventRpcTest, CloseDoesNotPublishToIndexersBeforeCommit)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  FailureCapturingIndexerRpc indexer;
+  ctx.add_indexer(make_socketpair_indexer_client(&indexer));
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, TxEventLog{},
+                                              ProposedTransaction{})(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  auto result = mempool_rpc.eventsched_close_block(1, 1)();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+
+  // The event root is available to the caller, but nothing was published.
+  EXPECT_TRUE(indexer.event_batches.empty());
+
+  // The losing-candidate path: abandon() awaits the close-time detached file
+  // work before deleting, so any publication attempted by close would have
+  // landed in [event_batches] by the time this returns.
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  EXPECT_TRUE(indexer.event_batches.empty());
+  EXPECT_FALSE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir(),
+                                               result.root_hash())));
+}
+
 } // namespace hogd
