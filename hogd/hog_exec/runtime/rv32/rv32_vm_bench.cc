@@ -10,11 +10,9 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
-#include "hogd/build_config.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
@@ -26,7 +24,6 @@
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
-#include "hogd/rust/wasmi/bindings.h"
 
 namespace hogd::rv32 {
 namespace {
@@ -622,106 +619,6 @@ compute_loop_independent_instruction_count()
   return static_cast<int64_t>(stats.instructions);
 }
 
-struct WasmiBenchContract {
-  std::array<uint8_t, 32> hash = {0x72, 0x76, 0x33, 0x32, 0x2d, 0x66, 0x69,
-                                  0x62, 0x6f, 0x6e, 0x61, 0x63, 0x63, 0x69,
-                                  0x2d, 0x72, 0x61, 0x77, 0x2d, 0x62, 0x65,
-                                  0x6e, 0x63, 0x68, 0x00, 0x00, 0x00, 0x00,
-                                  0x14, 0x00, 0x00, 0x01};
-  std::vector<uint8_t> wasm;
-};
-
-std::vector<uint8_t>
-load_wasm_from_dir(std::string_view directory, std::string_view filename)
-{
-  const std::string path = std::string(directory) + "/" + std::string(filename);
-  FILE *file = std::fopen(path.c_str(), "rb");
-  if (file == nullptr) {
-    std::abort();
-  }
-
-  std::vector<uint8_t> bytes;
-  std::array<uint8_t, 65536> buffer = {};
-  size_t count = 0;
-  while ((count = std::fread(buffer.data(), 1, buffer.size(), file)) > 0) {
-    bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + count);
-  }
-  std::fclose(file);
-  return bytes;
-}
-
-extern "C" ContractGetResult
-wasmi_bench_contract_get(void *userctx, const uint8_t *hash_ptr) noexcept
-{
-  if (userctx == nullptr || hash_ptr == nullptr) {
-    return ContractGetResult{.err_code = 1, .data = nullptr, .data_len = 0};
-  }
-  auto *contract = static_cast<WasmiBenchContract *>(userctx);
-  if (std::memcmp(hash_ptr, contract->hash.data(), contract->hash.size()) !=
-      0) {
-    return ContractGetResult{.err_code = 0, .data = nullptr, .data_len = 0};
-  }
-  return ContractGetResult{.err_code = 0,
-                           .data = contract->wasm.data(),
-                           .data_len = contract->wasm.size()};
-}
-
-class WasmiBenchRuntime {
-public:
-  explicit WasmiBenchRuntime(WasmiBenchContract &contract) : contract_(contract)
-  {
-    global_context_ = new_wasmi_global_context();
-    context_ = new_wasmi_context(&wasmi_bench_contract_get, global_context_);
-    const NewWasmiRuntimeResult result =
-        new_wasmi_runtime(contract_.hash.data(), &contract_, context_);
-    if (result.err_code != 0 || result.context_pointer == nullptr) {
-      std::abort();
-    }
-    runtime_ = result.context_pointer;
-  }
-
-  WasmiBenchRuntime(const WasmiBenchRuntime &) = delete;
-  WasmiBenchRuntime &operator=(const WasmiBenchRuntime &) = delete;
-
-  ~WasmiBenchRuntime()
-  {
-    free_wasmi_runtime(runtime_);
-    free_wasmi_context(context_);
-    free_wasmi_global_context(global_context_);
-  }
-
-  uint64_t invoke(std::string_view method, uint64_t gas_limit)
-  {
-    const WasmiInvokeResult result =
-        wasmi_invoke(runtime_, reinterpret_cast<const uint8_t *>(method.data()),
-                     static_cast<uint32_t>(method.size()), gas_limit);
-    if (result.error != 0) {
-      std::abort();
-    }
-    return result.gas_consumed;
-  }
-
-private:
-  WasmiBenchContract &contract_;
-  void *global_context_ = nullptr;
-  void *context_ = nullptr;
-  void *runtime_ = nullptr;
-};
-
-void
-run_wasmi_benchmark(benchmark::State &state, std::vector<uint8_t> wasm)
-{
-  WasmiBenchContract contract{.wasm = std::move(wasm)};
-  WasmiBenchRuntime runtime(contract);
-  int64_t consumed_fuel = 0;
-
-  for (auto _ : state) {
-    consumed_fuel += static_cast<int64_t>(runtime.invoke("14", kBenchGasLimit));
-  }
-
-  state.SetItemsProcessed(consumed_fuel);
-}
-
 void
 bm_dispatch_arithmetic(benchmark::State &state)
 {
@@ -925,21 +822,6 @@ bm_rv32_threaded_compute_loop_independent(benchmark::State &state)
   state.SetItemsProcessed(state.iterations() * instructions);
 }
 
-void
-bm_wasmi_wat_fibonacci_recursive_20(benchmark::State &state)
-{
-  run_wasmi_benchmark(state, load_wasm_from_dir(RV32_VM_BENCH_BINARY_DIR,
-                                                "rv32_fibonacci_bench.wasm"));
-}
-
-void
-bm_wasmi_built_contract_fibonacci_recursive_20(benchmark::State &state)
-{
-  run_wasmi_benchmark(state, load_wasm_from_dir(std::string(kBuildRoot) +
-                                                    "/built_contracts",
-                                                "fibonacci_raw.wasm"));
-}
-
 ArtifactImage
 parse_artifact_or_abort(std::span<const uint8_t> artifact)
 {
@@ -1132,8 +1014,6 @@ BENCHMARK(bm_rv32_threaded_instantiate);
 BENCHMARK(bm_rv32_run_compute_loop);
 BENCHMARK(bm_rv32_threaded_compute_loop);
 BENCHMARK(bm_rv32_threaded_compute_loop_independent);
-BENCHMARK(bm_wasmi_wat_fibonacci_recursive_20);
-BENCHMARK(bm_wasmi_built_contract_fibonacci_recursive_20);
 BENCHMARK(bm_syscall_bridge_roundtrip)->Arg(4096)->Arg(65536);
 BENCHMARK(bm_rv32_artifact_arithmetic_control_flow);
 BENCHMARK(bm_rv32_artifact_memory_transform);

@@ -18,10 +18,7 @@ option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
-# Enable WASM debug backtraces (preserves function names in stack traces)
-# When OFF (default): builds release WASMs, minimal size, no backtraces
-# When ON: builds debug WASMs with name section for useful backtraces
-option(WASM_DEBUG_BACKTRACES "Enable WASM debug backtraces with function names" OFF)
+
 # Enable logging of build failures to a file
 # This is used to track build failures in CI,
 # so that we can see what failed more easily (without info buried under pages of logs).

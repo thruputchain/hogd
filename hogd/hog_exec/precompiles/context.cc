@@ -47,11 +47,8 @@ make_hog_exec_context()
   // single borrowed instance per thread suffices, like the native context.
   static thread_local Rv32Context hog_exec_rv32_context;
 
-  auto hog_exec_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
-
   return std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {hog_exec_context.release(), true}},
           {ContractType::kNative, {hog_exec_native_context.get(), false}},
           {ContractType::kRv32, {&hog_exec_rv32_context, false}},
       });

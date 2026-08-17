@@ -1,7 +1,4 @@
 add_subdirectory(crypto)
-add_subdirectory(wasmi)
-add_subdirectory(wasmtime)
-add_subdirectory(wasm_meter)
 
 # The version check enforces that the toolchain we configured matches
 # the pin in rust-toolchain.toml. RUST_TSAN intentionally bypasses that
@@ -38,16 +35,6 @@ message(STATUS "Rust target CPU: ${RUST_BUILD_CPU}")
 
 # Build list of features to enable
 set(FEATURES_TO_ENABLE "")
-
-# Enable debug_logging if build type is Debug
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  list(APPEND FEATURES_TO_ENABLE debug_logging)
-endif()
-
-# Enable wasm_debug if WASM_DEBUG_BACKTRACES is set
-if(WASM_DEBUG_BACKTRACES)
-  list(APPEND FEATURES_TO_ENABLE wasm_debug)
-endif()
 
 # Apply features if any are enabled
 if(FEATURES_TO_ENABLE)

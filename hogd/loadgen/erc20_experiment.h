@@ -14,11 +14,8 @@ namespace hogd {
 
 class ERC20ExperimentState : public ExperimentState {
 public:
-  // use_rv32 selects which compiled artifacts back the erc20 and wallet
-  // contracts: the RV32 (.rv32a, kRv32 runtime) builds when true, the wasm
-  // builds otherwise. Everything else (calldata, tx shape) is identical.
-  ERC20ExperimentState(const ERC20PaymentsConfig &config, bool use_rv32 = false)
-    : config_(config), use_rv32_(use_rv32)
+  ERC20ExperimentState(const ERC20PaymentsConfig &config)
+    : config_(config)
   {}
 
   x23::Async<LoadgenStatus<LoadgenSuccessResult>> generate_experiment();
@@ -30,7 +27,6 @@ public:
 
 private:
   ERC20PaymentsConfig config_;
-  bool use_rv32_ = false;
 
   bool check_config_valid() const { return config_.num_addresses >= 2; }
 
@@ -38,9 +34,9 @@ private:
   // instruction, so the same do_action + cross-called erc20 transfer/mint costs
   // ~2.4x the wasm gas (measured ~29k for a transfer vs ~12k on wasm); the rv32
   // envelope is sized to cover that plus first-touch storage on the mint path.
-  GasAmount work_gas_limit() const
+  static GasAmount work_gas_limit()
   {
-    return use_rv32_ ? GasAmount{100'000} : GasAmount{20'000};
+    return GasAmount{100'000};
   }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);

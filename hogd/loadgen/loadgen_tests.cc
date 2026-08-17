@@ -16,6 +16,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class LoadgenTests : public ::testing::Test,
                      public NativeContractTestFramework {
 public:

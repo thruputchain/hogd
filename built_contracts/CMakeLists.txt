@@ -4,7 +4,6 @@ cmake_path(RELATIVE_PATH CMAKE_CURRENT_SOURCE_DIR BASE_DIRECTORY ${CMAKE_SOURCE_
 # Add contract loader library
 add_library(contract_loader
   contract_loader.cc
-  ${CMAKE_SOURCE_DIR}/hogd/hog_exec/runtime/wasm/instrumented_bytes.cc
 )
 
 target_link_libraries(contract_loader
@@ -24,8 +23,6 @@ target_include_directories(contract_loader PUBLIC
 target_include_directories(contract_loader PRIVATE
   ${CMAKE_BINARY_DIR}
 )
-
-add_dependencies(contract_loader generate_wasm_meter_ffi_h)
 
 add_custom_target(all_wasm_contracts)
 add_custom_target(all_wasm_headers)

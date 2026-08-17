@@ -334,8 +334,6 @@ if(BUILD_BENCHMARKS)
   add_dependencies(
     rv32_vm_bench
     rv32_fibonacci_bench_wasm
-    all_wasms_built
-    generate_wasmi_ffi_h
   )
 
   target_compile_definitions(

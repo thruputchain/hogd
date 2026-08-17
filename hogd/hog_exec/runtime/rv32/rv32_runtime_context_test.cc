@@ -45,8 +45,6 @@
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/trampoline_result.h"
-#include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
-#include "hogd/hog_exec/runtime/wasm/wasm_test_framework.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -91,10 +89,6 @@ constexpr std::string_view kEffectStorageKey = "rv32_parity_key";
 constexpr std::string_view kEffectStorageValue = "rv32 parity bytes";
 constexpr std::string_view kEffectEventData = "rv32 parity event";
 constexpr GasAmount kWasmErrorHostGas = 100;
-constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
-    WasmEngine::kWasmi,
-    WasmEngine::kWasmtime,
-};
 constexpr std::u8string_view kRv32SmokeCounterInterface = u8"Counter";
 // Keep in sync with built_contracts/integration_test_contracts/
 // rv32_smoke_counter/Cargo.toml; the SDK-lowered round-trip tests below fail
@@ -740,46 +734,6 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
                         .gas_consumed_ = 0};
   }
   return runtime.value()->invoke(method_id, gas_limit);
-}
-
-// definitions of method names in test_error_handling.wasm
-constexpr Runtime::MethodID kCall1 = 1;
-constexpr Runtime::MethodID kUnreachable = 5;
-
-InvokeResult
-invoke_wasm_error_contract(WasmEngine engine, HostFn0 external_call,
-                           Runtime::MethodID method, GasAmount gas_limit)
-{
-  WasmTestFramework wasm;
-  Contract contract;
-  contract.contract_type(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_error_handling.wasm");
-  const DeployedContractHash deployed{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-
-  wasm.setup_wasm_context(engine);
-  EXPECT_TRUE(wasm.link_fn("test", "good_call", &wasm_good_call_entry));
-  EXPECT_TRUE(wasm.link_fn("test", "external_call", external_call));
-  wasm.make_syscall_handler(contract);
-  auto runtime =
-      wasm.get_context()->make_new_runtime(deployed,
-                                           wasm.get_syscall_handler());
-  EXPECT_TRUE(runtime.has_value());
-  if (!runtime.has_value()) {
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
-  }
-  EXPECT_NE(runtime.value(), nullptr);
-  if (runtime.value() == nullptr) {
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
-  }
-  return runtime.value()->invoke(method, gas_limit);
 }
 
 void

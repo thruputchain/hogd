@@ -93,10 +93,7 @@ add_dependencies(
   components_library_exception
   generate_syscall_inner_h
   generate_syscall_meta_h
-  generate_wasmi_ffi_h
-  generate_wasmtime_ffi_h
   generate_crypto_ffi_h
-  generate_wasm_meter_ffi_h
   roundtrip_hh
   xdrtest
 )

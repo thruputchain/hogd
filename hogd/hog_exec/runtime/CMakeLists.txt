@@ -8,7 +8,6 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 add_subdirectory(view)
-add_subdirectory(wasm)
 add_subdirectory(item)
 add_subdirectory(anomalies)
 add_subdirectory(direct_rpc_tests)
@@ -54,7 +53,6 @@ target_link_libraries(
 
 add_library(runtime STATIC
   $<TARGET_OBJECTS:runtime_objects>
-  $<TARGET_OBJECTS:wasm_runtime_objects>
   $<TARGET_OBJECTS:rv32_runtime_objects>
   $<TARGET_OBJECTS:item_objects>
 )
@@ -157,7 +155,6 @@ add_dependencies(
   runtime_objects
   generate_syscall_inner_h
   generate_syscall_meta_h
-  generate_wasmtime_ffi_h
   protocol
 )
 
@@ -302,9 +299,6 @@ gtest_discover_tests(rv32_runtime_context_test
 
 add_dependencies(
   rv32_runtime_context_test
-  test_error_handling_wasm
-  all_wasm_contracts
-  all_wasm_headers
 )
 
 add_executable(
@@ -404,7 +398,5 @@ add_dependencies(
 
 add_dependencies(
   runtime_test
-  all_wasm_contracts
   all_riscvs_built
-  test_unknown_import_wasm
 )

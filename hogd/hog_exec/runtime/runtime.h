@@ -8,73 +8,16 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <type_traits>
 
 #include "contract.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
-#include "hogd/hog_exec/runtime/runtime_exports.h"
 
 namespace hogd {
 
 class SystemCallHandler;
 class Runtime;
-
-enum class RuntimeEngine {
-  kWasmi = 0,
-};
-
-namespace detail {
-
-struct RuntimeEngineInfo {
-  std::string name;
-  bool has_native_metering;
-  bool has_eager_link_guards;
-};
-
-constexpr static RuntimeEngineInfo kWasmiEngineInfo = {
-    .name = "wasmi",
-    .has_native_metering = true,
-    .has_eager_link_guards = true,
-};
-
-constexpr RuntimeEngineInfo const &
-get_engine_info(RuntimeEngine engine)
-{
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-    return kWasmiEngineInfo;
-  }
-  panic("unknown engine");
-}
-
-} // namespace detail
-
-std::string_view inline engine_to_string(RuntimeEngine engine)
-{
-  return detail::get_engine_info(engine).name;
-}
-
-// Whether or not the engine has native gas metering.
-// Use case is when testing behavior across multiple engines,
-// some tests will succeed/fail based on whether gas metering
-// is implemented in the engine.
-constexpr static bool
-engine_has_native_metering(RuntimeEngine engine)
-{
-  return detail::get_engine_info(engine).has_native_metering;
-}
-
-// does a missing linked function cause errors at instantiation time (true)
-// or are those checks deferred to runtime (false)
-// Usage is again for tests across multiple wasm engines.
-constexpr static bool
-engine_has_eager_link_guards(RuntimeEngine engine)
-{
-  return detail::get_engine_info(engine).has_eager_link_guards;
-}
 
 // Erased C-ABI function-pointer type for syscall trampoline dispatch.
 // Matches the Rust-side common::ErasedFnPtr = unsafe extern "C" fn().
@@ -93,64 +36,6 @@ extern "C" {
 using ErasedHostFn = void();
 using ErasedFnPtr = ErasedHostFn *;
 }
-
-template<typename Fn> struct HostFnTraits;
-
-template<> struct HostFnTraits<HostFn0> {
-  static constexpr uint8_t kNargs = 0;
-};
-
-template<> struct HostFnTraits<HostFn1> {
-  static constexpr uint8_t kNargs = 1;
-};
-
-template<> struct HostFnTraits<HostFn2> {
-  static constexpr uint8_t kNargs = 2;
-};
-
-template<> struct HostFnTraits<HostFn3> {
-  static constexpr uint8_t kNargs = 3;
-};
-
-template<> struct HostFnTraits<HostFn4> {
-  static constexpr uint8_t kNargs = 4;
-};
-
-template<> struct HostFnTraits<HostFn5> {
-  static constexpr uint8_t kNargs = 5;
-};
-
-template<> struct HostFnTraits<HostFn6> {
-  static constexpr uint8_t kNargs = 6;
-};
-
-template<> struct HostFnTraits<HostFn7> {
-  static constexpr uint8_t kNargs = 7;
-};
-
-template<> struct HostFnTraits<HostFn8> {
-  static constexpr uint8_t kNargs = 8;
-};
-
-template<> struct HostFnTraits<HostFn9> {
-  static constexpr uint8_t kNargs = 9;
-};
-
-template<> struct HostFnTraits<HostFn10> {
-  static constexpr uint8_t kNargs = 10;
-};
-
-template<> struct HostFnTraits<HostFn11> {
-  static constexpr uint8_t kNargs = 11;
-};
-
-template<> struct HostFnTraits<HostFn12> {
-  static constexpr uint8_t kNargs = 12;
-};
-
-template<typename Fn>
-concept supported_host_fn_ptr =
-    requires { HostFnTraits<std::remove_cvref_t<Fn>>::kNargs; };
 
 // Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list
@@ -171,24 +56,6 @@ public:
 
   virtual ~RuntimeContext() = default;
 
-  // Provide the functions that are made available to wasm modules(as function
-  // imports). Imports in wasm are identified by "module name" and "function
-  // name". For simplicity, this API implements only u64 arguments (between 0
-  // and 8) and expects imported functions to return an i32 (i.e. an error
-  // code from the syscall).
-  //
-  // Imported functions functions have a signature of
-  // HostFnResult
-  // function(ExternHostCallContext context, uint64_t arg0,...);
-  //
-  // Validate link_fn parameters. Returns false if any parameter is invalid.
-  static bool validate_link_fn_params(std::string_view module_name,
-                                      std::string_view fn_name,
-                                      ErasedFnPtr fn_ptr)
-  {
-    return !module_name.empty() && !fn_name.empty() && (fn_ptr != nullptr);
-  }
-
   // Perform any required validation checks on the contract.
   // In the case of webassembly, this is the webassembly validator.
   virtual InvokeErrorCode verify_contract(Contract const &contract) const = 0;
@@ -197,13 +64,6 @@ public:
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) = 0;
 };
-
-// create RuntimeContext with no imported functions
-std::unique_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
-// create RuntimeContext for running wasm contracts, and initialize with
-// hog_exec's imported function(s)
-std::unique_ptr<RuntimeContext>
-make_hog_exec_wasm_context(RuntimeEngine engine);
 
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.

@@ -25,11 +25,8 @@
 // executes one work transaction via root_invoke + abort: abort rolls back the
 // staged writes and discards the transfer's events, so each iteration runs
 // against the same post-init state with no DB write-back and the replay cache
-// untouched -- the measured time reflects interpreter + syscall cost. Both the
-// wasm and rv32 builds are registered (state.range(0)) so the runtimes can be
-// compared, and gas/tx is reported as a counter (the rv32 interpreter meters
-// one gas per instruction, so its figure is higher than wasm's coarser fuel
-// metering -- an accounting-scale difference).
+// untouched -- the measured time reflects interpreter + syscall cost. gas/tx
+// is reported as a counter.
 
 namespace hogd {
 namespace {
@@ -38,8 +35,7 @@ class PaymentsExecBench : public benchmark::Fixture {
 public:
   void SetUp(benchmark::State &state) override
   {
-    const bool use_rv32 = state.range(0) != 0;
-    const auto num_accounts = static_cast<uint32_t>(state.range(1));
+    const auto num_accounts = static_cast<uint32_t>(state.range(0));
     // A pool of distinct work txs to cycle through; abort keeps them reusable.
     constexpr uint64_t kPoolTxs = 1000;
 
@@ -52,8 +48,7 @@ public:
       ERC20ExperimentState exp(
           ERC20PaymentsConfig{
               .num_addresses = num_accounts,
-          },
-          use_rv32);
+          });
 
       auto init_result = exp.generate_experiment()();
       if (!init_result.has_value()) {
@@ -136,14 +131,11 @@ BENCHMARK_DEFINE_F(PaymentsExecBench, transfer)(benchmark::State &state)
                          benchmark::Counter::kIsRate);
 }
 
-// {use_rv32, num_accounts}. Both runtimes at a couple of account counts so the
-// rv32-vs-wasm gap (and how it moves with contention) is visible.
+// num_accounts: a couple of account counts so contention effects are visible.
 BENCHMARK_REGISTER_F(PaymentsExecBench, transfer)
-    ->Args({0, 10})
-    ->Args({1, 10})
-    ->Args({0, 2})
-    ->Args({1, 2})
-    ->ArgNames({"rv32", "accounts"})
+    ->Args({10})
+    ->Args({2})
+    ->ArgNames({"accounts"})
     ->Unit(benchmark::kMicrosecond)
     ->UseRealTime();
 

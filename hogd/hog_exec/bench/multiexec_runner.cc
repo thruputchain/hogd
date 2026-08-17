@@ -52,6 +52,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class SchedExecTest {
 public:
   using rpc_service = SchedExec1;
@@ -169,6 +170,7 @@ connect_to_exec_server(const ExecCard &card)
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 struct BlockValidationQueue {
 
   BlockValidationQueue(const x23::XdrVec<SignedTransaction> *txs,

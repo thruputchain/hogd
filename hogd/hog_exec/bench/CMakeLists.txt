@@ -1,29 +1,5 @@
 if(BUILD_BENCHMARKS)
   add_executable(
-    fibonacci_wasmonly
-    fibonacci_wasmonly.cc
-  )
-  target_link_libraries(
-    fibonacci_wasmonly
-    hogd
-    protocol
-    runtime
-    exec_interface
-    db_interface
-    hog_db
-    runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
-    contract_loader
-  )
-
-  target_include_directories(
-    fibonacci_wasmonly
-    PRIVATE
-    ${CMAKE_BINARY_DIR}
-  )
-
-  set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-
-  add_executable(
     fibonacci_rv32only
     fibonacci_rv32only.cc
   )
@@ -149,22 +125,3 @@ target_include_directories(
 )
 
 set_property(TARGET multiexec_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-
-add_executable(
-  wasm_stats
-  wasm_stats.cc
-)
-target_link_libraries(
-  wasm_stats
-  hogd
-  protocol
-  runtime
-  precompiles
-  runtime_test_lib
-)
-
-target_include_directories(
-  wasm_stats
-  PRIVATE
-  ${CMAKE_BINARY_DIR}
-)
