@@ -157,7 +157,7 @@ function(add_contract_header target_name)
         ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
         -o ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h
         -n ${target_name}
-        -w ${target_name}.wasm
+        -r ${target_name}.rv32a
         ${extra_includes}
     DEPENDS
       ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.py
