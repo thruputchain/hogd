@@ -42,10 +42,46 @@ protected:
   ContractAddress contract_addr_;
 };
 
-// The hash_bug guest computes sha256("hello") entirely in-contract (real
-// codegen, no crypto syscall) and returns the digest through a hand-written
-// direct-dispatch entrypoint whose method id is the hex of the historical
-// wasm export name "FFFFFFFFFFFFFFFF".
+// This test originally demonstrated that winch is broken on arch64
+//
+// [[package]]
+// name = "wasmtime"
+// version = "39.0.1"
+// source = "registry+https://github.com/rust-lang/crates.io-index"
+// checksum = "511bc19c2d48f338007dc941cb40c833c4707023fdaf9ec9b97cf1d5a62d26bb"
+//
+// This test invokes a contract that just computes a sha256 hash of a
+// hardcoded string (no sdk interaction, no syscalls).
+//
+// on x86, this test passes.  With wasmi (arch64), this test passes. With
+// cranelift (arch64), this test passes. with winch (arch64) test fails.
+//
+// This bug reproduces without using our own wasmtime lib (one might, in theory,
+// worry about potential memory corruption in our code manifesting in a broken
+// test). You can invoke wasmtime via a cli tool published by the wasmtime team.
+// geoff@geoff-mbp built_contracts % wasmtime run --codegen compiler=cranelift
+// --invoke FFFFFFFFFFFFFFFF hash_bug.wasm (no output, test passes)
+//
+// geoff@geoff-mbp built_contracts % wasmtime run --codegen compiler=winch
+// --invoke FFFFFFFFFFFFFFFF hash_bug.wasm Error: failed to run main module
+// `hash_bug.wasm`
+//
+// Caused by:
+//     0: failed to invoke `FFFFFFFFFFFFFFFF`
+//     1: error while executing at wasm backtrace:
+//            0:   0x2256 - <unknown>!<wasm function 0>
+//     2: wasm trap: wasm `unreachable` instruction executed
+//
+// (test fails)
+//
+// This bug has been patched as of wasmtime 42.0.0:
+// https://github.com/bytecodealliance/wasmtime/pull/12501
+//
+// The test now runs the same in-guest hashing on rv32: the hash_bug guest
+// computes sha256("hello") entirely in-contract (real codegen, no crypto
+// syscall) and returns the digest through a hand-written direct-dispatch
+// entrypoint whose method id is the hex of the historical wasm export name
+// "FFFFFFFFFFFFFFFF".
 TEST_F(Sha2InContractTest, InvokeFFFFF)
 {
   auto hash_expect = decode_hex(
