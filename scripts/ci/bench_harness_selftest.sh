@@ -246,7 +246,7 @@ check_eq "unsendable signal is not reported as a survivor" "3" "$reap_status"
 check_contains "unsendable signal says what went wrong" \
   "cannot signal processes: sudo: a password is required" "$reap_output"
 check_contains "unsendable signal names the fallback too" \
-  "unprivileged killall: killall: cannot kill pid 1: Operation not permitted" \
+  "unprivileged killall also failed: killall: cannot kill pid 1: Operation not permitted" \
   "$reap_output"
 check_eq "unsendable signal does not wait out the timeouts" "TERM" \
   "$(cat "$signal_file")"

@@ -368,8 +368,8 @@ signal_all() {
     unprivileged_err=\$(killall -q "-\$1" \$procs 2>&1)
     status=\$?
     if [ "\$status" -ne 0 ] && [ -n "\$unprivileged_err" ]; then
-      echo "cannot signal processes: \$err" \
-        "(unprivileged killall: \$unprivileged_err)" >&2
+      echo "cannot signal processes: \$err" >&2
+      echo "unprivileged killall also failed: \$unprivileged_err" >&2
       return 1
     fi
   fi
