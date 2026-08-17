@@ -1,19 +1,15 @@
 // Regression test for issue #2747 (and its amendment, finding 002). See
 // test_ffi_test_helpers.h.
 //
-// start_mock_invocation_frame() appended the parent's synthetic kInvoke record
-// and closed it on only one of its exits, the admission refusal. A throwing
-// trace-input copy or preallocation (caught by open_mock_invocation_frame())
-// and the start_frame() failure return (#3058) both left it open, so the
-// parent's later finish serialized a child Invoke that never opened a frame,
-// still carrying start_syscall_trace()'s sentinels. Every exit now runs through
-// one self-disarming helper; finishing twice is the other way to abort (#2948).
+// start_mock_invocation_frame() left its synthetic kInvoke record unfinished on
+// every exit but one, so the parent's finish serialized a child Invoke that
+// never opened a frame.
 //
-// The allocation failures themselves can only be forced with a global allocator
-// hook, which this suite deliberately does not install (see
-// noexcept_frame_trace_2644_2646_2741_regression_test.cc). What is checkable
-// here is the invariant, on every exit an honest caller reaches
-// deterministically: no record is left carrying the start-time sentinels.
+// Forcing the allocation failures needs a global allocator hook, which this
+// suite does not install (see
+// noexcept_frame_trace_2644_2646_2741_regression_test.cc). These cover the
+// exits reachable without one: no record is left carrying the start-time
+// sentinels.
 
 #include <cstddef>
 #include <cstdint>
@@ -55,8 +51,7 @@ make_invocation(ContractAddress address, uint64_t method, GasAmount gas_limit)
   };
 }
 
-// Finish the innermost open mock frame and hand the buffers to a scope guard.
-// Returns the deserialized trace.
+// Finish the innermost open mock frame and return its deserialized trace.
 InvocationFrameTrace
 finish_frame_and_take_trace(void *handler)
 {
@@ -81,9 +76,8 @@ finish_frame_and_take_trace(void *handler)
   return trace;
 }
 
-// The evidence #2747 reported. End gas is the sentinel to test: a finished
-// record may legitimately carry an Unrecoverable status, but not GasAmount max,
-// since the parent frames here run on a bounded budget.
+// End gas is the sentinel to test: a finished record may carry an Unrecoverable
+// status, but not GasAmount max, since these parents run on a bounded budget.
 void
 expect_no_unfinished_records(InvocationFrameTrace const &trace)
 {
@@ -97,9 +91,8 @@ expect_no_unfinished_records(InvocationFrameTrace const &trace)
 
 } // namespace
 
-// A refused open is the deterministic instance of the failure shape: the record
-// is appended, the open returns an error, and the parent frame keeps running.
-// The record must be complete by the time the caller sees the error.
+// A refusal appends the record, returns an error, and leaves the parent
+// running -- the record must be complete by the time the caller sees the error.
 TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
 {
   auto *db = make_db();
@@ -113,9 +106,7 @@ TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
   auto handler = make_mocked_handler(db, rc);
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(handler.syscall_handler, nullptr);
-  // Close through a guard: an unfinished frame left by a failed assertion
-  // blocks free_db() on the open-handler guard and hangs the binary instead of
-  // reporting the failure.
+  // Guarded: a frame left open by a failed assertion hangs free_db().
   x23::Defer d3([&] {
     EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
               kTestFFIErrorCodeNone);
@@ -158,8 +149,7 @@ TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
   EXPECT_EQ(bad_flags.body.invoke().outputs, nullptr);
 }
 
-// An open that fails before start_mock_invocation_frame() runs at all -- the
-// serialized invocation does not parse -- must not touch the parent's trace.
+// A failure before start_mock_invocation_frame() runs must append nothing.
 TEST(TestBindingsTest, UnparseableMockFrameOpenAppendsNoInvokeTrace)
 {
   auto *db = make_db();
@@ -182,9 +172,7 @@ TEST(TestBindingsTest, UnparseableMockFrameOpenAppendsNoInvokeTrace)
                        make_invocation(kParent, 0x1111, kParentGas)),
             kTestFFIErrorCodeNone);
 
-  // A truncated serialization of a well-formed Invocation: deserialize() throws
-  // x23::XdrException, which open_mock_invocation_frame() reports without ever
-  // reaching the trace append.
+  // Truncated: deserialize() throws before the trace append is reached.
   auto serialized = x23::serialize(make_invocation(kChild, 0x2222, kChildGas));
   ASSERT_GT(serialized.size(), 4U);
   FFISerializedInvocation truncated = {
@@ -199,10 +187,8 @@ TEST(TestBindingsTest, UnparseableMockFrameOpenAppendsNoInvokeTrace)
   expect_no_unfinished_records(trace);
 }
 
-// The success path disarms the guard and still records what production records:
-// the *requested* gas limit and flags (captured before the parent-budget clamp
-// and the ReadOnly inheritance), with a child trace attached once the child
-// finishes.
+// The success path disarms, and still traces the *requested* gas limit and
+// flags -- captured before the clamp and the ReadOnly inheritance.
 TEST(TestBindingsTest, MockFrameOpenStillTracesRequestedInvokeInputs)
 {
   auto *db = make_db();
