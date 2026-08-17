@@ -838,6 +838,88 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   EXPECT_EQ(sha256(lookup.value()), big_hash);
 }
 
+// The attached-contract size gate is strict (> kMaxContractSizeBytes): a
+// blob of exactly kMaxContractSizeBytes passes initial validation, the body
+// runs, and the deploy commits through the chunked-row path (its serialized
+// row is exactly kMaxSerializedContractBytes). Pins the accept side of the
+// boundary whose reject side is RejectsAttachedContractAboveSizeLimit; a
+// > -> >= drift would reject transactions other validators accept.
+TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
+{
+  Contract limit_contract(ContractType::kWasmi);
+  limit_contract.wasmi_contract().data.resize_uninitialized(
+      kMaxContractSizeBytes);
+  for (size_t i = 0; i < limit_contract.wasmi_contract().data.size(); ++i) {
+    limit_contract.wasmi_contract().data[i] =
+        static_cast<uint8_t>((i * 37) + 11);
+  }
+  auto limit_hash = sha256(limit_contract);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 98;
+    return nonce;
+  }();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(0,
+                [limit_hash](
+                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  auto deploy_result =
+                      ctx.handler().deploy_contract(kDeployNonce, limit_hash);
+                  if (!deploy_result.has_value()) {
+                    return deploy_result.error().to_invoke_error();
+                  }
+                  if (!deploy_result.value().has_value()) {
+                    return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  return {};
+                });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext native_context(std::move(contract_map));
+  NoopWasmiContext wasmi_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kWasmi, {&wasmi_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  auto deployed_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   limit_hash);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+  setup_grant_storage_token(deployed_addr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {limit_contract},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+  advance_block();
+
+  auto lookup = lookup_contract_from_db(limit_hash);
+  ASSERT_TRUE(lookup.has_value());
+  EXPECT_EQ(sha256(lookup.value()), limit_hash);
+}
+
 // An attached contract blob above kMaxContractSizeBytes is rejected
 // deterministically during initial validation: the body never runs and
 // nothing is deployed (#2569).

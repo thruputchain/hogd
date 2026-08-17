@@ -1936,6 +1936,85 @@ TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
   }
 }
 
+// The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
+// (footprint + kMessageOverhead > kExecToDbMessageCap): a batch whose
+// type-derived footprint lands exactly on the budget is pushed; one XDR word
+// (4 bytes) more is rejected as a clean conflict. The bound arithmetic is
+// mirrored from database_proxy.cc, so a change to the cap, the message
+// overhead, or the per-delta bound moves this boundary and fails the test --
+// an off-by-one tightening would abort transactions other validators accept.
+TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
+{
+  constexpr size_t kWord = 4;
+  constexpr auto kXdrMaxOf = []<typename T>(std::type_identity<T>) {
+    return x23::detail::xdr_size_bounds<T>().max_;
+  };
+  constexpr size_t kCap = 0x100'0000;
+  constexpr size_t kOverhead = kXdrMaxOf(std::type_identity<x23::rpc_msg>{}) +
+                               kXdrMaxOf(std::type_identity<BlockID>{}) +
+                               kXdrMaxOf(std::type_identity<TransactionID>{}) +
+                               kWord;
+  constexpr size_t kBudget = kCap - kOverhead;
+  constexpr size_t kFraming =
+      kXdrMaxOf(std::type_identity<AddressAndKey>{}) +
+      kXdrMaxOf(std::type_identity<StorageDeltaFlagSet>{}) +
+      kXdrMaxOf(std::type_identity<StorageDeltaType>{});
+  constexpr size_t kMinDelta = kFraming + kWord; // zero-length bytestring
+  constexpr auto kBoundOf = [](size_t len) {
+    return kMinDelta + ((len + 3) & ~size_t{3});
+  };
+  constexpr size_t kMaxLen = 1024; // kBytestringMaxLen
+  constexpr size_t kPerMax = kBoundOf(kMaxLen);
+
+  // Bytestring lengths whose per-delta bounds sum to exactly `target`
+  // (everything in the bound arithmetic is a multiple of one XDR word).
+  auto lens_for_target = [&](size_t target) {
+    std::vector<size_t> lens;
+    size_t left = target;
+    while (left > 2 * kPerMax) {
+      lens.push_back(kMaxLen);
+      left -= kPerMax;
+    }
+    const size_t t1 = (left / 2) & ~size_t{3};
+    lens.push_back(t1 - kMinDelta);
+    lens.push_back((left - t1) - kMinDelta);
+    size_t total = 0;
+    for (size_t len : lens) {
+      total += kBoundOf(len);
+    }
+    EXPECT_EQ(total, target);
+    return lens;
+  };
+
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+
+  auto push_batch_of = [&](std::vector<size_t> const &lens) {
+    auto tx = make_new_per_tx_db_proxy();
+    for (size_t i = 0; i < lens.size(); ++i) {
+      tx.add_delta(make_addrkey(contract_addr, "cap" + std::to_string(i)),
+                   make_bytestring_delta(std::string(lens[i], 'x')),
+                   std::to_underlying(StorageDeltaFlags::None));
+    }
+    return tx.try_push_current_subtransaction();
+  };
+
+  {
+    auto r = push_batch_of(lens_for_target(kBudget));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r.value())
+        << "a batch footprint of exactly the message budget must be pushed";
+  }
+
+  {
+    auto r = push_batch_of(lens_for_target(kBudget + kWord));
+    ASSERT_TRUE(r.has_value())
+        << "an over-budget push must be a clean conflict, not a system error";
+    EXPECT_FALSE(r.value())
+        << "one XDR word over the message budget must be rejected";
+  }
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
