@@ -857,7 +857,17 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
     if (arm.decl.qual != Declaration::kVoid) {
       decode_field(arm.decl, name, 8);
-      prbottom("        return {{ {0}, {1} }};\n", body.switch_id, arm.decl.id);
+      if (has_default_arm && arm.cases.size() > 1) {
+        // Multiple case labels narrow the discriminant to a union of literals,
+        // which tsc cannot match against a single variant while the catch-all
+        // { disc: number } variant also accepts those literals — cast instead.
+        prbottom("        return {{ {0}, {1} }} as {2};\n", body.switch_id,
+                 arm.decl.id, name);
+      }
+      else {
+        prbottom("        return {{ {0}, {1} }};\n", body.switch_id,
+                 arm.decl.id);
+      }
     }
     else if (!has_default_arm) {
       // No catch-all variant — need cast for void arms

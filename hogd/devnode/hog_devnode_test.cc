@@ -2117,7 +2117,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     EXPECT_EQ(reader.get_transactions_by_address(startup_query)().latest_block,
               1);
 
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
@@ -2245,7 +2245,12 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
                                        readiness.scheduler.port,
                                        /*retry=*/true)()
             .value();
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+
+    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
@@ -2955,7 +2960,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
 
     auto keypair =

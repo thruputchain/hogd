@@ -10,6 +10,7 @@
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
 namespace hogd::rv32 {
 namespace {
@@ -134,6 +135,21 @@ TEST(Rv32UnsupportedProfileTest,
         std::span<const uint8_t>(artifact.data(), artifact.size()));
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), ArtifactError::kInvalidProgram);
+
+    // The production deploy gate (parse_threaded_artifact defers decode to
+    // ThreadedMachinePreInstantiation::create) must reject the same table
+    // with the same ProgramError.
+    auto threaded = parse_threaded_artifact(
+        std::span<const uint8_t>(artifact.data(), artifact.size()));
+    ASSERT_TRUE(threaded.has_value());
+    auto created =
+        ThreadedMachinePreInstantiation::create(threaded->code,
+                                                threaded->initial_memory,
+                                                threaded->initial_memory_start,
+                                                threaded->memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_FALSE(created.has_value());
+    EXPECT_EQ(created.error(), test_case.expected_error);
   }
 }
 

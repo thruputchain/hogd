@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -10,9 +11,11 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "built_contracts/itc_erc20.h"
+#include "built_contracts/itc_erc20.hh"
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -29,6 +32,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
@@ -48,7 +52,7 @@ namespace hogd {
 namespace {
 
 // All storage costs are zeroed for these tests. The native HOG precompile and
-// the WASM itc_erc20 charge storage differently (native balance_cost vs plain
+// the RV32 itc_erc20 charge storage differently (native balance_cost vs plain
 // nnint_cost on a contract-data key), and that difference is deliberately out
 // of scope here: parity is about ERC20 *semantics*, not storage-cost
 // accounting. Zeroing costs keeps a divergence in storage pricing from showing
@@ -78,9 +82,62 @@ using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 // literal bytes a manual revert / fault leaves behind).
 using CapturedRecord = std::vector<uint8_t>;
 
+// The itc_erc20 error carried by a decoded contract Result, or nullopt when
+// the result is Ok or the abort payload was not an itc_erc20 exception (a
+// library exception, or a body that did not parse -- ContractErrorType keeps
+// those as distinct variant alternatives). Matching on the payload type
+// rather than on a hard-coded selector keeps this honest if the generated
+// exception ever changes shape.
+template<typename ResultT>
+std::optional<itc_erc20::ERC20Error>
+erc20_error_of(ResultT const &result)
+{
+  if (result.is_ok()) {
+    return std::nullopt;
+  }
+  return std::visit(
+      [](auto const &exception) -> std::optional<itc_erc20::ERC20Error> {
+        if constexpr (requires {
+                        {
+                          exception.exn
+                        } -> std::convertible_to<itc_erc20::ERC20Error>;
+                      }) {
+          return exception.exn;
+        }
+        else {
+          return std::nullopt;
+        }
+      },
+      result.err().variant_);
+}
+
+// The itc_erc20 error a captured step aborted with. Returns nullopt unless
+// the step ran a child frame that aborted with a decodable itc_erc20
+// exception -- so callers pin *which* error a rejection reported, not merely
+// that the frame aborted.
+template<StringLiteral Name>
+std::optional<itc_erc20::ERC20Error>
+step_erc20_error(CapturedRecord const &record)
+{
+  // [0] is the capture tag (0x00 == a child frame ran), [1] the frame status,
+  // and the rest is the literal return/abort payload.
+  if (record.size() < 2 || record[0] != 0x00 ||
+      static_cast<InvocationFrameStatusCode>(record[1]) !=
+          InvocationFrameStatusCode::Abort) {
+    return std::nullopt;
+  }
+  auto payload = std::as_bytes(std::span(record.data() + 2, record.size() - 2));
+  auto decoded =
+      erc20_meta::decode_return<Name>(payload, /*manually_reverted=*/true);
+  if (!decoded.has_value()) {
+    return std::nullopt;
+  }
+  return erc20_error_of(*decoded);
+}
+
 } // namespace
 
-// Drives the native HOG precompile and the WASM itc_erc20 contract through the
+// Drives the native HOG precompile and the RV32 itc_erc20 contract through the
 // same ERC20 operations, capturing each call's commit ExecResult plus the
 // literal return/abort bytes. The two backends agree byte-for-byte on valid
 // operations, on allowance handling, and on balance checking: the native
@@ -106,15 +163,15 @@ protected:
   // preset address, everything else is arbitrary.
   static constexpr ContractAddress kNativeTokenAddr =
       GenesisConfigurationLoader::kPresetNativeTokenAddress;
-  static constexpr ContractAddress kWasmTokenAddr = make_contract_address(200);
-  static constexpr ContractAddress kWasmAdminAddr = make_contract_address(201);
+  static constexpr ContractAddress kRv32TokenAddr = make_contract_address(200);
+  static constexpr ContractAddress kRv32AdminAddr = make_contract_address(201);
   static constexpr ContractAddress kNativeCallerAddr =
       make_contract_address(202);
-  static constexpr ContractAddress kWasmCallerAddr = make_contract_address(203);
+  static constexpr ContractAddress kRv32CallerAddr = make_contract_address(203);
   // Distinct (non-self) recipients for the baseline transfer.
   static constexpr ContractAddress kNativeRecipientAddr =
       make_contract_address(204);
-  static constexpr ContractAddress kWasmRecipientAddr =
+  static constexpr ContractAddress kRv32RecipientAddr =
       make_contract_address(205);
   // transfer_from: an owner (token holder, allowance granter) and a spender
   // (the delegated caller), per backend.
@@ -122,23 +179,23 @@ protected:
       make_contract_address(206);
   static constexpr ContractAddress kNativeSpenderAddr =
       make_contract_address(207);
-  static constexpr ContractAddress kWasmOwnerAddr = make_contract_address(208);
-  static constexpr ContractAddress kWasmSpenderAddr =
+  static constexpr ContractAddress kRv32OwnerAddr = make_contract_address(208);
+  static constexpr ContractAddress kRv32SpenderAddr =
       make_contract_address(209);
   // transfer_from to a distinct recipient: two extra recipient addresses.
   static constexpr ContractAddress kNativeTfRecipientAddr =
       make_contract_address(210);
-  static constexpr ContractAddress kWasmTfRecipientAddr =
+  static constexpr ContractAddress kRv32TfRecipientAddr =
       make_contract_address(211);
 
   // Native contract ids in the multiplexed context's native map.
-  static constexpr int32_t kWasmAdminId = 50;
+  static constexpr int32_t kRv32AdminId = 50;
   static constexpr int32_t kNativeCallerId = 51;
-  static constexpr int32_t kWasmCallerId = 52;
+  static constexpr int32_t kRv32CallerId = 52;
   static constexpr int32_t kNativeOwnerId = 53;
   static constexpr int32_t kNativeSpenderId = 54;
-  static constexpr int32_t kWasmOwnerId = 55;
-  static constexpr int32_t kWasmSpenderId = 56;
+  static constexpr int32_t kRv32OwnerId = 55;
+  static constexpr int32_t kRv32SpenderId = 56;
 
   static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
   {
@@ -153,7 +210,7 @@ protected:
   }
 
   // Compute the contract-data storage key that itc_erc20 uses for addr's
-  // balance. The WASM SDK's .hash() CXS-encodes the tuple (b"balance", addr)
+  // balance. The RV32 SDK's .hash() CXS-encodes the tuple (b"balance", addr)
   // and SHA-256s the result. CXS fixed-opaque arrays have no padding, so the
   // preimage is exactly: 7 bytes of "balance" || 32 bytes of addr = 39 bytes.
   static StorageKeyContractData
@@ -169,6 +226,71 @@ protected:
         sha256(std::span<const uint8_t>(preimage.data(), preimage.size()))};
   }
 
+  // Appends one ERC20 call's outcome to `record`: a tag byte, then either the
+  // error code that stopped the call, or the child frame status followed by
+  // the literal bytes the callee returned or aborted with.
+  static void append_invoke_record(NativeSyscallContext &ctx,
+                                   ContractAddress const &target,
+                                   Runtime::MethodID method_id,
+                                   Calldata const &calldata,
+                                   std::vector<uint8_t> &record)
+  {
+    CopyableInvokeOutputs outputs{};
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = method_id,
+        .gas_limit = static_cast<GasAmount>(UINT64_MAX),
+        .flags = std::to_underlying(InvokeFlag::None),
+    };
+    auto r = ctx.syscall<SyscallNo::kInvoke>(
+        target, std::as_bytes(std::span(calldata.data(), calldata.size())),
+        std::span<uint32_t>{}, inputs, outputs);
+
+    if (!r.has_value()) {
+      // Host-level (non-deterministic) failure: should not happen on these
+      // paths, but record it distinctly rather than hiding it.
+      record.push_back(0xEE);
+      record.push_back(static_cast<uint8_t>(r.error().code()));
+      return;
+    }
+    if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      // Invoke rejected before any child frame ran.
+      record.push_back(0x01);
+      record.push_back(static_cast<uint8_t>(r.value()));
+      return;
+    }
+    record.push_back(0x00);
+    record.push_back(static_cast<uint8_t>(outputs.frame_status));
+    auto rb = ctx.handler().get_return_buffer();
+    if (rb.has_value() && rb.value().has_value()) {
+      auto const *buf = rb.value().value();
+      for (auto byte_val : *buf) {
+        record.push_back(static_cast<uint8_t>(byte_val));
+      }
+    }
+    else {
+      // Fault: frame ran but produced no return buffer.
+      record.push_back(0xFF);
+    }
+  }
+
+  // Writes a capture driver's record to `result_key` so the test can read it
+  // back from the DB.
+  static InvokeStatus<void>
+  persist_record(NativeSyscallContext &ctx,
+                 StorageKeyContractData const &result_key,
+                 std::vector<uint8_t> const &record)
+  {
+    auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
+        result_key, std::as_bytes(std::span(record.data(), record.size())),
+        std::to_underlying(StorageDeltaFlags::None));
+    if (!set_r.has_value() ||
+        set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      ADD_FAILURE() << "capture driver failed to persist result";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  }
+
   // Builds a native "driver" contract whose method 0 invokes `target`'s ERC20
   // `Name` entrypoint with `args`, then records (tag, frame_status, literal
   // return bytes) into `result_key` so the test can read it back from the DB.
@@ -181,51 +303,52 @@ protected:
     Runtime::MethodID method_id = erc20_meta::method_id<Name>();
     return [target, result_key, method_id, calldata = std::move(calldata)](
                NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-      CopyableInvokeOutputs outputs{};
-      CopyableInvokeInputs inputs{
-          .entrypoint_id = method_id,
-          .gas_limit = static_cast<GasAmount>(UINT64_MAX),
-          .flags = std::to_underlying(InvokeFlag::None),
-      };
-      auto r = ctx.syscall<SyscallNo::kInvoke>(
-          target, std::as_bytes(std::span(calldata.data(), calldata.size())),
-          std::span<uint32_t>{}, inputs, outputs);
-
       std::vector<uint8_t> record;
-      if (!r.has_value()) {
-        // Host-level (non-deterministic) failure: should not happen on these
-        // paths, but record it distinctly rather than hiding it.
-        record.push_back(0xEE);
-        record.push_back(static_cast<uint8_t>(r.error().code()));
-      }
-      else if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-        // Invoke rejected before any child frame ran.
-        record.push_back(0x01);
-        record.push_back(static_cast<uint8_t>(r.value()));
-      }
-      else {
-        record.push_back(0x00);
-        record.push_back(static_cast<uint8_t>(outputs.frame_status));
-        auto rb = ctx.handler().get_return_buffer();
-        if (rb.has_value() && rb.value().has_value()) {
-          auto const *buf = rb.value().value();
-          for (auto byte_val : *buf) {
-            record.push_back(static_cast<uint8_t>(byte_val));
-          }
-        }
-        else {
-          // Fault: frame ran but produced no return buffer.
-          record.push_back(0xFF);
-        }
-      }
+      append_invoke_record(ctx, target, method_id, calldata, record);
+      return persist_record(ctx, result_key, record);
+    };
+  }
 
-      auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
-          result_key, std::as_bytes(std::span(record.data(), record.size())),
-          std::to_underlying(StorageDeltaFlags::None));
-      if (!set_r.has_value() ||
-          set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-        ADD_FAILURE() << "capture driver failed to persist result";
-        return InvokeError{InvokeErrorCode::Deterministic};
+  // One ERC20 call in a multi-step capture driver: which contract to call,
+  // with what calldata, and the key its outcome record is written under.
+  struct CaptureStep {
+    ContractAddress target;
+    Runtime::MethodID method_id;
+    Calldata calldata;
+    StorageKeyContractData result_key;
+  };
+
+  // Builds a CaptureStep invoking `target`'s ERC20 `Name` entrypoint.
+  template<StringLiteral Name, typename... Args>
+  static CaptureStep make_step(ContractAddress target,
+                               StorageKeyContractData result_key, Args... args)
+  {
+    return CaptureStep{.target = target,
+                       .method_id = erc20_meta::method_id<Name>(),
+                       .calldata = erc20_meta::make_calldata<Name>(args...),
+                       .result_key = result_key};
+  }
+
+  // Builds a native driver whose method 0 runs every step in order from a
+  // single root frame -- the shape the netting findings on hogd#1918 rely on:
+  // a call that must be rejected, followed by a sibling call whose opposite
+  // delta on the same NNInt key would net it away before commit. Each step
+  // records its own outcome, and the driver always returns success, so a step
+  // that aborts neither tears down the transaction nor hides the steps after
+  // it.
+  static NativeContract::function_t
+  make_multi_capture_driver(std::vector<CaptureStep> steps)
+  {
+    return [steps = std::move(steps)](
+               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      for (auto const &step : steps) {
+        std::vector<uint8_t> record;
+        append_invoke_record(ctx, step.target, step.method_id, step.calldata,
+                             record);
+        if (auto r = persist_record(ctx, step.result_key, record);
+            !r.has_value()) {
+          return r.error();
+        }
       }
       return {};
     };
@@ -308,23 +431,349 @@ protected:
     return outcome;
   }
 
+  // The comparable outcome of a multi-step capture transaction: the commit
+  // ExecResult plus one record per step. A failed commit rolls the driver's
+  // writes back, so the step records are only present when it succeeded --
+  // the rollback is itself part of the compared outcome.
+  using MultiStepOutcome = std::pair<ExecResult, std::vector<CapturedRecord>>;
+
+  // Runs `addr`'s method-0 multi-step driver and returns its outcome. The
+  // driver always returns success, so root_invoke always succeeds; a
+  // divergence surfaces in the commit result and/or the per-step bytes.
+  MultiStepOutcome
+  run_multi_capture_tx(ContractAddress const &addr,
+                       std::vector<StorageKeyContractData> const &result_keys,
+                       RuntimeContext &ctx)
+  {
+    auto handler_tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto handler = make_new_system_call_handler(handler_tx, ctx);
+    EXPECT_TRUE(handler.root_invoke().is_root_success());
+    ExecResult commit = handler.try_commit_transaction();
+    std::vector<CapturedRecord> records;
+    if (commit == ExecResult::ExecResultOK) {
+      EXPECT_TRUE(
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = handler_tx})());
+      advance_block();
+      records.reserve(result_keys.size());
+      for (auto const &result_key : result_keys) {
+        records.push_back(read_record(addr, result_key));
+      }
+    }
+    else {
+      advance_block();
+    }
+    return {commit, records};
+  }
+
+  // Runs the allowance-netting sequence from hogd#1918 against both backends:
+  // in ONE transaction a caller decrements a *fresh* (caller, spender)
+  // allowance by `magnitude` and then, as a sibling call, increments it
+  // straight back. Under the old deferred (non-strict) NNInt path the
+  // decrement returned Ok and emitted an Approval event for a diff the
+  // committed allowance could never fund; the sibling increment then netted
+  // the pending add back to zero, so nothing was left for commit-time
+  // validation to reject. With strict allowance updates the decrement must be
+  // rejected at invoke, and the increment that follows it must be unaffected.
+  //
+  // Steps (recorded in order): adjust_allowance(spender, -magnitude),
+  // adjust_allowance(spender, +magnitude), allowance(caller, spender),
+  // allowance(caller, untouched_spender). The two trailing reads pin the
+  // committed allowance without reaching into either backend's storage-key
+  // derivation: the second one is a known zero, so the netted-away outcome
+  // (both reads equal) is distinguishable from the correct one (they differ).
+  std::pair<MultiStepOutcome, MultiStepOutcome>
+  run_allowance_netting_parity(int128_t magnitude)
+  {
+    std::vector<StorageKeyContractData> native_keys{
+        make_storage_key("native_step0"), make_storage_key("native_step1"),
+        make_storage_key("native_step2"), make_storage_key("native_step3")};
+    std::vector<StorageKeyContractData> rv32_keys{
+        make_storage_key("rv32_step0"), make_storage_key("rv32_step1"),
+        make_storage_key("rv32_step2"), make_storage_key("rv32_step3")};
+
+    auto make_steps =
+        [magnitude](ContractAddress token, ContractAddress caller,
+                    ContractAddress spender, ContractAddress zero_spender,
+                    std::vector<StorageKeyContractData> const &keys) {
+          return std::vector<CaptureStep>{
+              make_step<u8"adjust_allowance">(token, keys[0], spender,
+                                              make_difference(-magnitude)),
+              make_step<u8"adjust_allowance">(token, keys[1], spender,
+                                              make_difference(magnitude)),
+              make_step<u8"allowance">(token, keys[2], caller, spender),
+              make_step<u8"allowance">(token, keys[3], caller, zero_spender)};
+        };
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        native_caller_fns;
+    native_caller_fns.emplace(0, make_multi_capture_driver(make_steps(
+                                     kNativeTokenAddr, kNativeCallerAddr,
+                                     kNativeSpenderAddr, kNativeRecipientAddr,
+                                     native_keys)));
+    auto native_caller =
+        std::make_unique<NativeContract>(std::move(native_caller_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        rv32_caller_fns;
+    rv32_caller_fns.emplace(0, make_multi_capture_driver(
+                                   make_steps(kRv32TokenAddr, kRv32CallerAddr,
+                                              kRv32SpenderAddr,
+                                              kRv32RecipientAddr, rv32_keys)));
+    auto rv32_caller =
+        std::make_unique<NativeContract>(std::move(rv32_caller_fns));
+
+    // The RV32 admin just initializes itc_erc20 (no balances are involved).
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          if (!init.has_value() || !init.value().has_value()) {
+            ADD_FAILURE() << "itc initialize failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
+    native_map.emplace(
+        std::to_underlying(
+            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+        make_native_token_contract());
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
+    native_map.emplace(kNativeCallerId, std::move(native_caller));
+    native_map.emplace(kRv32CallerId, std::move(rv32_caller));
+    auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
+    auto rv32_ctx = std::make_unique<Rv32Context>();
+    MultiplexedContext ctx(
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
+            {ContractType::kNative, {native_ctx.release(), true}},
+        });
+
+    auto native_token_obj = make_native_contract(std::to_underlying(
+        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+    write_contract(native_token_obj);
+    write_deployment(kNativeTokenAddr, native_token_obj);
+
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
+
+    auto deploy_native = [this](ContractAddress addr, int32_t id) {
+      auto obj = make_native_contract(id);
+      write_contract(obj);
+      write_deployment(addr, obj);
+    };
+    deploy_native(kRv32AdminAddr, kRv32AdminId);
+    deploy_native(kNativeCallerAddr, kNativeCallerId);
+    deploy_native(kRv32CallerAddr, kRv32CallerId);
+
+    run_tx(kRv32AdminAddr, 0, ctx);
+
+    return {run_multi_capture_tx(kNativeCallerAddr, native_keys, ctx),
+            run_multi_capture_tx(kRv32CallerAddr, rv32_keys, ctx)};
+  }
+
+  // Runs the cross-child balance-netting sequence from hogd#1918 against both
+  // backends: a caller holding NO tokens calls transfer(owner, amount) and
+  // then, as a sibling call in the same transaction,
+  // transfer_from(owner, caller, amount) against an allowance the owner
+  // granted it beforehand. Under the old deferred (non-strict) NNInt path the
+  // first call returned Ok and published a Transfer event the caller could not
+  // fund; the sibling call's credit then repaired the caller's pending
+  // negative balance through the parent-local item view, so the root commit
+  // saw a valid final delta. With a strict per-debit check the unfunded
+  // transfer must be rejected at invoke, while the delegated transfer that
+  // follows it still succeeds on its own merits.
+  //
+  // Steps (recorded in order): transfer(owner, amount),
+  // transfer_from(owner, caller, amount), get_balance_of(caller),
+  // get_balance_of(owner), get_balance_of(untouched). The trailing reads pin
+  // the committed balances; the last one is a known zero, so which of the two
+  // parties ended up holding the tokens is decidable without depending on
+  // either backend's return encoding.
+  std::pair<MultiStepOutcome, MultiStepOutcome>
+  run_unfunded_transfer_netting_parity(uint128_t amount)
+  {
+    std::vector<StorageKeyContractData> native_keys{
+        make_storage_key("native_step0"), make_storage_key("native_step1"),
+        make_storage_key("native_step2"), make_storage_key("native_step3"),
+        make_storage_key("native_step4")};
+    std::vector<StorageKeyContractData> rv32_keys{
+        make_storage_key("rv32_step0"), make_storage_key("rv32_step1"),
+        make_storage_key("rv32_step2"), make_storage_key("rv32_step3"),
+        make_storage_key("rv32_step4")};
+
+    auto make_steps =
+        [amount](ContractAddress token, ContractAddress caller,
+                 ContractAddress owner, ContractAddress zero_holder,
+                 std::vector<StorageKeyContractData> const &keys) {
+          return std::vector<CaptureStep>{
+              make_step<u8"transfer">(token, keys[0], owner,
+                                      make_amount(amount)),
+              make_step<u8"transfer_from">(token, keys[1], owner, caller,
+                                           make_amount(amount)),
+              make_step<u8"get_balance_of">(token, keys[2], caller),
+              make_step<u8"get_balance_of">(token, keys[3], owner),
+              make_step<u8"get_balance_of">(token, keys[4], zero_holder)};
+        };
+
+    // An owner driver that grants `spender` an allowance on `token`.
+    auto make_grant =
+        [amount](ContractAddress token,
+                 ContractAddress spender) -> NativeContract::function_t {
+      return [token, spender, amount](
+                 NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        ContractTraitClient<itc_erc20::ERC20> client(token);
+        auto r = client.invoke_opt<u8"adjust_allowance">(
+            ctx, spender, make_difference(static_cast<int128_t>(amount)));
+        if (!r.has_value() || !r.value().has_value() ||
+            !r.value().value().has_value() ||
+            !r.value().value().value().is_ok()) {
+          ADD_FAILURE() << "grant allowance failed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      };
+    };
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        native_caller_fns;
+    native_caller_fns.emplace(
+        0, make_multi_capture_driver(
+               make_steps(kNativeTokenAddr, kNativeCallerAddr, kNativeOwnerAddr,
+                          kNativeRecipientAddr, native_keys)));
+    auto native_caller =
+        std::make_unique<NativeContract>(std::move(native_caller_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        rv32_caller_fns;
+    rv32_caller_fns.emplace(0, make_multi_capture_driver(
+                                   make_steps(kRv32TokenAddr, kRv32CallerAddr,
+                                              kRv32OwnerAddr,
+                                              kRv32RecipientAddr, rv32_keys)));
+    auto rv32_caller =
+        std::make_unique<NativeContract>(std::move(rv32_caller_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        native_owner_fns;
+    native_owner_fns.emplace(0,
+                             make_grant(kNativeTokenAddr, kNativeCallerAddr));
+    auto native_owner =
+        std::make_unique<NativeContract>(std::move(native_owner_fns));
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        rv32_owner_fns;
+    rv32_owner_fns.emplace(0, make_grant(kRv32TokenAddr, kRv32CallerAddr));
+    auto rv32_owner =
+        std::make_unique<NativeContract>(std::move(rv32_owner_fns));
+
+    // The RV32 admin initializes itc_erc20 and mints the owner's balance.
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
+        0, [amount](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          if (!init.has_value() || !init.value().has_value()) {
+            ADD_FAILURE() << "itc initialize failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
+                                                  make_amount(amount));
+          if (!mint.has_value() || !mint.value().has_value() ||
+              !mint.value().value().has_value() ||
+              !mint.value().value().value().is_ok()) {
+            ADD_FAILURE() << "itc mint failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
+    native_map.emplace(
+        std::to_underlying(
+            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+        make_native_token_contract());
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
+    native_map.emplace(kNativeCallerId, std::move(native_caller));
+    native_map.emplace(kRv32CallerId, std::move(rv32_caller));
+    native_map.emplace(kNativeOwnerId, std::move(native_owner));
+    native_map.emplace(kRv32OwnerId, std::move(rv32_owner));
+    auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
+    auto rv32_ctx = std::make_unique<Rv32Context>();
+    MultiplexedContext ctx(
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
+            {ContractType::kNative, {native_ctx.release(), true}},
+        });
+
+    auto native_token_obj = make_native_contract(std::to_underlying(
+        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+    write_contract(native_token_obj);
+    write_deployment(kNativeTokenAddr, native_token_obj);
+
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
+
+    auto deploy_native = [this](ContractAddress addr, int32_t id) {
+      auto obj = make_native_contract(id);
+      write_contract(obj);
+      write_deployment(addr, obj);
+    };
+    deploy_native(kRv32AdminAddr, kRv32AdminId);
+    deploy_native(kNativeCallerAddr, kNativeCallerId);
+    deploy_native(kRv32CallerAddr, kRv32CallerId);
+    deploy_native(kNativeOwnerAddr, kNativeOwnerId);
+    deploy_native(kRv32OwnerAddr, kRv32OwnerId);
+
+    // Owner balances: a native HOG grant for the native owner, an admin mint
+    // for the RV32 owner. The callers are funded on neither backend.
+    setup_grant_storage_token(kNativeOwnerAddr, static_cast<int128_t>(amount));
+    run_tx(kRv32AdminAddr, 0, ctx);
+
+    // Owners grant the callers an allowance for exactly `amount`.
+    run_tx(kNativeOwnerAddr, 0, ctx);
+    run_tx(kRv32OwnerAddr, 0, ctx);
+
+    return {run_multi_capture_tx(kNativeCallerAddr, native_keys, ctx),
+            run_multi_capture_tx(kRv32CallerAddr, rv32_keys, ctx)};
+  }
+
   // Runs `transfer(receiver, transfer_amount)` against both the native
-  // precompile and the WASM itc_erc20, with each caller starting from a
+  // precompile and the RV32 itc_erc20, with each caller starting from a
   // freshly-minted balance of `start_balance`. Pass each caller's own address
   // as the receiver for a self-transfer, or a distinct address for an ordinary
   // transfer. When recipient_start_balance > 0 the receiver is pre-funded on
   // both backends before the transfer runs (native: direct write bypassing the
-  // supply-cap guard; WASM: direct write to the itc_erc20 balance key).
-  // Returns {native_record, wasm_record}, the byte-for-byte captured outcomes
+  // supply-cap guard; RV32: direct write to the itc_erc20 balance key).
+  // Returns {native_record, rv32_record}, the byte-for-byte captured outcomes
   // (tag + frame status + literal return/abort bytes).
   std::pair<CapturedRecord, CapturedRecord>
   run_transfer_parity(uint128_t start_balance, uint128_t transfer_amount,
                       ContractAddress native_receiver,
-                      ContractAddress wasm_receiver,
+                      ContractAddress rv32_receiver,
                       uint128_t recipient_start_balance = 0)
   {
     auto native_result_key = make_storage_key("native_result");
-    auto wasm_result_key = make_storage_key("wasm_result");
+    auto rv32_result_key = make_storage_key("rv32_result");
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_caller_fns;
@@ -336,29 +785,29 @@ protected:
         std::make_unique<NativeContract>(std::move(native_caller_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_caller_fns;
-    wasm_caller_fns.emplace(
-        0, make_capture_driver<u8"transfer">(kWasmTokenAddr, wasm_result_key,
-                                             wasm_receiver,
+        rv32_caller_fns;
+    rv32_caller_fns.emplace(
+        0, make_capture_driver<u8"transfer">(kRv32TokenAddr, rv32_result_key,
+                                             rv32_receiver,
                                              make_amount(transfer_amount)));
-    auto wasm_caller =
-        std::make_unique<NativeContract>(std::move(wasm_caller_fns));
+    auto rv32_caller =
+        std::make_unique<NativeContract>(std::move(rv32_caller_fns));
 
-    // The WASM admin initializes itc_erc20 (as its own-address owner) and mints
+    // The RV32 admin initializes itc_erc20 (as its own-address owner) and mints
     // the caller's starting balance.
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_admin_fns;
-    wasm_admin_fns.emplace(
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
         0,
         [start_balance](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kWasmCallerAddr,
+          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32CallerAddr,
                                                   make_amount(start_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
@@ -368,22 +817,22 @@ protected:
           }
           return {};
         });
-    auto wasm_admin =
-        std::make_unique<NativeContract>(std::move(wasm_admin_fns));
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
             HogexecPrecompiledNativeContracts::kNativeContractHogToken),
         make_native_token_contract());
-    native_map.emplace(kWasmAdminId, std::move(wasm_admin));
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeCallerId, std::move(native_caller));
-    native_map.emplace(kWasmCallerId, std::move(wasm_caller));
+    native_map.emplace(kRv32CallerId, std::move(rv32_caller));
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
 
@@ -392,23 +841,23 @@ protected:
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
-    auto wasm_token_obj = erc20_meta::load_wasm();
-    EXPECT_TRUE(wasm_token_obj);
-    write_contract(wasm_token_obj);
-    write_deployment(kWasmTokenAddr, wasm_token_obj);
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
 
-    auto admin_obj = make_native_contract(kWasmAdminId);
+    auto admin_obj = make_native_contract(kRv32AdminId);
     write_contract(admin_obj);
-    write_deployment(kWasmAdminAddr, admin_obj);
+    write_deployment(kRv32AdminAddr, admin_obj);
     auto native_caller_obj = make_native_contract(kNativeCallerId);
     write_contract(native_caller_obj);
     write_deployment(kNativeCallerAddr, native_caller_obj);
-    auto wasm_caller_obj = make_native_contract(kWasmCallerId);
-    write_contract(wasm_caller_obj);
-    write_deployment(kWasmCallerAddr, wasm_caller_obj);
+    auto rv32_caller_obj = make_native_contract(kRv32CallerId);
+    write_contract(rv32_caller_obj);
+    write_deployment(kRv32CallerAddr, rv32_caller_obj);
 
     // Fund the native caller (native HOG balance) and, via the admin tx, the
-    // WASM caller (itc token balance).
+    // RV32 caller (itc token balance).
     setup_grant_storage_token(kNativeCallerAddr, start_balance);
 
     // Pre-fund the recipient when caller-requested (e.g. CreditOverflow test).
@@ -423,34 +872,34 @@ protected:
                      static_cast<int128_t>(recipient_start_balance),
                      get_default_cost_model()));
 
-      // WASM: write directly to the itc_erc20 NonnegativeInt balance key,
+      // RV32: write directly to the itc_erc20 NonnegativeInt balance key,
       // bypassing the mint path (which would overflow the total-supply key).
-      StorageKey wasm_balance_skey(StorageKeyType::ContractData);
-      wasm_balance_skey.contract_data_key() =
-          itc_erc20_balance_key(wasm_receiver);
-      write_item(AddressAndKey{.address = kWasmTokenAddr,
-                               .key = std::move(wasm_balance_skey)},
+      StorageKey rv32_balance_skey(StorageKeyType::ContractData);
+      rv32_balance_skey.contract_data_key() =
+          itc_erc20_balance_key(rv32_receiver);
+      write_item(AddressAndKey{.address = kRv32TokenAddr,
+                               .key = std::move(rv32_balance_skey)},
                  std::make_shared<const StorageItemWrapper>(
                      static_cast<int128_t>(recipient_start_balance),
                      get_default_cost_model()));
     }
 
-    run_tx(kWasmAdminAddr, 0, ctx);
+    run_tx(kRv32AdminAddr, 0, ctx);
 
     return {run_capture_tx(kNativeCallerAddr, native_result_key, ctx),
-            run_capture_tx(kWasmCallerAddr, wasm_result_key, ctx)};
+            run_capture_tx(kRv32CallerAddr, rv32_result_key, ctx)};
   }
 
   // Runs transfer_from(owner, owner, transfer_amount) -- a delegated
   // self-transfer -- against both backends. The owner starts with
   // `owner_balance` and grants the spender (the caller) an allowance of
-  // `allowance`. Returns {native_record, wasm_record}.
+  // `allowance`. Returns {native_record, rv32_record}.
   std::pair<CapturedRecord, CapturedRecord>
   run_transfer_from_self_parity(uint128_t owner_balance, uint128_t allowance,
                                 uint128_t transfer_amount)
   {
     auto native_result_key = make_storage_key("native_result");
-    auto wasm_result_key = make_storage_key("wasm_result");
+    auto rv32_result_key = make_storage_key("rv32_result");
 
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
@@ -478,11 +927,11 @@ protected:
         std::make_unique<NativeContract>(std::move(native_owner_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_owner_fns;
-    wasm_owner_fns.emplace(0, make_grant(kWasmTokenAddr, kWasmSpenderAddr,
+        rv32_owner_fns;
+    rv32_owner_fns.emplace(0, make_grant(kRv32TokenAddr, kRv32SpenderAddr,
                                          allowance));
-    auto wasm_owner =
-        std::make_unique<NativeContract>(std::move(wasm_owner_fns));
+    auto rv32_owner =
+        std::make_unique<NativeContract>(std::move(rv32_owner_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_spender_fns;
@@ -494,27 +943,27 @@ protected:
         std::make_unique<NativeContract>(std::move(native_spender_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_spender_fns;
-    wasm_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
-                                    kWasmTokenAddr, wasm_result_key,
-                                    kWasmOwnerAddr, kWasmOwnerAddr,
+        rv32_spender_fns;
+    rv32_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
+                                    kRv32TokenAddr, rv32_result_key,
+                                    kRv32OwnerAddr, kRv32OwnerAddr,
                                     make_amount(transfer_amount)));
-    auto wasm_spender =
-        std::make_unique<NativeContract>(std::move(wasm_spender_fns));
+    auto rv32_spender =
+        std::make_unique<NativeContract>(std::move(rv32_spender_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_admin_fns;
-    wasm_admin_fns.emplace(
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
         0,
         [owner_balance](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kWasmOwnerAddr,
+          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
                                                   make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
@@ -524,24 +973,24 @@ protected:
           }
           return {};
         });
-    auto wasm_admin =
-        std::make_unique<NativeContract>(std::move(wasm_admin_fns));
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
             HogexecPrecompiledNativeContracts::kNativeContractHogToken),
         make_native_token_contract());
-    native_map.emplace(kWasmAdminId, std::move(wasm_admin));
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeOwnerId, std::move(native_owner));
     native_map.emplace(kNativeSpenderId, std::move(native_spender));
-    native_map.emplace(kWasmOwnerId, std::move(wasm_owner));
-    native_map.emplace(kWasmSpenderId, std::move(wasm_spender));
+    native_map.emplace(kRv32OwnerId, std::move(rv32_owner));
+    native_map.emplace(kRv32SpenderId, std::move(rv32_spender));
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
 
@@ -550,46 +999,46 @@ protected:
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
-    auto wasm_token_obj = erc20_meta::load_wasm();
-    EXPECT_TRUE(wasm_token_obj);
-    write_contract(wasm_token_obj);
-    write_deployment(kWasmTokenAddr, wasm_token_obj);
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
 
     auto deploy_native = [this](ContractAddress addr, int32_t id) {
       auto obj = make_native_contract(id);
       write_contract(obj);
       write_deployment(addr, obj);
     };
-    deploy_native(kWasmAdminAddr, kWasmAdminId);
+    deploy_native(kRv32AdminAddr, kRv32AdminId);
     deploy_native(kNativeOwnerAddr, kNativeOwnerId);
     deploy_native(kNativeSpenderAddr, kNativeSpenderId);
-    deploy_native(kWasmOwnerAddr, kWasmOwnerId);
-    deploy_native(kWasmSpenderAddr, kWasmSpenderId);
+    deploy_native(kRv32OwnerAddr, kRv32OwnerId);
+    deploy_native(kRv32SpenderAddr, kRv32SpenderId);
 
     // Owner balances: native HOG grant for the native owner; admin mint for the
-    // WASM owner.
+    // RV32 owner.
     setup_grant_storage_token(kNativeOwnerAddr, owner_balance);
-    run_tx(kWasmAdminAddr, 0, ctx);
+    run_tx(kRv32AdminAddr, 0, ctx);
 
     // Owners grant allowances.
     run_tx(kNativeOwnerAddr, 0, ctx);
-    run_tx(kWasmOwnerAddr, 0, ctx);
+    run_tx(kRv32OwnerAddr, 0, ctx);
 
     // Spenders run the delegated transfer and capture the outcome.
     return {run_capture_tx(kNativeSpenderAddr, native_result_key, ctx),
-            run_capture_tx(kWasmSpenderAddr, wasm_result_key, ctx)};
+            run_capture_tx(kRv32SpenderAddr, rv32_result_key, ctx)};
   }
 
   // Runs transfer_from(owner, distinct_recipient, transfer_amount) against both
   // backends. The owner starts with `owner_balance` and grants the spender an
   // allowance of `allowance`. The recipient is a distinct address from the
-  // owner. Returns {native_record, wasm_record}.
+  // owner. Returns {native_record, rv32_record}.
   std::pair<CapturedRecord, CapturedRecord>
   run_transfer_from_parity(uint128_t owner_balance, uint128_t allowance,
                            uint128_t transfer_amount)
   {
     auto native_result_key = make_storage_key("native_result");
-    auto wasm_result_key = make_storage_key("wasm_result");
+    auto rv32_result_key = make_storage_key("rv32_result");
 
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
@@ -617,11 +1066,11 @@ protected:
         std::make_unique<NativeContract>(std::move(native_owner_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_owner_fns;
-    wasm_owner_fns.emplace(0, make_grant(kWasmTokenAddr, kWasmSpenderAddr,
+        rv32_owner_fns;
+    rv32_owner_fns.emplace(0, make_grant(kRv32TokenAddr, kRv32SpenderAddr,
                                          allowance));
-    auto wasm_owner =
-        std::make_unique<NativeContract>(std::move(wasm_owner_fns));
+    auto rv32_owner =
+        std::make_unique<NativeContract>(std::move(rv32_owner_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_spender_fns;
@@ -633,27 +1082,27 @@ protected:
         std::make_unique<NativeContract>(std::move(native_spender_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_spender_fns;
-    wasm_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
-                                    kWasmTokenAddr, wasm_result_key,
-                                    kWasmOwnerAddr, kWasmTfRecipientAddr,
+        rv32_spender_fns;
+    rv32_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
+                                    kRv32TokenAddr, rv32_result_key,
+                                    kRv32OwnerAddr, kRv32TfRecipientAddr,
                                     make_amount(transfer_amount)));
-    auto wasm_spender =
-        std::make_unique<NativeContract>(std::move(wasm_spender_fns));
+    auto rv32_spender =
+        std::make_unique<NativeContract>(std::move(rv32_spender_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_admin_fns;
-    wasm_admin_fns.emplace(
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
         0,
         [owner_balance](
             NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = client.invoke_opt<u8"mint">(ctx, kWasmOwnerAddr,
+          auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
                                                   make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
@@ -663,24 +1112,24 @@ protected:
           }
           return {};
         });
-    auto wasm_admin =
-        std::make_unique<NativeContract>(std::move(wasm_admin_fns));
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
             HogexecPrecompiledNativeContracts::kNativeContractHogToken),
         make_native_token_contract());
-    native_map.emplace(kWasmAdminId, std::move(wasm_admin));
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeOwnerId, std::move(native_owner));
     native_map.emplace(kNativeSpenderId, std::move(native_spender));
-    native_map.emplace(kWasmOwnerId, std::move(wasm_owner));
-    native_map.emplace(kWasmSpenderId, std::move(wasm_spender));
+    native_map.emplace(kRv32OwnerId, std::move(rv32_owner));
+    native_map.emplace(kRv32SpenderId, std::move(rv32_spender));
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
 
@@ -689,43 +1138,43 @@ protected:
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
-    auto wasm_token_obj = erc20_meta::load_wasm();
-    EXPECT_TRUE(wasm_token_obj);
-    write_contract(wasm_token_obj);
-    write_deployment(kWasmTokenAddr, wasm_token_obj);
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
 
     auto deploy_native = [this](ContractAddress addr, int32_t id) {
       auto obj = make_native_contract(id);
       write_contract(obj);
       write_deployment(addr, obj);
     };
-    deploy_native(kWasmAdminAddr, kWasmAdminId);
+    deploy_native(kRv32AdminAddr, kRv32AdminId);
     deploy_native(kNativeOwnerAddr, kNativeOwnerId);
     deploy_native(kNativeSpenderAddr, kNativeSpenderId);
-    deploy_native(kWasmOwnerAddr, kWasmOwnerId);
-    deploy_native(kWasmSpenderAddr, kWasmSpenderId);
+    deploy_native(kRv32OwnerAddr, kRv32OwnerId);
+    deploy_native(kRv32SpenderAddr, kRv32SpenderId);
 
     // Owner balances: native HOG grant for the native owner; admin mint for the
-    // WASM owner.
+    // RV32 owner.
     setup_grant_storage_token(kNativeOwnerAddr, owner_balance);
-    run_tx(kWasmAdminAddr, 0, ctx);
+    run_tx(kRv32AdminAddr, 0, ctx);
 
     // Owners grant allowances.
     run_tx(kNativeOwnerAddr, 0, ctx);
-    run_tx(kWasmOwnerAddr, 0, ctx);
+    run_tx(kRv32OwnerAddr, 0, ctx);
 
     // Spenders run the delegated transfer and capture the outcome.
     return {run_capture_tx(kNativeSpenderAddr, native_result_key, ctx),
-            run_capture_tx(kWasmSpenderAddr, wasm_result_key, ctx)};
+            run_capture_tx(kRv32SpenderAddr, rv32_result_key, ctx)};
   }
 
   // Runs adjust_allowance(self, +amount) -- a caller granting itself an
-  // allowance -- against both backends. Returns {native_record, wasm_record}.
+  // allowance -- against both backends. Returns {native_record, rv32_record}.
   std::pair<CapturedRecord, CapturedRecord>
   run_adjust_allowance_self_parity(uint128_t amount)
   {
     auto native_result_key = make_storage_key("native_result");
-    auto wasm_result_key = make_storage_key("wasm_result");
+    auto rv32_result_key = make_storage_key("rv32_result");
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         native_caller_fns;
@@ -737,43 +1186,43 @@ protected:
         std::make_unique<NativeContract>(std::move(native_caller_fns));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_caller_fns;
-    wasm_caller_fns.emplace(
+        rv32_caller_fns;
+    rv32_caller_fns.emplace(
         0, make_capture_driver<u8"adjust_allowance">(
-               kWasmTokenAddr, wasm_result_key, kWasmCallerAddr,
+               kRv32TokenAddr, rv32_result_key, kRv32CallerAddr,
                make_difference(static_cast<int128_t>(amount))));
-    auto wasm_caller =
-        std::make_unique<NativeContract>(std::move(wasm_caller_fns));
+    auto rv32_caller =
+        std::make_unique<NativeContract>(std::move(rv32_caller_fns));
 
-    // The WASM admin just initializes itc_erc20 (no balance needed).
+    // The RV32 admin just initializes itc_erc20 (no balance needed).
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        wasm_admin_fns;
-    wasm_admin_fns.emplace(
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
         0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          ContractTraitClient<itc_erc20::ERC20> client(kWasmTokenAddr);
-          auto init = client.invoke_opt<u8"initialize">(ctx, kWasmAdminAddr);
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             return InvokeError{InvokeErrorCode::Deterministic};
           }
           return {};
         });
-    auto wasm_admin =
-        std::make_unique<NativeContract>(std::move(wasm_admin_fns));
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
             HogexecPrecompiledNativeContracts::kNativeContractHogToken),
         make_native_token_contract());
-    native_map.emplace(kWasmAdminId, std::move(wasm_admin));
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeCallerId, std::move(native_caller));
-    native_map.emplace(kWasmCallerId, std::move(wasm_caller));
+    native_map.emplace(kRv32CallerId, std::move(rv32_caller));
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
 
@@ -782,24 +1231,24 @@ protected:
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
-    auto wasm_token_obj = erc20_meta::load_wasm();
-    EXPECT_TRUE(wasm_token_obj);
-    write_contract(wasm_token_obj);
-    write_deployment(kWasmTokenAddr, wasm_token_obj);
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
 
     auto deploy_native = [this](ContractAddress addr, int32_t id) {
       auto obj = make_native_contract(id);
       write_contract(obj);
       write_deployment(addr, obj);
     };
-    deploy_native(kWasmAdminAddr, kWasmAdminId);
+    deploy_native(kRv32AdminAddr, kRv32AdminId);
     deploy_native(kNativeCallerAddr, kNativeCallerId);
-    deploy_native(kWasmCallerAddr, kWasmCallerId);
+    deploy_native(kRv32CallerAddr, kRv32CallerId);
 
-    run_tx(kWasmAdminAddr, 0, ctx);
+    run_tx(kRv32AdminAddr, 0, ctx);
 
     return {run_capture_tx(kNativeCallerAddr, native_result_key, ctx),
-            run_capture_tx(kWasmCallerAddr, wasm_result_key, ctx)};
+            run_capture_tx(kRv32CallerAddr, rv32_result_key, ctx)};
   }
 };
 
@@ -807,22 +1256,22 @@ protected:
 // must accept it and return byte-identical results.
 TEST_F(Erc20ParityTest, FundedTransferToRecipientParity)
 {
-  auto [native_record, wasm_record] = run_transfer_parity(
+  auto [native_record, rv32_record] = run_transfer_parity(
       /*start_balance=*/1'000, /*transfer_amount=*/37, kNativeRecipientAddr,
-      kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on funded transfer";
+      kRv32RecipientAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on funded transfer";
 }
 
 // A funded self-transfer: the caller owns more than it sends to itself. Both
 // backends must accept it and return byte-identical results.
 TEST_F(Erc20ParityTest, FundedSelfTransferParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/1'000, /*transfer_amount=*/37,
-                          kNativeCallerAddr, kWasmCallerAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on funded "
+                          kNativeCallerAddr, kRv32CallerAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on funded "
          "self-transfer";
 }
 
@@ -831,14 +1280,14 @@ TEST_F(Erc20ParityTest, FundedSelfTransferParity)
 // native token's strict per-debit check matches itc_erc20).
 TEST_F(Erc20ParityTest, OverBalanceSelfTransferParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/10, /*transfer_amount=*/100,
-                          kNativeCallerAddr, kWasmCallerAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on over-balance "
+                          kNativeCallerAddr, kRv32CallerAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on over-balance "
          "self-transfer";
-  ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(wasm_record[2],
+  ASSERT_GE(rv32_record.size(), 3U);
+  EXPECT_EQ(rv32_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
       << "both backends must reject at invoke";
 }
@@ -848,10 +1297,10 @@ TEST_F(Erc20ParityTest, OverBalanceSelfTransferParity)
 // it and return byte-identical results.
 TEST_F(Erc20ParityTest, FundedTransferFromSelfParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/1'000, /*allowance=*/100, /*transfer_amount=*/37);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on funded "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on funded "
          "transfer_from self";
 }
 
@@ -861,13 +1310,13 @@ TEST_F(Erc20ParityTest, FundedTransferFromSelfParity)
 // NativeTokenAllowanceTest.OverBalanceTransferFromRevertsAllowanceDebit.
 TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/10, /*allowance=*/100, /*transfer_amount=*/100);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on over-balance "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on over-balance "
          "transfer_from";
-  ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(wasm_record[2],
+  ASSERT_GE(rv32_record.size(), 3U);
+  EXPECT_EQ(rv32_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
@@ -875,9 +1324,9 @@ TEST_F(Erc20ParityTest, OverBalanceTransferFromSelfParity)
 // ample) succeeds on both backends.
 TEST_F(Erc20ParityTest, ExactBalanceTransferFromParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/100);
-  EXPECT_EQ(native_record, wasm_record);
+  EXPECT_EQ(native_record, rv32_record);
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Return));
@@ -887,9 +1336,9 @@ TEST_F(Erc20ParityTest, ExactBalanceTransferFromParity)
 // backends with identical ERC20Error::TooLarge bytes.
 TEST_F(Erc20ParityTest, OneOverBalanceTransferFromParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/101);
-  EXPECT_EQ(native_record, wasm_record);
+  EXPECT_EQ(native_record, rv32_record);
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
@@ -901,9 +1350,9 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferFromParity)
 // reference so no future error-code split can diverge.)
 TEST_F(Erc20ParityTest, BothInsufficientTransferFromParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/10, /*allowance=*/10, /*transfer_amount=*/100);
-  EXPECT_EQ(native_record, wasm_record);
+  EXPECT_EQ(native_record, rv32_record);
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
@@ -914,11 +1363,11 @@ TEST_F(Erc20ParityTest, BothInsufficientTransferFromParity)
 // the surrounding transaction commits cleanly on both.
 TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/10, /*transfer_amount=*/100,
-                          kNativeRecipientAddr, kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on over-balance "
+                          kNativeRecipientAddr, kRv32RecipientAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on over-balance "
          "transfer to a distinct recipient";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(static_cast<ExecResult>(native_record[0]), ExecResult::ExecResultOK)
@@ -932,11 +1381,11 @@ TEST_F(Erc20ParityTest, OverBalanceTransferToRecipientParity)
 // when the resulting total would be < 0).
 TEST_F(Erc20ParityTest, ExactBalanceTransferParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/100, /*transfer_amount=*/100,
-                          kNativeRecipientAddr, kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on exact-balance "
+                          kNativeRecipientAddr, kRv32RecipientAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on exact-balance "
          "transfer";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
@@ -948,11 +1397,11 @@ TEST_F(Erc20ParityTest, ExactBalanceTransferParity)
 // identical ERC20Error::TooLarge bytes.
 TEST_F(Erc20ParityTest, OneOverBalanceTransferParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/100, /*transfer_amount=*/101,
-                          kNativeRecipientAddr, kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged one past the "
+                          kNativeRecipientAddr, kRv32RecipientAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged one past the "
          "balance boundary";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
@@ -962,38 +1411,38 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferParity)
 // Credit-side overflow beyond the supply cap: the receiver already holds
 // INT128_MAX, which cannot occur under the total-supply bound (~2^59) but
 // can be hand-crafted in tests. Native no longer checks the credit leg at
-// invoke (supply-bound makes it unreachable); the WASM reference still
+// invoke (supply-bound makes it unreachable); the RV32 reference still
 // checks it, so the two backends diverge on this artificial state.
 // Native accepts the transfer at invoke; the transaction is then rejected
-// at commit by HogDb's add-capacity bound. WASM rejects at invoke with
+// at commit by HogDb's add-capacity bound. RV32 rejects at invoke with
 // ERC20Error::TooLarge. Documented divergence, not a bug.
 TEST_F(Erc20ParityTest, CreditOverflowBeyondSupplyDiverges)
 {
-  auto [native_record, wasm_record] = run_transfer_parity(
+  auto [native_record, rv32_record] = run_transfer_parity(
       /*start_balance=*/100, /*transfer_amount=*/1, kNativeRecipientAddr,
-      kWasmRecipientAddr,
+      kRv32RecipientAddr,
       /*recipient_start_balance=*/
       uint128_t{std::numeric_limits<int128_t>::max()});
   // Native: invoke accepted, tx rejected at commit (add-capacity bound).
   ASSERT_EQ(native_record.size(), 1U);
   EXPECT_NE(static_cast<ExecResult>(native_record[0]),
             ExecResult::ExecResultOK);
-  // WASM: invoke-time Abort, tx commits (nothing staged by the aborted child).
-  ASSERT_GE(wasm_record.size(), 3U);
-  EXPECT_EQ(wasm_record[2],
+  // RV32: invoke-time Abort, tx commits (nothing staged by the aborted child).
+  ASSERT_GE(rv32_record.size(), 3U);
+  EXPECT_EQ(rv32_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
-  EXPECT_NE(native_record, wasm_record);
+  EXPECT_NE(native_record, rv32_record);
 }
 
 // An amount above INT128_MAX (not representable as a signed balance delta):
 // pin that both backends reject it with the same observable result.
 TEST_F(Erc20ParityTest, HugeAmountTransferParity)
 {
-  auto [native_record, wasm_record] = run_transfer_parity(
+  auto [native_record, rv32_record] = run_transfer_parity(
       /*start_balance=*/1'000, /*transfer_amount=*/uint128_t{1} << 127,
-      kNativeRecipientAddr, kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on amount > "
+      kNativeRecipientAddr, kRv32RecipientAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on amount > "
          "INT128_MAX";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
@@ -1004,11 +1453,11 @@ TEST_F(Erc20ParityTest, HugeAmountTransferParity)
 // before the allowance debit.
 TEST_F(Erc20ParityTest, HugeAmountTransferFromParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/1'000, /*allowance=*/1'000,
       /*transfer_amount=*/uint128_t{1} << 127);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on transfer_from "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on transfer_from "
          "amount > INT128_MAX";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
@@ -1018,13 +1467,13 @@ TEST_F(Erc20ParityTest, HugeAmountTransferFromParity)
 // transfer_from with sufficient balance but insufficient allowance. Both
 // allowance and balance debits are strict (invoke-time TooLarge rejection);
 // this test pins the allowance leg's byte-identical rejection between the
-// native precompile and the WASM itc_erc20 reference.
+// native precompile and the RV32 itc_erc20 reference.
 TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_self_parity(
+  auto [native_record, rv32_record] = run_transfer_from_self_parity(
       /*owner_balance=*/1'000, /*allowance=*/10, /*transfer_amount=*/100);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on insufficient-"
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on insufficient-"
          "allowance transfer_from";
 }
 
@@ -1034,11 +1483,11 @@ TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromParity)
 // both should accept it identically. This locks in that agreement.
 TEST_F(Erc20ParityTest, TransferToZeroAddressParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/1'000, /*transfer_amount=*/37,
                           ContractAddress{}, ContractAddress{});
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on transfer to the "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on transfer to the "
          "zero address";
 }
 
@@ -1046,11 +1495,11 @@ TEST_F(Erc20ParityTest, TransferToZeroAddressParity)
 // identically (including any emitted Transfer event).
 TEST_F(Erc20ParityTest, ZeroAmountTransferParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_transfer_parity(/*start_balance=*/1'000, /*transfer_amount=*/0,
-                          kNativeRecipientAddr, kWasmRecipientAddr);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on zero-amount "
+                          kNativeRecipientAddr, kRv32RecipientAddr);
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on zero-amount "
          "transfer";
 }
 
@@ -1059,10 +1508,10 @@ TEST_F(Erc20ParityTest, ZeroAmountTransferParity)
 // must accept it and return byte-identical results.
 TEST_F(Erc20ParityTest, FundedTransferFromToRecipientParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_parity(
+  auto [native_record, rv32_record] = run_transfer_from_parity(
       /*owner_balance=*/1'000, /*allowance=*/200, /*transfer_amount=*/100);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on funded "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on funded "
          "transfer_from to a distinct recipient";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
@@ -1073,10 +1522,10 @@ TEST_F(Erc20ParityTest, FundedTransferFromToRecipientParity)
 // backends reject at invoke with ERC20Error::TooLarge, byte-identically.
 TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
 {
-  auto [native_record, wasm_record] = run_transfer_from_parity(
+  auto [native_record, rv32_record] = run_transfer_from_parity(
       /*owner_balance=*/100, /*allowance=*/200, /*transfer_amount=*/101);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged one past the "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged one past the "
          "balance boundary on transfer_from to a distinct recipient";
   ASSERT_GE(native_record.size(), 3U);
   EXPECT_EQ(native_record[2],
@@ -1087,11 +1536,123 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
 // both backends with ERC20Error::Internal at invoke, byte-identically.
 TEST_F(Erc20ParityTest, AdjustAllowanceToSelfParity)
 {
-  auto [native_record, wasm_record] =
+  auto [native_record, rv32_record] =
       run_adjust_allowance_self_parity(/*amount=*/100);
-  EXPECT_EQ(native_record, wasm_record)
-      << "native precompile and WASM itc_erc20 diverged on adjust_allowance "
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on adjust_allowance "
          "to self";
+}
+
+// hogd#1918, allowance-netting form: decrementing a fresh (owner, spender)
+// allowance and immediately incrementing it back, in one transaction, must not
+// launder the invalid decrement. Both backends reject the decrement at invoke
+// (ERC20Error::TooLarge) and let the increment through, so the committed
+// allowance is exactly the increment -- byte-identically. Before the strict
+// NNInt update, the decrement returned Ok (and emitted an Approval event for a
+// diff nothing could fund), and the increment netted the pending add back to
+// zero so the root commit found nothing to reject; that history would show up
+// here as a Return status on step 0 and a zero trailing allowance read. The
+// event-side counterpart lives in
+// NativeRv32TokenEventParityTest.NettedNegativeApprovalEmitsNoEventRv32AndNative.
+TEST_F(Erc20ParityTest, NegativeAllowanceNettingParity)
+{
+  auto [native_outcome, rv32_outcome] =
+      run_allowance_netting_parity(/*magnitude=*/100);
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a netted negative "
+         "allowance adjustment";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK)
+      << "the transaction must commit (the rejected decrement stages nothing)";
+  ASSERT_EQ(records.size(), 4U);
+
+  // Step 0: the decrement below a fresh (zero) allowance is rejected at
+  // invoke, not deferred to commit and netted away. The records compare equal
+  // byte-for-byte above, so pinning the error on one backend pins both.
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
+      << "a decrement below a fresh allowance must abort at invoke";
+  EXPECT_EQ(step_erc20_error<u8"adjust_allowance">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge))
+      << "the rejected decrement must abort with a decodable TooLarge";
+
+  // Step 1: the sibling increment is unaffected by the aborted decrement.
+  ASSERT_GE(records[1].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "the compensating increment must still succeed on its own merits";
+
+  // Steps 2 and 3: the committed (caller, spender) allowance is the increment
+  // alone, so it must differ from the never-touched control allowance. Under
+  // the netting bug both adjustments landed and cancelled, and this read
+  // returned the same Ok(0) bytes as the control.
+  ASSERT_GE(records[2].size(), 2U);
+  EXPECT_EQ(records[2][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(records[3][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_NE(records[2], records[3])
+      << "the committed allowance must be the increment, not a netted zero";
+}
+
+// hogd#1918, cross-child balance-netting form: a caller with no tokens
+// transfers `amount` to an owner and then, as a sibling call in the same
+// transaction, pulls the same `amount` back via an allowance the owner granted
+// it. The compensating credit must not rescue the unfunded debit: both
+// backends reject the first transfer at invoke (ERC20Error::TooLarge),
+// byte-identically, and the delegated transfer that follows still succeeds, so
+// the tokens end up with the caller and the owner is left at zero.
+TEST_F(Erc20ParityTest, UnfundedTransferNettedByLaterCreditParity)
+{
+  auto [native_outcome, rv32_outcome] =
+      run_unfunded_transfer_netting_parity(/*amount=*/100);
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an unfunded "
+         "transfer netted by a later credit";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK)
+      << "the transaction must commit (the rejected transfer stages nothing)";
+  ASSERT_EQ(records.size(), 5U);
+
+  // Step 0: the unfunded transfer aborts at invoke. Under the netting bug it
+  // returned Ok and published a Transfer event the caller could not fund. The
+  // records compare equal byte-for-byte above, so pinning the error on one
+  // backend pins both.
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
+      << "a transfer from a zero balance must abort at invoke";
+  EXPECT_EQ(step_erc20_error<u8"transfer">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge))
+      << "the unfunded transfer must abort with a decodable TooLarge";
+
+  // Step 1: the delegated pull is a legitimate, fully-funded transfer.
+  ASSERT_GE(records[1].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "the allowance-backed transfer_from must still succeed";
+
+  // Steps 2-4: the committed balances reflect the delegated pull only. The
+  // caller holds the tokens (so its read differs from the never-touched
+  // control) and the owner holds nothing (so its read matches the control).
+  // Under the netting bug the two debits cancelled and the roles were
+  // reversed: the caller read back zero and the owner kept the tokens.
+  ASSERT_GE(records[2].size(), 2U);
+  ASSERT_GE(records[3].size(), 2U);
+  ASSERT_GE(records[4].size(), 2U);
+  EXPECT_EQ(records[2][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(records[3][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(records[4][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_NE(records[2], records[4])
+      << "the caller must end up holding the tokens the owner started with";
+  EXPECT_EQ(records[3], records[4])
+      << "the owner must be left with nothing after the delegated pull";
 }
 
 // NOLINTEND(bugprone-exception-escape)

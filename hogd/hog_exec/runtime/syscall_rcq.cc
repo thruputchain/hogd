@@ -4,11 +4,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <exception>
 #include <span>
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -23,7 +21,7 @@ namespace hogd {
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_RetrocausalQueueInsert_inner(
     SystemCallHandler &syscall_handler, StorageKeyContractData const &input_key,
-    std::span<const std::byte> input_queue_entry) noexcept
+    std::span<const std::byte> input_queue_entry)
 {
   auto status =
       syscall_handler.retrocausal_queue_insert(input_key, input_queue_entry);
@@ -39,10 +37,11 @@ syscall_RetrocausalQueueInsert_inner(
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_RetrocausalQueueConsume_inner(
-    SystemCallHandler &syscall_handler, const StorageKeyContractData &input_key,
-    bool input_peek, std::span<std::byte> output_queue_entry,
-    RuntimeMemoryLength &output_written_len) noexcept
+syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
+                                      const StorageKeyContractData &input_key,
+                                      bool input_peek,
+                                      std::span<std::byte> output_queue_entry,
+                                      RuntimeMemoryLength &output_written_len)
 {
   auto status =
       syscall_handler.retrocausal_queue_consume(input_key, input_peek);
@@ -63,13 +62,8 @@ syscall_RetrocausalQueueConsume_inner(
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kRetrocausalQueueConsume>()) {
-    try {
-      trace_data->outputs.emplace(
-          SyscallRetrocausalQueueConsumeOutputs{.queue_entry = queue_entry});
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-    }
+    trace_data->outputs.emplace(
+        SyscallRetrocausalQueueConsumeOutputs{.queue_entry = queue_entry});
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -78,7 +72,7 @@ syscall_RetrocausalQueueConsume_inner(
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
                                       const StorageKeyContractData &input_key,
-                                      RuntimeMemoryLength &output_len) noexcept
+                                      RuntimeMemoryLength &output_len)
 {
 
   auto status =
@@ -97,13 +91,8 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kRetrocausalQueuePeekLen>()) {
-    try {
-      trace_data->outputs.emplace(
-          SyscallRetrocausalQueuePeekLenOutputs{.len = output_len});
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
-    }
+    trace_data->outputs.emplace(
+        SyscallRetrocausalQueuePeekLenOutputs{.len = output_len});
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};

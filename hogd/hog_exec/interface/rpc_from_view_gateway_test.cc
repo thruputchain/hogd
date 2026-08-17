@@ -166,7 +166,7 @@ public:
 
   void SetUp() override
   {
-    auto contract = vgt_meta::load_wasm();
+    auto contract = vgt_meta::load_rv32();
     framework_.write_contract(contract);
     framework_.write_deployment(kAddr, contract);
     framework_.setup_grant_storage_token(kAddr, 1'000'000'000);

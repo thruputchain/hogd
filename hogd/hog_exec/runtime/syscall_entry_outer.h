@@ -220,8 +220,7 @@ template<typename> struct SyscallTypes;
 
 template<typename Ret, typename... Args>
 requires (is_syscall_arg_param<Args> && ...)
-struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount,
-                            Args...) noexcept>
+struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount, Args...)>
   : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<SystemCallHandler &, WrappedGasAmount>
   extra_args(SystemCallHandler &handler, WrappedGasAmount total_available_gas)
@@ -232,7 +231,7 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount,
 
 template<typename Ret, typename... Args>
 requires (is_syscall_arg_param<Args> && ...)
-struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...) noexcept>
+struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
   : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<SystemCallHandler &>
   extra_args(SystemCallHandler &handler, WrappedGasAmount /*unused*/)
@@ -243,8 +242,7 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...) noexcept>
 
 template<typename Ret, typename... Args>
 requires (is_syscall_arg_param<Args> && ...)
-struct SyscallTypes<Ret (*)(Args...) noexcept>
-  : public SyscallTypeParams<Ret, Args...> {
+struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<> extra_args(SystemCallHandler & /*unused*/,
                                            WrappedGasAmount /*unused*/)
   {
@@ -584,13 +582,42 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
     // Invoke the inner syscall
     // template only required because we can't do auto [...handler] =
     // handler_pack; yet.  This would be so much cleaner in c++26.
-    auto res =
-        [&]<size_t... ExtraArgs>(std::index_sequence<ExtraArgs...> /*unused*/) {
-          return SyscallMeta::kInnerFunc(
-              std::get<ExtraArgs>(extra_args)...,
-              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(args))...);
-        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
+    //
+    // The inner syscall bodies run arbitrary allocating storage/cache/frame
+    // logic against attacker-controlled inputs, so this is the exception
+    // boundary for all of them: anything that escapes (most commonly
+    // std::bad_alloc under memory pressure) is translated into a structured
+    // Unrecoverable result here instead of terminating hogexec (issue #3400
+    // and siblings). The inner bodies are deliberately not noexcept so the
+    // translation happens here instead of at their own boundary via
+    // std::terminate(); this lambda is noexcept so that boundary is
+    // reestablished immediately around the catch.
+    auto res = [&]<size_t... ExtraArgs>(
+                   std::index_sequence<ExtraArgs...> /*unused*/) noexcept
+        -> std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount> {
+      try {
+        return SyscallMeta::kInnerFunc(
+            std::get<ExtraArgs>(extra_args)...,
+            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                std::get<Is>(args))...);
+      } catch (std::exception const &e) {
+        // The diagnostic itself allocates and could throw again (issue
+        // #3372); report through the no-allocation fallback if it does.
+        try {
+          error("unrecoverable: syscall {} body threw: {}", kSyscall, e.what());
+        } catch (...) {
+          report_dropped_syscall_trace("syscall-body exception diagnostic");
+        }
+        disarm_outputs(args);
+        return {HostFnError{HostFnErrorCode::Unrecoverable},
+                WrappedGasAmount{0}};
+      } catch (...) {
+        report_dropped_syscall_trace("non-std exception from syscall body");
+        disarm_outputs(args);
+        return {HostFnError{HostFnErrorCode::Unrecoverable},
+                WrappedGasAmount{0}};
+      }
+    }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
     if (runtime_log_level(LogLevel::kTrace)) {
       // The inner syscall has already run and written its outputs; formatting

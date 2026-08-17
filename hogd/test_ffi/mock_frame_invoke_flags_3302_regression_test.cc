@@ -1,17 +1,15 @@
 // Regression test for issue #3302: test_ffi mock invocation frames accepted
 // undefined InvokeFlag bits.
 //
-// Production SystemCallHandler::invoke() opens with
-// CHECK(validate_invoke_flags(flags)), which admits only TryInvoke | ReadOnly
-// (DelegateCall is defined but not yet implemented).
-// start_mock_invocation_frame() stored the caller's flags verbatim, so a mock
-// frame could carry bits that cannot exist on any production frame -- inert
-// today, since only the TryInvoke and ReadOnly bits are ever read back, but a
-// trap for whenever DelegateCall or a new flag lands. The mock pathway now
-// validates against the same predicate and reports
-// kTestFFIErrorCodeInvalidArgument instead of aborting the way production's
-// CHECK does, since the point of the FFI error codes is to hand an honest
-// caller a structured failure.
+// Production admits only TryInvoke | ReadOnly (DelegateCall is defined but not
+// yet implemented). start_mock_invocation_frame() stored the caller's flags
+// verbatim, so a mock frame could carry bits that cannot exist on any
+// production frame -- inert today, since only the TryInvoke and ReadOnly bits
+// are ever read back, but a trap for whenever DelegateCall or a new flag lands.
+// Both pathways now run the same check, via
+// SystemCallHandler::validate_new_invocation(); the FFI boundary reports
+// kTestFFIErrorCodeInvalidArgument, since the point of the FFI error codes is
+// to hand an honest caller a structured failure.
 
 #include <array>
 #include <cstdint>

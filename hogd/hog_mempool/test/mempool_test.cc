@@ -1100,7 +1100,7 @@ TEST(Mempool, NewlyDeployedContractHogCount)
   constexpr uint128_t kTransferAmount = 100'000'000;
   const SHA256Hash deploy_nonce = make_test_nonce(1);
   std::shared_ptr<Contract> fibonacci_contract =
-      load_contract("fibonacci.wasm");
+      load_rv32_contract("fibonacci.rv32a");
   ASSERT_TRUE(fibonacci_contract);
   const SHA256Hash fibonacci_hash = sha256(*fibonacci_contract);
   const ContractAddress deployed_address =
@@ -1125,7 +1125,7 @@ TEST(Mempool, NewlyDeployedContractHogCount)
 
   MempoolTestInfra server;
   server.deploy_built_contract_to_address(kDeployAndTransferAddress,
-                                          "deploy_and_transfer.wasm");
+                                          "deploy_and_transfer.rv32a");
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(

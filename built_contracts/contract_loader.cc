@@ -105,4 +105,13 @@ load_contract(std::string_view filename)
   return out;
 }
 
+std::shared_ptr<Contract>
+load_rv32_contract(std::string_view filename)
+{
+  auto rv32 = load_contract_blob(filename);
+  auto out = std::make_shared<Contract>(ContractType::kRv32);
+  out->rv32_contract() = std::move(rv32);
+  return out;
+}
+
 } // namespace hogd

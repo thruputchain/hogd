@@ -33,6 +33,7 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -50,7 +51,7 @@ public:
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb),
-      wasm_runtime_context_(make_hog_exec_context())
+      rv32_runtime_context_(make_hog_exec_context())
   {}
 
 protected:
@@ -69,10 +70,10 @@ protected:
     party_b_secret_ = sec_b;
 
     // Load contracts
-    auto pc_contract = pc_meta::load_wasm();
-    auto erc20_contract = erc20_meta::load_wasm();
-    auto wallet_a_contract = wallet_meta::load_wasm();
-    auto wallet_b_contract = wallet_meta::load_wasm();
+    auto pc_contract = pc_meta::load_rv32();
+    auto erc20_contract = erc20_meta::load_rv32();
+    auto wallet_a_contract = wallet_meta::load_rv32();
+    auto wallet_b_contract = wallet_meta::load_rv32();
 
     // Deploy contracts
     write_contract(pc_contract);
@@ -133,7 +134,7 @@ protected:
   ContractTraitClient<simple_wallet::SimpleWallet> wallet_b_client_ =
       ContractTraitClient<simple_wallet::SimpleWallet>(kWalletBAddress);
 
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
+  std::unique_ptr<RuntimeContext> rv32_runtime_context_;
 
   Ed25519PublicKey party_a_pubkey_;
   Ed25519SecretKey party_a_secret_;
@@ -249,7 +250,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -290,7 +291,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -325,7 +326,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     EXPECT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -362,7 +363,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
@@ -397,7 +398,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
@@ -432,7 +433,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
@@ -461,7 +462,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
@@ -498,7 +499,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -520,7 +521,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -539,7 +540,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -558,7 +559,7 @@ protected:
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -603,7 +604,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -664,7 +665,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -726,7 +727,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -778,7 +779,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -831,7 +832,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -887,7 +888,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -947,7 +948,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -1000,7 +1001,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
-        make_new_system_call_handler(handler_tx.tx, *wasm_runtime_context_);
+        make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();

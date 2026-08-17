@@ -37,4 +37,9 @@ target_link_libraries(
   runtime_test_lib
   GTest::gtest
 )
+add_dependencies(
+  view_test
+  all_riscvs_built
+)
+
 gtest_discover_tests(view_test)

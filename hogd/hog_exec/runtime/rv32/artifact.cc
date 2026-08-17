@@ -96,7 +96,9 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   if (gas_digest != kGasScheduleDigest) {
     return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
   }
-  if (memory_bytes == 0 || memory_bytes > kMaxMemoryBytes) {
+  // memory_bytes == 0 is a valid degenerate: a zero-memory contract whose
+  // data accesses all fault. Only the upper bound is enforced.
+  if (memory_bytes > kMaxMemoryBytes) {
     return std::unexpected(ArtifactError::kMemorySizeInvalid);
   }
   if (code_size == 0 || code_size > kMaxCodeBytes) {

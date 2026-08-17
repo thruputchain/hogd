@@ -409,12 +409,6 @@ TEST(Rv32ArtifactTest, rejectsBoundsAndSectionLayoutErrors)
   }
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactMemoryBytesOffset, 0);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kMemorySizeInvalid);
-  }
-  {
-    auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactCodeSizeOffset, 0);
     expect_artifact_error(std::move(artifact), ArtifactError::kCodeSizeInvalid);
   }
@@ -517,6 +511,75 @@ TEST(Rv32ArtifactTest, acceptsZeroExtendedInitialMemoryPrefix)
   EXPECT_EQ(parsed->memory_bytes, 256U);
   ASSERT_EQ(parsed->initial_memory.size(), stored.size());
   EXPECT_TRUE(std::ranges::equal(parsed->initial_memory, stored));
+}
+
+TEST(Rv32ArtifactTest, acceptsZeroMemoryBytesArtifact)
+{
+  // The canonical zero-memory encoding: no stored image, memory_bytes == 0.
+  // A zero-memory contract is a valid degenerate (all data accesses fault).
+  const auto artifact =
+      test_artifact::build_artifact({addi(1, 0, 7), 0x00100073U},
+                                    std::span<const uint8_t>{});
+  const auto parsed = parse_artifact(artifact);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->memory_bytes, 0U);
+  EXPECT_TRUE(parsed->initial_memory.empty());
+
+  const auto threaded = parse_threaded_artifact(artifact);
+  ASSERT_TRUE(threaded.has_value());
+  EXPECT_EQ(threaded->memory_bytes, 0U);
+  EXPECT_TRUE(threaded->initial_memory.empty());
+}
+
+TEST(Rv32ArtifactTest, acceptsLimitBoundaryValues)
+{
+  // Only the reject side of each limit was pinned; an off-by-one tightening
+  // would reject artifacts other validators accept.
+  {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactMemoryBytesOffset, kMaxMemoryBytes);
+    const auto parsed = parse_artifact(artifact);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->memory_bytes, kMaxMemoryBytes);
+    EXPECT_TRUE(parse_threaded_artifact(artifact).has_value());
+  }
+  {
+    const std::vector<uint32_t> words((kMaxCodeBytes / kInstructionBytes),
+                                      addi(0, 0, 0));
+    const std::array<uint8_t, 1> stored = {1};
+    const auto artifact = test_artifact::build_artifact(words, stored);
+    const auto parsed = parse_artifact(artifact);
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_TRUE(parse_threaded_artifact(artifact).has_value());
+  }
+}
+
+TEST(Rv32ProgramTest, zero_memory_machine_faults_all_data_accesses)
+{
+  const auto program = make_program({load(1, 2, 0, 0)}); // lw x1, 0(x0)
+  Machine machine(program, /*memory_bytes=*/0, /*gas=*/100);
+  EXPECT_EQ(machine.trap(), Trap::kNone);
+  EXPECT_EQ(machine.step(), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBadMemory);
+}
+
+TEST(Rv32ProgramTest, construction_traps_bad_pc_for_invalid_initial_pc)
+{
+  const auto program = make_program({addi(1, 0, 7)});
+
+  Machine out_of_range(program, 31, 5, /*initial_pc=*/8);
+  EXPECT_EQ(out_of_range.trap(), Trap::kBadPc);
+  EXPECT_EQ(out_of_range.step(), StepResult::kTrap);
+  EXPECT_EQ(out_of_range.gas_remaining(),
+            5U); // never executed, nothing charged
+  out_of_range.reset(9);
+  EXPECT_EQ(out_of_range.trap(), Trap::kBadPc);
+  EXPECT_EQ(out_of_range.gas_remaining(), 9U);
+
+  Machine misaligned(program, 31, 5, /*initial_pc=*/2);
+  EXPECT_EQ(misaligned.trap(), Trap::kBadPc);
+  EXPECT_EQ(misaligned.step(), StepResult::kTrap);
+  EXPECT_EQ(misaligned.gas_remaining(), 5U);
 }
 
 TEST(Rv32ArtifactTest, materializesInitialMemoryAtStartOffset)

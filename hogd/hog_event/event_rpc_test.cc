@@ -3304,4 +3304,39 @@ TEST_F(EventRpcTest, ReconciliationRejectsTwoCommittedRecordsAhead)
   EXPECT_FALSE(ctx.reconcile_outbox_tip(200, scheduler_tip)().has_value());
 }
 
+// Regression for #1960: closing may retain a durable candidate for recovery,
+// but indexers must not be able to pull it unless it is committed.
+TEST_F(EventRpcTest, CloseDoesNotMakeCandidatePullableBeforeCommit)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  ProposedTransaction body = make_body(1);
+  ProposalTxs proposal_txs = make_proposal_txs({body});
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  EXPECT_EQ(
+      exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 1), body)(),
+      RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+
+  auto result = mempool_rpc.eventsched_close_block(1, 1, proposal_txs)();
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(1).value());
+  EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(1).value());
+  EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+}
+
 } // namespace hogd

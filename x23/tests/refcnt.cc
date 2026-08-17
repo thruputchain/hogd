@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <thread>
+#include <utility>
 
 #include <x23/debug.h>
 #include <x23/refcnt.h>
@@ -28,19 +29,74 @@ struct Thing : RefCount {
   }
 };
 
+// Both RefPtr assignment operators used to drop the reference they held
+// before capturing the source.  These tests check that the source is now
+// captured before destroying the old pointee can mutate it or free its
+// storage.
+//
+// See issue #1158; PR #1157 landed CopyAssignLinkedListAdvance as a
+// DISABLED_ reproducer.
+//
 // RefPtr<T> can't be a member of T (RefOps eagerly needs complete type),
-// so split into a complete base and a derived class that adds the link.
+// so split into a complete base and derived classes that add state.
+// The base destructor is virtual because RefCount::finalize() deletes
+// through the base pointer the RefPtr holds; without it the derived
+// destructor never runs and ASAN reports a new-delete-type-mismatch that
+// has nothing to do with the bug under test.
 struct ListNode : RefCount {
   using RefCount::refcount;
   static constexpr bool kAllowRefPtrConversion = true;
+  virtual ~ListNode() = default;
 };
 struct Link : ListNode {
   RefPtr<ListNode> next;
 };
 
-// head = head->next where head is sole owner: copy-assign unrefs head
-// before reffing next, but unref destroys the node (and its next member).
-TEST(refcnt, DISABLED_CopyAssignLinkedListAdvance)
+// Destroying a Clearer nulls a RefPtr held elsewhere -- a stand-in for
+// any destructor with side effects on refcounted state.  Nothing is
+// freed out from under the assignment here, so the old decrement-first
+// ordering made these tests fail deterministically without a sanitizer.
+struct Clearer : ListNode {
+  RefPtr<ListNode> *victim = nullptr;
+  ~Clearer() override
+  {
+    if (victim)
+      *victim = nullptr;
+  }
+};
+
+TEST(refcnt, CopyAssignSourceMutatedByOldObjectDestructor)
+{
+  auto *tail = new Link;
+  RefPtr<ListNode> keep(*tail);
+  RefPtr<ListNode> src = keep;
+
+  auto *c = new Clearer;
+  c->victim = &src;
+  RefPtr<ListNode> head(*c);
+
+  head = src; // head retains tail before ~Clearer nulls src
+  EXPECT_EQ(head.get(), tail);
+}
+
+TEST(refcnt, MoveAssignSourceMutatedByOldObjectDestructor)
+{
+  auto *tail = new Link;
+  RefPtr<ListNode> keep(*tail);
+  RefPtr<ListNode> src = keep;
+
+  auto *c = new Clearer;
+  c->victim = &src;
+  RefPtr<ListNode> head(*c);
+
+  head = std::move(src); // src is moved before ~Clearer assigns nullptr
+  EXPECT_EQ(head.get(), tail);
+}
+
+// Here head is the sole owner of a node containing the source RefPtr.
+// Assignment must capture the source before releasing head destroys that
+// node.  The old decrement-first ordering caused a heap-use-after-free.
+TEST(refcnt, CopyAssignLinkedListAdvance)
 {
   auto *tail = new Link;
   RefPtr<ListNode> keep(*tail);
@@ -50,6 +106,19 @@ TEST(refcnt, DISABLED_CopyAssignLinkedListAdvance)
   RefPtr<ListNode> head(*h);
 
   head = h->next; // head = head->next
+  EXPECT_EQ(head.get(), tail);
+}
+
+TEST(refcnt, MoveAssignLinkedListAdvance)
+{
+  auto *tail = new Link;
+  RefPtr<ListNode> keep(*tail);
+
+  auto *h = new Link;
+  h->next = keep;
+  RefPtr<ListNode> head(*h);
+
+  head = std::move(h->next); // head = std::move(head->next)
   EXPECT_EQ(head.get(), tail);
 }
 

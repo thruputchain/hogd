@@ -1474,6 +1474,40 @@ TEST(Rv32Threaded, createRejectsImagePastTotalMemory)
             ProgramError::kMemoryTooLarge);
 }
 
+TEST(Rv32Threaded, createRejectsTotalMemoryAboveLimitAcceptsAtLimit)
+{
+  const std::vector<uint32_t> words = {addi(1, 0, 5)};
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(
+                words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
+                /*total_memory_size=*/kMaxMemoryBytes + 1, /*trace=*/false)
+                .error(),
+            ProgramError::kMemoryTooLarge);
+  EXPECT_TRUE(ThreadedMachinePreInstantiation::create(
+                  words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
+                  /*total_memory_size=*/kMaxMemoryBytes, /*trace=*/false)
+                  .has_value());
+}
+
+TEST(Rv32Threaded, createRejectsCodeTooLargeAndUnsupportedLikeCanonical)
+{
+  // The remaining two ProgramError values the production gate must report
+  // identically to canonical decode (the other three are pinned above).
+  const std::vector<uint32_t> oversized((kMaxCodeBytes / kInstructionBytes) + 1,
+                                        addi(0, 0, 0));
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(
+                words_to_bytes(oversized), /*memory=*/{}, /*memory_start=*/0,
+                /*total_memory_size=*/256, /*trace=*/false)
+                .error(),
+            ProgramError::kCodeTooLarge);
+
+  const std::vector<uint32_t> fp_instruction = {0x00000053U};
+  EXPECT_EQ(ThreadedMachinePreInstantiation::create(
+                words_to_bytes(fp_instruction), /*memory=*/{},
+                /*memory_start=*/0, /*total_memory_size=*/256, /*trace=*/false)
+                .error(),
+            ProgramError::kUnsupportedInstruction);
+}
+
 // --- Trap-time gas parity
 // ----------------------------------------------------
 //
@@ -1535,6 +1569,58 @@ expect_trap_gas_parity(std::span<const uint32_t> words, Trap expected_trap,
   EXPECT_EQ(trmachine.run(trhost, tobs), StepResult::kTrap);
   EXPECT_EQ(trmachine.trap(), expected_trap);
   EXPECT_EQ(trmachine.gas_remaining(), expected_gas_remaining);
+}
+
+TEST(Rv32ThreadedTrapGas, misalignedControlFlowTargetsTrapLikeCanonical)
+{
+  using test_program::branch;
+  using test_program::j_type;
+  using test_program::jalr;
+  // In-range but misaligned (2 mod 4) targets must trap kBadPc on both
+  // engines; a range-only bound would wrongly accept them.
+  {
+    const std::vector<uint32_t> words = {j_type(0, 6), addi(1, 0, 1)};
+    expect_trap_gas_parity(words, Trap::kBadPc,
+                           /*expected_gas_remaining=*/99, /*check_pc=*/false);
+  }
+  {
+    const std::vector<uint32_t> words = {branch(0, 0, 0, 6), addi(1, 0, 1)};
+    expect_trap_gas_parity(words, Trap::kBadPc,
+                           /*expected_gas_remaining=*/99, /*check_pc=*/false);
+  }
+  {
+    // jalr clears bit 0 (target 7 -> 6) and must still reject 2 mod 4.
+    const std::vector<uint32_t> words = {addi(1, 0, 7), jalr(0, 1, 0),
+                                         addi(3, 0, 9)};
+    expect_trap_gas_parity(words, Trap::kBadPc,
+                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+  }
+}
+
+TEST(Rv32ThreadedTrapGas, jumpToExactCodeEndTrapsLikeCanonical)
+{
+  using test_program::j_type;
+  using test_program::jalr;
+  // The first byte past the last instruction (max_pc) is a fall-off boundary,
+  // not a valid jump target; max_pc is computed independently of
+  // ThreadedProgram::contains_pc, so pin it at the runtime check too.
+  {
+    const std::vector<uint32_t> words = {addi(1, 0, 1), j_type(0, 4)};
+    expect_trap_gas_parity(words, Trap::kBadPc,
+                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+  }
+  {
+    const std::vector<uint32_t> words = {addi(1, 0, 8), jalr(0, 1, 0)};
+    expect_trap_gas_parity(words, Trap::kBadPc,
+                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+  }
+}
+
+TEST(Rv32ThreadedTrapGas, emptyCodeTrapsBadPcLikeCanonical)
+{
+  // A machine that never executed anything charges nothing on either engine.
+  expect_trap_gas_parity(std::vector<uint32_t>{}, Trap::kBadPc,
+                         /*expected_gas_remaining=*/100, /*check_pc=*/false);
 }
 
 TEST(Rv32ThreadedTrapGas, plainLoadFaultMidRunChargesExecutedPrefix)

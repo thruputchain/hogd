@@ -21,6 +21,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -28,7 +29,7 @@
 //
 // WASM integration tests for manual frame revert functionality.
 //
-// These tests load and invoke the actual manual_revert_test.wasm contract
+// These tests load and invoke the actual manual_revert_test contract
 // to verify that the SDK's Returnable trait properly triggers manual revert
 // at the WASM runtime level.
 //
@@ -36,10 +37,10 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
-class ManualRevertWasmTest : public ::testing::TestWithParam<TestDB>,
+class ManualRevertRv32Test : public ::testing::TestWithParam<TestDB>,
                              public NativeContractTestFramework {
 public:
-  ManualRevertWasmTest()
+  ManualRevertRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
@@ -48,7 +49,7 @@ protected:
   void SetUp() override
   {
     // Load and deploy the manual_revert_test contract
-    auto contract = hogd::load_contract("manual_revert_test.wasm");
+    auto contract = hogd::load_rv32_contract("manual_revert_test.rv32a");
     contract_addr_ = make_contract_address(0);
     write_contract(contract);
     write_deployment(contract_addr_, contract);
@@ -86,14 +87,14 @@ protected:
 // Test basic manual revert functionality through WASM contract.
 //
 // This integration test verifies the complete end-to-end flow:
-// - Loads the actual manual_revert_test.wasm contract
+// - Loads the actual manual_revert_test contract
 // - Calls test_basic_manual_revert(should_revert=true) via WASM runtime
 // - Verifies that the SDK's Returnable trait triggers manual revert
 // - Confirms that storage changes are reverted (check_storage_exists returns
 // false)
 // - Ensures the transaction commits successfully despite the revert
 //
-TEST_P(ManualRevertWasmTest, BasicManualRevert)
+TEST_P(ManualRevertRv32Test, BasicManualRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -143,12 +144,12 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto rv32_context = std::make_unique<Rv32Context>();
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
-          {ContractType::kWasmi, {wasm_context.release(), true}}});
+          {ContractType::kRv32, {rv32_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -180,7 +181,7 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
 // - This validates that the manual revert behavior is intentional, not a side
 // effect
 //
-TEST_P(ManualRevertWasmTest, BasicNoRevert)
+TEST_P(ManualRevertRv32Test, BasicNoRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -224,11 +225,11 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
   auto native_contract_addr = make_contract_address(1);
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto rv32_context = std::make_unique<Rv32Context>();
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
-          {ContractType::kWasmi, {wasm_context.release(), true}}});
+          {ContractType::kRv32, {rv32_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -258,7 +259,7 @@ TEST_P(ManualRevertWasmTest, BasicNoRevert)
 // - Ensures the outer method can handle the reverted inner call
 // - Validates that the SDK properly handles nested Result::Err scenarios
 //
-TEST_P(ManualRevertWasmTest, NestedManualRevert)
+TEST_P(ManualRevertRv32Test, NestedManualRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -291,11 +292,11 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
 
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto rv32_context = std::make_unique<Rv32Context>();
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
-          {ContractType::kWasmi, {wasm_context.release(), true}}});
+          {ContractType::kRv32, {rv32_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -326,7 +327,7 @@ TEST_P(ManualRevertWasmTest, NestedManualRevert)
 // - Error type 0 (no error) succeeds normally without revert
 // - Validates the end-to-end flow: SDK error → Returnable trait → manual revert
 //
-TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
+TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -366,11 +367,11 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr, native_contract_xdr);
 
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -405,7 +406,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 // - Transaction succeeds normally
 // - This serves as a control to confirm error types 1-4 behavior is intentional
 //
-TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
+TEST_P(ManualRevertRv32Test, ErrorTypeNoError)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -439,11 +440,11 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
   write_contract(native_contract_xdr);
   write_deployment(native_contract_addr, native_contract_xdr);
 
-  auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto rv32_context = std::make_unique<Rv32Context>();
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
-          {ContractType::kWasmi, {wasm_context.release(), true}}});
+          {ContractType::kRv32, {rv32_context.release(), true}}});
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -474,7 +475,7 @@ TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 // - Validates that manual revert properly handles multiple storage operations
 // - Confirms end-to-end storage revert functionality through WASM
 //
-TEST_P(ManualRevertWasmTest, StorageManualRevert)
+TEST_P(ManualRevertRv32Test, StorageManualRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -511,11 +512,11 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr, native_contract_xdr);
 
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -570,11 +571,11 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
     write_contract(native_contract_xdr);
     write_deployment(native_contract_addr, native_contract_xdr);
 
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -598,7 +599,7 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertWasmTest,
+INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertRv32Test,
                          ::testing::Values(TestDB::kMockInMemory,
                                            TestDB::kHogDb),
                          test_db_to_string);

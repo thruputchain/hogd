@@ -418,7 +418,13 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
-      frame_stack_.back().commit_failed_child_frame();
+      // Contain the auth-token restore allocation at the noexcept
+      // finish_frame() boundary; the child is already popped (#3378).
+      try {
+        frame_stack_.back().commit_failed_child_frame();
+      } catch (...) {
+        return SystemError{SystemErrorCode::Unrecoverable};
+      }
     }
 
     return {{frame_result, manually_reverted}};
@@ -430,14 +436,21 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   size_t stack_size = frame_stack_.size();
   if (stack_size >= 2) {
     // Commit the frame to it's parent
-    // Accounts for whether or not the frame is set to manually revert
-    if (frame_stack_.back().should_revert()) {
-      frame_stack_[stack_size - 2].commit_manually_reverted_frame(
-          std::move(frame_stack_.back()));
-    }
-    else {
-      frame_stack_[stack_size - 2].commit_successful_child_frame(
-          std::move(frame_stack_.back()));
+    // Accounts for whether or not the frame is set to manually revert.
+    // Contain the commit's allocation at the noexcept finish_frame() boundary,
+    // popping the child so the stack stays coherent (#3378).
+    try {
+      if (frame_stack_.back().should_revert()) {
+        frame_stack_[stack_size - 2].commit_manually_reverted_frame(
+            std::move(frame_stack_.back()));
+      }
+      else {
+        frame_stack_[stack_size - 2].commit_successful_child_frame(
+            std::move(frame_stack_.back()));
+      }
+    } catch (...) {
+      frame_stack_.pop_back();
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
   else {

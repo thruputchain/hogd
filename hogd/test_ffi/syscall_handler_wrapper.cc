@@ -251,28 +251,6 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // Mirror production's flag precondition. SystemCallHandler::invoke() opens
-  // with CHECK(validate_invoke_flags(flags)), admitting only
-  // TryInvoke | ReadOnly -- DelegateCall is defined but not yet implemented, so
-  // it is not in the valid set. Without this, a mock frame could carry bits no
-  // production frame can, which nothing reads today but would silently become a
-  // live divergence the moment DelegateCall or a new flag lands (#3302).
-  //
-  // The FFI boundary reports the rejection rather than aborting the way
-  // production's CHECK does: an undefined bit is a caller-supplied scalar
-  // violating a documented precondition, which is what
-  // kTestFFIErrorCodeInvalidArgument exists for (see
-  // setup_grant_contract_storage_tokens' negative-token rejection). Aborting
-  // here would defeat the point of returning structured errors to an honest
-  // caller. This runs before any state is touched, so a rejected open is a
-  // complete no-op.
-  if (!SystemCallHandler::validate_invoke_flags(invoke_flags)) {
-    error("invalid argument: start_mock_invocation_frame called with undefined "
-          "InvokeFlag bits: {}",
-          invoke_flags);
-    return kTestFFIErrorCodeInvalidArgument;
-  }
-
   GasAmount current_gas = std::numeric_limits<GasAmount>::max();
   if (auto *runtime = get_mock_runtime()) {
     auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
@@ -280,8 +258,31 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     current_gas = gas_runtime->gas_remaining();
   }
 
+  // Every exit owes the parent's synthetic kInvoke a finish_syscall_trace();
+  // throwing ones used to skip it, leaving the parent to serialize a child
+  // Invoke that never opened a frame (#2747). Self-disarming because finishing
+  // twice trips the sentinel CHECK and aborts (#2948).
+  bool syscall_trace_pending = false;
+  auto finish_pending_trace = [&](HostFnStatus<SyscallErrorCode> status) {
+    if (syscall_trace_pending) {
+      syscall_trace_pending = false;
+      handler_.finish_syscall_trace(status, current_gas);
+    }
+  };
+  // try/catch: this runs during unwinding, where an escaping throw terminates.
+  x23::Defer complete_trace_on_unwind([&]() {
+    try {
+      finish_pending_trace(HostFnError{HostFnErrorCode::Unrecoverable});
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+    } catch (...) {
+      report_dropped_log("non-std exception completing mock kInvoke trace");
+    }
+  });
+
   if (handler_.is_running()) {
     handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
+    syscall_trace_pending = true;
     if (auto *invoke_trace =
             handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
       invoke_trace->inputs = SyscallInvokeInputs{
@@ -333,6 +334,22 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     frame_flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
+  // The admission checks invoke() runs before creating a child frame: undefined
+  // flag bits (#3302) and reentrance (#3301). Auth-token ownership is vacuous
+  // until the API below can pass tokens. Only locals have been computed by this
+  // point, so a refusal pushes no frame and the caller owes no finish; the
+  // caller's synthetic kInvoke is traced with production's syscall error and no
+  // gas charged, matching a refused kInvoke. Closed before the error() log,
+  // which can throw.
+  if (auto admitted = handler_.validate_new_invocation(
+          invocation.invoked_address, frame_flags, std::span<uint32_t const>{});
+      !admitted.has_value()) {
+    finish_pending_trace(admitted.error().code());
+    error("invalid argument: mock invocation frame not admitted: {}",
+          admitted.error().code());
+    return kTestFFIErrorCodeInvalidArgument;
+  }
+
   // TODO(geoff): current API does not support passing auth tokens via the mock
   // frames.
   //
@@ -361,10 +378,19 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     // no backing mock runtime, #2507) and surface an unrecoverable FFI error
     // (#3058). The reserved capacity and unreleased mock_runtime above are
     // harmless.
+    // The parent is still running; close its kInvoke the way production does,
+    // via to_host_fn_error() with no gas consumed.
+    finish_pending_trace(stashed_parent_trace.error().to_host_fn_error());
     error("unrecoverable: frame admission allocation failed in "
           "start_mock_invocation_frame");
     return kTestFFIErrorCodeUnrecoverableError;
   }
+
+  // finish_mock_invocation_frame() owns the record now. Must disarm: the
+  // child's trace is active from here, and finishing against its empty
+  // system_calls trips a CHECK.
+  syscall_trace_pending = false;
+
   // Push exactly one slot per mock frame so this stack stays in lockstep with
   // the handler's invocation-frame depth, and finish_mock_invocation_frame()
   // restores only the trace the finishing frame actually stashed. The slot may

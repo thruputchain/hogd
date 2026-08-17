@@ -16,6 +16,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "contract.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -24,6 +25,7 @@
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/item_lock/new_deployment_lock.h"
 #include "hogd/hog_db/item_lock/nnint128_lock.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db.h"
@@ -60,6 +62,22 @@ ItemChange
 make_deletion_change()
 {
   return Deletion();
+}
+
+DeployedContractHash
+make_deployed_hash(uint8_t value, uint32_t contract_size)
+{
+  DeployedContractHash hash{};
+  hash.hash.fill(value);
+  hash.contract_size = contract_size;
+  hash.contract_type = ContractType::kWasmi;
+  return hash;
+}
+
+ItemChange
+make_deploy_change(uint8_t value, uint32_t contract_size)
+{
+  return DeployedContractData(make_deployed_hash(value, contract_size));
 }
 
 AddressAuthData
@@ -1296,6 +1314,113 @@ TEST(ItemLockTest, ExclusiveNNIntDowngradeToRegularRevalidates)
   ASSERT_TRUE(inner != nullptr);
   EXPECT_EQ(inner->get_base_and_delta(),
             (std::pair<int128_t, int128_t>(100, 10)));
+}
+
+// Issue #1189: a DeployContract change can now carry the exclusive-lock flag,
+// which routes it through ExclusiveLock -- a path that previously reached
+// panic("unimplemented") because it priced only the bytes/nnint/deletion/
+// auth/rcq item types. Pins that the deploy change is admitted, priced
+// identically to the regular NewDeploymentLock reservation, and locks
+// everyone else out both before and after it finalizes.
+TEST(ItemLockTest, ExclusiveDeployContractIsPricedAndBlocksPeers)
+{
+  constexpr uint32_t kContractSize = 40;
+  const int128_t kDeployCost = kTestCostModel.get_deployment_cost(
+      make_deployed_hash(0xD0, kContractSize));
+  // Guard the fixture rather than the code under test: a free deployment
+  // would make the cost assertions below vacuous.
+  ASSERT_GT(kDeployCost, 0);
+
+  ItemLock lock(0);
+  auto exclusive = make_deploy_change(0xD0, kContractSize);
+  exclusive.set_permanent_exclusive();
+
+  auto acquired =
+      lock.try_atomic_change_lock(nullptr, &exclusive, make_dummy_context());
+  ASSERT_TRUE(acquired.has_value());
+  EXPECT_EQ(acquired.value(), kDeployCost);
+
+  // A peer deploying the very same hash -- which the regular
+  // NewDeploymentLock admits alongside -- is now locked out.
+  {
+    auto peer = make_deploy_change(0xD0, kContractSize);
+    std::optional<DbConflictCode> reason;
+    auto peer_ctx = make_dummy_context();
+    peer_ctx.conflict_reason = &reason;
+    auto blocked = lock.try_atomic_change_lock(nullptr, &peer, peer_ctx);
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error(), HogDbError{HogDbCode::kConflict});
+    EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+  }
+
+  // Committing installs a real NewDeploymentLock and finalizes permanently.
+  auto committed = lock.commit_change(exclusive, make_dummy_context());
+  ASSERT_TRUE(committed.has_value());
+  EXPECT_EQ(committed.value(), kDeployCost);
+  EXPECT_TRUE(lock.is_finalized());
+  ASSERT_TRUE(lock.get_inner<NewDeploymentLock>() != nullptr);
+
+  // The permanent exclusive lock outlives the commit: nothing else in the
+  // block may touch the key, not even an identical deploy.
+  {
+    auto peer = make_deploy_change(0xD0, kContractSize);
+    std::optional<DbConflictCode> reason;
+    auto peer_ctx = make_dummy_context();
+    peer_ctx.conflict_reason = &reason;
+    auto blocked = lock.try_atomic_change_lock(nullptr, &peer, peer_ctx);
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+  }
+}
+
+// The exclusive upgrade is refused while another transaction already holds a
+// (regular) reservation on the deployment key -- the contended direction of
+// the case above.
+TEST(ItemLockTest, ExclusiveDeployContractBlockedByExistingHolder)
+{
+  ItemLock lock(0);
+  auto held = make_deploy_change(0xD3, 8);
+  auto r1 = lock.try_atomic_change_lock(nullptr, &held, make_dummy_context());
+  ASSERT_TRUE(r1.has_value());
+
+  auto exclusive = make_deploy_change(0xD3, 8);
+  exclusive.set_permanent_exclusive();
+  std::optional<DbConflictCode> reason;
+  auto ctx = make_dummy_context();
+  ctx.conflict_reason = &reason;
+  auto blocked = lock.try_atomic_change_lock(nullptr, &exclusive, ctx);
+  ASSERT_FALSE(blocked.has_value());
+  EXPECT_EQ(reason, DbConflictCode::kDbConflictExclusiveLock);
+
+  // The refusal is a no-op: the original holder still commits normally.
+  auto committed = lock.commit_change(held, make_dummy_context());
+  ASSERT_TRUE(committed.has_value());
+  EXPECT_TRUE(lock.is_finalized());
+}
+
+// A permanent exclusive lock reports the true (signed) marginal cost rather
+// than clamping at zero, so a deployment that shrinks an address's stored
+// contract refunds the difference. Pins that deploy changes take the same
+// snapshot_cost_transform branch as the other exclusive item types.
+TEST(ItemLockTest, ExclusiveDeployContractReportsRefundAgainstSnapshotCost)
+{
+  constexpr uint32_t kSmallSize = 4;
+  const int128_t kDeployCost =
+      kTestCostModel.get_deployment_cost(make_deployed_hash(0xD4, kSmallSize));
+  const int128_t kSnapshotCost = kDeployCost + 5000;
+
+  ItemLock lock(kSnapshotCost);
+  auto exclusive = make_deploy_change(0xD4, kSmallSize);
+  exclusive.set_permanent_exclusive();
+
+  auto acquired =
+      lock.try_atomic_change_lock(nullptr, &exclusive, make_dummy_context());
+  ASSERT_TRUE(acquired.has_value());
+  EXPECT_EQ(acquired.value(), -5000);
+
+  auto committed = lock.commit_change(exclusive, make_dummy_context());
+  ASSERT_TRUE(committed.has_value());
+  EXPECT_EQ(committed.value(), -5000);
 }
 
 } // namespace hogd

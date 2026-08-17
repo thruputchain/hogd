@@ -320,6 +320,11 @@ public:
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode
   // try_invoke, it is set to the frame's post-acquire two-phase-commit conflict
   // (kDbDiagnosticNone on a successful acquire).
+  //
+  // On allocation failure while committing the child into its parent, the child
+  // is still popped and an Unrecoverable SystemError is returned, so the
+  // noexcept caller (SystemCallHandler::finish_frame) is never terminated
+  // (#3378).
   SystemStatus<std::pair<InvokeResult, bool>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,
