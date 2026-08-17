@@ -18,9 +18,8 @@
 namespace hogd {
 
 // Validate and convert a 32-bit syscall argument slot into a narrower-or-equal
-// integral type T. This is the canonical wasm32 ABI encoding: each value slot
-// is a bare 32-bit value (i32 on the wasm boundary), NOT widened or
-// sign-extended to 64 bits.
+// integral type T. This is the canonical syscall ABI encoding: each value slot
+// is a bare 32-bit value.
 //
 // Returns std::nullopt if the bits are not a valid encoding of the target type:
 // - Unsigned types narrower than uint32_t reject upper-bit overflow.
@@ -89,7 +88,7 @@ narrow_slot_mock(uint64_t input)
 // into typesafe objects to pass to inner syscalls.
 //
 // Each argument type consumes some number of argument slots to the syscall.
-// On the wasm32 path each slot is a uint32_t (parse()); on the native mock
+// On the rv32 path each slot is a uint32_t (parse()); on the native mock
 // path each slot is a uint64_t (parse_mock()), so the mock can carry host
 // pointers in offset slots. These slots either encode the value (as in small
 // types) or act as offsets into contract memory, or some combination thereof.
@@ -352,7 +351,7 @@ struct SyscallArgParams<T &> {
 
 // Optional trivially copyable input types.
 // Uses an all-ones offset as an explicit null sentinel: UINT32_MAX on the
-// wasm32 path (a 32-bit slot) and UINT64_MAX on the native mock path. Other
+// rv32 path (a 32-bit slot) and UINT64_MAX on the native mock path. Other
 // offsets must resolve to in-bounds memory or argument validation fails.
 // Some syscalls use nullptr to indicate an optional parameter is omitted.
 template<typename T> requires std::is_trivially_copyable_v<T>
@@ -367,8 +366,8 @@ struct SyscallArgParams<const T *> {
   parse(AliasGuard &guard, std::span<std::byte> contract_memory,
         uint32_t offset)
   {
-    // 0 can be a valid pointer in wasm. As such, optional inputs use
-    // UINT32_MAX as the explicit null sentinel.
+    // 0 can be a valid pointer in the rv32 sandbox. As such, optional inputs
+    // use UINT32_MAX as the explicit null sentinel.
     if (offset == std::numeric_limits<uint32_t>::max()) {
       return {.is_valid = true, .value = std::nullopt};
     }
@@ -384,9 +383,9 @@ struct SyscallArgParams<const T *> {
   constexpr static OptionalInputParseResult parse_mock(AliasGuard &guard,
                                                        uint64_t offset)
   {
-    // 0 can be a valid pointer in wasm.  As such, the optional input types in
-    // the sdk use UINT64_MAX as the nullptr (in the case of a None input),
-    // instead of 0.
+    // 0 can be a valid pointer in the rv32 sandbox.  As such, the optional
+    // input types in the sdk use UINT64_MAX as the nullptr (in the case of a
+    // None input), instead of 0.
     if (offset == std::numeric_limits<uint64_t>::max()) {
       return {.is_valid = true, .value = std::nullopt};
     }

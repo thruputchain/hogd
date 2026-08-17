@@ -96,8 +96,6 @@ message(STATUS "Using CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
 message(STATUS "Using CMAKE_CXX_FLAGS_RELEASE: ${CMAKE_CXX_FLAGS_RELEASE}")
 
 include(cmake/stacktrace.cmake)
-include(cmake/wat2wasm.cmake)
-include(cmake/wasmopt.cmake)
 
 # Where to place generated headers
 set(BUILT_HEADERS_DIR "${CMAKE_CURRENT_BINARY_DIR}/built_headers")

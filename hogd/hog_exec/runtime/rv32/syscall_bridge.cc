@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
 
+#include <exception>
 #include <span>
 #include <utility>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "syscall_error.hh"
+#include "types.hh"
 
 namespace hogd::rv32 {
 

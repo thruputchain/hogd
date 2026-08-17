@@ -6,6 +6,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "contract.hh"

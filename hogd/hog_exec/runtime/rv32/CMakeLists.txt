@@ -305,12 +305,6 @@ if(HOGD_RV32_ENABLE_LTO)
 endif()
 
 if(BUILD_BENCHMARKS)
-  wat2wasm_target(
-    rv32_fibonacci_bench_wasm
-    fibonacci_bench.wat
-    ${CMAKE_CURRENT_BINARY_DIR}/rv32_fibonacci_bench.wasm
-  )
-
   add_executable(
     rv32_vm_bench
     rv32_vm_bench.cc
@@ -320,25 +314,12 @@ if(BUILD_BENCHMARKS)
     rv32_vm_bench
     rv32_syscall_bridge
     benchmark::benchmark
-    built_headers_interface
-    unified_lib
   )
 
   target_include_directories(
     rv32_vm_bench
     PRIVATE
     ${CMAKE_BINARY_DIR}
-  )
-
-  add_dependencies(
-    rv32_vm_bench
-    rv32_fibonacci_bench_wasm
-  )
-
-  target_compile_definitions(
-    rv32_vm_bench
-    PRIVATE
-    RV32_VM_BENCH_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
   )
 
   if(HOGD_RV32_ENABLE_LTO)
