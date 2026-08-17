@@ -432,6 +432,7 @@ TEST_F(IndexerOutboxTest, OpenOrCreateClearsInheritedSetgidBit)
 {
   const std::string path = dir_.directory() + "/indexer-outbox";
   ASSERT_TRUE(std::filesystem::create_directory(path));
+  ASSERT_EQ(chown(path.c_str(), static_cast<uid_t>(-1), getegid()), 0);
   std::filesystem::permissions(path,
                                std::filesystem::perms::owner_all |
                                    std::filesystem::perms::set_gid,
