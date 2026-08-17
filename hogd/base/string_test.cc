@@ -10,6 +10,7 @@
 #include "hogd/base/network_hash.h"
 #include "hogd/base/span.h"
 #include "hogd/base/string.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 

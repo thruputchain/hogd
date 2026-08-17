@@ -136,7 +136,7 @@ print_iec_rate(size_t bytes, double seconds, bool add_space)
 
   // static_cast<double>(SIZE_MAX) rounds up to exactly 2^64, so this rejects
   // precisely the values that would overflow the conversion.
-  constexpr double kLimit =
+  constexpr auto kLimit =
       static_cast<double>(std::numeric_limits<size_t>::max());
   if (rate >= kLimit)
     return print_iec_bytes(std::numeric_limits<size_t>::max(), add_space);
