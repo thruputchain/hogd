@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hog_exec/runtime/syscall_arg_params.h"
 #include "syscall_error.hh"
+#include "types.hh"
 
 // Test host functions mirror a C ABI with many intentionally-unused slots.
 // NOLINTBEGIN(readability-named-parameter)
