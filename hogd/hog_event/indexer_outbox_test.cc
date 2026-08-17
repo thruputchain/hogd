@@ -428,6 +428,24 @@ TEST_F(IndexerOutboxTest, OpenOrCreateMakesPrivateDurableStoreDirectory)
   EXPECT_EQ(stat_buf.st_mode & 07777, 0700);
 }
 
+TEST_F(IndexerOutboxTest, OpenOrCreateClearsInheritedSetgidBit)
+{
+  const std::string path = dir_.directory() + "/indexer-outbox";
+  ASSERT_TRUE(std::filesystem::create_directory(path));
+  std::filesystem::permissions(path,
+                               std::filesystem::perms::owner_all |
+                                   std::filesystem::perms::set_gid,
+                               std::filesystem::perm_options::replace);
+  struct stat stat_buf{};
+  ASSERT_EQ(stat(path.c_str(), &stat_buf), 0);
+  ASSERT_EQ(stat_buf.st_mode & 07777, 02700);
+
+  auto store = IndexerOutboxStore::open_or_create_in(dir_.directory());
+  ASSERT_TRUE(store.has_value()) << store.error();
+  ASSERT_EQ(stat(path.c_str(), &stat_buf), 0);
+  EXPECT_EQ(stat_buf.st_mode & 07777, 0700);
+}
+
 TEST_F(IndexerOutboxTest, OpenOrCreateRetriesParentFsyncAfterExistingChild)
 {
   fail_next_indexer_outbox_operation_for_test(
