@@ -5,6 +5,7 @@
 #include <cstring>
 #include <filesystem>
 #include <future>
+#include <latch>
 #include <span>
 #include <string>
 #include <string_view>
@@ -13,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "db_conflict.hh"
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -21,11 +21,12 @@
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
-#include "hogd/hog_event/test_util/socketpair_indexer_client.h"
 #include "hogd/init.h"
 #include "indexer.hh"
+#include "proposal.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -324,22 +325,22 @@ TEST_F(EventBlockContextTest, AwaitWaitsForAllExecutors)
 
   // Spawn a task that waits for all executors
   std::atomic<bool> await_completed = false;
-  auto async = [&context, &await_completed](this auto) -> x23::Async<void> {
+  std::latch await_started(1);
+  auto async = [&context, &await_completed,
+                &await_started](this auto) -> x23::Async<void> {
     co_await default_threadpool().bg();
+    await_started.count_down();
     co_await context.await_all_executors_closed();
     await_completed.store(true, std::memory_order_release);
   }();
 
-  // Give the await task time to start waiting
-  using namespace std::chrono_literals;
-  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+  await_started.wait();
 
   // Await should not have completed yet
   EXPECT_FALSE(await_completed.load(std::memory_order_acquire));
 
   // Close first executor
   context.executor_close_block();
-  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
 
   // Still should not be complete
   EXPECT_FALSE(await_completed.load(std::memory_order_acquire));
@@ -396,10 +397,13 @@ TEST_F(EventBlockContextTest, MultipleConcurrentAwaits)
   context.executor_open_block();
 
   std::atomic<int> completed_awaits = 0;
+  std::latch awaiters_started(3);
 
   // Spawn 3 concurrent awaiters
-  auto awaiter = [&context, &completed_awaits](this auto) -> x23::Async<void> {
+  auto awaiter = [&context, &completed_awaits,
+                  &awaiters_started](this auto) -> x23::Async<void> {
     co_await default_threadpool().bg();
+    awaiters_started.count_down();
     co_await context.await_all_executors_closed();
     completed_awaits.fetch_add(1, std::memory_order_release);
   };
@@ -408,8 +412,7 @@ TEST_F(EventBlockContextTest, MultipleConcurrentAwaits)
   auto async2 = awaiter();
   auto async3 = awaiter();
 
-  using namespace std::chrono_literals;
-  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+  awaiters_started.wait();
   EXPECT_EQ(completed_awaits.load(), 0);
 
   // Close executor - all 3 awaits should complete
@@ -572,38 +575,6 @@ TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
 }
 
 namespace {
-struct CapturingIndexerRpc {
-  using rpc_service = IndexerEvent1;
-
-  x23::Async<void>
-  indexer_event_process_events(BlockHeight block_height,
-                               const TxEventLogBatch &tx_events,
-                               const ProposedTransactionBatch &tx_bodies)
-  {
-    received_batches++;
-    last_block_height = block_height;
-    received_events = tx_events;
-    received_bodies = tx_bodies;
-    co_return;
-  }
-
-  // Required for is_IndexerEvent1 conformance; the failure-relay path is
-  // covered by FailureCapturingIndexerRpc in event_rpc_test.cc, so this file's
-  // tests don't record reports.
-  static x23::Async<void>
-  indexer_event_report_tx_failure(const SignedTransactionHash & /*tx_hash*/,
-                                  const TxFailureDiagnostic & /*diag*/)
-  {
-    co_return;
-  }
-
-  size_t received_batches = 0;
-  BlockHeight last_block_height = -1;
-  TxEventLogBatch received_events;
-  ProposedTransactionBatch received_bodies;
-};
-static_assert(is_IndexerEvent1<CapturingIndexerRpc *, x23::Async>);
-
 ProposedTransaction
 make_distinct_body(uint64_t nonce)
 {
@@ -629,7 +600,8 @@ make_event_for_body(ProposedTransaction const &body, uint8_t marker)
 }
 } // namespace
 
-TEST_F(EventBlockContextTest, IndexerFanoutCanMispairPerThreadEventBodies)
+TEST_F(EventBlockContextTest,
+       CandidateSerializesEventBodiesInCanonicalProposalOrder)
 {
   EventBlockContext context(temp_dir_, 1);
   PerThread<TxEventLogBatch> event_registration_probe;
@@ -700,32 +672,30 @@ TEST_F(EventBlockContextTest, IndexerFanoutCanMispairPerThreadEventBodies)
   context.executor_close_block();
   finish_file(context);
 
-  CapturingIndexerRpc indexer;
-  std::vector<indexer_event_client_t> indexers;
-  indexers.push_back(make_socketpair_indexer_client(&indexer));
-  try {
-    context.send_events_to_indexers(/*block_height=*/7, indexers)();
-  } catch (...) {
-    release_workers.set_value();
-    worker_a.join();
-    worker_b.join();
-    throw;
-  }
+  x23::XdrVec<SignedTransactionHash> canonical_hashes{
+      sha256(body_b.signed_tx.tx), sha256(body_a.signed_tx.tx)};
+  x23::XdrVec<NondeterministicProposalData> canonical_data{
+      body_b.nondeterministic_proposal_data,
+      body_a.nondeterministic_proposal_data};
+  ProposalTxs proposal_txs{
+      .hash = t_to_parallel_batch(canonical_hashes)(),
+      .nondeterministic_data = t_to_parallel_batch(canonical_data)(),
+  };
+  auto candidate = context.snapshot_indexer_outbox_candidate(
+      /*block_height=*/7, context.get_root_hash(), std::move(proposal_txs))();
 
   release_workers.set_value();
   worker_a.join();
   worker_b.join();
 
-  ASSERT_EQ(indexer.received_batches, 1);
-  ASSERT_EQ(indexer.last_block_height, 7);
-  ASSERT_EQ(indexer.received_events.size(), 2);
-  ASSERT_EQ(indexer.received_bodies.size(), 2);
+  ASSERT_EQ(candidate.event_logs.size(), 2);
+  ASSERT_EQ(candidate.tx_bodies.size(), 2);
 
-  // For every forwarded index i, the body must be the one that produced the
-  // event log at the same index.
-  for (size_t i = 0; i < indexer.received_events.size(); i++) {
-    EXPECT_EQ(sha256(indexer.received_bodies[i].signed_tx.tx),
-              indexer.received_events[i].proposed_tx_hash);
+  EXPECT_EQ(candidate.event_logs[0].proposed_tx_hash, canonical_hashes[0]);
+  EXPECT_EQ(candidate.event_logs[1].proposed_tx_hash, canonical_hashes[1]);
+  for (size_t i = 0; i < candidate.event_logs.size(); i++) {
+    EXPECT_EQ(sha256(candidate.tx_bodies[i].signed_tx.tx),
+              candidate.event_logs[i].proposed_tx_hash);
   }
 }
 

@@ -2,7 +2,10 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "network.hh"
 #include "types.hh"
+#include "x23/serialize.h"
+#include "x23/vec.h"
 
 #include <bit>
 #include <cstring>
@@ -11,6 +14,24 @@
 #include <string_view>
 
 namespace hogd {
+
+std::string
+IndexerKeyFormat::make_block_identity_meta_key(BlockHeight block_height)
+{
+  std::string key(kBlockIdentityMetaKeyPrefix);
+  const uint64_t encoded = std::byteswap(static_cast<uint64_t>(block_height));
+  key.append(reinterpret_cast<const char *>(&encoded), sizeof(encoded));
+  return key;
+}
+
+std::string
+IndexerKeyFormat::make_epoch_history_meta_key(const ProtocolCommit &protocol)
+{
+  std::string key(kEpochHistoryMetaKeyPrefix);
+  const x23::Buf encoded = x23::serialize(protocol);
+  key.append(reinterpret_cast<const char *>(encoded.data()), encoded.size());
+  return key;
+}
 
 void
 IndexerKeyFormat::make_tx_key(std::string &key, SHA256Hash const &tx_hash)

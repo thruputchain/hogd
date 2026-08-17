@@ -25,6 +25,7 @@ make_payload(IterationOrder order, BlockHeight block, std::uint8_t tx_fill,
   p.block_height = block;
   std::ranges::fill(p.tx_hash, tx_fill);
   p.sequence_number = seq;
+  p.max_block_height = block;
   return p;
 }
 
@@ -84,6 +85,21 @@ TEST(EventCursorTest, VersionMismatchRejected)
   encoded[2] = static_cast<char>(0xFF);
   encoded[3] = static_cast<char>(0xFF);
   EXPECT_FALSE(cursor::decode(encoded).has_value());
+}
+
+TEST(EventCursorTest, NegativeOrInconsistentHeightsRejected)
+{
+  auto payload =
+      make_payload(IterationOrder::IterationOrderDescending, 10, 0x01, 0);
+  payload.max_block_height = -1;
+  EXPECT_FALSE(cursor::decode(cursor::encode(payload)).has_value());
+
+  payload.max_block_height = 10;
+  payload.block_height = -1;
+  EXPECT_FALSE(cursor::decode(cursor::encode(payload)).has_value());
+
+  payload.block_height = 11;
+  EXPECT_FALSE(cursor::decode(cursor::encode(payload)).has_value());
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

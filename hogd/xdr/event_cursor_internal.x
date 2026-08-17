@@ -22,6 +22,7 @@ struct EventCursorPayload {
   BlockHeight block_height;
   SHA256Hash tx_hash;
   unsigned int sequence_number;
+  BlockHeight max_block_height;
 };
 
 } // namespace hogd

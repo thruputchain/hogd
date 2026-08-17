@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
+#include <optional>
 
 #include "auth_card.hh"
 #include "hogd/base/types.h"
@@ -67,18 +68,122 @@ public:
   }
 
   // Event.
-  void register_event(const EventCard &card)
+  EventPrepareResult prepare_event(const EventCard &card)
   {
-    event_card_ = card;
+    std::unique_lock lk(event_mutex_);
+    if (event_registered_.load(std::memory_order_acquire)) {
+      CHECK(active_event_snapshot_.has_value());
+      if (card != event_card_) {
+        return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
+      }
+      if (pending_event_card_) {
+        CHECK(*pending_event_card_ == event_card_);
+        CHECK(pending_event_tip_.has_value());
+        EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        result.snapshot().tip = *pending_event_tip_;
+        result.snapshot().token = pending_event_token_;
+        return result;
+      }
+      CHECK(event_canonical_tip_.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      if (*event_canonical_tip_ == active_event_snapshot_->tip) {
+        EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        result.snapshot() = *active_event_snapshot_;
+        return result;
+      }
+    }
+    if (pending_event_card_ && card == *pending_event_card_) {
+      CHECK(pending_event_tip_.has_value());
+      EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      result.snapshot().tip = *pending_event_tip_;
+      result.snapshot().token = pending_event_token_;
+      return result;
+    }
+    if (pending_event_card_) {
+      return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
+    }
+    if (!event_canonical_tip_) {
+      return EventPrepareResult{EventPrepareOutcome::EventPrepareNotReady};
+    }
+    const BlockHeight tip_height =
+        event_canonical_tip_->consensus_value.proposal_header.block_height;
+    if (tip_height == -1) {
+      return EventPrepareResult{EventPrepareOutcome::EventPrepareNotReady};
+    }
+    if (tip_height < -1) {
+      return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
+    }
+    pending_event_card_ = card;
+    pending_event_tip_ = *event_canonical_tip_;
+    EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+    result.snapshot().tip = *pending_event_tip_;
+    result.snapshot().token = ++next_event_registration_token_;
+    pending_event_token_ = result.snapshot().token;
+    return result;
+  }
+  EventActivationResult
+  activate_event(const EventRegistrationSnapshot &snapshot)
+  {
+    std::unique_lock lk(event_mutex_);
+    if (event_registered_.load(std::memory_order_acquire)) {
+      CHECK(active_event_snapshot_.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      if (snapshot == *active_event_snapshot_) {
+        return EventActivationResult{EventActivationOutcome::EventActivationOK};
+      }
+    }
+    if (!event_canonical_tip_ || !pending_event_card_ || !pending_event_tip_ ||
+        pending_event_token_ != snapshot.token) {
+      return EventActivationResult{
+          EventActivationOutcome::EventActivationError};
+    }
+    if (snapshot.tip != *pending_event_tip_) {
+      return EventActivationResult{
+          EventActivationOutcome::EventActivationError};
+    }
+    if (*pending_event_tip_ != *event_canonical_tip_) {
+      EventActivationResult result{
+          EventActivationOutcome::EventActivationRetry};
+      result.current_tip() = *event_canonical_tip_;
+      pending_event_card_.reset();
+      pending_event_tip_.reset();
+      pending_event_token_ = 0;
+      return result;
+    }
+    if (event_registered_.load(std::memory_order_acquire)) {
+      CHECK(event_card_ == *pending_event_card_);
+    }
+    else {
+      event_card_ = *pending_event_card_;
+    }
+    active_event_snapshot_ = snapshot;
+    pending_event_card_.reset();
+    pending_event_tip_.reset();
+    pending_event_token_ = 0;
     event_registered_.store(true, std::memory_order_release);
+    return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
   bool event_registered(EventCard *card) const
   {
-    bool ret = event_registered_.load(std::memory_order_acquire);
-    if (card) {
+    std::unique_lock lk(event_mutex_);
+    const bool ret = event_registered_.load(std::memory_order_acquire);
+    if (ret && card) {
       *card = event_card_;
     }
     return ret;
+  }
+  void publish_event_canonical_tip(EventCanonicalTip tip)
+  {
+    std::unique_lock lk(event_mutex_);
+    event_canonical_tip_ = std::move(tip);
+  }
+  std::optional<EventCanonicalTip> event_canonical_tip() const
+  {
+    std::unique_lock lk(event_mutex_);
+    return event_canonical_tip_;
   }
 
   // Auth.
@@ -124,8 +229,17 @@ public:
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.clear();
     }
-    event_registered_ = false;
-    event_card_ = EventCard{};
+    {
+      std::unique_lock lk(event_mutex_);
+      event_registered_ = false;
+      event_card_ = EventCard{};
+      active_event_snapshot_.reset();
+      pending_event_card_.reset();
+      pending_event_tip_.reset();
+      pending_event_token_ = 0;
+      next_event_registration_token_ = 0;
+      event_canonical_tip_.reset();
+    }
     {
       std::unique_lock lk(shard_cards_mutex_);
       shard_cards_.clear();
@@ -148,7 +262,14 @@ private:
   x23::Vec<ExecCard> exec_cards_;
 
   std::atomic<bool> event_registered_ = false;
+  mutable std::mutex event_mutex_;
   EventCard event_card_;
+  std::optional<EventRegistrationSnapshot> active_event_snapshot_;
+  std::optional<EventCard> pending_event_card_;
+  std::optional<EventCanonicalTip> pending_event_tip_;
+  uint64_t pending_event_token_ = 0;
+  uint64_t next_event_registration_token_ = 0;
+  std::optional<EventCanonicalTip> event_canonical_tip_;
 
   std::atomic<bool> auth_registered_ = false;
   AuthCard auth_card_;

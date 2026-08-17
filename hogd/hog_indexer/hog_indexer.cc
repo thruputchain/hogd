@@ -1,39 +1,32 @@
 #include <cstdint>
 #include <cstdlib>
-#include <format>
 #include <future>
 #include <print>
 #include <string>
-#include <utility>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
-#include "hogd/hog_indexer/rpc_from_event.h"
 #include "hogd/hog_indexer/shared.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
-#include "hogd/version.h"
-#include "indexer.hh"
-#include "x23/sockio.h"
 
 namespace hogd {
-
 namespace {
 
 int
 indexer_init(const std::string &path, const std::string &event_server_addr,
-             const std::string &bind_ip, uint16_t event_port,
-             uint16_t block_explorer_port, uint16_t metrics_port)
+             const std::string &bind_ip, uint16_t block_explorer_port,
+             uint16_t metrics_port)
 {
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
@@ -49,34 +42,10 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   Health::instance().set_current_block_height(db.latest_block())();
 
   RecentTxFailureCache failure_cache;
+  IndexerPullController pull_controller(event_server_addr, db, failure_cache);
+  pull_controller.wait_until_caught_up();
 
-  // Create the RPC server that the event server talks to.
-  RpcServer<IndexerEventRpc> event(db, failure_cache);
-  event->max_message_size_ = kBulkRpcMaxMessageSize;
-  uint16_t actual_event_port =
-      event.start_server(make_bind_host_port(bind_ip, event_port));
-  CHECK(actual_event_port == event_port || event_port == 0);
-  info("PORT indexer.event={}", actual_event_port);
-
-  // Register with the event server.
-  auto client_res = make_rpc_client<EventIndexer1>(server_address_to_sockaddr(
-                                                       event_server_addr),
-                                                   /*retry=*/true)();
-  if (!client_res)
-    panic("indexer connect to event server failed: {}",
-          client_res.error().error_code().message());
-  event_indexer_client_t client = std::move(*client_res);
-  const std::string indexer_server_addr =
-      format_advertised_address(bind_ip, /*port=*/actual_event_port);
-  const IndexerCard card{.protocol = version::kHogdProtocol(),
-                         .address_for_event = indexer_server_addr.c_str()};
-  const EventIndexerIntroOutcome intro_outcome =
-      client.event_indexer_intro(card)();
-  if (intro_outcome != EventIndexerIntroOutcome::EventIntroSuccess)
-    panic("indexer: event server rejected/failed registration: {}",
-          intro_outcome);
-
-  // Create the RPC server that the block explorers talk to.
+  // Do not serve stale product queries while startup replay is incomplete.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
   block_explorer->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_block_explorer_port = block_explorer.start_server(
@@ -86,7 +55,6 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   info("PORT indexer.block_explorer={}", actual_block_explorer_port);
 
   // The indexer is initialized. Now block forever.
-  Health::instance().set_status(Health::Status::kOk)();
   info("indexer initialization complete.");
   std::promise<void>().get_future().wait();
 
@@ -94,7 +62,6 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
 }
 
 } // namespace
-
 } // namespace hogd
 
 namespace {
@@ -137,7 +104,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string event_server_addr;
   std::string path;
   std::string bind_ip;
-  uint16_t event_port = 0;
   uint16_t block_explorer_port = 0;
   uint16_t metrics_port = 0;
 
@@ -152,16 +118,17 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       event_server_addr = argv[++i];
       continue;
     }
+    if (arg == "--event-port" && i + 1 < argc) {
+      hogd::parse_port_arg("--event-port", argv[++i], argv, usage);
+      hogd::warn("--event-port is deprecated and ignored");
+      continue;
+    }
     if (arg == "--db-path" && i + 1 < argc) {
       path = argv[++i];
       continue;
     }
     if (arg == "--bind-ip" && i + 1 < argc) {
       bind_ip = argv[++i];
-      continue;
-    }
-    if (arg == "--event-port" && i + 1 < argc) {
-      event_port = hogd::parse_port_arg("--event-port", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--block-explorer-port" && i + 1 < argc) {
@@ -175,6 +142,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (event_server_addr.empty() || path.empty() || bind_ip.empty()) {
     usage(argv);
   }
-  return hogd::indexer_init(path, event_server_addr, bind_ip, event_port,
+  return hogd::indexer_init(path, event_server_addr, bind_ip,
                             block_explorer_port, metrics_port);
 };

@@ -43,6 +43,10 @@ decode(std::string_view bytes)
   if (payload.schema_version != kCursorVersion) {
     return std::nullopt;
   }
+  if (payload.block_height < 0 || payload.max_block_height < 0 ||
+      payload.block_height > payload.max_block_height) {
+    return std::nullopt;
+  }
   return payload;
 }
 

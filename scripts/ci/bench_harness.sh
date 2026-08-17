@@ -292,7 +292,7 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
 # both, and 3 if the signals could not be sent at all -- a host whose [killall]
-# or [sudo] is broken has not been shown to have a process refusing to die, and
+# is broken has not been shown to have a process refusing to die, and
 # must not be reported as though it had.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
@@ -348,10 +348,10 @@ wait_gone() {
 # Sends \$1 to every named process. Returns nonzero only when the signal could
 # not be sent at all, which has to be told apart from a process that refused to
 # die: [-q] silences killall's own "no process found", so a nonzero exit that
-# still says something is sudo or killall failing rather than an absence of
+# still says something is killall failing rather than an absence of
 # processes to kill.
 signal_all() {
-  err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
+  err=\$(killall -q "-\$1" \$procs 2>&1)
   status=\$?
   if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
     echo "cannot signal processes: \$err" >&2

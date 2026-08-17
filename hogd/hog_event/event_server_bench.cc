@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <print>
 #include <span>
 #include <stdexcept>
@@ -19,11 +20,14 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/init.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "transaction.hh"
@@ -42,10 +46,20 @@ namespace {
 struct TestSchedEvent {
   using rpc_service = SchedEvent1;
 
-  static RPCError schedevent_intro_event(const EventCard &card)
+  static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
     std::println("Intro event server: {}", x23::show(card));
-    return RPCError::kRPCNone;
+    EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
+    result.snapshot().tip.block_id = std::numeric_limits<BlockID>::max();
+    result.snapshot().tip.consensus_value.proposal_header.block_height = -1;
+    result.snapshot().token = 1;
+    return result;
+  }
+
+  static EventActivationResult
+  schedevent_activate_event(const EventRegistrationSnapshot & /*unused*/)
+  {
+    return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
 };
 
@@ -74,7 +88,9 @@ connect_to_event_sched_server(const std::string &address)
     throw std::runtime_error(
         std::format("Failed to parse event sched server address: {}", address));
   }
-  auto client = make_rpc_client<EventSched1>(host_port, false)();
+  auto client =
+      make_rpc_client<EventSched1>(host_port, false,
+                                   kEventSchedulerRpcMaxMessageSize)();
   if (!client)
     panic("connect_to_event_sched_server failed: {}",
           client.error().error_code().message());
@@ -96,15 +112,22 @@ const std::vector<uint8_t> event_data = []() {
 const ContractAddress contract_address =
     sha256(std::string_view{"contract_addr"});
 
+ProposedTransaction
+create_fake_body(size_t tx_id)
+{
+  ProposedTransaction body{};
+  body.signed_tx.tx.uniquifier.block_expiry_height = 1'000'000;
+  body.signed_tx.tx.uniquifier.nonce = tx_id;
+  body.signed_tx.tx.invocation.gas_limit = 1'000'000;
+  return body;
+}
+
 // Create a fake TxEventLog with some events
 TxEventLog
 create_fake_event_log(size_t tx_id)
 {
   TxEventLog event_log{};
-
-  auto size_span = std::as_bytes(std::span<const size_t, 1>{&tx_id, 1});
-  std::memcpy(event_log.proposed_tx_hash.data(), size_span.data(),
-              size_span.size());
+  event_log.proposed_tx_hash = sha256(create_fake_body(tx_id).signed_tx.tx);
 
   // Create some fake events (3 events per transaction)
   for (size_t i = 0; i < 3; i++) {
@@ -147,10 +170,9 @@ event_sender_coro(event_exec_client_t &exec_client, x23::CoroCB<void> &cb,
 
     for (size_t i = start; i < end; i++) {
       auto event_log = create_fake_event_log(i);
-      auto res =
-          co_await exec_client.eventexecutor_emit_event(block_number, i,
-                                                        event_log,
-                                                        ProposedTransaction{});
+      auto body = create_fake_body(i);
+      auto res = co_await exec_client.eventexecutor_emit_event(block_number, i,
+                                                               event_log, body);
       if (res != RPCError::kRPCNone) {
         throw std::runtime_error(
             std::format("Failed to emit event {}: error code {}", i,
@@ -225,8 +247,22 @@ run_event_bench(const std::string &exec_server_addr,
   if (res1 != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close executor event handle");
   }
+  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
+  hashes.reserve(num_events);
+  nondeterministic_data.reserve(num_events);
+  for (size_t i = 0; i < num_events; ++i) {
+    ProposedTransaction body = create_fake_body(i);
+    hashes.push_back(sha256(body.signed_tx.tx));
+    nondeterministic_data.push_back(body.nondeterministic_proposal_data);
+  }
+  ProposalTxs proposal_txs{
+      .hash = t_to_parallel_batch(hashes)(),
+      .nondeterministic_data = t_to_parallel_batch(nondeterministic_data)(),
+  };
   auto close_res =
-      event_sched_client.eventsched_close_block(block_number, block_number)();
+      event_sched_client.eventsched_close_block(block_number, block_number,
+                                                proposal_txs)();
   if (close_res.error() != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close block");
   }

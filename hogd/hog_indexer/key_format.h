@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "network.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -17,19 +18,12 @@ class IndexerKeyFormat {
 public:
   IndexerKeyFormat() = delete;
 
-  // Scheme format for this index:
+  // Primary event index.
   // Column family: tx_index
-  // This is the primary index, and is responsible for storing the list of
-  // events per each transaction. Key format:
-  //   tx_hash (32 bytes) (total: 32 bytes)
-  // Value format:
-  //   serialized TxEventLog
-  // The first bytes of the key are the block height, so that appending new elts
-  // and pruning old data is efficient.
-  //
-  // This index is the primary event index.  Other indices do not store copies
-  // of the events, but rather just reference things that can be looked up in
-  // this index.
+  // Key: tx_hash (32 bytes)
+  // Value: little-endian BlockHeight || XDR ProposedTransaction ||
+  //        XDR TxEventLog
+  // Other indices reference records here by transaction hash.
 
   // Column family: contract_index
   // This index is responsible for allowing searches of events by contract
@@ -38,13 +32,11 @@ public:
   //   BE) + tx_hash (32 bytes) + sequence_number (4 bytes BE) (total: 77
   //   bytes)
   // Value format:
-  //   empty string (event data is looked up from tx_index using block_height
-  //   and tx_hash)
+  //   empty string (event data is looked up from tx_index using tx_hash)
   //
   // This index provides a way to find events by contract address. The actual
-  // event data is retrieved by looking up the transaction in tx_index using the
-  // block_height and tx_hash from the key, then extracting the event at the
-  // sequence_number.
+  // event data is retrieved from tx_index using the tx_hash from the key, then
+  // extracting the event at the sequence_number.
 
   // Column family names for RocksDB
   static constexpr const char *kTxIndexColumnFamily = "tx_index";
@@ -56,6 +48,21 @@ public:
   // inside consume_events.  Absent on databases that predate this key.
   static constexpr const char *kHighestIndexedBlockMetaKey =
       "meta:highest_indexed_block";
+
+  // Durable strict-ingestion metadata lives in the default column family. The
+  // progress value is XDR IndexerInitializedProgress; each identity value is
+  // XDR IndexerCommittedBlockIdentity.
+  static constexpr const char *kDurableProgressMetaKey =
+      "meta:indexer_durable:progress";
+  static constexpr std::string_view kStrictMetadataPrefix =
+      "meta:indexer_durable:";
+  static constexpr std::string_view kBlockIdentityMetaKeyPrefix =
+      "meta:indexer_durable:block:";
+  static constexpr std::string_view kEpochHistoryMetaKeyPrefix =
+      "meta:indexer_durable:epoch:";
+  static std::string make_block_identity_meta_key(BlockHeight block_height);
+  static std::string
+  make_epoch_history_meta_key(const ProtocolCommit &protocol);
 
   // Transaction index key format:
   //   tx_hash (32 bytes)

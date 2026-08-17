@@ -1,10 +1,10 @@
 add_library(hog_event_objects OBJECT
   event_block_context.cc
+  indexer_outbox.cc
   rpc_context.cc
   rpc_from_exec.cc
   rpc_from_sched.cc
   status.cc
-  topic_layout.cc
   utilities.cc
 )
 
@@ -18,6 +18,7 @@ add_library(hog_event STATIC $<TARGET_OBJECTS:hog_event_objects>)
 target_link_libraries(
   hog_event
   hogd
+  indexer_payload_validation
   metrics
   merkle
 )
@@ -46,9 +47,9 @@ endif()
 
 add_library(hog_event_test_objects OBJECT
   event_block_context_test.cc
+  indexer_outbox_test.cc
   event_rpc_test.cc
   rpc_server_shutdown_test.cc
-  topic_layout_test.cc
 )
 target_link_libraries(
   hog_event_test_objects

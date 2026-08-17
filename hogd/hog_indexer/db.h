@@ -3,8 +3,10 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <rocksdb/compression_type.h>
 #include <set>
 #include <span>
@@ -14,11 +16,13 @@
 #include <vector>
 
 #include "event.hh"
+#include "event_outbox_internal.hh"
 #include "hogd/hog_indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 // Forward declare RocksDB types to avoid including headers here
 namespace rocksdb {
@@ -70,8 +74,9 @@ public:
   // Delete copy, allow move
   IndexDB(const IndexDB &) = delete;
   IndexDB &operator=(const IndexDB &) = delete;
-  IndexDB(IndexDB &&other) noexcept;
-  IndexDB &operator=(IndexDB &&other) noexcept;
+  IndexDB(IndexDB &&other) noexcept; // NOLINT(bugprone-exception-escape)
+  IndexDB &
+  operator=(IndexDB &&other) noexcept; // NOLINT(bugprone-exception-escape)
 
   static std::string get_build_config();
 
@@ -89,6 +94,14 @@ public:
   IndexerStatus<void>
   consume_events(BlockHeight block_height, std::span<const TxEventLog> events,
                  std::span<const ProposedTransaction> bodies);
+
+  // Durable strict ingestion. Epoch changes and committed blocks each have one
+  // synchronous RocksDB WriteBatch durability point.
+  IndexerProgress durable_progress() const;
+  IndexerEpochResult initialize_epoch(const IndexerOutboxOrigin &origin);
+  x23::Async<IndexerBlockApplyResult>
+  apply_committed_block(IndexerOutboxOrigin origin,
+                        IndexerCommittedBlock block);
 
   // Everything stored in the tx_index for one transaction.
   struct TxRecord {
@@ -149,6 +162,22 @@ public:
   // kEventsMaxLimit is capped to that.
   static constexpr std::uint32_t kEventsDefaultLimit = 50;
   static constexpr std::uint32_t kEventsMaxLimit = 200;
+  // Genesis is committed directly at height 0. The durable event/indexer
+  // stream begins with the first post-genesis block.
+  static constexpr BlockHeight kFirstOutboxBlockHeight = 1;
+
+  void set_legacy_ingest_test_hook(std::function<void()> hook)
+  {
+    legacy_ingest_test_hook_ = std::move(hook);
+  }
+  void set_initialize_epoch_test_hook(std::function<void()> hook)
+  {
+    initialize_epoch_test_hook_ = std::move(hook);
+  }
+  void set_apply_validation_test_hook(std::function<void()> hook)
+  {
+    apply_validation_test_hook_ = std::move(hook);
+  }
 
   [[nodiscard]] static constexpr bool
   is_valid_iteration_order(IterationOrder order)
@@ -183,19 +212,21 @@ private:
 
   void stats_worker(std::stop_token &stoken) const;
 
-  // Seek the tx_index to its last entry to initialize
-  // highest_indexed_block_ on open.  Runs once at construction.
-  void initialize_highest_block_from_db();
+  IndexerBlockApplyResult
+  apply_validated_committed_block(const IndexerOutboxOrigin &origin,
+                                  const IndexerCommittedBlock &block);
+
+  IndexerStatus<void> initialize_progress_from_db();
 
   // True iff `h` is at or below the contiguous watermark or buffered
   // in pending_heights_.  The guard evidences ingest_mutex_ is held.
-  bool height_seen(int64_t h, std::lock_guard<std::mutex> const &g) const;
+  bool height_seen(int64_t h, std::unique_lock<std::mutex> const &g) const;
 
   // Record an ingested height: advance the contiguous watermark
   // (draining newly-contiguous pending heights, persisting the meta
   // key) or buffer an out-of-order height.  The guard evidences
   // ingest_mutex_ is held.
-  void record_height(int64_t h, std::lock_guard<std::mutex> const &g);
+  void record_height(int64_t h, std::unique_lock<std::mutex> const &g);
 
   std::unique_ptr<rocksdb::DB, RocksDBDeleter> db_;
   rocksdb::ColumnFamilyHandle *tx_cf_handle_;
@@ -209,13 +240,24 @@ private:
   // advance/persist).  get_events never takes it — queries read only
   // the atomic below.  Default-constructed fresh on move (moves only
   // happen in the factory functions, before concurrent use).
-  std::mutex ingest_mutex_;
+  mutable std::mutex ingest_mutex_;
 
   // Heights ingested out of order, strictly above the watermark + 1.
   // Almost always empty (commit-time fanout delivers heights in
   // order); intentionally NOT persisted — a gap spanning a restart
   // stalls serving until upstream resends.  Guarded by ingest_mutex_.
   std::set<int64_t> pending_heights_;
+
+  // Present only after durable epoch initialization. Guarded by ingest_mutex_.
+  std::optional<IndexerInitializedProgress> durable_progress_;
+  // Set when a recognized legacy watermark is loaded or legacy ingestion first
+  // runs. This is distinct from a fresh empty database: durable initialization
+  // must fail with an explicit migration-required outcome while legacy storage
+  // remains restart-compatible.
+  bool legacy_mode_ = false;
+  std::function<void()> legacy_ingest_test_hook_;
+  std::function<void()> initialize_epoch_test_hook_;
+  std::function<void()> apply_validation_test_hook_;
 
   // Highest CONTIGUOUSLY ingested block height (see latest_block()),
   // kNoBlocksIndexed until the first ingest, seeded from the on-disk

@@ -25,6 +25,7 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -40,8 +41,10 @@
 
 namespace hogd {
 
+namespace {
+
 class RpcLoadgenEventTest : public ::testing::Test {
-public:
+protected:
   void SetUp() override
   {
     // Start loadgen RPC server on a random port
@@ -68,7 +71,6 @@ public:
         x23::HostPort{"localhost", event_wrapper_.sched_port()}, false);
   }
 
-protected:
   HogdbWrapper db_wrapper_;
   EventServerWrapper event_wrapper_;
 
@@ -124,7 +126,7 @@ protected:
 
     // We use [block_id] as the height as well.
     auto event_close_res =
-        event_client_.eventsched_close_block(block_id, block_id);
+        event_client_.eventsched_close_block(block_id, block_id, ProposalTxs{});
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
@@ -224,9 +226,11 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   for (const auto &tx : txs) {
     SHA256Hash tx_hash = sha256(tx.tx);
     auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash)();
-    ASSERT_TRUE(events.has_value()) << "Events should be present";
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    ASSERT_GT(events->events.size(), 0)
+    if (!events.has_value()) {
+      ADD_FAILURE() << "Events should be present";
+      return;
+    }
+    ASSERT_GT(events.value().events.size(), 0)
         << "Events should have at least one event";
   }
 }
@@ -330,7 +334,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   for (const auto &tx : txs) {
     SHA256Hash tx_hash = sha256(tx.tx);
     auto events = event_wrapper_.get_events_by_hash(test_block_id, tx_hash)();
-    if (events.has_value() && !events->events.empty()) {
+    if (events.has_value() && !events.value().events.empty()) {
       found_events = true;
       break;
     }
@@ -338,5 +342,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // At least one transaction should have emitted events after unblocking
   ASSERT_TRUE(found_events) << "No events were emitted after unblocking";
 }
+
+} // namespace
 
 } // namespace hogd
