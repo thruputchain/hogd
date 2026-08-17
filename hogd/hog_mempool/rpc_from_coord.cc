@@ -1526,10 +1526,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     return GenesisCeremonyResult(outcome);
   };
 
-  if (request.context.protocol != 0 || request.expected_parent_height != 0 ||
-      sha256(request.transactions) != request.expected_batch_hash) {
+  if (request.context.protocol != 0 || request.expected_parent_height != 0) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
   }
+  const SHA256Hash batch_hash = sha256(request.transactions);
 
   x23::XdrVec<SignedTransaction> txs;
   if (!(co_await parallel_batch_to_t(request.transactions, txs)) ||
@@ -1570,8 +1570,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     // auth callback can hold it while genesis ceremony execution is pending.
     const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
     if (last_committed_block_.value.proposal_header.block_height == 1) {
-      if (committed_genesis_ceremony_batch_hash_ ==
-              request.expected_batch_hash &&
+      if (committed_genesis_ceremony_batch_hash_ == batch_hash &&
           committed_genesis_ceremony_proposal_txs_) {
         GenesisCeremonyResult already(
             GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
@@ -1725,7 +1724,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       SchedulerCommitOutcome::SchedulerCommitOK) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
   }
-  committed_genesis_ceremony_batch_hash_ = request.expected_batch_hash;
+  committed_genesis_ceremony_batch_hash_ = batch_hash;
   committed_genesis_ceremony_proposal_txs_ = committed_proposal_txs;
   GenesisCeremonyResult committed(
       GenesisCeremonyOutcome::GenesisCeremonyCommitted);

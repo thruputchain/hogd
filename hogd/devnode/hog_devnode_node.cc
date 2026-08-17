@@ -1028,7 +1028,6 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
   GenesisCeremonyRequest request{
       .expected_parent_height = 0,
       .expected_parent_value_hash = sha256(tip.db_tip().value),
-      .expected_batch_hash = sha256(parallel),
       .context = ProposalContext{.protocol = 0},
       .transactions = std::move(parallel),
   };

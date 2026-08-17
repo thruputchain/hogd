@@ -2319,7 +2319,6 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndIsIdempotent)
   GenesisCeremonyRequest request{
       .expected_parent_height = 0,
       .expected_parent_value_hash = sha256(parent.db_tip().value),
-      .expected_batch_hash = sha256(parallel),
       .context = ProposalContext{.protocol = 0},
       .transactions = parallel,
   };
@@ -2380,7 +2379,6 @@ TEST(Mempool, GenesisV2CeremonyRejectsParentCommittedBeforeNomination)
   GenesisCeremonyRequest request{
       .expected_parent_height = 0,
       .expected_parent_value_hash = sha256(parent.db_tip().value),
-      .expected_batch_hash = sha256(parallel),
       .context = ProposalContext{.protocol = 0},
       .transactions = std::move(parallel),
   };
