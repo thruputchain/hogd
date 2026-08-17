@@ -380,10 +380,16 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     }
 
     double seconds = timer.elapsed();
+    // Guard against a zero interval: dividing by it yields a non-finite
+    // double, and converting that to size_t for print_iec_bytes is undefined
+    // behavior (#2900). elapsed() is backed by steady_clock, so the interval
+    // can be zero on a fast snapshot but never negative.
+    size_t rate = seconds > 0 ? static_cast<size_t>(stats.bytes / seconds) : 0;
+
     info("snapshot took {:.3f} s (not including disk sync)", seconds);
     info("...total items snapshot {}", stats.items);
     info("...total bytes snapshot {}", print_iec_bytes(stats.bytes, true));
-    info("...snapshot rate {}/s", print_iec_bytes(stats.bytes / seconds), true);
+    info("...snapshot rate {}/s", print_iec_bytes(rate, true));
 
     ElapsedTimer snap_sync_timer{};
 
