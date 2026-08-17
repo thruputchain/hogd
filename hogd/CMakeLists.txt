@@ -86,7 +86,7 @@ endif()
 add_custom_target(tidy_targets)
 add_dependencies(
   tidy_targets
-  all_wasm_headers
+  all_contract_headers
   protocol
   x23
   hogd_interface

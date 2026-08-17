@@ -21,6 +21,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class ERC20ExperimentTest : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
@@ -57,15 +58,12 @@ protected:
 
   // Runs the full erc20 payments experiment in-process: genesis deploy, the
   // initialization/mint blocks, then 100 wallet-authorized transfer work txs.
-  // use_rv32 selects the rv32 vs wasm contract builds; the workload is
-  // otherwise identical, which is what makes the two runtimes comparable.
-  void run_payments_experiment(bool use_rv32)
+  void run_payments_experiment()
   {
     auto state = std::make_shared<ERC20ExperimentState>(
         ERC20PaymentsConfig{
             .num_addresses = 10,
-        },
-        use_rv32);
+        });
     auto result = state->generate_experiment()();
     ASSERT_TRUE(result.has_value());
 
@@ -114,17 +112,12 @@ protected:
   }
 };
 
-TEST_F(ERC20ExperimentTest, Basic)
-{
-  run_payments_experiment(/*use_rv32=*/false);
-}
-
 // Same payments workload, but the erc20 and wallet contracts are the compiled
 // rv32 artifacts run through the RV32 runtime. Exercises the rv32 wallet
 // do_action -> ed25519 verify -> cross-call erc20 transfer path end to end.
 TEST_F(ERC20ExperimentTest, BasicRv32)
 {
-  run_payments_experiment(/*use_rv32=*/true);
+  run_payments_experiment();
 }
 
 TEST_F(ERC20ExperimentTest, BasicAuth)

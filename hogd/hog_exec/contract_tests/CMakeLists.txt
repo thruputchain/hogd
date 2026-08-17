@@ -20,7 +20,7 @@ target_include_directories(
 
 add_dependencies(
   contract_tests_objects
-  all_wasm_headers
+  all_contract_headers
 )
 
 add_executable(

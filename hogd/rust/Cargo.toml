@@ -2,7 +2,6 @@
 members = [
     "crypto",
     "unified",
-    "synchronized_map",
     "test_ffi_bindings",
 ]
 resolver = "2"

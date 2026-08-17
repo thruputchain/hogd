@@ -24,7 +24,7 @@ if(BUILD_BENCHMARKS)
   add_dependencies(
     fibonacci_rv32only
     all_riscvs_built # for fibonacci.rv32a
-    all_wasm_headers # for built_contracts/fibonacci.h
+    all_contract_headers # for built_contracts/fibonacci.h
   )
 
   set_property(TARGET fibonacci_rv32only PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -55,7 +55,7 @@ if(BUILD_BENCHMARKS)
   add_dependencies(
     payments_bench
     all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a (payments_bench -r)
-    all_wasm_headers # for built_contracts/itc_erc20.h / simple_wallet.h
+    all_contract_headers # for built_contracts/itc_erc20.h / simple_wallet.h
   )
 
   set_property(TARGET payments_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

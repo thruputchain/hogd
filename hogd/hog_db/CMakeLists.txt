@@ -60,7 +60,7 @@ target_link_libraries(
   metrics
   http
 )
-add_dependencies(hog-db all_wasm_contracts)
+add_dependencies(hog-db all_riscv_contracts)
 
 if(BUILD_BENCHMARKS)
   # Build the hog_db_bench executable
@@ -100,7 +100,7 @@ target_link_libraries(
   model_checker
   GTest::gtest_main
 )
-add_dependencies(hog_db_test all_wasm_contracts)
+add_dependencies(hog_db_test all_riscv_contracts)
 gtest_discover_tests(
   hog_db_test
 )

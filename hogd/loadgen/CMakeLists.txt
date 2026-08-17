@@ -13,9 +13,9 @@ target_link_libraries(loadgen
 
 add_dependencies(
   loadgen
-  all_wasm_contracts
-  all_wasm_headers
-  all_riscvs_built # erc20_experiment loads .rv32a artifacts in rv32 mode
+  all_riscv_contracts
+  all_contract_headers
+  all_riscvs_built # erc20_experiment loads .rv32a artifacts
 )
 
 target_include_directories(loadgen PRIVATE
@@ -40,9 +40,8 @@ target_link_libraries(
 
 add_dependencies(
   loadgen_tests
-  all_wasm_contracts
-  all_wasm_headers
-  all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a (BasicRv32 test)
+  all_riscv_contracts
+  all_contract_headers
 )
 
 add_executable(
@@ -72,8 +71,8 @@ if(BUILD_BENCHMARKS)
 
   add_dependencies(
     erc20_experiment_bench
-    all_wasm_contracts
-    all_wasm_headers
+    all_riscv_contracts
+    all_contract_headers
   )
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set_property(TARGET erc20_experiment_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -93,8 +92,8 @@ target_link_libraries(
 
 add_dependencies(
   tx_size_stats
-  all_wasm_contracts
-  all_wasm_headers
+  all_riscv_contracts
+  all_contract_headers
 )
 
 # create gas_usage_metric binary
@@ -115,11 +114,11 @@ target_link_libraries(
 
 add_dependencies(
   gas_usage_metric
-  all_wasm_contracts
-  all_wasm_headers
+  all_riscv_contracts
+  all_contract_headers
 )
 
-# in-process payments execution benchmark (wasm vs rv32), no servers needed
+# in-process payments execution benchmark, no servers needed
 if(BUILD_BENCHMARKS)
   add_executable(
     payments_exec_bench
@@ -139,9 +138,8 @@ if(BUILD_BENCHMARKS)
 
   add_dependencies(
     payments_exec_bench
-    all_wasm_contracts
-    all_wasm_headers
-    all_riscvs_built # for itc_erc20.rv32a / simple_wallet.rv32a
+    all_riscv_contracts
+    all_contract_headers
   )
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set_property(TARGET payments_exec_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

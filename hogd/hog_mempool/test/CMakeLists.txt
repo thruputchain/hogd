@@ -10,7 +10,7 @@ target_link_libraries(mempool_test_infra
   hogd_interface
 )
 add_dependencies(mempool_test_infra
-  all_wasm_contracts
+  all_riscv_contracts
   all_riscvs_built
 )
 
@@ -27,7 +27,7 @@ target_link_libraries(mempool_test_objects
   hogd_interface
 )
 add_dependencies(mempool_test_objects
-  all_wasm_contracts
+  all_riscv_contracts
 )
 
 add_executable(
@@ -85,7 +85,7 @@ if(BUILD_BENCHMARKS)
   )
   add_dependencies(
     mempool_scheduler_bench
-    all_wasm_contracts
+    all_riscv_contracts
   )
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set_property(TARGET mempool_scheduler_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
