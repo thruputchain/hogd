@@ -592,5 +592,42 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
   EXPECT_FALSE(std::ranges::search(buf, payload).empty());
 }
 
+// Same fallback with the configured kRv32 wallet's code record absent:
+// Rv32Context::make_new_runtime sees resolve_contract return null (not an
+// error) and must fail Unrecoverable — broken chain state fails loudly.
+TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
+{
+  auto echo_obj = echo_meta::load_rv32();
+  ASSERT_TRUE(echo_obj);
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(
+      NativeContractTestFramework::make_deployed_contract_hash(echo_obj));
+  run_genesis_initialization(builder.build_or_panic(*get_default_cost_model()),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+
+  auto rv32_ctx = std::make_unique<Rv32Context>();
+  MultiplexedContext ctx(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kRv32, {rv32_ctx.release(), true}},
+      });
+
+  ContractAddress undeployed = make_contract_address(77);
+  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(8, 0xAB);
+  SignedTransaction stx;
+  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.uniquifier = make_new_uniquifier();
+
+  auto handler = make_new_system_call_handler(stx, ctx);
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultUnrecoverable);
+}
+
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

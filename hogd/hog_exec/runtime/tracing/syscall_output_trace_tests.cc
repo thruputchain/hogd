@@ -72,9 +72,10 @@ make_entry(GasAmount gas_at_start, GasAmount gas_at_end, SyscallTraceBody body,
   };
 }
 
-// Test-only stub accepting any wasmi blob, so DeployContract can run against
-// an opaque attached contract (same rationale as selective_deployment_test).
-class NoopWasmiContext : public RuntimeContext {
+// Test-only stub accepting any rv32-tagged blob, so DeployContract can run
+// against an opaque attached contract (same rationale as
+// selective_deployment_test).
+class NoopRv32Context : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*unused*/) const override
   {
@@ -555,10 +556,10 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
 
 TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 {
-  Contract blob(ContractType::kWasmi);
-  blob.wasmi_contract().data.resize_uninitialized(32);
-  for (size_t i = 0; i < blob.wasmi_contract().data.size(); ++i) {
-    blob.wasmi_contract().data[i] = static_cast<uint8_t>((i * 13) + 3);
+  Contract blob(ContractType::kRv32);
+  blob.rv32_contract().data.resize_uninitialized(32);
+  for (size_t i = 0; i < blob.rv32_contract().data.size(); ++i) {
+    blob.rv32_contract().data[i] = static_cast<uint8_t>((i * 13) + 3);
   }
   auto blob_hash = sha256(blob);
 
@@ -599,11 +600,11 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
   NativeContext native_context(std::move(cmap));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto contract = make_native_contract(0);
   write_contract(contract);

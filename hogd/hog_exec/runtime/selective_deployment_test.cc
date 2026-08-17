@@ -54,14 +54,15 @@ public:
 
 namespace {
 
-// Test-only stub that accepts any wasmi contract without parsing it. Tests in
-// this file exercise SystemCallHandler's selective-deployment bookkeeping
-// (which contracts end up in the DB), not wasm validation, and use opaque
-// placeholder bytes in contracts_to_deploy rather than real wasm modules. A
-// real wasmi context would reject those bytes in verify_contract and the test
-// would fail for unrelated reasons. The deployed contracts are never invoked,
-// so make_new_runtime does not need to produce a working Runtime.
-class NoopWasmiContext : public RuntimeContext {
+// Test-only stub that accepts any rv32-tagged contract without parsing it.
+// Tests in this file exercise SystemCallHandler's selective-deployment
+// bookkeeping (which contracts end up in the DB), not artifact validation, and
+// use opaque placeholder bytes in contracts_to_deploy rather than real
+// artifacts. A real Rv32Context would reject those bytes in verify_contract
+// and the test would fail for unrelated reasons. The deployed contracts are
+// never invoked, so make_new_runtime does not need to produce a working
+// Runtime.
+class NoopRv32Context : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*unused*/) const override
   {
@@ -88,12 +89,12 @@ public:
 TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
 {
   // Create two contracts to add to contracts_to_deploy
-  Contract contract_to_deploy_1(ContractType::kWasmi);
-  contract_to_deploy_1.wasmi_contract() =
+  Contract contract_to_deploy_1(ContractType::kRv32);
+  contract_to_deploy_1.rv32_contract() =
       ContractBlob{.data = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1}};
 
-  Contract contract_to_deploy_2(ContractType::kWasmi);
-  contract_to_deploy_2.wasmi_contract() =
+  Contract contract_to_deploy_2(ContractType::kRv32);
+  contract_to_deploy_2.rv32_contract() =
       ContractBlob{.data = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2}};
 
   auto contract_1_hash = sha256(contract_to_deploy_1);
@@ -128,11 +129,11 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   // Mark the deployer contract as existing and deployed within the database
   auto deployer_contract = make_native_contract(0);
@@ -766,10 +767,10 @@ TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
 // kMaxContractSizeBytes.
 TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 {
-  Contract big_contract(ContractType::kWasmi);
-  big_contract.wasmi_contract().data.resize_uninitialized(100_KiB);
-  for (size_t i = 0; i < big_contract.wasmi_contract().data.size(); ++i) {
-    big_contract.wasmi_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
+  Contract big_contract(ContractType::kRv32);
+  big_contract.rv32_contract().data.resize_uninitialized(100_KiB);
+  for (size_t i = 0; i < big_contract.rv32_contract().data.size(); ++i) {
+    big_contract.rv32_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
   }
   auto big_hash = sha256(big_contract);
 
@@ -797,11 +798,11 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto deployer_contract = make_native_contract(0);
   write_contract(deployer_contract);
@@ -847,10 +848,10 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 // deployment.
 TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
 {
-  Contract blob(ContractType::kWasmi);
-  blob.wasmi_contract().data.resize_uninitialized(64);
-  for (size_t i = 0; i < blob.wasmi_contract().data.size(); ++i) {
-    blob.wasmi_contract().data[i] = static_cast<uint8_t>((i * 3) + 1);
+  Contract blob(ContractType::kRv32);
+  blob.rv32_contract().data.resize_uninitialized(64);
+  for (size_t i = 0; i < blob.rv32_contract().data.size(); ++i) {
+    blob.rv32_contract().data[i] = static_cast<uint8_t>((i * 3) + 1);
   }
   auto blob_hash = sha256(blob);
 
@@ -893,11 +894,11 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto deployer_contract = make_native_contract(0);
   write_contract(deployer_contract);
@@ -959,10 +960,10 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
 // succeeds if the earlier deployments were really rolled back.
 TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
 {
-  Contract blob(ContractType::kWasmi);
-  blob.wasmi_contract().data.resize_uninitialized(64);
-  for (size_t i = 0; i < blob.wasmi_contract().data.size(); ++i) {
-    blob.wasmi_contract().data[i] = static_cast<uint8_t>((i * 5) + 3);
+  Contract blob(ContractType::kRv32);
+  blob.rv32_contract().data.resize_uninitialized(64);
+  for (size_t i = 0; i < blob.rv32_contract().data.size(); ++i) {
+    blob.rv32_contract().data[i] = static_cast<uint8_t>((i * 5) + 3);
   }
   auto blob_hash = sha256(blob);
 
@@ -1062,11 +1063,11 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   contract_map.emplace(1,
                        std::make_unique<NativeContract>(std::move(fns_child)));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto parent_contract = make_native_contract(0);
   write_contract(parent_contract);
@@ -1105,10 +1106,10 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
 // try-invoking frame is caught by its parent (the root still commits).
 TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
 {
-  Contract blob(ContractType::kWasmi);
-  blob.wasmi_contract().data.resize_uninitialized(64);
-  for (size_t i = 0; i < blob.wasmi_contract().data.size(); ++i) {
-    blob.wasmi_contract().data[i] = static_cast<uint8_t>((i * 7) + 5);
+  Contract blob(ContractType::kRv32);
+  blob.rv32_contract().data.resize_uninitialized(64);
+  for (size_t i = 0; i < blob.rv32_contract().data.size(); ++i) {
+    blob.rv32_contract().data[i] = static_cast<uint8_t>((i * 7) + 5);
   }
   auto blob_hash = sha256(blob);
 
@@ -1222,11 +1223,11 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   contract_map.emplace(2,
                        std::make_unique<NativeContract>(std::move(fns_leaf)));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto root_contract = make_native_contract(0);
   write_contract(root_contract);
@@ -1280,10 +1281,10 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
 // address, and the null-arm result is exactly where DeployContract lands.
 TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
 {
-  Contract blob(ContractType::kWasmi);
-  blob.wasmi_contract().data.resize_uninitialized(64);
-  for (size_t i = 0; i < blob.wasmi_contract().data.size(); ++i) {
-    blob.wasmi_contract().data[i] = static_cast<uint8_t>((i * 11) + 7);
+  Contract blob(ContractType::kRv32);
+  blob.rv32_contract().data.resize_uninitialized(64);
+  for (size_t i = 0; i < blob.rv32_contract().data.size(); ++i) {
+    blob.rv32_contract().data[i] = static_cast<uint8_t>((i * 11) + 7);
   }
   auto blob_hash = sha256(blob);
 
@@ -1345,11 +1346,11 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto deployer_contract = make_native_contract(0);
   write_contract(deployer_contract);
@@ -1386,11 +1387,11 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
 // > -> >= drift would reject transactions other validators accept.
 TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
 {
-  Contract limit_contract(ContractType::kWasmi);
-  limit_contract.wasmi_contract().data.resize_uninitialized(
+  Contract limit_contract(ContractType::kRv32);
+  limit_contract.rv32_contract().data.resize_uninitialized(
       kMaxContractSizeBytes);
-  for (size_t i = 0; i < limit_contract.wasmi_contract().data.size(); ++i) {
-    limit_contract.wasmi_contract().data[i] =
+  for (size_t i = 0; i < limit_contract.rv32_contract().data.size(); ++i) {
+    limit_contract.rv32_contract().data[i] =
         static_cast<uint8_t>((i * 37) + 11);
   }
   auto limit_hash = sha256(limit_contract);
@@ -1419,11 +1420,11 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto deployer_contract = make_native_contract(0);
   write_contract(deployer_contract);
@@ -1465,9 +1466,9 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
 // nothing is deployed (#2569).
 TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
-  Contract oversized(ContractType::kWasmi);
-  oversized.wasmi_contract().data.resize_uninitialized(kMaxContractSizeBytes +
-                                                       1);
+  Contract oversized(ContractType::kRv32);
+  oversized.rv32_contract().data.resize_uninitialized(kMaxContractSizeBytes +
+                                                      1);
   auto oversized_hash = sha256(oversized);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
@@ -1481,11 +1482,11 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto deployer_contract = make_native_contract(0);
   write_contract(deployer_contract);

@@ -70,7 +70,7 @@ make_deployed_hash(uint8_t value, uint32_t contract_size)
   DeployedContractHash hash{};
   hash.hash.fill(value);
   hash.contract_size = contract_size;
-  hash.contract_type = ContractType::kWasmi;
+  hash.contract_type = ContractType::kRv32;
   return hash;
 }
 

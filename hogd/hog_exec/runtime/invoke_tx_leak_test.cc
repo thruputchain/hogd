@@ -42,7 +42,7 @@ namespace hogd {
 
 namespace {
 
-class NoopWasmiContext : public RuntimeContext {
+class NoopRv32Context : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const & /*contract*/) const override
   {
@@ -70,8 +70,8 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
       TestDB::kHogDb);
 
-  Contract contract_to_deploy(ContractType::kWasmi);
-  contract_to_deploy.wasmi_contract().data.append_range(std::string(8192, 'x'));
+  Contract contract_to_deploy(ContractType::kRv32);
+  contract_to_deploy.rv32_contract().data.append_range(std::string(8192, 'x'));
   const auto contract_hash = sha256(contract_to_deploy);
 
   constexpr static SHA256Hash kDeployNonce = []() {
@@ -104,11 +104,11 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native));
   NativeContext native_context(std::move(contract_map));
-  NoopWasmiContext wasmi_context;
+  NoopRv32Context noop_context;
   MultiplexedContext context(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
           {ContractType::kNative, {&native_context, false}},
-          {ContractType::kWasmi, {&wasmi_context, false}}});
+          {ContractType::kRv32, {&noop_context, false}}});
 
   auto deployer_contract = NativeContractTestFramework::make_native_contract(0);
   fw.write_contract(deployer_contract);

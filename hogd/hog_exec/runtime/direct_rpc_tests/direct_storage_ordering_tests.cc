@@ -343,8 +343,8 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
       NativeContractTestFramework::make_contract_address(1);
   fw.setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.append_range(std::string(2048, 'x'));
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(std::string(2048, 'x'));
   auto contract_ptr = std::make_shared<const Contract>(contract);
   const auto deployed_contract_hash =
       NativeContractTestFramework::make_deployed_contract_hash(contract_ptr);
