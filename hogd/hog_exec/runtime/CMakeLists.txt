@@ -300,13 +300,6 @@ target_link_libraries(
 gtest_discover_tests(rv32_runtime_context_test
                      TEST_PREFIX rv32.runtime.)
 
-add_dependencies(
-  rv32_runtime_context_test
-  test_error_handling_wasm
-  all_wasm_contracts
-  all_wasm_headers
-)
-
 add_executable(
   rv32_upstream_artifact_test
   rv32/runtime_context.cc
