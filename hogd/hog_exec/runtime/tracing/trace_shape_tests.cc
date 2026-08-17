@@ -227,6 +227,59 @@ TEST_F(TraceShapeTest, Sha256WrapperTraceIsExact)
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+            input.size());
+}
+
+TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
+{
+  const x23::Vec<uint8_t, 0xffffffff> input = {1, 2, 3, 4, 5, 8, 13};
+  const SHA256Hash expected_hash = sha256(input);
+  constexpr uint32_t kRepeat = 3;
+
+  auto addr = deploy_sdk_contract<sha256_wrapper::Sha256Wrapper>();
+  ContractTraitClient<sha256_wrapper::Sha256Wrapper> client(addr);
+  const SignedTransaction tx{
+      .tx = Transaction{.invocation =
+                            client.make_invocation<u8"sha256_repeated">(
+                                kGasLimit, kRepeat, input),
+                        .uniquifier = make_new_uniquifier()}};
+  auto handler = make_new_system_call_handler(tx, runtime_context_);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(output.return_buffer().empty());
+
+  const std::array<GasAmount, kRepeat> sha256_gas = {99'772, 98'560, 97'348};
+  SyscallTraceVec expected;
+  expected.push_back(get_calldata_len_entry(
+      99'906, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
+  expected.push_back(get_calldata_entry(99'882, tx.tx.invocation.calldata));
+  for (const GasAmount gas : sha256_gas) {
+    SyscallTraceBody body(SyscallNo::kSHA256);
+    body.sha256().inputs.input.append_range(input);
+    body.sha256().outputs = SyscallSHA256Outputs{.hash = expected_hash};
+    expected.push_back(make_entry(gas, gas - SHA256HashCost(input.size()),
+                                  std::move(body), ok_status()));
+  }
+  expected.push_back(return_entry(96'091, {}));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(handler.get_transaction_stats()
+                ->syscall_counts[std::to_underlying(SyscallNo::kSHA256)],
+            kRepeat);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+            size_t{kRepeat} * input.size());
 }
 
 TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
