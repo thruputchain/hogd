@@ -638,6 +638,10 @@ private:
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
 
+  x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block_impl(BlockID block_id,
+                                   ConsensusValue expected_value);
+
   x23::Async<bool>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
@@ -820,9 +824,6 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-  std::optional<SHA256Hash> committed_genesis_ceremony_batch_hash_;
-  std::optional<ProposalTxs> committed_genesis_ceremony_proposal_txs_;
-
   using FailedAuthenticationTxSet =
       SynchronizedMap<SignedTransactionHash, char, SipHash24Hasher>;
   SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>

@@ -1328,6 +1328,13 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
+  if (last_committed_block_.value.proposal_header.block_height < 1) {
+    // Heights 0 and 1 are reserved for genesis initialization and the genesis
+    // ceremony. Ordinary nomination starts at height 2.
+    info("schedulercoord_nominate ret");
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
+  }
   if (nominated_block_cache_.block_id) {
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
@@ -1529,8 +1536,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   if (request.context.protocol != 0 || request.expected_parent_height != 0) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
   }
-  const SHA256Hash batch_hash = sha256(request.transactions);
-
   x23::XdrVec<SignedTransaction> txs;
   if (!(co_await parallel_batch_to_t(request.transactions, txs)) ||
       txs.size() > kMaxBlockSize) {
@@ -1570,16 +1575,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     // auth callback can hold it while genesis ceremony execution is pending.
     const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
     if (last_committed_block_.value.proposal_header.block_height == 1) {
-      if (committed_genesis_ceremony_batch_hash_ == batch_hash &&
-          committed_genesis_ceremony_proposal_txs_) {
-        GenesisCeremonyResult already(
-            GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
-        already.commit() = {
-            .db_tip = last_committed_block_,
-            .proposal_txs = *committed_genesis_ceremony_proposal_txs_,
-        };
-        co_return already;
-      }
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
     }
     if (last_committed_block_.value.proposal_header.block_height != 0 ||
@@ -1720,12 +1715,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     cache.tx_hashes.clear();
   }
 
-  if (co_await schedulercoord_commit_block(block_id, value) !=
+  if (co_await schedulercoord_commit_block_impl(block_id, value) !=
       SchedulerCommitOutcome::SchedulerCommitOK) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
   }
-  committed_genesis_ceremony_batch_hash_ = batch_hash;
-  committed_genesis_ceremony_proposal_txs_ = committed_proposal_txs;
   GenesisCeremonyResult committed(
       GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   committed.commit() = {
@@ -1947,6 +1940,13 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                 validation_tx_count);
     });
   });
+  if (proposal.header.block_height <= 1) {
+    // Heights 0 and 1 are established outside ordinary validation.
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {
       co_await wait_for_validation_gate_open();
@@ -2447,6 +2447,19 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
   if (!ready()) {
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
+  if (expected_value.proposal_header.block_height <= 1) {
+    // Heights 0 and 1 are committed by genesis initialization and the genesis
+    // ceremony, not through the ordinary coordinator commit RPC.
+    co_return SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
+  }
+  co_return co_await schedulercoord_commit_block_impl(block_id,
+                                                       std::move(expected_value));
+}
+
+x23::Async<SchedulerCommitOutcome>
+MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
+    BlockID block_id, ConsensusValue expected_value)
+{
   MempoolMetrics::instance().commit_attempt_count.increment();
 
   const std::chrono::steady_clock::time_point commit_started_at =

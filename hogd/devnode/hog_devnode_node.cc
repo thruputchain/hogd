@@ -1033,9 +1033,7 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
   };
   GenesisCeremonyResult result =
       client.schedulercoord_commit_genesis_ceremony(std::move(request))();
-  CHECK(result.outcome() == GenesisCeremonyOutcome::GenesisCeremonyCommitted ||
-        result.outcome() ==
-            GenesisCeremonyOutcome::GenesisCeremonyAlreadyCommitted);
+  CHECK_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
 }
 
 void
