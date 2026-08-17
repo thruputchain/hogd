@@ -137,7 +137,8 @@ HogDbExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
   case StorageDeltaType::kDeltaTypeDeployContract:
     assert(addrkey.key.key_type() == StorageKeyType::Metadata);
     return finish(tx.request_deploy_contract(addrkey.address,
-                                             delta.deployed_contract_hash()));
+                                             delta.deployed_contract_hash(),
+                                             flags));
   case StorageDeltaType::kDeltaTypeAuthDataChange:
     assert(addrkey.key.key_type() == StorageKeyType::AuthData);
     return finish(

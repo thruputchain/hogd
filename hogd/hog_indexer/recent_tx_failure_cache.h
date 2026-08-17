@@ -17,9 +17,8 @@ namespace hogd {
 
 // Short-lived, best-effort cache of recently observed nondeterministic
 // transaction failures: tx hash -> TxFailureDiagnostic (attempt height plus
-// the first conflicting op).  Fed by the event server's failure-report relay
-// (indexer_event_report_tx_failure); consulted by get_transaction_info when a
-// tx has no committed record.
+// the first conflicting op). Fed by best-effort event-server pull notices;
+// consulted by get_transaction_info when a tx has no committed record.
 //
 // Storage is a SynchronizedMap -- a sharded, per-bucket-locked hash table --
 // so concurrent reports and lookups from RPC threads contend only when they

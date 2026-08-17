@@ -279,11 +279,11 @@ def gen_inner_outer(
     inner_arg_decls = ", ".join(inner_arg_decl_strs)
 
     inner = f"""std::pair<{inner_return_type}, WrappedGasAmount>
-syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls}) noexcept;
+syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
     frame = f"""std::pair<{inner_return_type}, WrappedGasAmount>
-syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls}) noexcept
+syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
 {{
   throw std::runtime_error("unimplemented");
 }}

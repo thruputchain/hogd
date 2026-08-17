@@ -48,4 +48,9 @@ target_link_libraries(
   loadgen
   GTest::gtest
 )
+add_dependencies(
+  exec_interface_test
+  all_riscvs_built
+)
+
 gtest_discover_tests(exec_interface_test)

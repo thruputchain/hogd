@@ -170,9 +170,9 @@ public:
   }
 
   void deploy_built_contract_to_address(const ContractAddress &address,
-                                        std::string_view wasm_filename)
+                                        std::string_view artifact_filename)
   {
-    std::shared_ptr<Contract> contract = load_contract(wasm_filename);
+    std::shared_ptr<Contract> contract = load_rv32_contract(artifact_filename);
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
     CHECK(get_db()
@@ -183,7 +183,9 @@ public:
                   address,
                   DeployedContractHash{.hash = contract_hash,
                                        .contract_size =
-                                           static_cast<uint32_t>(bytes.size())})
+                                           static_cast<uint32_t>(bytes.size()),
+                                       .contract_type =
+                                           contract->contract_type()})
               .has_value());
     CHECK(get_db()
               .write_address_auth_data(address, make_default_auth_data())
@@ -220,8 +222,22 @@ public:
     return *event_sched_server_->impl();
   }
 
+  void register_runtime_after_genesis()
+  {
+    register_event_with_mempool();
+    register_executor_with_mempool();
+    mempool_coord_server_->impl()->finish_runtime_init()();
+  }
+
+  void register_event_only_after_genesis() { register_event_with_mempool(); }
+
+  void register_executor_only_after_event()
+  {
+    register_executor_with_mempool();
+  }
+
 private:
-  static constexpr std::string kTestContractFileName = "fibonacci.wasm";
+  static constexpr std::string kTestContractFileName = "fibonacci.rv32a";
   static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 15UL * 1024 * 1024 * 1024; // 20 GiB.
 
@@ -275,7 +291,8 @@ private:
 
   void init_contracts()
   {
-    std::shared_ptr<Contract> contract = load_contract(kTestContractFileName);
+    std::shared_ptr<Contract> contract =
+        load_rv32_contract(kTestContractFileName);
 
     // Write contract to hog_db.
     auto bytes = x23::serialize(*contract);
@@ -291,7 +308,9 @@ private:
           get_db()
               .write_address_metadata(
                   address, DeployedContractHash{.hash = contract_hash,
-                                                .contract_size = contract_size})
+                                                .contract_size = contract_size,
+                                                .contract_type =
+                                                    contract->contract_type()})
               .has_value());
       CHECK(get_db()
                 .write_address_auth_data(address, make_default_auth_data())
@@ -336,14 +355,25 @@ private:
     auto client = create_client<SchedEvent1>(MempoolTestInfra::kAddress,
                                              sched_event_server_.port())()
                       .value();
-    auto r = client.schedevent_intro_event(
-        {.protocol = version::kHogdProtocol(),
-         .upid = {},
-         .address_for_exec =
-             make_address(kAddress, event_exec_server_.port()).c_str(),
-         .address_for_sched =
-             make_address(kAddress, event_sched_server_.port()).c_str()})();
-    CHECK_EQ(r, RPCError::kRPCNone);
+    std::string exec_address =
+        make_address(kAddress, event_exec_server_.port());
+    std::string sched_address =
+        make_address(kAddress, event_sched_server_->port());
+    EventCard card{.protocol = version::kHogdProtocol(),
+                   .upid = {},
+                   .address_for_exec = exec_address.c_str(),
+                   .address_for_sched = sched_address.c_str()};
+    while (true) {
+      auto prepared = client.schedevent_prepare_event(card)();
+      if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        continue;
+      }
+      CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+      auto activated = client.schedevent_activate_event(prepared.snapshot())();
+      CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationOK);
+      break;
+    }
   }
 
   void register_auth_with_mempool()
@@ -398,8 +428,8 @@ private:
 
   // The event server that the mempool accesses.
   TestEventAggregator event_server_;
-  TestEventAggregatorSchedServer event_sched_server_ =
-      TestEventAggregatorSchedServer(event_server_);
+  std::unique_ptr<TestEventAggregatorSchedServer> event_sched_server_ =
+      std::make_unique<TestEventAggregatorSchedServer>(event_server_);
   TestEventAggregatorExecServer event_exec_server_ =
       TestEventAggregatorExecServer(event_server_);
 

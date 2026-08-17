@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -14,6 +17,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -21,7 +25,10 @@
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "invoke_args.hh"
+#include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -256,6 +263,390 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
   }
 }
 
+// Pins the consensus-visible outcome classification of the production
+// Rv32Runtime (ThreadedMachine + live syscall_entry), mirroring the mapping
+// coverage the kMockTest RuntimeContext already has.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class Rv32ProductionMappingTest : public ::testing::Test,
+                                  public NativeContractTestFramework {
+public:
+  Rv32ProductionMappingTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDb)
+  {}
+
+protected:
+  Rv32Context runtime_context_;
+
+  constexpr static uint32_t kEcall = 0x00000073U;
+  constexpr static uint32_t kEbreak = 0x00100073U;
+  constexpr static uint32_t kCanonicalUnimp = 0xC0001073U;
+
+  constexpr static int32_t kSha256SyscallNo = 0;
+  constexpr static int32_t kReturnSyscallNo = 6;
+  constexpr static int32_t kExitSyscallNo = 8;
+  constexpr static int32_t kBytestringSetSyscallNo = 15;
+
+  ContractAddress
+  deploy_words(std::vector<uint32_t> const &words, uint64_t addr_seed,
+               std::vector<uint8_t> initial_memory = std::vector<uint8_t>(256))
+  {
+    auto contract = std::make_shared<Contract>(ContractType::kRv32);
+    contract->rv32_contract().data.append_range(
+        rv32::test_artifact::build_artifact(words, initial_memory));
+    auto addr = make_contract_address(addr_seed);
+    write_contract(contract);
+    write_deployment(addr, contract);
+    setup_grant_storage_token(addr, 1'000'000'000);
+    return addr;
+  }
+
+  // Sets a0..aN then ecalls, mirroring the register-native syscall ABI.
+  static void append_syscall(std::vector<uint32_t> &program,
+                             std::initializer_list<int32_t> arg_regs)
+  {
+    uint8_t reg = 10;
+    for (const int32_t imm : arg_regs) {
+      program.push_back(rv32::test_program::addi(reg, 0, imm));
+      ++reg;
+    }
+    program.push_back(kEcall);
+  }
+
+  InvokeResult invoke_deployed(ContractAddress const &addr, GasAmount gas_limit)
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = gas_limit,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+        runtime_context_);
+    return handler.root_invoke();
+  }
+};
+
+TEST_F(Rv32ProductionMappingTest, GuestTrapsMapToDeterministic)
+{
+  constexpr GasAmount kGas = 10'000;
+  uint64_t seed = 0;
+  auto expect_deterministic = [&](std::vector<uint32_t> const &words) {
+    auto addr = deploy_words(words, seed++);
+    auto result = invoke_deployed(addr, kGas);
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+    EXPECT_LT(result.gas_consumed_, kGas);
+  };
+
+  expect_deterministic({kEbreak});
+  expect_deterministic({kCanonicalUnimp});
+  expect_deterministic({rv32::test_program::j_type(0, 4096)});
+  expect_deterministic({rv32::test_program::store(0, 0, 1024, 2)});
+  expect_deterministic({rv32::test_program::addi(1, 0, 1)});
+}
+
+TEST_F(Rv32ProductionMappingTest, ExitSyscallIsDeterministicFault)
+{
+  std::vector<uint32_t> program;
+  append_syscall(program, {kExitSyscallNo});
+  auto addr = deploy_words(program, 0);
+
+  auto result = invoke_deployed(addr, 10'000);
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  EXPECT_LT(result.gas_consumed_, 10'000U);
+}
+
+TEST_F(Rv32ProductionMappingTest, ZeroMemoryContractVerifiesAndExecutes)
+{
+  // memory_bytes == 0 artifacts are valid; a zero-memory contract can still
+  // Return an empty buffer.
+  std::vector<uint32_t> program;
+  append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+  const std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact(program, std::span<const uint8_t>{});
+
+  ContractBlob blob;
+  blob.data.append_range(artifact);
+  Contract verify_contract_xdr(ContractType::kRv32);
+  verify_contract_xdr.rv32_contract() = blob;
+  EXPECT_EQ(runtime_context_.verify_contract(verify_contract_xdr),
+            InvokeErrorCode::None);
+
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract() = std::move(blob);
+  auto addr = make_contract_address(0);
+  write_contract(contract);
+  write_deployment(addr, contract);
+  setup_grant_storage_token(addr, 1'000'000'000);
+
+  auto result = invoke_deployed(addr, 10'000);
+  ASSERT_TRUE(result.is_root_success());
+}
+
+TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
+{
+  std::vector<uint32_t> program;
+  append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+  auto addr = deploy_words(program, 0);
+
+  auto result = invoke_deployed(addr, 10'000);
+
+  ASSERT_TRUE(result.is_root_success());
+}
+
+TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)
+{
+  // SHA256HashCost(64) far exceeds the limit, so the syscall host charge
+  // exhausts the budget after the setup instructions execute. Out-of-gas is
+  // consensus-distinguishable from other faults only by the gas signature:
+  // the whole limit is consumed.
+  std::vector<uint32_t> program;
+  append_syscall(program, {kSha256SyscallNo, 0, 64, 128});
+  auto addr = deploy_words(program, 0);
+
+  constexpr GasAmount kGasLimit = 50;
+  auto result = invoke_deployed(addr, kGasLimit);
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.gas_consumed_, kGasLimit);
+}
+
+TEST_F(Rv32ProductionMappingTest, SyscallAfterBlockCancelMapsToAbandon)
+{
+  // A storage write against a no-longer-current block returns Abandon from
+  // the syscall; the production runtime must surface it as Abandon, not fold
+  // it into a deterministic fault.
+  std::vector<uint32_t> program;
+  append_syscall(program,
+                 {kBytestringSetSyscallNo, /*key_ptr=*/0, /*value_ptr=*/32,
+                  /*value_len=*/4, /*flags=*/0});
+  auto addr = deploy_words(program, 0);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 1'000'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+      runtime_context_);
+
+  auto storage_snapshot_cache = get_storage_snapshot_cache();
+  advance_block();
+  auto result = handler.root_invoke();
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Abandon);
+}
+
+TEST_F(Rv32ProductionMappingTest,
+       ValidationModeTryInvokeWithoutProposalBitsMapsToValidationFailure)
+{
+  // In validation mode, a successfully-returning TryInvoke child must consume
+  // a nondeterministic proposal bit; with none supplied the frame finish fails
+  // ValidationFailure, which the production runtime must surface unchanged.
+  constexpr int32_t kInvokeSyscallNo = 5;
+  std::vector<uint32_t> target_program;
+  append_syscall(target_program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+  auto target = deploy_words(target_program, 1);
+
+  std::vector<uint8_t> initial_memory(256);
+  for (size_t i = 0; i < target.size(); ++i) {
+    initial_memory[i] = static_cast<uint8_t>(target[i]);
+  }
+  const CopyableInvokeInputs inputs{
+      .entrypoint_id = 0,
+      .gas_limit = 1000,
+      .flags = std::to_underlying(InvokeFlag::TryInvoke),
+  };
+  std::memcpy(&initial_memory[32], &inputs, sizeof(inputs));
+
+  std::vector<uint32_t> program;
+  append_syscall(program, {kInvokeSyscallNo, /*address_ptr=*/0,
+                           /*calldata_ptr=*/0, /*calldata_len=*/0,
+                           /*tokens_ptr=*/0, /*tokens_len=*/0,
+                           /*inputs_ptr=*/32, /*outputs_ptr=*/64});
+  auto addr = deploy_words(program, 0, std::move(initial_memory));
+
+  Transaction tx{
+      .invocation =
+          Invocation{
+              .invoked_address = addr,
+              .entrypoint = entrypoint_from_method_id(0),
+              .gas_limit = 1'000'000,
+              .calldata = Calldata{},
+          },
+      .uniquifier = make_new_uniquifier(),
+  };
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+  auto handler =
+      make_new_system_call_handler_validation(tx, runtime_context_,
+                                              NondeterministicProposalData{});
+
+  auto result = handler.root_invoke();
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::ValidationFailure);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
+TEST_F(Rv32ProductionMappingTest, UnboundedLoopIsTerminatedByGasMeter)
+{
+  // A genuine infinite loop (self-jump), not a slow-but-bounded recursion:
+  // only the meter can end it.
+  auto addr = deploy_words({rv32::test_program::j_type(0, 0)}, 0);
+
+  constexpr GasAmount kGasLimit = 10'000;
+  auto result = invoke_deployed(addr, kGasLimit);
+
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.gas_consumed_, kGasLimit);
+}
+
+TEST_F(Rv32ProductionMappingTest, SelfInvokeIsRejectedAsReentrance)
+{
+  // The guest fetches its own address, invokes it, and returns the syscall
+  // result code: the invoke must be rejected pre-frame with
+  // kSyscallErrorCodeReentrance and the guest keeps running.
+  std::vector<uint8_t> initial_memory(256);
+  const CopyableInvokeInputs inputs{
+      .entrypoint_id = 0,
+      .gas_limit = 1000,
+      .flags = std::to_underlying(InvokeFlag::None),
+  };
+  std::memcpy(&initial_memory[64], &inputs, sizeof(inputs));
+
+  constexpr int32_t kGetCurrentAddressSyscallNo = 19;
+  constexpr int32_t kInvokeSyscallNo = 5;
+  std::vector<uint32_t> program;
+  append_syscall(program, {kGetCurrentAddressSyscallNo, /*out_ptr=*/0});
+  append_syscall(program, {kInvokeSyscallNo, /*address_ptr=*/0,
+                           /*calldata_ptr=*/0, /*calldata_len=*/0,
+                           /*tokens_ptr=*/0, /*tokens_len=*/0,
+                           /*inputs_ptr=*/64, /*outputs_ptr=*/96});
+  program.push_back(rv32::test_program::store(0, 10, 128, 2));
+  append_syscall(program, {kReturnSyscallNo, 128, 4, 0, 0, 0});
+  auto addr = deploy_words(program, 0, std::move(initial_memory));
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 100'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+      runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.return_buffer().size(), 4U);
+  const std::vector<uint8_t> expected = {
+      std::to_underlying(SyscallErrorCode::kSyscallErrorCodeReentrance), 0, 0,
+      0};
+  EXPECT_TRUE(std::ranges::equal(output.return_buffer(), expected));
+}
+
+TEST_F(Rv32ProductionMappingTest, FailedChildFramesDoNotPoisonLaterInvokes)
+{
+  // The rv32 twin of wasm's FollowBadWithGood: two try-invokes of a child
+  // that faults deterministically, then a clean Return from the caller. Both
+  // child outputs report Fault and the transaction still succeeds.
+  auto trap_addr = deploy_words({kEbreak}, 1);
+
+  std::vector<uint8_t> initial_memory(256);
+  for (size_t i = 0; i < trap_addr.size(); ++i) {
+    initial_memory[i] = static_cast<uint8_t>(trap_addr[i]);
+  }
+  const CopyableInvokeInputs inputs{
+      .entrypoint_id = 0,
+      .gas_limit = 1000,
+      .flags = std::to_underlying(InvokeFlag::TryInvoke),
+  };
+  std::memcpy(&initial_memory[64], &inputs, sizeof(inputs));
+
+  constexpr int32_t kInvokeSyscallNo = 5;
+  std::vector<uint32_t> program;
+  append_syscall(program, {kInvokeSyscallNo, 0, 0, 0, 0, 0, /*inputs=*/64,
+                           /*outputs=*/96});
+  append_syscall(program, {kInvokeSyscallNo, 0, 0, 0, 0, 0, /*inputs=*/64,
+                           /*outputs=*/108});
+  append_syscall(program,
+                 {kReturnSyscallNo, /*buffer=*/96, /*len=*/24, 0, 0, 0});
+  auto addr = deploy_words(program, 0, std::move(initial_memory));
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 100'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+      runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.return_buffer().size(), 24U);
+  CopyableInvokeOutputs first;
+  CopyableInvokeOutputs second;
+  std::memcpy(&first, output.return_buffer().data(), sizeof(first));
+  std::memcpy(&second, output.return_buffer().data() + 12, sizeof(second));
+  EXPECT_EQ(first.frame_status, InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(second.frame_status, InvocationFrameStatusCode::Fault);
+}
+
+TEST_F(Rv32ProductionMappingTest,
+       DeploymentRowWithoutContractRowIsUnrecoverable)
+{
+  // A deployment row whose contract row is missing is an inconsistent DB
+  // state; resolution fails and must surface as Unrecoverable, not a
+  // contract-attributable fault.
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact({kEbreak}, std::vector<uint8_t>{0}));
+  auto addr = make_contract_address(0);
+  write_deployment(addr, contract);
+
+  auto result = invoke_deployed(addr, 10'000);
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+}
+
+TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
+{
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
+  contract->rv32_contract().data.append_range(
+      std::vector<uint8_t>{0xde, 0xad, 0xbe, 0xef});
+  auto addr = make_contract_address(0);
+  write_contract(contract);
+  write_deployment(addr, contract);
+
+  auto deployed = get_storage_snapshot_cache()->try_get_deployed_contract(addr);
+  ASSERT_TRUE(deployed.has_value());
+  ASSERT_NE(deployed.value(), nullptr);
+  ASSERT_NE(deployed.value()->entry, nullptr);
+  EXPECT_FALSE(deployed.value()->entry->translated.has_value());
+
+  auto result = invoke_deployed(addr, 10'000);
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+}
+
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
 {
   // A single straight-line run whose total gas exceeds the legacy uint16 run
@@ -278,6 +669,60 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
   contract.rv32_contract() = std::move(blob);
   Rv32Context context;
   EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::None);
+}
+
+namespace {
+
+InvokeErrorCode
+verify_rv32_blob(std::vector<uint8_t> const &artifact)
+{
+  ContractBlob blob;
+  blob.data.append_range(artifact);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract() = std::move(blob);
+  Rv32Context context;
+  return context.verify_contract(contract);
+}
+
+} // namespace
+
+TEST(Rv32ContractTest, VerifyRejectsGarbageBlob)
+{
+  EXPECT_EQ(verify_rv32_blob({0xde, 0xad, 0xbe, 0xef}),
+            InvokeErrorCode::Deterministic);
+  EXPECT_EQ(verify_rv32_blob({}), InvokeErrorCode::Deterministic);
+}
+
+TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
+{
+  std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
+                                          std::vector<uint8_t>{0});
+  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::None);
+
+  artifact.resize(artifact.size() / 2);
+  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
+}
+
+TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
+{
+  // 0x53 is an F-extension opcode: the artifact parses structurally but the
+  // instruction decode in Rv32Contract::create must reject it.
+  const std::vector<uint8_t> artifact =
+      rv32::test_artifact::build_artifact({0x00000053U},
+                                          std::vector<uint8_t>{0});
+  EXPECT_EQ(verify_rv32_blob(artifact), InvokeErrorCode::Deterministic);
+
+  ContractBlob blob;
+  blob.data.append_range(artifact);
+  EXPECT_FALSE(Rv32Contract::create(blob).has_value());
+}
+
+TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
+{
+  Contract contract(ContractType::kWasmi);
+  Rv32Context context;
+  EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

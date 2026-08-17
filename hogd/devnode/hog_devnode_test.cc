@@ -1,4 +1,4 @@
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -43,11 +43,13 @@
 #include "contract.hh"
 #include "db_gateway.hh"
 #include "event.hh"
+#include "event_outbox_internal.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
+#include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/string.h"
@@ -62,9 +64,8 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
-#include "hogd/hog_indexer/db.h"
-#include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -72,7 +73,11 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
+#include "pagination.hh"
+#include "proposal.hh"
+#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -743,7 +748,9 @@ private:
       auto remaining =
           std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
 
+      // NOLINTNEXTLINE(misc-include-cleaner)
       pollfd poll_fd{.fd = stdout_fd_, .events = POLLIN, .revents = 0};
+      // NOLINTNEXTLINE(misc-include-cleaner)
       int ready = poll(&poll_fd, 1, static_cast<int>(remaining.count()));
       if (ready < 0) {
         if (errno == EINTR) {
@@ -762,7 +769,9 @@ private:
         continue;
       }
       if (count == 0) {
-        throw std::runtime_error("hog-devnode stdout closed before readiness");
+        throw std::runtime_error(
+            std::format("hog-devnode stdout closed before readiness: {}",
+                        read_remaining_stderr()));
       }
       if (errno == EINTR) {
         continue;
@@ -908,7 +917,96 @@ open_persistent_hog_db(std::filesystem::path const &data_dir)
 }
 
 void
-initialize_persistent_data_dir(std::filesystem::path const &data_dir)
+initialize_persistent_data_dir(std::filesystem::path const &data_dir,
+                               uint32_t dev_accounts = 1)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--dev-accounts",
+      std::to_string(dev_accounts),
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), dev_accounts + 1UL);
+  expect_clean_exit(process);
+}
+
+TEST(HogDevnode, FreshDataDirOutboxOriginLinksCommittedGenesis)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir, 0);
+
+  HogDbDAO db = open_persistent_hog_db(data_dir);
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value()) << tip.error();
+  ASSERT_EQ(tip->value.proposal_header.block_height, 1);
+  auto store = IndexerOutboxStore::open(
+      (data_dir / "events" / "indexer-outbox").string());
+  ASSERT_TRUE(store.has_value()) << store.error();
+  auto committed = store->load_committed(1)();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(committed->consensus_value, tip->value);
+  auto origin = store->load_current_epoch_origin();
+  ASSERT_TRUE(origin.has_value()) << origin.error();
+  ASSERT_TRUE(origin->has_value());
+  const auto &origin_value = origin.value();
+  const auto *current_origin =
+      origin_value.has_value() ? &origin_value.value() : nullptr;
+  ASSERT_NE(current_origin, nullptr);
+  EXPECT_EQ(current_origin->origin.first_height, 1);
+  EXPECT_EQ(current_origin->origin.first_prev_hash,
+            committed->consensus_value.prev_hash);
+}
+
+IndexerOutboxCommittedPayload
+make_empty_outbox_append(BlockHeight height, ConsensusValueHash prev_hash)
+{
+  ProposalTxs proposal_txs;
+  TxEventLogBatch event_logs;
+  ConsensusValue value{};
+  value.prev_hash = std::move(prev_hash);
+  value.proposal_header.block_height = height;
+  value.proposal_header.events_hash =
+      compute_indexer_outbox_event_root(event_logs);
+  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  CHECK(txs_root.has_value());
+  value.proposal_header.txs_hash = *txs_root;
+  value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
+  return {.format_version = kIndexerOutboxFormatVersion,
+          .consensus_value = std::move(value),
+          .proposal_txs = std::move(proposal_txs),
+          .event_logs = std::move(event_logs),
+          .tx_bodies = {}};
+}
+
+IndexerOutboxCommittedPayload
+append_next_test_outbox_record(std::filesystem::path const &data_dir)
+{
+  auto store = IndexerOutboxStore::open(
+      (data_dir / "events" / "indexer-outbox").string());
+  CHECK(store.has_value());
+  auto latest = store->latest_committed_record_raw();
+  CHECK(latest.has_value());
+  CHECK(latest->has_value());
+  const auto &latest_value = latest.value();
+  const auto *latest_record =
+      latest_value.has_value() ? &latest_value.value() : nullptr;
+  CHECK(latest_record != nullptr);
+  auto previous = store->load_committed(latest_record->block_height)();
+  CHECK(previous.has_value());
+  auto next = make_empty_outbox_append(latest_record->block_height + 1,
+                                       sha256(previous->consensus_value));
+  CHECK(store->publish_committed(next)().has_value());
+  return next;
+}
+
+void
+advance_persistent_data_dir(std::filesystem::path const &data_dir)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({
       "--data-dir",
@@ -921,9 +1019,38 @@ initialize_persistent_data_dir(std::filesystem::path const &data_dir)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
   EXPECT_EQ(readiness.bootstrap_accounts[0].role, "faucet");
   EXPECT_EQ(readiness.bootstrap_accounts[1].role, "local_user");
+
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+  SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+  TransactionRefPage page;
+  while (std::chrono::steady_clock::now() < deadline) {
+    page = reader.get_transactions_by_address(query)();
+    if (page.latest_block == 2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(page.latest_block, 2);
   expect_clean_exit(process);
 }
 
@@ -976,10 +1103,10 @@ expect_startup_failure(std::vector<std::string> args,
     return;
   }
   const int exit_status = *status;
-  ASSERT_TRUE(WIFEXITED(exit_status));
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFEXITED(exit_status)) << stderr_output;
   EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE);
   EXPECT_TRUE(process.read_remaining_stdout().empty());
-  std::string stderr_output = process.read_remaining_stderr();
   EXPECT_NE(stderr_output.find(expected_stderr), std::string::npos)
       << stderr_output;
 }
@@ -1985,7 +2112,13 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    AddressTransactionQuery startup_query{};
+    startup_query.order = IterationOrder::IterationOrderAscending;
+    startup_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    EXPECT_EQ(reader.get_transactions_by_address(startup_query)().latest_block,
+              1);
+
+    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
@@ -2045,23 +2178,62 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
+TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
 
   SignedTransactionHash tx_hash{};
+  SignedTransaction expected_signed_tx;
+  std::optional<ProposedTransaction> expected_indexed_tx;
+  std::optional<TxEventLog> expected_event_log;
+  const ContractAddress wallet_address =
+      build_local_bootstrap_account_artifact({.user_account_count = 1})
+          .accounts[1]
+          .address;
+
+  auto expect_recovered_index = [&](auto &reader, BlockHeight latest_height) {
+    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+    TransactionRefPage page;
+    do {
+      AddressTransactionQuery query{};
+      query.address = wallet_address;
+      query.order = IterationOrder::IterationOrderAscending;
+      query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+      page = reader.get_transactions_by_address(query)();
+      if (page.latest_block == latest_height) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (std::chrono::steady_clock::now() < deadline);
+
+    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+    EXPECT_EQ(result.info().tx.signed_tx, expected_signed_tx);
+    ASSERT_TRUE(expected_indexed_tx.has_value());
+    ASSERT_TRUE(expected_event_log.has_value());
+    EXPECT_EQ(result.info().tx, *expected_indexed_tx);
+    EXPECT_EQ(result.info().events, *expected_event_log);
+    EXPECT_EQ(page.latest_block, latest_height);
+    ASSERT_EQ(page.refs.size(), 1UL);
+    EXPECT_EQ(page.refs[0].tx_hash, tx_hash);
+    EXPECT_EQ(page.refs[0].height, 2);
+  };
+
   {
-    HogDevnodeProcess process = HogDevnodeProcess::start({
-        "--data-dir",
-        data_dir.string(),
-        "--dev-accounts",
-        "1",
-        "--dev-account-seed",
-        "groundhog-dev-accounts",
-        "--dev-account-tokens",
-        "1000000000",
-    });
+    HogDevnodeProcess process = HogDevnodeProcess::start(
+        {
+            "--data-dir",
+            data_dir.string(),
+            "--dev-accounts",
+            "1",
+            "--dev-account-seed",
+            "groundhog-dev-accounts",
+            "--dev-account-tokens",
+            "1000000000",
+        },
+        {{"HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL", "1"}});
     Readiness readiness = process.wait_for_readiness();
     ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
     EXPECT_EQ(readiness.chain_state, "fresh");
@@ -2079,15 +2251,11 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
                                                        /*retry=*/true)()
                       .value();
 
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
         derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-    const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact({.user_account_count = 1})
-            .accounts[1]
-            .address;
 
     Transaction tx{
         .invocation =
@@ -2115,34 +2283,37 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
             .signature = signature,
         }},
     };
+    expected_signed_tx = signed_tx;
     tx_hash = sha256(signed_tx.tx);
-    ASSERT_EQ(
-        submit_and_commit(scheduler, SignedTransactionBatch{signed_tx}).size(),
-        1UL);
-
-    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
-    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
-    while (std::chrono::steady_clock::now() < deadline) {
-      result = reader.get_transaction_info(tx_hash)();
-      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
-        break;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    SignedTransactionHashBatch committed =
+        submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
+    if (committed.size() != 1) {
+      const int status = process.terminate();
+      ADD_FAILURE() << "expected one committed transaction, process status "
+                    << status << ":\n"
+                    << process.read_remaining_stderr();
+      return;
     }
-    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(result.info().height, 2);
+
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 3);
 
     expect_clean_exit(process);
   }
 
   {
-    std::filesystem::path indexer_db_path = data_dir / "indexer" / "indexer-db";
-    ASSERT_GT(std::filesystem::remove_all(indexer_db_path), 0UL);
-    IndexerStatus<IndexDB> indexer_status =
-        IndexDB::open_or_make_new(indexer_db_path);
-    ASSERT_TRUE(indexer_status.has_value()) << indexer_status.error();
-    TxEventLogBatch no_events;
-    ASSERT_TRUE(indexer_status->consume_events(1, no_events, {}).has_value());
+    auto store =
+        IndexerOutboxStore::open_or_create_in((data_dir / "events").string());
+    ASSERT_TRUE(store.has_value()) << store.error();
+    auto payload = store->load_committed(2)();
+    ASSERT_TRUE(payload.has_value()) << payload.error();
+    ASSERT_EQ(payload->tx_bodies.size(), 1UL);
+    ASSERT_EQ(payload->event_logs.size(), 1UL);
+    expected_indexed_tx = payload->tx_bodies[0];
+    expected_event_log = payload->event_logs[0];
+    EXPECT_EQ(expected_event_log->proposed_tx_hash, tx_hash);
   }
 
   {
@@ -2167,29 +2338,20 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
             .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 3);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
                                                        /*retry=*/true)()
                       .value();
-    TxInfoResult result = reader.get_transaction_info(tx_hash)();
-    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(result.info().height, 2);
-    EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
+    expect_recovered_index(reader, 3);
 
-    int status = process.terminate();
-    std::string stderr_output = process.read_remaining_stderr();
-    ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
-    EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
-    EXPECT_NE(stderr_output.find(
-                  "recovered hog-devnode database at committed height 2"),
-              std::string::npos)
-        << stderr_output;
-    EXPECT_NE(stderr_output.find("replayed recovered event log"),
-              std::string::npos)
-        << stderr_output;
-    EXPECT_TRUE(process.read_remaining_stdout().empty());
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 4);
+    expect_recovered_index(reader, 4);
+    expect_clean_exit(process);
   }
 
   {
@@ -2214,17 +2376,14 @@ TEST(HogDevnode, DataDirPersistsCommittedStateAcrossRestart)
             .value();
     SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 4);
 
-    int status = process.terminate();
-    std::string stderr_output = process.read_remaining_stderr();
-    ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
-    EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
-    EXPECT_NE(stderr_output.find(
-                  "recovered hog-devnode database at committed height 2"),
-              std::string::npos)
-        << stderr_output;
-    EXPECT_TRUE(process.read_remaining_stdout().empty());
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    expect_recovered_index(reader, 4);
+    expect_clean_exit(process);
   }
 }
 
@@ -2312,6 +2471,167 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)
       "0000000000000000000000000000000000000000000000000000000000000000 "
       "does not match requested network hash "
       "00000000000000000000000000000000000000000000000000000000000000aa");
+}
+
+TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir, 0);
+
+  {
+    auto store = IndexerOutboxStore::open(
+        (data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(store.has_value()) << store.error();
+    IndexerOutboxCandidatePayload candidate{
+        .format_version = kIndexerOutboxFormatVersion,
+        .block_id = 91,
+        .block_height = 1,
+        .event_root = compute_indexer_outbox_event_root({}),
+    };
+    ASSERT_TRUE(store->publish_candidate(candidate)().has_value());
+  }
+  ASSERT_TRUE(std::filesystem::remove(
+      data_dir / "events" / "indexer-outbox" /
+      IndexerOutboxStore::current_epoch_origin_filename()));
+
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "0", "--dev-account-seed", "groundhog-dev-accounts",
+                          "--dev-account-tokens", "1000000000"},
+                         "recovered devnode chain has no durable outbox "
+                         "origin; clean chain rollout "
+                         "required");
+}
+
+TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir, 0);
+  const std::filesystem::path outbox_dir =
+      data_dir / "events" / "indexer-outbox";
+
+  std::filesystem::rename(
+      outbox_dir / IndexerOutboxStore::current_epoch_origin_filename(),
+      outbox_dir / IndexerOutboxStore::epoch_origin_filename("hogp/archival"));
+
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "0", "--dev-account-seed", "groundhog-dev-accounts",
+                          "--dev-account-tokens", "1000000000"},
+                         "recovered devnode chain has no durable outbox "
+                         "origin; clean chain rollout "
+                         "required");
+}
+
+TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
+            0UL);
+
+  expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
+                          "1", "--dev-account-seed", "groundhog-dev-accounts",
+                          "--dev-account-tokens", "1000000000"},
+                         "recovered devnode chain has no durable outbox "
+                         "origin; clean chain rollout "
+                         "required");
+}
+
+TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::path ahead_data_dir = make_test_data_dir();
+  Defer cleanup_ahead_data_dir(
+      [&] { std::filesystem::remove_all(ahead_data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::filesystem::copy(data_dir, ahead_data_dir,
+                        std::filesystem::copy_options::recursive);
+  advance_persistent_data_dir(ahead_data_dir);
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
+            0UL);
+  std::filesystem::copy(ahead_data_dir / "events" / "indexer-outbox",
+                        data_dir / "events" / "indexer-outbox",
+                        std::filesystem::copy_options::recursive);
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "indexer" / "indexer-db"),
+            0UL);
+  std::filesystem::copy(ahead_data_dir / "indexer" / "indexer-db",
+                        data_dir / "indexer" / "indexer-db",
+                        std::filesystem::copy_options::recursive);
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"},
+      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
+      "chain tip 1");
+}
+
+TEST(HogDevnode, DataDirPullDoesNotReplayOutboxOneAheadOfHogDb)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::ignore = append_next_test_outbox_record(data_dir);
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 1);
+  expect_clean_exit(process);
+}
+
+TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::path ahead_data_dir = make_test_data_dir();
+  Defer cleanup_ahead_data_dir(
+      [&] { std::filesystem::remove_all(ahead_data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::filesystem::copy(data_dir, ahead_data_dir,
+                        std::filesystem::copy_options::recursive);
+  advance_persistent_data_dir(ahead_data_dir);
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "indexer" / "indexer-db"),
+            0UL);
+  std::filesystem::copy(ahead_data_dir / "indexer" / "indexer-db",
+                        data_dir / "indexer" / "indexer-db",
+                        std::filesystem::copy_options::recursive);
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"},
+      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
+      "chain tip 1");
+}
+
+TEST(HogDevnode, DataDirAcceptsMatchingOutboxIndexerAndHogDb)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  EXPECT_EQ(readiness.chain_state, "recovered");
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
@@ -2641,7 +2961,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    auto fibonacci_contract = load_contract("fibonacci.wasm");
+    auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
 
     auto keypair =

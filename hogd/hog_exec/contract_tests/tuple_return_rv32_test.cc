@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -30,9 +31,9 @@
 #include "x23/x23.h"
 
 //
-// WASM integration tests for tuple return types.
+// RV32 integration tests for tuple return types.
 //
-// These tests use a native contract that invokes the tuple_return.wasm contract
+// These tests use a native contract that invokes the tuple_return.rv32 contract
 // and decodes the return values to verify that tuple return types are properly
 // handled through the entire stack: Rust SDK -> XDR serialization -> C++ header
 // generation.
@@ -40,10 +41,10 @@
 
 namespace hogd {
 
-class TupleReturnWasmTest : public ::testing::Test,
+class TupleReturnRv32Test : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
-  TupleReturnWasmTest()
+  TupleReturnRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb)
@@ -55,8 +56,8 @@ public:
   {
     using tuple_return_client_t =
         ContractTraitClient<tuple_return::TupleReturn>;
-    tuple_return_client_t wasm_client(kWasmContractAddress);
-    auto decoded = wasm_client.template invoke_opt<MethodName>(ctx, args...);
+    tuple_return_client_t rv32_client(kRv32ContractAddress);
+    auto decoded = rv32_client.template invoke_opt<MethodName>(ctx, args...);
     if (!decoded.has_value() || !decoded.value().has_value() ||
         !decoded.value().value().has_value()) {
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -73,10 +74,10 @@ protected:
   {
     using tuple_return_meta = ContractTraitMeta<tuple_return::TupleReturn>;
 
-    auto wasm_contract = tuple_return_meta::load_wasm();
-    write_contract(wasm_contract);
-    write_deployment(kWasmContractAddress, wasm_contract);
-    setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
+    auto rv32_contract = tuple_return_meta::load_rv32();
+    write_contract(rv32_contract);
+    write_deployment(kRv32ContractAddress, rv32_contract);
+    setup_grant_storage_token(kRv32ContractAddress, 1'000'000'000);
 
     NativeContractBuilder builder;
 
@@ -357,14 +358,14 @@ protected:
     setup_grant_storage_token(kNativeContractAddress,
                               replay_cache_cost_charged(1));
 
-    auto wasm_context = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_context = std::make_unique<Rv32Context>();
     multiplexed_context_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
             {ContractType::kNative, {native_runtime_context.release(), true}},
-            {ContractType::kWasmi, {wasm_context.release(), true}}});
+            {ContractType::kRv32, {rv32_context.release(), true}}});
   }
 
-  constexpr static ContractAddress kWasmContractAddress =
+  constexpr static ContractAddress kRv32ContractAddress =
       make_contract_address(0);
   constexpr static ContractAddress kNativeContractAddress =
       make_contract_address(1);
@@ -376,7 +377,7 @@ protected:
 //
 // Test existing basic two-element tuple.
 //
-TEST_F(TupleReturnWasmTest, BasicTwoTuple)
+TEST_F(TupleReturnRv32Test, BasicTwoTuple)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -401,7 +402,7 @@ TEST_F(TupleReturnWasmTest, BasicTwoTuple)
 //
 // Test nested tuple.
 //
-TEST_F(TupleReturnWasmTest, NestedTuple)
+TEST_F(TupleReturnRv32Test, NestedTuple)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
@@ -426,7 +427,7 @@ TEST_F(TupleReturnWasmTest, NestedTuple)
 //
 // Test single-element tuple.
 //
-TEST_F(TupleReturnWasmTest, SingleElementTuple)
+TEST_F(TupleReturnRv32Test, SingleElementTuple)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -445,7 +446,7 @@ TEST_F(TupleReturnWasmTest, SingleElementTuple)
 //
 // Test three-element tuple.
 //
-TEST_F(TupleReturnWasmTest, ThreeElementTuple)
+TEST_F(TupleReturnRv32Test, ThreeElementTuple)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -464,7 +465,7 @@ TEST_F(TupleReturnWasmTest, ThreeElementTuple)
 //
 // Test deeply nested tuple.
 //
-TEST_F(TupleReturnWasmTest, DeeplyNested)
+TEST_F(TupleReturnRv32Test, DeeplyNested)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -483,7 +484,7 @@ TEST_F(TupleReturnWasmTest, DeeplyNested)
 //
 // Test tuple with fixed array.
 //
-TEST_F(TupleReturnWasmTest, TupleWithFixedArray)
+TEST_F(TupleReturnRv32Test, TupleWithFixedArray)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -502,7 +503,7 @@ TEST_F(TupleReturnWasmTest, TupleWithFixedArray)
 //
 // Test tuple with variable array.
 //
-TEST_F(TupleReturnWasmTest, TupleWithVariableArray)
+TEST_F(TupleReturnRv32Test, TupleWithVariableArray)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -521,7 +522,7 @@ TEST_F(TupleReturnWasmTest, TupleWithVariableArray)
 //
 // Test nested arrays in tuple.
 //
-TEST_F(TupleReturnWasmTest, NestedArrays)
+TEST_F(TupleReturnRv32Test, NestedArrays)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -540,7 +541,7 @@ TEST_F(TupleReturnWasmTest, NestedArrays)
 //
 // Test array of tuples.
 //
-TEST_F(TupleReturnWasmTest, ArrayOfTuples)
+TEST_F(TupleReturnRv32Test, ArrayOfTuples)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -559,7 +560,7 @@ TEST_F(TupleReturnWasmTest, ArrayOfTuples)
 //
 // Test 2D nested array.
 //
-TEST_F(TupleReturnWasmTest, NestedArray2D)
+TEST_F(TupleReturnRv32Test, NestedArray2D)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -578,7 +579,7 @@ TEST_F(TupleReturnWasmTest, NestedArray2D)
 //
 // Test 3D nested array.
 //
-TEST_F(TupleReturnWasmTest, NestedArray3D)
+TEST_F(TupleReturnRv32Test, NestedArray3D)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -597,7 +598,7 @@ TEST_F(TupleReturnWasmTest, NestedArray3D)
 //
 // Test deeply nested 4D array.
 //
-TEST_F(TupleReturnWasmTest, DeeplyNestedArray)
+TEST_F(TupleReturnRv32Test, DeeplyNestedArray)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -616,7 +617,7 @@ TEST_F(TupleReturnWasmTest, DeeplyNestedArray)
 //
 // Test tuple with optional.
 //
-TEST_F(TupleReturnWasmTest, TupleWithOption)
+TEST_F(TupleReturnRv32Test, TupleWithOption)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -635,7 +636,7 @@ TEST_F(TupleReturnWasmTest, TupleWithOption)
 //
 // Test tuple with all optional elements.
 //
-TEST_F(TupleReturnWasmTest, TupleAllOptional)
+TEST_F(TupleReturnRv32Test, TupleAllOptional)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -654,7 +655,7 @@ TEST_F(TupleReturnWasmTest, TupleAllOptional)
 //
 // Test nested optional tuple.
 //
-TEST_F(TupleReturnWasmTest, NestedOptionTuple)
+TEST_F(TupleReturnRv32Test, NestedOptionTuple)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -673,7 +674,7 @@ TEST_F(TupleReturnWasmTest, NestedOptionTuple)
 //
 // Test kitchen sink with complex combinations.
 //
-TEST_F(TupleReturnWasmTest, KitchenSink)
+TEST_F(TupleReturnRv32Test, KitchenSink)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -692,7 +693,7 @@ TEST_F(TupleReturnWasmTest, KitchenSink)
 //
 // Test arrays and tuples combination.
 //
-TEST_F(TupleReturnWasmTest, ArraysAndTuples)
+TEST_F(TupleReturnRv32Test, ArraysAndTuples)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -711,7 +712,7 @@ TEST_F(TupleReturnWasmTest, ArraysAndTuples)
 //
 // Test tuple with nested array.
 //
-TEST_F(TupleReturnWasmTest, TupleWithNestedArray)
+TEST_F(TupleReturnRv32Test, TupleWithNestedArray)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -730,7 +731,7 @@ TEST_F(TupleReturnWasmTest, TupleWithNestedArray)
 //
 // Test 8-element tuple.
 //
-TEST_F(TupleReturnWasmTest, Tuple8Elements)
+TEST_F(TupleReturnRv32Test, Tuple8Elements)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -749,7 +750,7 @@ TEST_F(TupleReturnWasmTest, Tuple8Elements)
 //
 // Test 16-element tuple (maximum supported).
 //
-TEST_F(TupleReturnWasmTest, Tuple16Elements)
+TEST_F(TupleReturnRv32Test, Tuple16Elements)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -768,7 +769,7 @@ TEST_F(TupleReturnWasmTest, Tuple16Elements)
 //
 // Test empty tuple (void).
 //
-TEST_F(TupleReturnWasmTest, EmptyTuple)
+TEST_F(TupleReturnRv32Test, EmptyTuple)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -787,7 +788,7 @@ TEST_F(TupleReturnWasmTest, EmptyTuple)
 //
 // Test tuple with fixed byte array.
 //
-TEST_F(TupleReturnWasmTest, TupleWithBytes)
+TEST_F(TupleReturnRv32Test, TupleWithBytes)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -806,7 +807,7 @@ TEST_F(TupleReturnWasmTest, TupleWithBytes)
 //
 // Test tuple with variable byte array.
 //
-TEST_F(TupleReturnWasmTest, TupleWithVariableBytes)
+TEST_F(TupleReturnRv32Test, TupleWithVariableBytes)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -825,7 +826,7 @@ TEST_F(TupleReturnWasmTest, TupleWithVariableBytes)
 //
 // Test nested bytes array.
 //
-TEST_F(TupleReturnWasmTest, NestedBytesArray)
+TEST_F(TupleReturnRv32Test, NestedBytesArray)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -844,7 +845,7 @@ TEST_F(TupleReturnWasmTest, NestedBytesArray)
 //
 // Test tuple with array of optionals.
 //
-TEST_F(TupleReturnWasmTest, TupleArrayOption)
+TEST_F(TupleReturnRv32Test, TupleArrayOption)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -863,7 +864,7 @@ TEST_F(TupleReturnWasmTest, TupleArrayOption)
 //
 // Test nested everything - maximum complexity.
 //
-TEST_F(TupleReturnWasmTest, NestedEverything)
+TEST_F(TupleReturnRv32Test, NestedEverything)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =

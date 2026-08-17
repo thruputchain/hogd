@@ -140,7 +140,8 @@ public:
   // Note that this does NOT create the contract, or update a refcount on that
   // contract.
   HogDbStatus<void> request_deploy_contract(Address const &addr,
-                                            const DeployedContractHash &hash);
+                                            const DeployedContractHash &hash,
+                                            StorageDeltaFlagSet flags);
 
   // request_new_contract requests to create a new contract.
   // Does NOT update the refcount on the contract.
@@ -203,6 +204,16 @@ public:
   // reason. CHECK rather than assert: silently defaulting a missing reason
   // would misreport the conflict type in release builds.
   DbConflictCode conflict_reason_for(HogDbCode code) const;
+
+  // Number of keys retained in the transaction-local change and balance-delta
+  // maps. Tests use these to assert that a failed subtransaction leaves no
+  // entries behind once it is rolled back (#3090); nothing in production
+  // reads them.
+  std::size_t change_entry_count_for_testing() const { return changes_.size(); }
+  std::size_t balance_entry_count_for_testing() const
+  {
+    return balance_deltas_.size();
+  }
 
 private:
   struct ItemVersion {
@@ -308,10 +319,15 @@ InvokeTX::request_deletion(const ItemKey &key, StorageDeltaFlagSet flags)
 
 inline HogDbStatus<void>
 InvokeTX::request_deploy_contract(Address const &addr,
-                                  const DeployedContractHash &hash)
+                                  const DeployedContractHash &hash,
+                                  StorageDeltaFlagSet flags)
 {
+  auto change = ItemChange(DeployedContractData(hash));
+  if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
+    change.set_permanent_exclusive();
+  }
   return request_change(make_address_metadata_item_key(addr),
-                        DeployedContractData(hash));
+                        std::move(change));
 }
 
 } // namespace hogd

@@ -18,14 +18,14 @@
 
 namespace hogd {
 
-class ReturnFaultTestWasmTest : public ::testing::Test,
+class ReturnFaultTestRv32Test : public ::testing::Test,
                                 public NativeContractTestFramework {
 public:
-  ReturnFaultTestWasmTest()
+  ReturnFaultTestRv32Test()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
           TestDB::kHogDb),
-      wasm_runtime_context_(make_hog_exec_context())
+      runtime_context_(make_hog_exec_context())
   {}
 
 protected:
@@ -35,7 +35,7 @@ protected:
         ContractTraitMeta<return_fault_test::ReturnFaultTest>;
 
     // Load contract
-    auto contract = return_fault_test_meta::load_wasm();
+    auto contract = return_fault_test_meta::load_rv32();
 
     // Deploy contract
     write_contract(contract);
@@ -50,12 +50,12 @@ protected:
   ContractTraitClient<return_fault_test::ReturnFaultTest> client_ =
       ContractTraitClient<return_fault_test::ReturnFaultTest>(kContractAddress);
 
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_;
+  std::unique_ptr<RuntimeContext> runtime_context_;
 
   uint64_t nonce_ = 0;
 };
 
-TEST_F(ReturnFaultTestWasmTest, InvokeRunTest)
+TEST_F(ReturnFaultTestRv32Test, InvokeRunTest)
 {
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
@@ -65,7 +65,7 @@ TEST_F(ReturnFaultTestWasmTest, InvokeRunTest)
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
-      *wasm_runtime_context_);
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 

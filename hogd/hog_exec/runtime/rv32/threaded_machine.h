@@ -65,6 +65,16 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // <= 8 (kDivInstructionGas) << kMaxRunGas, so a valid split always exists.
 inline constexpr uint32_t kMaxRunGas = 10000;
 
+// The narrow-imm + rs2 arm of Slot's operand union (see Slot below for why the
+// two can share a word). Declared out of line rather than as an unnamed struct
+// inside the anonymous union: ISO C++ ([class.union.anon]) lets an anonymous
+// union define only non-static data members, so a nested type there is a
+// compiler extension (clang: -Wnested-anon-types).
+struct RbOperands {
+  int16_t imm16; // store offset / branch slot-delta (fits int16)
+  uint8_t rs2;   // R-type / store / branch
+};
+
 // Executable instruction, packed to 16 bytes (alignas(16) -- a power of two, so
 // `ip - base` (pc_of) and `ip + imm` (branch/jump targets) still lower to a
 // shift, and the exec_ array is half the size of the old 32-byte slot). Layout:
@@ -90,10 +100,7 @@ struct alignas(16) Slot {
   uint8_t rs1 = 0;           // offset 11
   union {                    // offset 12
     int32_t imm = 0; //   lui/auipc/jal (wide) + I-type/load/jalr (12-bit)
-    struct {
-      int16_t imm16; //   store offset / branch slot-delta (fits int16)
-      uint8_t rs2;   //   R-type / store / branch
-    } rb;
+    RbOperands rb;   //   R-type / store / branch: {imm16, rs2}
   };
 };
 static_assert(sizeof(Slot) == 16);

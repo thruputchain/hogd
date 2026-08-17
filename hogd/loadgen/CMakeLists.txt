@@ -15,6 +15,7 @@ add_dependencies(
   loadgen
   all_wasm_contracts
   all_wasm_headers
+  all_riscvs_built # erc20_experiment loads .rv32a artifacts in rv32 mode
 )
 
 target_include_directories(loadgen PRIVATE

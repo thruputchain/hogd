@@ -20,10 +20,8 @@
 #include <utility>
 #include <vector>
 
-#include "built_contracts/no_syscall_test.h"
-#include "built_contracts/read_only_test.h"
-#include "built_contracts/sha256_wrapper.h"
 #include "contract.hh"
+#include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/json.h"
@@ -31,9 +29,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
-#include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -45,8 +42,6 @@
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/trampoline_result.h"
-#include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
-#include "hogd/hog_exec/runtime/wasm/wasm_test_framework.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -54,6 +49,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 // Test callback fixtures intentionally mirror C host function ABIs, and the
@@ -65,14 +61,7 @@ namespace {
 
 namespace compiled_sha256_return = rv32::fixtures::compiled_sha256_return;
 
-static_assert(compiled_sha256_return::kSha256RepeatedMethodId ==
-              sha256_wrapper::Sha256Wrapper::kEntrypoints[1]);
-static_assert(compiled_sha256_return::kSha256MethodId ==
-              sha256_wrapper::Sha256Wrapper::kEntrypoints[0]);
-
 constexpr int32_t kRv32ContractId = 7;
-constexpr ContractAddress kWasmContractAddress =
-    NativeContractTestFramework::make_contract_address(6);
 constexpr ContractAddress kRv32ContractAddress =
     NativeContractTestFramework::make_contract_address(7);
 constexpr uint32_t kReturnBufferAddress = 192;
@@ -90,11 +79,6 @@ constexpr GasAmount kParityGas = 10'000;
 constexpr std::string_view kEffectStorageKey = "rv32_parity_key";
 constexpr std::string_view kEffectStorageValue = "rv32 parity bytes";
 constexpr std::string_view kEffectEventData = "rv32 parity event";
-constexpr GasAmount kWasmErrorHostGas = 100;
-constexpr std::array<WasmEngine, 2> kDifferentialWasmEngines = {
-    WasmEngine::kWasmi,
-    WasmEngine::kWasmtime,
-};
 constexpr std::u8string_view kRv32SmokeCounterInterface = u8"Counter";
 // Keep in sync with built_contracts/integration_test_contracts/
 // rv32_smoke_counter/Cargo.toml; the SDK-lowered round-trip tests below fail
@@ -349,49 +333,19 @@ exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
 }
 
 extern "C" TrampolineResult
+zero_code_exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                     uint32_t, uint32_t)
+{
+  return make_exit_result(0);
+}
+
+extern "C" TrampolineResult
 return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
              uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Return);
-}
-
-extern "C" TrampolineResult
-wasm_unrecoverable_entry(ExternHostCallContext /*unused*/,
-                         WasmContext /*unused*/)
-{
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Unrecoverable},
-                              kWasmErrorHostGas);
-}
-
-extern "C" TrampolineResult
-wasm_validation_failure_entry(ExternHostCallContext /*unused*/,
-                              WasmContext /*unused*/)
-{
-  return to_trampoline_result(HostFnError{HostFnErrorCode::ValidationFailure},
-                              kWasmErrorHostGas);
-}
-
-extern "C" TrampolineResult
-wasm_abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
-{
-  return to_trampoline_result(HostFnError{HostFnErrorCode::Abandon},
-                              kWasmErrorHostGas);
-}
-
-extern "C" TrampolineResult
-wasm_good_call_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/)
-{
-  return to_trampoline_result({SyscallErrorCode::kSyscallErrorCodeNone},
-                              kWasmErrorHostGas);
-}
-
-extern "C" TrampolineResult
-wasm_consume_too_much_gas_entry(ExternHostCallContext /*unused*/,
-                                WasmContext wasm_context)
-{
-  return to_trampoline_result(HostFnError{HostFnErrorCode::OutOfGas},
-                              wasm_context.gas_remaining);
 }
 
 // Stage the Return payload at kReturnBufferAddress. Under the register-native
@@ -734,58 +688,6 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
   return runtime.value()->invoke(method_id, gas_limit);
 }
 
-// definitions of method names in test_error_handling.wasm
-constexpr Runtime::MethodID kCall1 = 1;
-constexpr Runtime::MethodID kUnreachable = 5;
-
-InvokeResult
-invoke_wasm_error_contract(WasmEngine engine, HostFn0 external_call,
-                           Runtime::MethodID method, GasAmount gas_limit)
-{
-  WasmTestFramework wasm;
-  Contract contract;
-  contract.contract_type(ContractType::kWasmi);
-  contract.wasmi_contract() =
-      test::load_wasm_from_file("test_error_handling.wasm");
-  const DeployedContractHash deployed{
-      .hash = sha256(contract),
-      .contract_size =
-          static_cast<uint32_t>(contract.wasmi_contract().data.size()),
-      .contract_type = ContractType::kWasmi,
-  };
-
-  wasm.setup_wasm_context(engine);
-  EXPECT_TRUE(wasm.link_fn("test", "good_call", &wasm_good_call_entry));
-  EXPECT_TRUE(wasm.link_fn("test", "external_call", external_call));
-  wasm.make_syscall_handler(contract);
-  auto runtime =
-      wasm.get_context()->make_new_runtime(deployed,
-                                           wasm.get_syscall_handler());
-  EXPECT_TRUE(runtime.has_value());
-  if (!runtime.has_value()) {
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
-  }
-  EXPECT_NE(runtime.value(), nullptr);
-  if (runtime.value() == nullptr) {
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
-  }
-  return runtime.value()->invoke(method, gas_limit);
-}
-
-void
-expect_matching_error(InvokeResult const &wasm_result,
-                      InvokeResult const &rv32_result, InvokeErrorCode expected)
-{
-  ASSERT_FALSE(wasm_result.is_root_success());
-  ASSERT_FALSE(rv32_result.is_root_success());
-  ASSERT_EQ(wasm_result.result_.error().code(), expected);
-  EXPECT_EQ(rv32_result.result_.error().code(), expected);
-  EXPECT_EQ(wasm_result.result_.error().code(),
-            rv32_result.result_.error().code());
-}
-
 std::shared_ptr<const Contract>
 make_rv32_contract_xdr()
 {
@@ -795,9 +697,9 @@ make_rv32_contract_xdr()
 }
 
 std::shared_ptr<const Contract>
-make_wasmi_contract_xdr()
+make_non_mock_contract_xdr()
 {
-  auto contract = std::make_shared<Contract>(ContractType::kWasmi);
+  auto contract = std::make_shared<Contract>(ContractType::kRv32);
   return contract;
 }
 
@@ -839,521 +741,193 @@ protected:
   }
 };
 
-void
-expect_syscall_trace_suffix_matches(InvocationFrameTrace const &wasm_trace,
-                                    InvocationFrameTrace const &rv32_trace)
-{
-  ASSERT_GE(wasm_trace.system_calls.size(), 2U);
-  ASSERT_EQ(rv32_trace.system_calls.size(), 2U);
+// Exact-pin helpers mirroring tracing/trace_shape_tests.cc: expected traces
+// are hardcoded SyscallTrace values, not comparisons against another runtime
+// or a second run. Absolute gas values shift when the gas schedule or the
+// hand-assembled/compiled fixtures change; regenerate them deliberately (the
+// failure message prints the observed trace).
+using SyscallTraceVec = x23::Vec<SyscallTrace, 0xffffffff>;
 
-  const size_t wasm_offset = wasm_trace.system_calls.size() - 2;
-  for (size_t i = 0; i < rv32_trace.system_calls.size(); ++i) {
-    auto const &wasm_call = wasm_trace.system_calls[wasm_offset + i];
-    auto const &rv32_call = rv32_trace.system_calls[i];
-    EXPECT_EQ(wasm_call.body.syscall_number(), rv32_call.body.syscall_number());
-    EXPECT_EQ(wasm_call.status.error(), rv32_call.status.error());
-    if (wasm_call.status.error() == HostFnErrorCode::NoneOrRecoverable) {
-      EXPECT_EQ(wasm_call.status.syscall_return_code(),
-                rv32_call.status.syscall_return_code());
-    }
-  }
+HostFunctionStatusXdr
+ok_status()
+{
+  HostFunctionStatusXdr status(HostFnErrorCode::NoneOrRecoverable);
+  status.syscall_return_code() = SyscallErrorCode::kSyscallErrorCodeNone;
+  return status;
 }
 
-void
-expect_sha256_then_return_trace_matches(
-    InvocationFrameTrace const &wasm_trace,
-    InvocationFrameTrace const &rv32_trace, std::span<const uint8_t> input,
-    SHA256Hash const &expected_hash, std::span<const uint8_t> expected_return)
+HostFunctionStatusXdr
+error_status(SyscallErrorCode code)
 {
-  ASSERT_GE(wasm_trace.system_calls.size(), 2U);
-  ASSERT_EQ(rv32_trace.system_calls.size(), 2U);
-  const size_t wasm_offset = wasm_trace.system_calls.size() - 2;
-
-  auto const &wasm_sha = wasm_trace.system_calls[wasm_offset];
-  auto const &rv32_sha = rv32_trace.system_calls[0];
-  ASSERT_EQ(wasm_sha.body.syscall_number(), SyscallNo::kSHA256);
-  ASSERT_EQ(rv32_sha.body.syscall_number(), SyscallNo::kSHA256);
-  EXPECT_EQ(wasm_sha.status.error(), HostFnErrorCode::NoneOrRecoverable);
-  EXPECT_EQ(rv32_sha.status.error(), HostFnErrorCode::NoneOrRecoverable);
-  EXPECT_EQ(wasm_sha.status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeNone);
-  EXPECT_EQ(rv32_sha.status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeNone);
-  EXPECT_TRUE(std::ranges::equal(wasm_sha.body.sha256().inputs.input, input));
-  EXPECT_TRUE(std::ranges::equal(rv32_sha.body.sha256().inputs.input, input));
-  ASSERT_NE(wasm_sha.body.sha256().outputs, nullptr);
-  ASSERT_NE(rv32_sha.body.sha256().outputs, nullptr);
-  EXPECT_EQ(wasm_sha.body.sha256().outputs->hash, expected_hash);
-  EXPECT_EQ(rv32_sha.body.sha256().outputs->hash, expected_hash);
-
-  auto const &wasm_return = wasm_trace.system_calls[wasm_offset + 1];
-  auto const &rv32_return = rv32_trace.system_calls[1];
-  ASSERT_EQ(wasm_return.body.syscall_number(), SyscallNo::kReturn);
-  ASSERT_EQ(rv32_return.body.syscall_number(), SyscallNo::kReturn);
-  EXPECT_EQ(wasm_return.status.error(), HostFnErrorCode::Return);
-  EXPECT_EQ(rv32_return.status.error(), HostFnErrorCode::Return);
-  EXPECT_TRUE(std::ranges::equal(wasm_return.body.return_trace().inputs.buffer,
-                                 expected_return));
-  EXPECT_TRUE(std::ranges::equal(rv32_return.body.return_trace().inputs.buffer,
-                                 expected_return));
-  EXPECT_FALSE(wasm_return.body.return_trace().inputs.revert_frame);
-  EXPECT_FALSE(rv32_return.body.return_trace().inputs.revert_frame);
+  HostFunctionStatusXdr status(HostFnErrorCode::NoneOrRecoverable);
+  status.syscall_return_code() = code;
+  return status;
 }
 
-void
-expect_sha256_return_trace_matches(InvocationFrameTrace const &wasm_trace,
-                                   InvocationFrameTrace const &rv32_trace,
-                                   std::span<const uint8_t> input,
-                                   SHA256Hash const &expected_hash)
+SyscallTrace
+make_trace_entry(GasAmount gas_at_start, GasAmount gas_at_end,
+                 SyscallTraceBody body, HostFunctionStatusXdr status)
 {
-  expect_sha256_then_return_trace_matches(wasm_trace, rv32_trace, input,
-                                          expected_hash,
-                                          std::span<const uint8_t>(
-                                              expected_hash));
+  return SyscallTrace{
+      .gas_remaining_at_start = gas_at_start,
+      .gas_remaining_at_end = gas_at_end,
+      .body = std::move(body),
+      .status = std::move(status),
+  };
 }
 
-void
-expect_storage_event_return_trace_matches(
-    InvocationFrameTrace const &wasm_trace,
-    InvocationFrameTrace const &rv32_trace)
+SyscallTrace
+return_trace_entry(GasAmount gas, std::span<const uint8_t> buffer,
+                   bool revert_frame = false)
 {
-  ASSERT_GE(wasm_trace.system_calls.size(), 3U);
-  ASSERT_EQ(rv32_trace.system_calls.size(), 3U);
-  const size_t wasm_offset = wasm_trace.system_calls.size() - 3;
-
-  auto const &wasm_set = wasm_trace.system_calls[wasm_offset];
-  auto const &rv32_set = rv32_trace.system_calls[0];
-  ASSERT_EQ(wasm_set.body.syscall_number(), SyscallNo::kBytestringSet);
-  ASSERT_EQ(rv32_set.body.syscall_number(), SyscallNo::kBytestringSet);
-  EXPECT_EQ(wasm_set.status.error(), HostFnErrorCode::NoneOrRecoverable);
-  EXPECT_EQ(rv32_set.status.error(), HostFnErrorCode::NoneOrRecoverable);
-  EXPECT_EQ(wasm_set.status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeNone);
-  EXPECT_EQ(rv32_set.status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeNone);
-  EXPECT_EQ(wasm_set.body.bytestring_set().inputs.key,
-            rv32_set.body.bytestring_set().inputs.key);
-  EXPECT_EQ(wasm_set.body.bytestring_set().inputs.bytestring,
-            rv32_set.body.bytestring_set().inputs.bytestring);
-  EXPECT_EQ(wasm_set.body.bytestring_set().inputs.flags,
-            rv32_set.body.bytestring_set().inputs.flags);
-
-  auto const &wasm_event = wasm_trace.system_calls[wasm_offset + 1];
-  auto const &rv32_event = rv32_trace.system_calls[1];
-  ASSERT_EQ(wasm_event.body.syscall_number(), SyscallNo::kLogEvent);
-  ASSERT_EQ(rv32_event.body.syscall_number(), SyscallNo::kLogEvent);
-  EXPECT_EQ(wasm_event.status.error(), HostFnErrorCode::NoneOrRecoverable);
-  EXPECT_EQ(rv32_event.status.error(), HostFnErrorCode::NoneOrRecoverable);
-  EXPECT_EQ(wasm_event.status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeNone);
-  EXPECT_EQ(rv32_event.status.syscall_return_code(),
-            SyscallErrorCode::kSyscallErrorCodeNone);
-  ASSERT_NE(wasm_event.body.log_event().inputs.topic0, nullptr);
-  ASSERT_NE(rv32_event.body.log_event().inputs.topic0, nullptr);
-  EXPECT_EQ(*wasm_event.body.log_event().inputs.topic0,
-            *rv32_event.body.log_event().inputs.topic0);
-  EXPECT_EQ(wasm_event.body.log_event().inputs.topic1, nullptr);
-  EXPECT_EQ(rv32_event.body.log_event().inputs.topic1, nullptr);
-  EXPECT_EQ(wasm_event.body.log_event().inputs.topic2, nullptr);
-  EXPECT_EQ(rv32_event.body.log_event().inputs.topic2, nullptr);
-  EXPECT_EQ(wasm_event.body.log_event().inputs.data,
-            rv32_event.body.log_event().inputs.data);
-
-  auto const &wasm_return = wasm_trace.system_calls[wasm_offset + 2];
-  auto const &rv32_return = rv32_trace.system_calls[2];
-  ASSERT_EQ(wasm_return.body.syscall_number(), SyscallNo::kReturn);
-  ASSERT_EQ(rv32_return.body.syscall_number(), SyscallNo::kReturn);
-  EXPECT_EQ(wasm_return.status.error(), HostFnErrorCode::Return);
-  EXPECT_EQ(rv32_return.status.error(), HostFnErrorCode::Return);
-  EXPECT_TRUE(wasm_return.body.return_trace().inputs.buffer.empty());
-  EXPECT_TRUE(rv32_return.body.return_trace().inputs.buffer.empty());
-  EXPECT_FALSE(wasm_return.body.return_trace().inputs.revert_frame);
-  EXPECT_FALSE(rv32_return.body.return_trace().inputs.revert_frame);
+  SyscallTraceBody body(SyscallNo::kReturn);
+  body.return_trace().inputs.buffer.append_range(buffer);
+  body.return_trace().inputs.revert_frame = revert_frame;
+  return make_trace_entry(gas, gas, std::move(body),
+                          HostFunctionStatusXdr(HostFnErrorCode::Return));
 }
 
-TEST_F(Rv32RuntimeContextTest, InvalidSyscallReturnMatchesWasmStatusAndTrace)
+SyscallTrace
+sha256_trace_entry(GasAmount gas_at_start, std::span<const uint8_t> input,
+                   SHA256Hash const &hash)
 {
-  auto wasm_context = make_hog_exec_context();
-  auto wasm_contract =
-      ContractTraitMeta<no_syscall_test::NoSyscallTest>::load_wasm();
-  write_contract(wasm_contract);
-  write_deployment(kWasmContractAddress, wasm_contract);
-  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
+  SyscallTraceBody body(SyscallNo::kSHA256);
+  body.sha256().inputs.input.append_range(input);
+  body.sha256().outputs = SyscallSHA256Outputs{.hash = hash};
+  return make_trace_entry(gas_at_start,
+                          gas_at_start - SHA256HashCost(input.size()),
+                          std::move(body), ok_status());
+}
+
+TEST_F(Rv32RuntimeContextTest, InvalidSyscallThenReturnTraceIsExact)
+{
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, make_invalid_syscall_then_return_image()}});
   auto rv32_contract = make_rv32_contract_xdr();
   install_contract(rv32_contract);
 
-  ContractTraitClient<no_syscall_test::NoSyscallTest> wasm_client(
-      kWasmContractAddress);
-  SignedTransaction wasm_handler_tx{
-      .tx = Transaction{.invocation = wasm_client.make_invocation<u8"run_test">(
-                            kEnoughGas, static_cast<uint64_t>(kSyscallCount)),
-                        .uniquifier = Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = 1,
-                        }}};
-  auto wasm_handler =
-      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
-  wasm_handler.enable_tracing();
-  wasm_handler.enable_transaction_stats();
+  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                              rv32_context);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
 
-  auto rv32_handler =
-      make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                   rv32_context);
-  rv32_handler.enable_tracing();
-  rv32_handler.enable_transaction_stats();
+  const auto result = handler.root_invoke();
+  ASSERT_TRUE(result.is_root_success());
 
-  const auto wasm_result = wasm_handler.root_invoke();
-  const auto rv32_result = rv32_handler.root_invoke();
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(output.return_buffer().empty());
 
-  ASSERT_TRUE(wasm_result.is_root_success());
-  ASSERT_TRUE(rv32_result.is_root_success());
+  // 1 addi + ecall for the out-of-range syscall number (traced under its raw
+  // discriminant, charged kNoSyscallCost, and continues), then 6 addi + ecall
+  // for the empty Return.
+  SyscallTraceVec expected;
+  expected.push_back(make_trace_entry(
+      kEnoughGas - (2 * rv32::kBaseInstructionGas),
+      kEnoughGas - (2 * rv32::kBaseInstructionGas) - kNoSyscallCost,
+      SyscallTraceBody(static_cast<SyscallNo>(kSyscallCount)),
+      error_status(SyscallErrorCode::kSyscallErrorCodeNoSyscall)));
+  expected.push_back(return_trace_entry(
+      kEnoughGas - (9 * rv32::kBaseInstructionGas) - kNoSyscallCost, {}));
 
-  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
-  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
-  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
-  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
-  EXPECT_EQ(wasm_output.return_buffer().size(), 0U);
-  EXPECT_EQ(rv32_output.return_buffer().size(), 0U);
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_EQ(handler.get_trace()->status.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(handler.get_trace()->status.return_buffer().empty());
+  EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+  EXPECT_TRUE(handler.get_most_recent_frame_events().empty());
 
-  ASSERT_NE(wasm_handler.get_trace(), nullptr);
-  ASSERT_NE(rv32_handler.get_trace(), nullptr);
-  EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
-            rv32_handler.get_trace()->status.status_code());
-  EXPECT_EQ(wasm_handler.get_trace()->status.return_buffer().size(),
-            rv32_handler.get_trace()->status.return_buffer().size());
-  EXPECT_EQ(wasm_handler.get_trace()->storage_writes.size(),
-            rv32_handler.get_trace()->storage_writes.size());
-  expect_syscall_trace_suffix_matches(*wasm_handler.get_trace(),
-                                      *rv32_handler.get_trace());
-  EXPECT_EQ(wasm_handler.get_most_recent_frame_events().size(),
-            rv32_handler.get_most_recent_frame_events().size());
-  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
-  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 1);
-  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 1);
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
 }
 
-TEST_F(Rv32RuntimeContextTest, Sha256ReturnMatchesWasmTraceAndOutput)
+TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
 {
-  const x23::Vec<uint8_t, 0xffffffff> input = {1, 2, 3, 4, 5, 8, 13};
-  const SHA256Hash expected_hash = sha256(input);
-
-  auto wasm_context = make_hog_exec_context();
-  auto wasm_contract =
-      ContractTraitMeta<sha256_wrapper::Sha256Wrapper>::load_wasm();
-  write_contract(wasm_contract);
-  write_deployment(kWasmContractAddress, wasm_contract);
-  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
-
-  auto rv32_context = rv32::RuntimeContext(
-      {{kRv32ContractId, make_sha256_then_return_image(input)}});
-  auto rv32_contract = make_rv32_contract_xdr();
-  install_contract(rv32_contract);
-
-  ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
-      kWasmContractAddress);
-  SignedTransaction wasm_handler_tx{
-      .tx = Transaction{
-          .invocation =
-              wasm_client.make_invocation<u8"sha256">(kParityGas, input),
-          .uniquifier = Uniquifier{
-              .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
-              .nonce = 2,
-          }}};
-  auto wasm_handler =
-      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
-  wasm_handler.enable_tracing();
-  wasm_handler.enable_transaction_stats();
-
-  auto rv32_handler =
-      make_new_system_call_handler(make_root_transaction(kParityGas),
-                                   rv32_context);
-  rv32_handler.enable_tracing();
-  rv32_handler.enable_transaction_stats();
-
-  const auto wasm_result = wasm_handler.root_invoke();
-  const auto rv32_result = rv32_handler.root_invoke();
-
-  ASSERT_TRUE(wasm_result.is_root_success());
-  ASSERT_TRUE(rv32_result.is_root_success());
-
-  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
-  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
-  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
-  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
-  EXPECT_TRUE(std::ranges::equal(wasm_output.return_buffer(), expected_hash));
-  EXPECT_TRUE(std::ranges::equal(rv32_output.return_buffer(), expected_hash));
-
-  ASSERT_NE(wasm_handler.get_trace(), nullptr);
-  ASSERT_NE(rv32_handler.get_trace(), nullptr);
-  EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
-            rv32_handler.get_trace()->status.status_code());
-  EXPECT_TRUE(
-      std::ranges::equal(wasm_handler.get_trace()->status.return_buffer(),
-                         expected_hash));
-  EXPECT_TRUE(
-      std::ranges::equal(rv32_handler.get_trace()->status.return_buffer(),
-                         expected_hash));
-  EXPECT_EQ(wasm_handler.get_trace()->storage_writes.size(),
-            rv32_handler.get_trace()->storage_writes.size());
-  EXPECT_EQ(wasm_handler.get_most_recent_frame_events().size(),
-            rv32_handler.get_most_recent_frame_events().size());
-  expect_sha256_return_trace_matches(*wasm_handler.get_trace(),
-                                     *rv32_handler.get_trace(), input,
-                                     expected_hash);
-  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
-  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
-  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
-}
-
-TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnMatchesWasmTraceAndOutput)
-{
-  const x23::Vec<uint8_t, 0xffffffff> input(
-      compiled_sha256_return::kInput.begin(),
-      compiled_sha256_return::kInput.end());
-  const SHA256Hash expected_hash = sha256(input);
-
-  auto wasm_context = make_hog_exec_context();
-  auto wasm_contract =
-      ContractTraitMeta<sha256_wrapper::Sha256Wrapper>::load_wasm();
-  write_contract(wasm_contract);
-  write_deployment(kWasmContractAddress, wasm_contract);
-  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
-
-  auto rv32_context = rv32::RuntimeContext(
-      {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
-  auto rv32_contract = make_rv32_contract_xdr();
-  install_contract(rv32_contract);
-
-  ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
-      kWasmContractAddress);
-  SignedTransaction wasm_handler_tx{
-      .tx = Transaction{
-          .invocation =
-              wasm_client.make_invocation<u8"sha256">(kParityGas, input),
-          .uniquifier = Uniquifier{
-              .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
-              .nonce = 4,
-          }}};
-  auto wasm_handler =
-      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
-  wasm_handler.enable_tracing();
-  wasm_handler.enable_transaction_stats();
-
-  auto rv32_handler = make_new_system_call_handler(
-      make_root_transaction(kParityGas,
-                            compiled_sha256_return::kSha256MethodId),
-      rv32_context);
-  rv32_handler.enable_tracing();
-  rv32_handler.enable_transaction_stats();
-
-  const auto wasm_result = wasm_handler.root_invoke();
-  const auto rv32_result = rv32_handler.root_invoke();
-
-  ASSERT_TRUE(wasm_result.is_root_success());
-  ASSERT_TRUE(rv32_result.is_root_success());
-
-  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
-  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
-  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
-  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
-  EXPECT_TRUE(std::ranges::equal(wasm_output.return_buffer(), expected_hash));
-  EXPECT_TRUE(std::ranges::equal(rv32_output.return_buffer(), expected_hash));
-
-  ASSERT_NE(wasm_handler.get_trace(), nullptr);
-  ASSERT_NE(rv32_handler.get_trace(), nullptr);
-  EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
-            rv32_handler.get_trace()->status.status_code());
-  EXPECT_TRUE(
-      std::ranges::equal(wasm_handler.get_trace()->status.return_buffer(),
-                         expected_hash));
-  EXPECT_TRUE(
-      std::ranges::equal(rv32_handler.get_trace()->status.return_buffer(),
-                         expected_hash));
-  expect_sha256_return_trace_matches(*wasm_handler.get_trace(),
-                                     *rv32_handler.get_trace(), input,
-                                     expected_hash);
-  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
-  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
-  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
-}
-
-TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchMatchesWasm)
-{
-  const x23::Vec<uint8_t, 0xffffffff> input(
-      compiled_sha256_return::kInput.begin(),
-      compiled_sha256_return::kInput.end());
-  const SHA256Hash expected_hash = sha256(input);
-
-  auto wasm_context = make_hog_exec_context();
-  auto wasm_contract =
-      ContractTraitMeta<sha256_wrapper::Sha256Wrapper>::load_wasm();
-  write_contract(wasm_contract);
-  write_deployment(kWasmContractAddress, wasm_contract);
-  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
-
-  auto rv32_context = rv32::RuntimeContext(
-      {{kRv32ContractId, make_compiled_sha256_then_return_image()}});
-  auto rv32_contract = make_rv32_contract_xdr();
-  install_contract(rv32_contract);
-
-  ContractTraitClient<sha256_wrapper::Sha256Wrapper> wasm_client(
-      kWasmContractAddress);
-  SignedTransaction wasm_handler_tx{
-      .tx = Transaction{.invocation =
-                            wasm_client.make_invocation<u8"sha256_repeated">(
-                                kParityGas, uint32_t{1}, input),
-                        .uniquifier = Uniquifier{
-                            .block_expiry_height =
-                                std::numeric_limits<BlockHeight>::max(),
-                            .nonce = 40,
-                        }}};
-  auto wasm_handler =
-      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
-  wasm_handler.enable_tracing();
-  wasm_handler.enable_transaction_stats();
-
-  auto rv32_handler = make_new_system_call_handler(
-      make_root_transaction(kParityGas,
-                            compiled_sha256_return::kSha256RepeatedMethodId),
-      rv32_context);
-  rv32_handler.enable_tracing();
-  rv32_handler.enable_transaction_stats();
-
-  const auto wasm_result = wasm_handler.root_invoke();
-  const auto rv32_result = rv32_handler.root_invoke();
-
-  ASSERT_TRUE(wasm_result.is_root_success());
-  ASSERT_TRUE(rv32_result.is_root_success());
-
-  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
-  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
-  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
-  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
-  EXPECT_TRUE(wasm_output.return_buffer().empty());
-  EXPECT_TRUE(rv32_output.return_buffer().empty());
-  ASSERT_FALSE(std::span<const uint8_t>(expected_hash).empty());
-  EXPECT_FALSE(std::ranges::equal(wasm_output.return_buffer(), expected_hash));
-  EXPECT_FALSE(std::ranges::equal(rv32_output.return_buffer(), expected_hash));
-
-  ASSERT_NE(wasm_handler.get_trace(), nullptr);
-  ASSERT_NE(rv32_handler.get_trace(), nullptr);
-  EXPECT_EQ(wasm_handler.get_trace()->status.status_code(),
-            rv32_handler.get_trace()->status.status_code());
-  EXPECT_TRUE(wasm_handler.get_trace()->status.return_buffer().empty());
-  EXPECT_TRUE(rv32_handler.get_trace()->status.return_buffer().empty());
-  expect_sha256_then_return_trace_matches(*wasm_handler.get_trace(),
-                                          *rv32_handler.get_trace(), input,
-                                          expected_hash,
-                                          std::span<const uint8_t>{});
-  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
-  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
-  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
-}
-
-TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventMatchWasmTraceAndEffects)
-{
-  auto wasm_context = make_hog_exec_context();
-  auto wasm_contract =
-      ContractTraitMeta<read_only_test::ReadOnlyTest>::load_wasm();
-  write_contract(wasm_contract);
-  write_deployment(kWasmContractAddress, wasm_contract);
-  setup_grant_storage_token(kWasmContractAddress, 1'000'000'000);
-
   auto rv32_context = rv32::RuntimeContext(
       {{kRv32ContractId, make_storage_event_return_image()}});
   auto rv32_contract = make_rv32_contract_xdr();
   install_contract(rv32_contract);
 
-  ContractTraitClient<read_only_test::ReadOnlyTest> wasm_client(
-      kWasmContractAddress);
-  SignedTransaction wasm_handler_tx{
-      .tx = Transaction{
-          .invocation =
-              wasm_client.make_invocation<u8"write_storage_and_log_event">(
-                  kParityGas),
-          .uniquifier = Uniquifier{
-              .block_expiry_height = std::numeric_limits<BlockHeight>::max(),
-              .nonce = 3,
-          }}};
-  auto wasm_handler =
-      make_new_system_call_handler(wasm_handler_tx.tx, *wasm_context);
-  wasm_handler.enable_tracing();
-  wasm_handler.enable_transaction_stats();
+  const SignedTransaction tx{.tx = make_root_transaction(kParityGas)};
+  auto handler = make_new_system_call_handler(tx.tx, rv32_context);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
 
-  SignedTransaction rv32_handler_tx{.tx = make_root_transaction(kParityGas)};
-  auto rv32_handler =
-      make_new_system_call_handler(rv32_handler_tx.tx, rv32_context);
-  rv32_handler.enable_tracing();
-  rv32_handler.enable_transaction_stats();
+  const auto result = handler.root_invoke();
+  ASSERT_TRUE(result.is_root_success());
 
-  const auto wasm_result = wasm_handler.root_invoke();
-  const auto rv32_result = rv32_handler.root_invoke();
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(output.return_buffer().empty());
 
-  ASSERT_TRUE(wasm_result.is_root_success());
-  ASSERT_TRUE(rv32_result.is_root_success());
+  ASSERT_NE(handler.get_trace(), nullptr);
+  auto const &trace = *handler.get_trace();
+  const auto events = handler.get_most_recent_frame_events();
 
-  const auto wasm_output = wasm_handler.get_most_recent_frame_output();
-  const auto rv32_output = rv32_handler.get_most_recent_frame_output();
-  ASSERT_EQ(wasm_output.status_code(), InvocationFrameStatusCode::Return);
-  ASSERT_EQ(rv32_output.status_code(), InvocationFrameStatusCode::Return);
-  EXPECT_TRUE(wasm_output.return_buffer().empty());
-  EXPECT_TRUE(rv32_output.return_buffer().empty());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                  ProposedTransaction{.signed_tx = tx})());
 
-  ASSERT_NE(wasm_handler.get_trace(), nullptr);
-  ASSERT_NE(rv32_handler.get_trace(), nullptr);
-  auto const *wasm_trace = wasm_handler.get_trace();
-  auto const *rv32_trace = rv32_handler.get_trace();
-  const auto wasm_events = wasm_handler.get_most_recent_frame_events();
-  const auto rv32_events = rv32_handler.get_most_recent_frame_events();
+  const StorageKeyContractData key =
+      make_storage_key_matching_static_key_sdk_macro(kEffectStorageKey);
+  const std::vector<uint8_t> value(kEffectStorageValue.begin(),
+                                   kEffectStorageValue.end());
+  Topic topic0;
+  topic0.fill(0x5a);
+  const std::vector<uint8_t> data(kEffectEventData.begin(),
+                                  kEffectEventData.end());
 
-  ASSERT_EQ(wasm_handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(wasm_handler.emit_events(ExecResult::ExecResultOK,
-                                       ProposedTransaction{
-                                           .signed_tx = wasm_handler_tx})());
-  ASSERT_EQ(rv32_handler.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(rv32_handler.emit_events(ExecResult::ExecResultOK,
-                                       ProposedTransaction{
-                                           .signed_tx = rv32_handler_tx})());
+  // BytestringSet is 5 addi + ecall, LogEvent 6 addi + ecall, and the empty
+  // Return 6 addi + ecall; syscall costs beyond base instruction gas come
+  // from the gas cost table.
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kBytestringSet);
+    body.bytestring_set().inputs.key = key;
+    body.bytestring_set().inputs.bytestring.append_range(value);
+    body.bytestring_set().inputs.flags =
+        static_cast<uint32_t>(StorageDeltaFlags::None);
+    expected.push_back(make_trace_entry(kParityGas - 6, kParityGas - 6,
+                                        std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kLogEvent);
+    body.log_event().inputs.topic0 = topic0;
+    body.log_event().inputs.data.append_range(data);
+    expected.push_back(make_trace_entry(kParityGas - 13, kParityGas - 13,
+                                        std::move(body), ok_status()));
+  }
+  expected.push_back(return_trace_entry(kParityGas - 20, {}));
 
-  EXPECT_EQ(wasm_trace->status.status_code(), rv32_trace->status.status_code());
-  EXPECT_TRUE(wasm_trace->status.return_buffer().empty());
-  EXPECT_TRUE(rv32_trace->status.return_buffer().empty());
-  expect_storage_event_return_trace_matches(*wasm_trace, *rv32_trace);
+  EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(trace.status.return_buffer().empty());
+  ASSERT_EQ(trace.system_calls, expected) << x23::show(trace.system_calls);
 
-  ASSERT_EQ(wasm_trace->storage_writes.size(), 1U);
-  ASSERT_EQ(rv32_trace->storage_writes.size(), 1U);
-  auto const &wasm_write = wasm_trace->storage_writes[0];
-  auto const &rv32_write = rv32_trace->storage_writes[0];
-  EXPECT_EQ(wasm_write.addrkey.address, kWasmContractAddress);
-  EXPECT_EQ(rv32_write.addrkey.address, kRv32ContractAddress);
-  EXPECT_EQ(wasm_write.addrkey.key, rv32_write.addrkey.key);
-  EXPECT_EQ(wasm_write.flags, rv32_write.flags);
-  ASSERT_EQ(wasm_write.delta.type(), StorageDeltaType::kDeltaTypeBytestringSet);
-  ASSERT_EQ(rv32_write.delta.type(), StorageDeltaType::kDeltaTypeBytestringSet);
-  EXPECT_EQ(wasm_write.delta.bytestring(), rv32_write.delta.bytestring());
+  // The committed storage delta and the emitted event mirror the trace.
+  ASSERT_EQ(trace.storage_writes.size(), 1U);
+  auto const &write = trace.storage_writes[0];
+  EXPECT_EQ(write.addrkey,
+            make_contract_data_addrkey_matching_static_key_sdk_macro(
+                kRv32ContractAddress, kEffectStorageKey));
+  EXPECT_EQ(write.flags, 0U);
+  ASSERT_EQ(write.delta.type(), StorageDeltaType::kDeltaTypeBytestringSet);
+  EXPECT_TRUE(std::ranges::equal(write.delta.bytestring(), value));
 
-  ASSERT_EQ(wasm_events.size(), 1U);
-  ASSERT_EQ(rv32_events.size(), 1U);
-  EXPECT_EQ(wasm_events[0].contract_address, kWasmContractAddress);
-  EXPECT_EQ(rv32_events[0].contract_address, kRv32ContractAddress);
-  EXPECT_EQ(wasm_events[0].num_topics, 1U);
-  EXPECT_EQ(rv32_events[0].num_topics, 1U);
-  EXPECT_EQ(wasm_events[0].serialized_event, rv32_events[0].serialized_event);
+  ASSERT_EQ(events.size(), 1U);
+  EXPECT_EQ(events[0].contract_address, kRv32ContractAddress);
+  EXPECT_EQ(events[0].num_topics, 1U);
+  x23::Vec<uint8_t, kMaxEventLength> expected_event;
+  expected_event.append_range(topic0);
+  expected_event.append_range(data);
+  EXPECT_EQ(events[0].serialized_event, expected_event);
 
-  ASSERT_NE(wasm_handler.get_transaction_stats(), nullptr);
-  ASSERT_NE(rv32_handler.get_transaction_stats(), nullptr);
-  EXPECT_EQ(wasm_handler.get_transaction_stats()->invalid_syscall_count, 0);
-  EXPECT_EQ(rv32_handler.get_transaction_stats()->invalid_syscall_count, 0);
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
 }
 
-TEST_F(Rv32RuntimeContextTest, Sha256ReturnIsDeterministicForSameInputs)
+TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
 {
   const x23::Vec<uint8_t, 0xffffffff> input = {3, 1, 4, 1, 5, 9};
   const SHA256Hash expected_hash = sha256(input);
@@ -1362,44 +936,39 @@ TEST_F(Rv32RuntimeContextTest, Sha256ReturnIsDeterministicForSameInputs)
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto handler1 =
-      make_new_system_call_handler(make_root_transaction(kParityGas),
-                                   rv32_context);
-  auto handler2 =
-      make_new_system_call_handler(make_root_transaction(kParityGas),
-                                   rv32_context);
-  handler1.enable_tracing();
-  handler2.enable_tracing();
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  auto handler = make_new_system_call_handler(make_root_transaction(kParityGas),
+                                              rv32_context);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  const auto result = handler.root_invoke();
 
-  ASSERT_TRUE(result1.is_root_success());
-  ASSERT_TRUE(result2.is_root_success());
-  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+  ASSERT_TRUE(result.is_root_success());
 
-  const auto output1 = handler1.get_most_recent_frame_output();
-  const auto output2 = handler2.get_most_recent_frame_output();
-  EXPECT_EQ(output1.status_code(), output2.status_code());
-  EXPECT_TRUE(std::ranges::equal(output1.return_buffer(), expected_hash));
-  EXPECT_TRUE(
-      std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(output.return_buffer(), expected_hash));
 
-  ASSERT_NE(handler1.get_trace(), nullptr);
-  ASSERT_NE(handler2.get_trace(), nullptr);
-  EXPECT_EQ(handler1.get_trace()->system_calls.size(),
-            handler2.get_trace()->system_calls.size());
-  expect_sha256_return_trace_matches(*handler1.get_trace(),
-                                     *handler2.get_trace(), input,
-                                     expected_hash);
-  for (size_t i = 0; i < handler1.get_trace()->system_calls.size(); ++i) {
-    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_start,
-              handler2.get_trace()->system_calls[i].gas_remaining_at_start);
-    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
-              handler2.get_trace()->system_calls[i].gas_remaining_at_end);
-  }
+  // SHA256 is 4 addi + ecall; the hash-returning Return is 6 addi + ecall.
+  const GasAmount sha_gas = kParityGas - (5 * rv32::kBaseInstructionGas);
+  const GasAmount return_gas =
+      sha_gas - SHA256HashCost(input.size()) - (7 * rv32::kBaseInstructionGas);
+  SyscallTraceVec expected;
+  expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
+  expected.push_back(return_trace_entry(return_gas, expected_hash));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+            input.size());
 }
 
-TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnIsDeterministicForSameInputs)
+TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
 {
   const x23::Vec<uint8_t, 0xffffffff> input(
       compiled_sha256_return::kInput.begin(),
@@ -1410,47 +979,41 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnIsDeterministicForSameInputs)
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto handler1 = make_new_system_call_handler(
+  auto handler = make_new_system_call_handler(
       make_root_transaction(kParityGas,
                             compiled_sha256_return::kSha256MethodId),
       rv32_context);
-  auto handler2 = make_new_system_call_handler(
-      make_root_transaction(kParityGas,
-                            compiled_sha256_return::kSha256MethodId),
-      rv32_context);
-  handler1.enable_tracing();
-  handler2.enable_tracing();
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  const auto result = handler.root_invoke();
 
-  ASSERT_TRUE(result1.is_root_success());
-  ASSERT_TRUE(result2.is_root_success());
-  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+  ASSERT_TRUE(result.is_root_success());
 
-  const auto output1 = handler1.get_most_recent_frame_output();
-  const auto output2 = handler2.get_most_recent_frame_output();
-  EXPECT_EQ(output1.status_code(), output2.status_code());
-  EXPECT_TRUE(std::ranges::equal(output1.return_buffer(), expected_hash));
-  EXPECT_TRUE(
-      std::ranges::equal(output1.return_buffer(), output2.return_buffer()));
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(std::ranges::equal(output.return_buffer(), expected_hash));
 
-  ASSERT_NE(handler1.get_trace(), nullptr);
-  ASSERT_NE(handler2.get_trace(), nullptr);
-  EXPECT_EQ(handler1.get_trace()->system_calls.size(),
-            handler2.get_trace()->system_calls.size());
-  expect_sha256_return_trace_matches(*handler1.get_trace(),
-                                     *handler2.get_trace(), input,
-                                     expected_hash);
-  for (size_t i = 0; i < handler1.get_trace()->system_calls.size(); ++i) {
-    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_start,
-              handler2.get_trace()->system_calls[i].gas_remaining_at_start);
-    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
-              handler2.get_trace()->system_calls[i].gas_remaining_at_end);
-  }
+  // Absolute gas pins for the compiled fixture; they shift when the fixture
+  // is recompiled or the gas schedule changes.
+  const GasAmount sha_gas = 9'981;
+  const GasAmount return_gas = 8'774;
+  SyscallTraceVec expected;
+  expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
+  expected.push_back(return_trace_entry(return_gas, expected_hash));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+            input.size());
 }
 
-TEST_F(Rv32RuntimeContextTest,
-       CompiledMultiMethodDispatchIsDeterministicForSameInputs)
+TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
 {
   const x23::Vec<uint8_t, 0xffffffff> input(
       compiled_sha256_return::kInput.begin(),
@@ -1461,43 +1024,39 @@ TEST_F(Rv32RuntimeContextTest,
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto handler1 = make_new_system_call_handler(
+  auto handler = make_new_system_call_handler(
       make_root_transaction(kParityGas,
                             compiled_sha256_return::kSha256RepeatedMethodId),
       rv32_context);
-  auto handler2 = make_new_system_call_handler(
-      make_root_transaction(kParityGas,
-                            compiled_sha256_return::kSha256RepeatedMethodId),
-      rv32_context);
-  handler1.enable_tracing();
-  handler2.enable_tracing();
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  const auto result = handler.root_invoke();
 
-  ASSERT_TRUE(result1.is_root_success());
-  ASSERT_TRUE(result2.is_root_success());
-  EXPECT_EQ(result1.gas_consumed_, result2.gas_consumed_);
+  ASSERT_TRUE(result.is_root_success());
 
-  const auto output1 = handler1.get_most_recent_frame_output();
-  const auto output2 = handler2.get_most_recent_frame_output();
-  EXPECT_EQ(output1.status_code(), output2.status_code());
-  EXPECT_TRUE(output1.return_buffer().empty());
-  EXPECT_TRUE(output2.return_buffer().empty());
+  const auto output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  EXPECT_TRUE(output.return_buffer().empty());
 
-  ASSERT_NE(handler1.get_trace(), nullptr);
-  ASSERT_NE(handler2.get_trace(), nullptr);
-  ASSERT_EQ(handler1.get_trace()->system_calls.size(),
-            handler2.get_trace()->system_calls.size());
-  expect_sha256_then_return_trace_matches(*handler1.get_trace(),
-                                          *handler2.get_trace(), input,
-                                          expected_hash,
-                                          std::span<const uint8_t>{});
-  for (size_t i = 0; i < handler1.get_trace()->system_calls.size(); ++i) {
-    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_start,
-              handler2.get_trace()->system_calls[i].gas_remaining_at_start);
-    EXPECT_EQ(handler1.get_trace()->system_calls[i].gas_remaining_at_end,
-              handler2.get_trace()->system_calls[i].gas_remaining_at_end);
-  }
+  // The repeated-hash method hashes once and returns an empty buffer.
+  // Absolute gas pins for the compiled fixture; they shift when the fixture
+  // is recompiled or the gas schedule changes.
+  const GasAmount sha_gas = 9'979;
+  const GasAmount return_gas = 8'772;
+  SyscallTraceVec expected;
+  expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
+  expected.push_back(return_trace_entry(return_gas, {}));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed,
+            input.size());
 }
 
 TEST_F(Rv32RuntimeContextTest,
@@ -1654,84 +1213,6 @@ TEST_F(Rv32RuntimeContextTest, DirectInvokeNormalizesOutOfGasConsumption)
   EXPECT_EQ(result.gas_consumed_, 10U);
 }
 
-TEST_F(Rv32RuntimeContextTest, HostErrorContractsMatchWasmOutcomes)
-{
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
-
-  auto expect_parity = [&](HostFn0 wasm_entry, HostFn8 rv32_entry,
-                           InvokeErrorCode expected) {
-    for (const WasmEngine engine : kDifferentialWasmEngines) {
-      auto rv32_context = rv32::RuntimeContext(
-          {{kRv32ContractId, make_single_ecall_image(rv32_entry)}});
-      auto handler =
-          make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                       rv32_context);
-
-      const auto wasm_result =
-          invoke_wasm_error_contract(engine, wasm_entry, kCall1, kEnoughGas);
-      const auto rv32_result =
-          direct_invoke(contract, rv32_context, handler, kEnoughGas);
-
-      expect_matching_error(wasm_result, rv32_result, expected);
-    }
-  };
-
-  expect_parity(&wasm_unrecoverable_entry, &unrecoverable_entry,
-                InvokeErrorCode::Unrecoverable);
-  expect_parity(&wasm_validation_failure_entry, &validation_failure_entry,
-                InvokeErrorCode::ValidationFailure);
-  expect_parity(&wasm_abandon_entry, &abandon_entry, InvokeErrorCode::Abandon);
-}
-
-TEST_F(Rv32RuntimeContextTest, DeterministicTrapContractMatchesWasmOutcome)
-{
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
-
-  for (const WasmEngine engine : kDifferentialWasmEngines) {
-    auto rv32_context =
-        rv32::RuntimeContext({{kRv32ContractId, make_bad_pc_image()}});
-    auto handler =
-        make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                     rv32_context);
-
-    const auto wasm_result =
-        invoke_wasm_error_contract(engine, &wasm_good_call_entry, kUnreachable,
-                                   kEnoughGas);
-    const auto rv32_result =
-        direct_invoke(contract, rv32_context, handler, kEnoughGas);
-
-    expect_matching_error(wasm_result, rv32_result,
-                          InvokeErrorCode::Deterministic);
-  }
-}
-
-TEST_F(Rv32RuntimeContextTest, OutOfGasContractMatchesWasmOutcome)
-{
-  constexpr GasAmount kGasLimit = 10;
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
-
-  for (const WasmEngine engine : kDifferentialWasmEngines) {
-    auto rv32_context = rv32::RuntimeContext(
-        {{kRv32ContractId, make_single_ecall_image(&host_out_of_gas_entry)}});
-    auto handler =
-        make_new_system_call_handler(make_root_transaction(kGasLimit),
-                                     rv32_context);
-
-    const auto wasm_result =
-        invoke_wasm_error_contract(engine, &wasm_consume_too_much_gas_entry,
-                                   kCall1, kGasLimit);
-    const auto rv32_result =
-        direct_invoke(contract, rv32_context, handler, kGasLimit);
-
-    expect_matching_error(wasm_result, rv32_result, InvokeErrorCode::OutOfGas);
-    EXPECT_EQ(wasm_result.gas_consumed_, kGasLimit);
-    EXPECT_EQ(rv32_result.gas_consumed_, kGasLimit);
-  }
-}
-
 TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
 {
   auto contract = make_rv32_contract_xdr();
@@ -1789,20 +1270,28 @@ TEST_F(Rv32RuntimeContextTest, ZeroReturnHaltCodeMapsToSuccess)
   EXPECT_EQ(result.gas_consumed_, (3U * rv32::kBaseInstructionGas) + 4U);
 }
 
-TEST_F(Rv32RuntimeContextTest, NonzeroExitHaltCodeMapsToDeterministic)
+TEST_F(Rv32RuntimeContextTest, ExitPanicMapsToDeterministicRegardlessOfCode)
 {
-  auto rv32_context = rv32::RuntimeContext(
-      {{kRv32ContractId, make_single_ecall_image(&exit_entry)}});
-  auto contract = make_rv32_contract_xdr();
-  install_contract(contract);
+  // Parity with the wasm runtime and production Rv32Runtime: Exit is always a
+  // deterministic failure; the trampoline result_code is not an exit status.
+  auto expect_deterministic = [&](HostFn8 entry) {
+    auto rv32_context = rv32::RuntimeContext(
+        {{kRv32ContractId, make_single_ecall_image(entry)}});
+    auto contract = make_rv32_contract_xdr();
+    install_contract(contract);
 
-  auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
-                                              rv32_context);
+    auto handler =
+        make_new_system_call_handler(make_root_transaction(kEnoughGas),
+                                     rv32_context);
 
-  auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
+    auto result = direct_invoke(contract, rv32_context, handler, kEnoughGas);
 
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+    ASSERT_FALSE(result.is_root_success());
+    EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  };
+
+  expect_deterministic(&exit_entry);
+  expect_deterministic(&zero_code_exit_entry);
 }
 
 TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
@@ -1810,7 +1299,8 @@ TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto expect_deterministic = [&](rv32::RuntimeContractImage image) {
+  auto expect_deterministic = [&](rv32::RuntimeContractImage image,
+                                  GasAmount expected_gas) {
     auto rv32_context =
         rv32::RuntimeContext({{kRv32ContractId, std::move(image)}});
     auto handler =
@@ -1820,12 +1310,16 @@ TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
 
     ASSERT_FALSE(result.is_root_success());
     EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+    EXPECT_EQ(result.gas_consumed_, expected_gas);
   };
 
-  expect_deterministic(make_bad_pc_image());
-  expect_deterministic(make_bad_memory_image());
-  expect_deterministic(make_unaligned_oob_access_image());
-  expect_deterministic(make_breakpoint_image());
+  // Instructions retired before the trap are metered; the trapping fetch or
+  // access itself is charged too.
+  expect_deterministic(make_bad_pc_image(), 1 * rv32::kBaseInstructionGas);
+  expect_deterministic(make_bad_memory_image(), 1 * rv32::kBaseInstructionGas);
+  expect_deterministic(make_unaligned_oob_access_image(),
+                       2 * rv32::kBaseInstructionGas);
+  expect_deterministic(make_breakpoint_image(), 1 * rv32::kBaseInstructionGas);
 }
 
 TEST_F(Rv32RuntimeContextTest, SameInputsTrapDeterministically)
@@ -1863,7 +1357,7 @@ TEST_F(Rv32RuntimeContextTest, VerifyRejectsUndefinedRv32MockContract)
 TEST_F(Rv32RuntimeContextTest, VerifyRejectsNonMockContractWithoutAbort)
 {
   auto rv32_context = rv32::RuntimeContext({});
-  auto contract = make_wasmi_contract_xdr();
+  auto contract = make_non_mock_contract_xdr();
 
   EXPECT_EQ(rv32_context.verify_contract(*contract),
             InvokeErrorCode::Deterministic);

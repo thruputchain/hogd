@@ -5,6 +5,7 @@
 #include <format>
 #include <memory>
 #include <regex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,6 +20,8 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/bench/control_client.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
@@ -30,6 +33,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/shared.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -74,6 +78,11 @@ public:
     event_server_handle_ =
         std::make_unique<ControlServerHandle>(event_server_addr());
 
+    if (event_server_handle_->ci_client.clear_work_dir() !=
+        CIServerErrorCode::kCIServerErrorCodeOK) {
+      panic("Failed to clear event server work dir");
+    }
+
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
     start_db_server();
@@ -102,6 +111,21 @@ public:
   }
 
   void advance_block();
+
+  void set_event_proposal_transactions(
+      std::span<const SignedTransaction> transactions)
+  {
+    x23::XdrVec<SignedTransactionHash> hashes;
+    x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
+    hashes.reserve(transactions.size());
+    nondeterministic_data.resize(transactions.size());
+    for (const SignedTransaction &transaction : transactions) {
+      hashes.push_back(sha256(transaction.tx));
+    }
+    event_proposal_txs_.hash = t_to_parallel_batch(hashes)();
+    event_proposal_txs_.nondeterministic_data =
+        t_to_parallel_batch(nondeterministic_data)();
+  }
 
   void run_genesis_configuration(
       GenesisConfigurationBuilder const &genesis_configuration_builder);
@@ -239,7 +263,8 @@ private:
     }
     // We use [block_number] as the height as well.
     auto r =
-        event_sched_client_->eventsched_close_block(block_number, block_number);
+        event_sched_client_->eventsched_close_block(block_number, block_number,
+                                                    event_proposal_txs_);
     if (r.error() != RPCError::kRPCNone) {
       panic("Failed to close event block");
     }
@@ -260,6 +285,7 @@ private:
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
+  ProposalTxs event_proposal_txs_;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
@@ -292,11 +318,14 @@ CommonBenchState::advance_block()
 
   ConsensusValue value{};
   value.proposal_header.block_height = block_number_;
+  value.proposal_txs_hash =
+      proposal_txs_compatibility_hash(event_proposal_txs_);
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot for block {}: {}", block_number_,
           r2.result());
   }
+  event_proposal_txs_ = {};
 
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,

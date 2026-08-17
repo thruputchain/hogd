@@ -441,10 +441,11 @@ public:
       return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
     }
     info("clearing work directory: {}", work_dir_);
-    // clear the work directory
+    // Clear the contents while keeping the configured work directory usable.
     try {
       std::filesystem::path dir_path(work_dir_);
       std::filesystem::remove_all(dir_path);
+      std::filesystem::create_directories(dir_path);
     } catch (const std::exception &e) {
       error("Exception clearing work directory {}: {}", work_dir_, e.what());
       return CIServerErrorCode::kCIServerErrorCodeInternal;

@@ -19,4 +19,8 @@ inline constexpr size_t kBulkRpcMaxMessageSize = 0x7fffffff;
 static_assert(kBulkRpcMaxMessageSize <= 0x7fffffffULL,
               "message-size cap must fit a single ONC RPC record fragment");
 
+// EventSched1 carries the full proposal payload so event can durably retain a
+// pre-commit candidate. Keep this cap scoped to that internal RPC surface.
+inline constexpr size_t kEventSchedulerRpcMaxMessageSize = 0x7fffffff;
+
 } // namespace hogd

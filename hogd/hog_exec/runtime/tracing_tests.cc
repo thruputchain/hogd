@@ -8,6 +8,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
@@ -51,11 +52,6 @@ public:
   {}
 
 protected:
-  static std::unique_ptr<RuntimeContext> make_context()
-  {
-    return make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
-  };
-
   std::unique_ptr<RuntimeContext> runtime_context_;
 
   void SetUp() override { runtime_context_ = make_hog_exec_context(); }
@@ -63,7 +59,7 @@ protected:
 
 TEST_F(TracingTest, Sha256Repeated)
 {
-  auto contract = hogd::load_contract("sha256_wrapper.wasm");
+  auto contract = hogd::load_rv32_contract("sha256_wrapper.rv32a");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(contract_addr, contract);
@@ -125,8 +121,9 @@ TEST_F(TracingTest, Sha256Repeated)
 
 TEST_F(TracingTest, FibonacciNestedInvocation)
 {
-  auto fibonacci_contract = hogd::load_contract("fibonacci.wasm");
-  auto fibonacci_caller_contract = hogd::load_contract("fibonacci_call.wasm");
+  auto fibonacci_contract = hogd::load_rv32_contract("fibonacci.rv32a");
+  auto fibonacci_caller_contract =
+      hogd::load_rv32_contract("fibonacci_call.rv32a");
 
   auto fibonacci_addr = make_contract_address(0);
   auto fibonacci_caller_addr = make_contract_address(1);
@@ -222,7 +219,7 @@ TEST_F(TracingTest, NoSyscallTest)
   auto contract_addr = make_contract_address(0);
   auto client =
       ContractTraitClient<no_syscall_test::NoSyscallTest>(contract_addr);
-  auto contract = load_contract("no_syscall_test.wasm");
+  auto contract = load_rv32_contract("no_syscall_test.rv32a");
   write_contract(contract);
   write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -261,7 +258,7 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
   auto contract_addr = make_contract_address(0);
   auto client =
       ContractTraitClient<no_syscall_test::NoSyscallTest>(contract_addr);
-  auto contract = load_contract("no_syscall_test.wasm");
+  auto contract = load_rv32_contract("no_syscall_test.rv32a");
   write_contract(contract);
   write_deployment(contract_addr, contract);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -764,6 +761,178 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   // output buffer was empty (old behavior recorded an empty buffer here).
   ASSERT_EQ(traced_buffer.size(), 9U);
   EXPECT_EQ(std::memcmp(traced_buffer.data(), "RETURNED!", 9), 0);
+}
+
+namespace {
+
+// #1759: a syscall the runtime entered with the frame's gas already exhausted
+// must have been rewritten to OutOfGas.
+//
+// An engine can hand the host a syscall on a frame with nothing left to spend.
+// rv32 does it at exact budget: gas is charged per run, and a run ending in
+// ecall that the budget exactly covers is not a deficit, so nothing suppresses
+// it and the syscall reaches the host with zero gas remaining (see
+// Rv32ThreadedTrapGas.ecallAtExactBudgetStillReachesHost). Only an
+// *unaffordable* run settles at the op_ecall seam before the host sees it
+// (deficitRunEndingInEcallSuppressesSyscall).
+//
+// The trace is where that is visible after the fact: an entry with
+// gas_remaining_at_start == 0 that did NOT fail is a syscall that ran, mutated
+// frame state, and reported success in a frame that could not pay for it. That
+// is the reported exploit shape (MintAuthToken then Return, both zero-cost,
+// both in an exhausted child frame).
+//
+// This holds for every syscall, in every frame, on every engine, so it is
+// cheap to assert over any trace a test already has in hand.
+//
+// Returns the number of syscalls that were entered on an exhausted frame, so
+// callers can report how much of the boundary they actually reached -- an
+// assertion that never fires is not the same thing as an assertion that held.
+//
+// Walks the tree with an explicit worklist rather than recursing: trace depth
+// is bounded by the frame-stack cap, but misc-no-recursion is on in tidy and
+// an iterative walk is no harder to read than the recursive one.
+size_t
+check_no_syscall_succeeded_on_exhausted_frame(InvocationFrameTrace const &root)
+{
+  size_t exhausted_frame_entries = 0;
+  std::vector<InvocationFrameTrace const *> worklist{&root};
+
+  while (!worklist.empty()) {
+    auto const *frame = worklist.back();
+    worklist.pop_back();
+
+    for (auto const &syscall_trace : frame->system_calls) {
+      if (syscall_trace.gas_remaining_at_start == 0) {
+        exhausted_frame_entries++;
+        EXPECT_EQ(syscall_trace.status.error(), HostFnErrorCode::OutOfGas)
+            << "syscall "
+            << static_cast<int64_t>(
+                   std::to_underlying(syscall_trace.body.syscall_number()))
+            << " was entered with no gas remaining and did not fail "
+               "out-of-gas";
+      }
+
+      if (syscall_trace.body.syscall_number() != SyscallNo::kInvoke) {
+        continue;
+      }
+      auto const &invoke_trace = syscall_trace.body.invoke();
+      if (invoke_trace.outputs == nullptr ||
+          invoke_trace.outputs->child_trace == nullptr) {
+        continue;
+      }
+      worklist.push_back(&*invoke_trace.outputs->child_trace);
+    }
+  }
+
+  return exhausted_frame_entries;
+}
+
+} // namespace
+
+// Drives a real rv32 contract to the exact budget at which each of its
+// syscalls is entered with the frame's gas fully spent, and requires every one
+// of those entries to come back OutOfGas.
+//
+// rv32 reaches this state by design, not by accident: gas is charged per run,
+// and a run ending in ecall that the budget exactly covers leaves a zero --
+// not negative -- balance, so nothing suppresses it and the syscall reaches
+// the host (Rv32ThreadedTrapGas.ecallAtExactBudgetStillReachesHost). Those
+// machine-level tests pin the seam; this one pins what the runtime does with
+// the syscall that gets through it. `gas_consumed >= gas_remaining` in
+// wrap_after_parse is the only thing standing between that entry and a free
+// syscall, and MintAuthToken and Return both cost zero.
+//
+// The budgets are derived rather than searched. If a full run enters syscall i
+// with R_i gas remaining, then a limit of (G - R_i) spends exactly the gas
+// preceding that syscall, putting it at zero -- execution up to that point is
+// deterministic and does not depend on the limit. That lands on the boundary
+// for every syscall the contract makes, instead of sweeping and hoping a
+// sample hits it, so the coverage count below can be asserted rather than
+// merely reported.
+TEST_F(TracingTest, Rv32SyscallAtExactlyExhaustedGasIsOutOfGas)
+{
+  auto contract = hogd::load_rv32_contract("sha256_wrapper.rv32a");
+  auto contract_addr = make_contract_address(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  auto client =
+      ContractTraitClient<sha256_wrapper::Sha256Wrapper>(contract_addr);
+
+  constexpr uint32_t kRepeats = 5;
+  constexpr GasAmount kFullGasLimit = 1'000'000;
+
+  x23::Vec<uint8_t, 0xffffffff> data = {1, 2, 3, 4, 5};
+
+  // A full run, to read off where each syscall sits in the gas budget.
+  std::vector<GasAmount> gas_remaining_at_syscall;
+  {
+    auto handler = make_new_system_call_handler(
+        Transaction{.invocation = client.make_invocation<u8"sha256_repeated">(
+                        kFullGasLimit, kRepeats, data),
+                    .uniquifier = make_new_uniquifier()},
+        *runtime_context_);
+    handler.enable_tracing();
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+
+    auto const *trace = handler.get_trace();
+    ASSERT_NE(trace, nullptr);
+    for (auto const &syscall_trace : trace->system_calls) {
+      gas_remaining_at_syscall.push_back(syscall_trace.gas_remaining_at_start);
+    }
+  }
+  // kGetCalldataLen, kGetCalldata, kRepeats x kSHA256, kReturn.
+  ASSERT_EQ(gas_remaining_at_syscall.size(), kRepeats + 3);
+
+  size_t boundary_entries_hit = 0;
+
+  for (size_t i = 0; i < gas_remaining_at_syscall.size(); i++) {
+    GasAmount const remaining = gas_remaining_at_syscall[i];
+    // The first syscall can sit at the very top of the budget, which would
+    // derive a limit of zero -- nothing to exercise there.
+    if (remaining >= kFullGasLimit) {
+      continue;
+    }
+    GasAmount const derived_limit = kFullGasLimit - remaining;
+
+    SCOPED_TRACE(testing::Message() << "syscall index " << i
+                                    << ", derived gas limit " << derived_limit);
+
+    auto handler = make_new_system_call_handler(
+        Transaction{.invocation = client.make_invocation<u8"sha256_repeated">(
+                        derived_limit, kRepeats, data),
+                    .uniquifier = make_new_uniquifier()},
+        *runtime_context_);
+    handler.enable_tracing();
+    auto res = handler.root_invoke();
+
+    // Whatever else happened, the frame must not have completed: the budget
+    // stops exactly at this syscall.
+    EXPECT_FALSE(res.is_root_success());
+
+    auto const *trace = handler.get_trace();
+    ASSERT_NE(trace, nullptr);
+
+    // The invariant, over the whole trace tree.
+    size_t const entries =
+        check_no_syscall_succeeded_on_exhausted_frame(*trace);
+    boundary_entries_hit += entries;
+
+    // And specifically: this derived limit should have put a syscall at zero.
+    EXPECT_GT(entries, 0U)
+        << "derived limit did not land a syscall on an exhausted frame";
+  }
+
+  // If the derivation ever stops producing zero-gas entries -- a change in how
+  // rv32 charges runs, or a syscall sequence that no longer reaches the seam --
+  // this test has quietly stopped testing anything, so say so.
+  EXPECT_GT(boundary_entries_hit, 0U)
+      << "no syscall was exercised on an exhausted frame";
+  RecordProperty("exhausted_frame_syscall_entries",
+                 static_cast<int>(boundary_entries_hit));
 }
 
 // NOLINTEND(bugprone-exception-escape)

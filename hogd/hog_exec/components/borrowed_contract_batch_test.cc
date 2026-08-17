@@ -18,10 +18,10 @@ namespace hogd {
 namespace {
 
 Contract
-make_wasm_contract(std::initializer_list<uint8_t> bytes)
+make_rv32_contract(std::initializer_list<uint8_t> bytes)
 {
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data = bytes;
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data = bytes;
   return contract;
 }
 
@@ -44,8 +44,8 @@ static_assert(x23::serializes_like<BorrowedContractBatch, NewContractBatch>);
 
 TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
 {
-  Contract c1 = make_wasm_contract({0x01, 0x02, 0x03});
-  Contract c2 = make_wasm_contract({0xAA, 0xBB});
+  Contract c1 = make_rv32_contract({0x01, 0x02, 0x03});
+  Contract c2 = make_rv32_contract({0xAA, 0xBB});
   auto c1_hash = sha256(c1);
   auto c2_hash = sha256(c2);
 
@@ -76,10 +76,10 @@ TEST(BorrowedContractBatchTest, SerializesEmptyBatch)
 
 TEST(BorrowedContractBatchTest, SkipsMissingHashes)
 {
-  Contract c1 = make_wasm_contract({0x01, 0x02, 0x03});
+  Contract c1 = make_rv32_contract({0x01, 0x02, 0x03});
   auto c1_hash = sha256(c1);
 
-  Contract missing_contract = make_wasm_contract({0x10, 0x20});
+  Contract missing_contract = make_rv32_contract({0x10, 0x20});
   auto missing_hash = sha256(missing_contract);
 
   std::unordered_set<SHA256Hash, SipHash24Hasher> hashes{c1_hash, missing_hash};

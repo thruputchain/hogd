@@ -9,6 +9,7 @@
 #include "built_contracts/authclaim_test.h"
 #include "built_contracts/contract_loader.h"
 #include "exec_result.hh"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -31,7 +32,7 @@ public:
 protected:
   static std::unique_ptr<RuntimeContext> make_context()
   {
-    return make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    return make_hog_exec_context();
   };
 
   using authclaim_client_t = ContractTraitClient<authclaim_test::AuthClaimTest>;
@@ -42,7 +43,7 @@ protected:
 
   void setup_contract(ContractAddress const &contract_addr)
   {
-    auto contract = hogd::load_contract("authclaim_test.wasm");
+    auto contract = hogd::load_rv32_contract("authclaim_test.rv32a");
     write_contract(contract);
     write_deployment(contract_addr, contract);
     setup_grant_storage_token(contract_addr, 1'000'000'000);

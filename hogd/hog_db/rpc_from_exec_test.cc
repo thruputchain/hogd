@@ -8,6 +8,7 @@
 #include <set>
 #include <utility>
 
+#include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
 #include "rpc_types.hh"
@@ -20,7 +21,9 @@
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/ramdb/db.h"
@@ -64,6 +67,25 @@ make_bytes_delta(AddressAndKey addrkey, std::uint8_t byte)
                                  std::to_underlying(StorageDeltaFlags::None)};
 }
 
+AddressAndKey
+make_balance_key(ContractAddress const &addr)
+{
+  return AddressAndKey{.address = addr,
+                       .key =
+                           StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+}
+
+FlaggedStorageDelta
+make_balance_delta(ContractAddress const &addr, int128_t amount)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  delta.nnint_add() = to_xdr(amount);
+  return FlaggedStorageDelta{.addrkey = make_balance_key(addr),
+                             .delta = std::move(delta),
+                             .flags =
+                                 std::to_underlying(StorageDeltaFlags::None)};
+}
+
 // Requests to consume [uniquifier] for [addr]. The request itself succeeds
 // (a fresh replay-cache entry); it's the balance lock it charges storage
 // cost against that can later fail at sync_balance_locks.
@@ -78,6 +100,23 @@ make_consume_uniquifier_delta(ContractAddress const &addr,
                                .key = StorageKey(StorageKeyType::ReplayCache)},
       .delta = std::move(delta),
       .flags = std::to_underlying(StorageDeltaFlags::None)};
+}
+
+FlaggedStorageDelta
+make_deploy_delta(ContractAddress const &addr, std::uint8_t hash_byte,
+                  StorageDeltaFlagSet flags)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
+  DeployedContractHash hash{};
+  hash.hash.fill(hash_byte);
+  hash.contract_size = 32;
+  hash.contract_type = ContractType::kRv32;
+  delta.deployed_contract_hash() = hash;
+  return FlaggedStorageDelta{
+      .addrkey = AddressAndKey{.address = addr,
+                               .key = StorageKey(StorageKeyType::Metadata)},
+      .delta = std::move(delta),
+      .flags = flags};
 }
 
 class RpcFromExecDiagnosticsTest : public ::testing::Test {
@@ -235,6 +274,131 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
   retry.push_back(make_bytes_delta(key_b, 0xDD));
   auto r2 =
       rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{4}, retry);
+  EXPECT_EQ(r2.error(), RPCError::kRPCNone);
+}
+
+// A failed push must leave the root InvokeTX holding nothing for the keys
+// only the failed child touched. Retained empty entries are invisible to
+// commit/abort/sync, but rollback skips empty vectors, so they would survive
+// every later rollback -- letting a contract that repeats a failing TryInvoke
+// against fresh addresses grow the live transaction's maps (#3090).
+TEST_F(RpcFromExecDiagnosticsTest, FailedBalancePushRetainsNoEntries)
+{
+  // Under the cost model's balance cost, so crediting a fresh receiver never
+  // pays for its own balance row: its lock is rejected on first admission in
+  // update_balance_lock(), before any entry can be published.
+  constexpr int128_t kTransferAmount = 100;
+  ASSERT_LT(kTransferAmount,
+            StorageCostModel::default_cost_model().get_balance_cost());
+
+  constexpr int kAttempts = 8;
+  for (int i = 0; i < kAttempts; ++i) {
+    ContractAddress receiver{};
+    for (std::size_t j = 0; j < receiver.size(); ++j)
+      receiver[j] = static_cast<std::uint8_t>(0xB0 + j);
+    receiver[0] = static_cast<std::uint8_t>(i);
+
+    // addr_ is funded, so the debit locks successfully and is then rolled
+    // back; the fresh receiver's credit is what fails.
+    StorageDeltaBatch batch;
+    batch.push_back(make_balance_delta(addr_, -kTransferAmount));
+    batch.push_back(make_balance_delta(receiver, kTransferAmount));
+
+    auto r =
+        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{9}, batch);
+    ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed) << i;
+
+    InvokeTX *itx = ctx_->get_invoke_tx(BlockID{1}, TransactionID{9});
+    ASSERT_NE(itx, nullptr);
+    EXPECT_EQ(itx->get_savepoint_head(), 0U) << i;
+    EXPECT_EQ(itx->change_entry_count_for_testing(), 0U) << i;
+    EXPECT_EQ(itx->balance_entry_count_for_testing(), 0U) << i;
+  }
+}
+
+// Same invariant for ordinary storage keys: the successful key_b write and
+// the storage cost it locked against addr_'s balance are both rolled back,
+// and neither leaves an entry behind.
+TEST_F(RpcFromExecDiagnosticsTest, FailedDataPushRetainsNoEntries)
+{
+  auto key_a = make_data_key(addr_, 1);
+  auto key_b = make_data_key(addr_, 2);
+  seed_conflict(BlockID{1}, TransactionID{1}, key_a);
+
+  StorageDeltaBatch batch;
+  batch.push_back(make_bytes_delta(key_b, 0xCC));
+  batch.push_back(make_bytes_delta(key_a, 0xBB));
+  auto r =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
+  ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
+
+  InvokeTX *itx = ctx_->get_invoke_tx(BlockID{1}, TransactionID{3});
+  ASSERT_NE(itx, nullptr);
+  EXPECT_EQ(itx->get_savepoint_head(), 0U);
+  EXPECT_EQ(itx->change_entry_count_for_testing(), 0U);
+  EXPECT_EQ(itx->balance_entry_count_for_testing(), 0U);
+}
+
+// Regression test for #1189: request_one dropped [flags] on the floor for
+// kDeltaTypeDeployContract deltas, so an exclusive lock requested on a deploy
+// was silently downgraded to an ordinary reservation -- MockDB blocked the
+// second deploy, hog_db did not. The two tests below pin both halves: the
+// flag now blocks, and its absence still admits an identical concurrent
+// deploy (so the block above comes from the flag, not from the deploy path
+// having become conflict-happy).
+TEST_F(RpcFromExecDiagnosticsTest, DeployContractExclusiveFlagBlocksConcurrent)
+{
+  StorageDeltaBatch exclusive;
+  exclusive.push_back(
+      make_deploy_delta(addr_, 0xD1,
+                        std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  auto r1 = rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1},
+                                              exclusive);
+  ASSERT_EQ(r1.error(), RPCError::kRPCNone);
+
+  // Same address, same contract hash: without the exclusive lock this would
+  // be admitted alongside (see the control test below).
+  StorageDeltaBatch concurrent;
+  concurrent.push_back(
+      make_deploy_delta(addr_, 0xD1,
+                        std::to_underlying(StorageDeltaFlags::None)));
+  auto r2 = rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2},
+                                              concurrent);
+  ASSERT_EQ(r2.error(), RPCError::kRPCStorageWriteFailed);
+
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(r2.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
+    ASSERT_EQ(r2.conflict().conflicts().size(), 1U);
+    EXPECT_EQ(r2.conflict().conflicts()[0].addrkey.key.key_type(),
+              StorageKeyType::Metadata);
+    EXPECT_EQ(r2.conflict().conflicts()[0].code,
+              DbConflictCode::kDbConflictExclusiveLock);
+  }
+  else {
+    ASSERT_EQ(r2.conflict().level(), DbDiagnosticLevel::kDbDiagnosticFirst);
+    EXPECT_EQ(r2.conflict().first().addrkey.key.key_type(),
+              StorageKeyType::Metadata);
+    EXPECT_EQ(r2.conflict().first().code,
+              DbConflictCode::kDbConflictExclusiveLock);
+  }
+}
+
+TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
+{
+  StorageDeltaBatch first;
+  first.push_back(
+      make_deploy_delta(addr_, 0xD2,
+                        std::to_underlying(StorageDeltaFlags::None)));
+  auto r1 =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1}, first);
+  ASSERT_EQ(r1.error(), RPCError::kRPCNone);
+
+  StorageDeltaBatch second;
+  second.push_back(
+      make_deploy_delta(addr_, 0xD2,
+                        std::to_underlying(StorageDeltaFlags::None)));
+  auto r2 =
+      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, second);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 

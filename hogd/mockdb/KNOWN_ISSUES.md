@@ -51,6 +51,25 @@ idempotent.
   and `ProposalValidationTryInvokeConsumeCommitMatch` in `rcq_delete_test.cc`
   (skipped on MockDB)
 
+## No per-block RCQ insert cap: >250 concurrent entries abort proposal-mode consumers
+
+MockDB does not enforce `kRetrocausalQueueBlockEntriesMaxLen` at commit
+(`RetrocausalQueueArgs::new_entries_` grows unbounded), so committing two
+transactions that together insert more than 250 entries at one key succeeds. A
+proposal-mode transaction that then consumes a 251st concurrent entry hits the
+`CHECK(!ProposalModeData)` in `RetrocausalQueueItem::get_next_item`
+(`hog_exec/runtime/item/item_view.cc`) and aborts the test process. On HogDb
+the reservation gate in `RetrocausalQueueLock::try_atomic_change_lock` caps
+committed inserts per (block, key) at 250, making the CHECK a valid invariant.
+Do not write proposal-mode MockDB tests that consume past the cap.
+
+- **File**: `hogd/storage_item/refcounted_delta_variant.cc`
+  (`RetrocausalQueueArgs::insert_entry`)
+- **Tests**: `ConcurrentOverflow` in `rcq_test.cc` (skipped on MockDB);
+  validation-mode cap pinned by
+  `ConcurrentConsumeCapExceededIsValidationFailure` in
+  `rcq_doctored_proposal_data_test.cc`
+
 ## Balance deltas from different subtransaction depths are not combined
 
 MockDB's `TransactionState::extract_results()` iterates subtransactions

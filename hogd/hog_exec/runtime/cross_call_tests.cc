@@ -7,6 +7,7 @@
 #include "built_contracts/fibonacci_call.h"
 #include "exec_result.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -27,8 +28,9 @@ public:
 protected:
   void SetUp() override
   {
-    auto fibonacci_contract = hogd::load_contract("fibonacci.wasm");
-    auto fibonacci_caller_contract = hogd::load_contract("fibonacci_call.wasm");
+    auto fibonacci_contract = hogd::load_rv32_contract("fibonacci.rv32a");
+    auto fibonacci_caller_contract =
+        hogd::load_rv32_contract("fibonacci_call.rv32a");
 
     write_contract(fibonacci_contract);
     write_contract(fibonacci_caller_contract);
@@ -50,8 +52,7 @@ protected:
           ContractTraitClient<fibonacci_call::FibonacciCaller>(
               fibonacci_caller_contract_address_);
 
-  std::unique_ptr<RuntimeContext> wasm_runtime_context_ =
-      make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  std::unique_ptr<RuntimeContext> runtime_context_ = make_hog_exec_context();
 
   void initialize_fibonacci_caller()
   {
@@ -63,7 +64,7 @@ protected:
                                                   UINT64_MAX,
                                                   fibonacci_contract_address_),
                             .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -86,7 +87,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
                                       .make_invocation<u8"call_fibonacci">(
                                           UINT64_MAX, uint32_t{5}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -102,7 +103,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
                                       .make_invocation<u8"call_fibonacci">(
                                           UINT64_MAX, uint32_t{20}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -123,7 +124,7 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
                                           UINT64_MAX, uint32_t{20},
                                           uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     // inner call OOG => caller using the non-try client hits unreachable
     ASSERT_FALSE(res.is_root_success());
@@ -142,7 +143,7 @@ TEST_P(CrossCallTests, LowOverallGasPropagates)
                                       .make_invocation<u8"call_fibonacci">(
                                           1000, uint32_t{20}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 1000);
@@ -163,7 +164,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
                                       u8"call_fibonacci_expect_out_of_gas">(
                                       UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();
@@ -180,7 +181,7 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
                                       u8"call_fibonacci_expect_out_of_gas">(
                                       UINT64_MAX, uint32_t{20}, uint64_t{1010}),
                               .uniquifier = make_new_uniquifier()}},
-        *wasm_runtime_context_);
+        *runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction();

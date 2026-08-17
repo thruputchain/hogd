@@ -30,6 +30,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "precompiles.hh"
 #include "rpc_types.hh"
@@ -100,10 +101,10 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     ctx_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
   }
@@ -119,7 +120,7 @@ protected:
     write_contract(make_native_contract(kNativeWalletId));
     setup_grant_storage_token(wallet_, 1'000'000'000);
 
-    auto echo_obj = echo_meta::load_wasm();
+    auto echo_obj = echo_meta::load_rv32();
     ASSERT_TRUE(echo_obj);
     write_contract(echo_obj);
     write_deployment(kEchoAddr, echo_obj);
@@ -226,7 +227,7 @@ protected:
 
 // Happy path through the real resolution path: root tx with a valid pubkey
 // claim to its derived, UNDEPLOYED address executes `execute` against a
-// deployed wasm echo target; expect commit success and the echoed bytes.
+// deployed rv32 echo target; expect commit success and the echoed bytes.
 TEST_F(DefaultWalletFallbackTest, RootFallbackExecutesWallet)
 {
   setup_wallet_and_echo();
@@ -256,7 +257,7 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackExecutesWallet)
 
 // Deploy success through the root-fallback path: root tx with a valid pubkey
 // claim to an UNDEPLOYED address invokes `deploy` with a contract hash that IS
-// in the store (echo wasm, written by setup). Assert root_success (wallet ran
+// in the store (echo rv32, written by setup). Assert root_success (wallet ran
 // and returned a ContractAddress without faulting or aborting) and that the
 // returned address matches static_get_deploy_address.
 //
@@ -271,8 +272,8 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackDeploysContract)
 {
   setup_wallet_and_echo();
   make_ctx();
-  // Echo wasm is already in the store from setup_wallet_and_echo().
-  auto echo_obj = echo_meta::load_wasm();
+  // Echo rv32 is already in the store from setup_wallet_and_echo().
+  auto echo_obj = echo_meta::load_rv32();
   ASSERT_TRUE(echo_obj);
   SHA256Hash target_hash = sha256(*echo_obj);
   SHA256Hash nonce{};
@@ -361,10 +362,10 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
-    auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+    auto rv32_ctx = std::make_unique<Rv32Context>();
     ctx_ = std::make_unique<MultiplexedContext>(
         std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-            {ContractType::kWasmi, {wasm_ctx.release(), true}},
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
   }
@@ -535,7 +536,7 @@ TEST_F(DefaultWalletFallbackTest, WalletHashNotDeployable)
 }
 
 // Configurability suite: genesis carries a default_wallet pointing at the
-// echo wasm contract instead of the native wallet; a root invocation of an
+// echo rv32 contract instead of the native wallet; a root invocation of an
 // UNDEPLOYED address must resolve to the configured contract. (With the
 // native wallet this same transaction would abort in the auth guard; the
 // echo contract just returns its payload.)
@@ -552,7 +553,7 @@ public:
 
 TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
 {
-  auto echo_obj = echo_meta::load_wasm();
+  auto echo_obj = echo_meta::load_rv32();
   ASSERT_TRUE(echo_obj);
 
   GenesisConfigurationBuilder builder;
@@ -565,10 +566,10 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
   // only writes the native precompile records.
   write_contract(echo_obj);
 
-  auto wasm_ctx = make_hog_exec_wasm_context(RuntimeEngine::kWasmi);
+  auto rv32_ctx = std::make_unique<Rv32Context>();
   MultiplexedContext ctx(
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
-          {ContractType::kWasmi, {wasm_ctx.release(), true}},
+          {ContractType::kRv32, {rv32_ctx.release(), true}},
       });
 
   ContractAddress undeployed = make_contract_address(77);
@@ -589,6 +590,43 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
   auto const &buf = frame_output.return_buffer();
   // The echoed payload (8 x 0xAB) must appear in the return buffer.
   EXPECT_FALSE(std::ranges::search(buf, payload).empty());
+}
+
+// Same fallback with the configured kRv32 wallet's code record absent:
+// Rv32Context::make_new_runtime sees resolve_contract return null (not an
+// error) and must fail Unrecoverable — broken chain state fails loudly.
+TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
+{
+  auto echo_obj = echo_meta::load_rv32();
+  ASSERT_TRUE(echo_obj);
+
+  GenesisConfigurationBuilder builder;
+  builder.set_default_wallet(
+      NativeContractTestFramework::make_deployed_contract_hash(echo_obj));
+  run_genesis_initialization(builder.build_or_panic(*get_default_cost_model()),
+                             BlockExecutionMode::kBlockExecutionModeProposal);
+
+  auto rv32_ctx = std::make_unique<Rv32Context>();
+  MultiplexedContext ctx(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kRv32, {rv32_ctx.release(), true}},
+      });
+
+  ContractAddress undeployed = make_contract_address(77);
+  ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(8, 0xAB);
+  SignedTransaction stx;
+  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.uniquifier = make_new_uniquifier();
+
+  auto handler = make_new_system_call_handler(stx, ctx);
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
+            InvocationFrameStatusCode::Fault);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultUnrecoverable);
 }
 
 // NOLINTEND(bugprone-exception-escape)

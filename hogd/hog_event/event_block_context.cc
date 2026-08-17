@@ -1,4 +1,5 @@
 #include "hogd/hog_event/event_block_context.h"
+#include "event_outbox_internal.hh"
 
 #include <atomic>
 #include <cassert>
@@ -8,7 +9,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <exception>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -16,6 +16,7 @@
 #include <sys/fcntl.h>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <version>
@@ -27,8 +28,12 @@
 #include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/crypto/crypto.h"
 #include "indexer.hh"
+#include "indexer_payload_validation.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -131,12 +136,8 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
                    std::suspend_never>);
   co_await write_event(std::span(*serialize_buf));
 
-  // [events_with_bodies_] is a [PerThread<>] object, so it is safe to insert
-  // into it without holding a lock.  The event log and its body are appended as
-  // a single pair so they stay associated through the commit-time flatten.  The
-  // body is accumulated for forwarding to the indexer at commit; it is
-  // deliberately not added to the trie (it is not part of the consensus event
-  // commitment).
+  // Preserve each event/body pair when the durable candidate is snapshotted at
+  // close. Bodies are not part of the consensus event commitment.
   events_with_bodies_->emplace_back(
       detail::EventWithBody{.event = std::move(event),
                             .body = std::move(body)});
@@ -329,12 +330,71 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   rename_file(g, hash);
   auto ts5 = x23::fastclock::now();
   info("time to rename file: {} ns", ts5 - ts4);
+  auto directory = Directory::open(work_directory_, /*create=*/false);
+  if (!directory) {
+    panic("failed to open events directory after rename: {}",
+          directory.error());
+  }
+  if (auto synced = directory->sync(); !synced) {
+    panic("failed to fsync events directory after rename: {}", synced.error());
+  }
   file_done_.store(true);
   auto *pool = x23::ThreadPool::get_thread_pool();
   if (!pool) {
     pool = &default_threadpool();
   }
   file_done_.broadcast(pool);
+}
+
+x23::Async<IndexerOutboxCandidatePayload>
+EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
+                                                     SHA256Hash event_root,
+                                                     ProposalTxs proposal_txs)
+{
+  IndexerOutboxCandidatePayload payload{
+      .format_version = kIndexerOutboxFormatVersion,
+      .block_id = block_id_,
+      .block_height = block_height,
+      .event_root = event_root,
+      .proposal_txs = std::move(proposal_txs),
+  };
+
+  EventWithBodyBatch pairs;
+  {
+    std::unique_lock ul = events_with_bodies_.lock_threads();
+    events_with_bodies_.for_each(ul, [&pairs](EventWithBodyBatch &batch) {
+      pairs.reserve(pairs.size() + batch.size());
+      for (detail::EventWithBody &pair : batch) {
+        pairs.push_back(std::move(pair));
+      }
+    });
+  }
+
+  x23::XdrVec<SignedTransactionHash> canonical_hashes;
+  CHECK(co_await parallel_batch_to_t(payload.proposal_txs.hash,
+                                     canonical_hashes));
+  CHECK_EQ(canonical_hashes.size(), pairs.size());
+
+  std::unordered_map<SignedTransactionHash, size_t, SipHash24Hasher> by_hash;
+  by_hash.reserve(pairs.size());
+  for (size_t i = 0; i < pairs.size(); ++i) {
+    const SignedTransactionHash body_hash = sha256(pairs[i].body.signed_tx.tx);
+    CHECK_EQ(body_hash, pairs[i].event.proposed_tx_hash);
+    CHECK(by_hash.emplace(body_hash, i).second);
+  }
+
+  payload.event_logs.reserve(pairs.size());
+  payload.tx_bodies.reserve(pairs.size());
+  for (const SignedTransactionHash &hash : canonical_hashes) {
+    auto it = by_hash.find(hash);
+    CHECK(it != by_hash.end());
+    detail::EventWithBody &pair = pairs[it->second];
+    payload.event_logs.push_back(std::move(pair.event));
+    payload.tx_bodies.push_back(std::move(pair.body));
+    by_hash.erase(it);
+  }
+  CHECK(by_hash.empty());
+  co_return payload;
 }
 
 x23::Async<void>
@@ -431,72 +491,6 @@ EventBlockContext::await_all_executors_closed()
     }
   }
   co_return true; // All executors closed normally
-}
-
-x23::Async<void>
-EventBlockContext::send_events_to_indexers(
-    BlockHeight block_height, std::vector<indexer_event_client_t> &indexers)
-{
-  TxEventLogBatch full_event_log;
-  ProposedTransactionBatch full_tx_bodies;
-  try {
-    // Flatten the single per-thread container once, splitting each pair into
-    // the event-log and body vectors in lockstep.  Because both halves come
-    // from the same traversal of the same container, position i of each vector
-    // always refers to the same EventWithBody (#2826).
-    std::unique_lock ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(ul, [&full_event_log, &full_tx_bodies](
-                                         EventWithBodyBatch &batch) {
-      for (detail::EventWithBody &pair : batch) {
-        full_event_log.push_back(std::move(pair.event));
-        full_tx_bodies.push_back(std::move(pair.body));
-      }
-      batch.clear();
-    });
-
-    // CI tests triggered an std::bad_alloc error here; logging the specifics of
-    // the error in case it occurs again
-  } catch (const std::exception &e) {
-    error("failed to send events to indexers: {}", e.what());
-    throw;
-  }
-
-  // [full_event_log] and [full_tx_bodies] are index-aligned: they are split
-  // from the same EventWithBody pairs in one traversal, so the body at position
-  // i belongs to the event log at position i.  They are forwarded together so
-  // the indexer never re-matches bodies to events.
-  CHECK(full_event_log.size() == full_tx_bodies.size());
-
-  // Per-indexer catch on both loops, like the tx-failure relay in
-  // rpc_context.cc: indexers are decoupled from consensus, so one dead or
-  // misbehaving indexer's RPC-layer error must not fail commit_block (which
-  // would hard-abort the coordinator). The dispatch loop needs its own guard
-  // because x23::Async is eager -- the call runs to its first suspension and
-  // can throw synchronously -- and an unguarded await-loop throw would also
-  // unwind [handles] while other sends are in flight (a panic in debug).
-  std::vector<x23::Async<void>> handles;
-  handles.reserve(indexers.size());
-
-  for (indexer_event_client_t &indexer : indexers) {
-    try {
-      handles.push_back(indexer.indexer_event_process_events(block_height,
-                                                             full_event_log,
-                                                             full_tx_bodies));
-    } catch (x23::XdrException const &e) {
-      warn("dropping block {} events to an indexer (dispatch): {}",
-           block_height, e.what());
-    }
-  }
-  for (x23::Async<void> &handle : handles) {
-    try {
-      co_await handle;
-    } catch (x23::XdrException const &e) {
-      warn("dropping block {} events to an indexer: {}", block_height,
-           e.what());
-    }
-  }
-  handles.clear();
-  co_return;
 }
 
 } // namespace hogd

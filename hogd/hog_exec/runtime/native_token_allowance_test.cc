@@ -498,12 +498,25 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   }
 }
 
-// 6. A net-negative sequence of adjust_allowance calls fails at commit.
+// 6. A decrement past the running allowance is rejected at invoke rather than
+// deferred to commit: the strict path checks (committed base + net in-tx
+// delta) at the point of the add. The earlier increment stands on its own, so
+// the transaction commits with the allowance at the granted value -- there is
+// no accepted-but-invalid pending delta for a later sibling call to net away
+// (hogd#1918). The netting sequence itself is pinned, against this precompile
+// and the RV32 itc_erc20 reference side by side, by
+// Erc20ParityTest.NegativeAllowanceNettingParity.
 TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(182);
   constexpr static ContractAddress kSpenderAddr = make_contract_address(183);
+  constexpr static int128_t kGrant = 100;
+  constexpr static int128_t kOverDecrement = -150;
 
+  // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
+  // to pay the replay-cache storage cost, so the commit assertion below turns
+  // on the allowance semantics rather than on the invoked address's funding.
+  setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(
       GenesisConfigurationLoader::kPresetNativeTokenAddress,
       get_default_cost_model()->get_nnint_cost());
@@ -512,10 +525,42 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     auto client = ContractTraitClient<itc_erc20::ERC20>(
         GenesisConfigurationLoader::kPresetNativeTokenAddress);
-    for (int128_t d : {100, -150}) {
-      auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
-                                                       make_difference(d));
-      (void)r;
+
+    auto grant =
+        client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
+                                                make_difference(kGrant));
+    if (!grant.has_value() || !grant.value().has_value() ||
+        !grant.value().value().has_value() ||
+        !grant.value().value().value().is_ok()) {
+      ADD_FAILURE() << "initial allowance grant did not return Ok";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto over = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
+                                                        make_difference(
+                                                            kOverDecrement));
+    if (!over.has_value() || !over.value().has_value() ||
+        !over.value().value().has_value()) {
+      ADD_FAILURE() << "over-decrement faulted instead of returning an error";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    if (over.value().value().value().is_ok()) {
+      ADD_FAILURE() << "a decrement past the running allowance must be "
+                       "rejected at invoke, not deferred to commit";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    // The rejected decrement staged nothing: the grant is still visible.
+    auto allowance =
+        client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
+    if (!allowance.has_value() || !allowance.value().has_value() ||
+        !allowance.value().value().has_value() ||
+        !allowance.value().value().value().is_ok() ||
+        amount_to_u128(allowance.value().value().value().ok()) !=
+            static_cast<uint128_t>(kGrant)) {
+      ADD_FAILURE() << "allowance after the rejected decrement is not the "
+                       "granted value";
+      return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
   });
@@ -546,7 +591,26 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
   ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+
+  advance_block();
+
+  // DB readback: only the grant was committed.
+  auto allowance_key_data =
+      Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr,
+                                                       kSpenderAddr);
+  ASSERT_TRUE(allowance_key_data.has_value());
+  StorageKey allowance_storage_key(StorageKeyType::ContractData);
+  allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
+  auto allowance_item = lookup_storage_item_from_db(
+      AddressAndKey{.address =
+                        GenesisConfigurationLoader::kPresetNativeTokenAddress,
+                    .key = std::move(allowance_storage_key)});
+  ASSERT_TRUE(allowance_item.has_value());
+  EXPECT_EQ(from_xdr(allowance_item->nnint()), kGrant);
 }
 
 // Regression test for #1628: self-transfer must not publish a zero delta
@@ -1493,7 +1557,7 @@ TEST_F(NativeTokenAllowanceTest,
 // A delegated zero transfer over fresh keys succeeds at invoke, including the
 // zero allowance debit, but cannot commit: the two fresh native-balance rows
 // each have to fund their own creation cost from a zero credit. Storage-cost
-// parity with the contract-data-backed WASM token is deliberately outside the
+// parity with the contract-data-backed RV32 token is deliberately outside the
 // ERC20 parity harness (which runs with zero costs), so pin this native
 // accounting edge separately here.
 TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)

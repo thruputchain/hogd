@@ -1,11 +1,9 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include <cassert>
-#include <exception>
 #include <optional>
 #include <utility>
 
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -25,7 +23,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 bool input_force_load_from_snapshot,
                                 int128_t &output_current_set,
                                 bool &output_current_set_opt,
-                                int128_t &output_current_add) noexcept
+                                int128_t &output_current_add)
 {
   auto status =
       syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
@@ -50,16 +48,11 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kNonnegativeIntGet>()) {
-    try {
-      trace_data->outputs.emplace(SyscallNonnegativeIntGetOutputs());
-      if (output_current_set_opt) {
-        trace_data->outputs->current_set = to_xdr(output_current_set);
-      }
-      trace_data->outputs->current_add = to_xdr(output_current_add);
-    } catch (std::exception &e) {
-      report_dropped_syscall_trace(e.what());
-      return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{0}};
+    trace_data->outputs.emplace(SyscallNonnegativeIntGetOutputs());
+    if (output_current_set_opt) {
+      trace_data->outputs->current_set = to_xdr(output_current_set);
     }
+    trace_data->outputs->current_add = to_xdr(output_current_add);
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
@@ -69,7 +62,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
                                    const int128_t &input_add_value,
-                                   StorageDeltaFlagSet input_flags) noexcept
+                                   StorageDeltaFlagSet input_flags)
 {
   std::optional<int128_t> set_value = std::nullopt;
   if (optional_input_set_value) {

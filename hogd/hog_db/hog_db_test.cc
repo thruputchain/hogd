@@ -10,6 +10,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -621,7 +622,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
 
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr2,
-      DeployedContractHash{.hash = sha256(contract), .contract_size = 10}));
+      DeployedContractHash{.hash = sha256(contract), .contract_size = 10},
+      std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr), -100000,
                                  std::to_underlying(StorageDeltaFlags::None)));
@@ -631,7 +633,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
 
   DeployedContractHash deployed_hash{.hash = sha256(contract),
                                      .contract_size = 10};
-  ASSERT_TRUE(invoke_tx.request_deploy_contract(addr3, deployed_hash));
+  ASSERT_TRUE(invoke_tx.request_deploy_contract(
+      addr3, deployed_hash, std::to_underlying(StorageDeltaFlags::None)));
   int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
                   cost_model_.get_balance_cost();
   CHECK(cost < 100000); // for the test, given the above constant
@@ -1317,10 +1320,10 @@ TEST_F(HogDbTest, DbHashDeltaNewContractLockMatchesFullStateHash)
 // recompute, and the DAO reassembles the row byte-identically.
 TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 {
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.resize_uninitialized(2 * kBigItemThreshold);
-  for (size_t i = 0; i < contract.wasmi_contract().data.size(); ++i) {
-    contract.wasmi_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.resize_uninitialized(2 * kBigItemThreshold);
+  for (size_t i = 0; i < contract.rv32_contract().data.size(); ++i) {
+    contract.rv32_contract().data[i] = static_cast<uint8_t>((i * 31) + 7);
   }
 
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
@@ -1341,15 +1344,15 @@ TEST_F(HogDbTest, DbHashDeltaChunkedNewContractLockMatchesFullStateHash)
 // leave earlier writes visible and the commit error would abort the node.
 TEST_F(HogDbTest, NewContractExceedingSerializedBoundIsInvalidExecutorBehavior)
 {
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract().data.resize_uninitialized(
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.resize_uninitialized(
       kMaxSerializedContractBytes + 1);
 
   // A row at exactly the bound is accepted (the preflight is >, not >=).
   // Blob of (bound - 8) serializes to exactly kMaxSerializedContractBytes:
   // 4-byte union tag + 4-byte opaque length + data (multiple of 4, no pad).
-  Contract at_bound_contract(ContractType::kWasmi);
-  at_bound_contract.wasmi_contract().data.resize_uninitialized(
+  Contract at_bound_contract(ContractType::kRv32);
+  at_bound_contract.rv32_contract().data.resize_uninitialized(
       kMaxSerializedContractBytes - 8);
   ASSERT_EQ(x23::xdr_size(at_bound_contract), kMaxSerializedContractBytes);
 
@@ -1377,7 +1380,8 @@ TEST_F(HogDbTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_deploy_contract(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
-                             .contract_size = 15}));
+                             .contract_size = 15},
+        std::to_underlying(StorageDeltaFlags::None)));
   });
 }
 
@@ -3858,6 +3862,150 @@ TEST_F(HogDbTest, ExclusiveNNIntNegativeAddOnBytestringRejectedAtReservation)
   // The committed bytestring is untouched.
   auto bytes = db_.read_bytes(key);
   ASSERT_TRUE(bytes);
+}
+
+// The next four tests cover issue #1189: rpc_from_exec's request_one dropped
+// the StorageDeltaFlagSet for kDeltaTypeDeployContract deltas, and
+// request_deploy_contract had no flags parameter to receive it, so an
+// exclusive lock on a deploy was silently ignored by hog_db while MockDB
+// honored it.
+
+namespace {
+
+DeployedContractHash
+make_test_deployed_hash(std::string_view seed, uint32_t contract_size)
+{
+  return DeployedContractHash{.hash = sha256(std::as_bytes(std::span(seed))),
+                              .contract_size = contract_size,
+                              .contract_type = ContractType::kRv32};
+}
+
+} // namespace
+
+// An exclusive deploy locks the address metadata key against every other
+// transaction in the block, even one deploying the identical contract hash
+// (which the ordinary deployment lock admits alongside -- see the control
+// test below).
+TEST_F(HogDbTest, ExclusiveDeployBlocksConcurrentDeploy)
+{
+  Address addr = make_address(kAddress + 330);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+  auto hash = make_test_deployed_hash("exclusive deploy", 32);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_a(block_tx);
+  ASSERT_TRUE(itx_a.request_deploy_contract(
+      addr, hash, std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_b(block_tx);
+  auto r = itx_b.request_deploy_contract(addr, hash,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::None));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDbCode::kConflict, r.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
+            *itx_b.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  itx_b.abort();
+  itx_a.abort();
+}
+
+// Control for the test above: without the flag, two transactions deploying
+// the same hash to the same address share the deployment lock. This is what
+// hog_db did unconditionally while the flag was being dropped.
+TEST_F(HogDbTest, NonExclusiveDeployAdmitsConcurrentIdenticalDeploy)
+{
+  Address addr = make_address(kAddress + 331);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+  auto hash = make_test_deployed_hash("shared deploy", 32);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_a(block_tx);
+  ASSERT_TRUE(itx_a.request_deploy_contract(
+      addr, hash, std::to_underlying(StorageDeltaFlags::None)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_b(block_tx);
+  ASSERT_TRUE(itx_b.request_deploy_contract(
+      addr, hash, std::to_underlying(StorageDeltaFlags::None)));
+  EXPECT_TRUE(itx_b.sync_balance_locks());
+
+  itx_b.abort();
+  itx_a.abort();
+}
+
+// The lock an exclusive deploy takes is permanent: it survives the
+// transaction's own commit and keeps the key closed for the rest of the
+// block, and the deployment still lands in the database.
+TEST_F(HogDbTest, ExclusiveDeployStaysLockedAfterCommitAndPersists)
+{
+  Address addr = make_address(kAddress + 332);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+  auto hash = make_test_deployed_hash("permanent deploy", 24);
+
+  StorageLongHash base_hash = db_.compute_full_db_hash();
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_a(block_tx);
+  ASSERT_TRUE(itx_a.request_deploy_contract(
+      addr, hash, std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  ASSERT_TRUE(itx_a.sync_balance_locks());
+  ASSERT_TRUE(itx_a.commit());
+
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx_b(block_tx);
+  auto r = itx_b.request_deploy_contract(addr, hash,
+                                         std::to_underlying(
+                                             StorageDeltaFlags::None));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(HogDbCode::kConflict, r.error().code());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(itx_b.last_conflict_reason().has_value());
+  EXPECT_EQ(DbConflictCode::kDbConflictExclusiveLock,
+            *itx_b.last_conflict_reason());
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  itx_b.abort();
+
+  auto incremental_hash = block_tx.get().close(base_hash);
+  ASSERT_TRUE(incremental_hash.has_value());
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto stored = db_.read_address_metadata(addr);
+  ASSERT_TRUE(stored);
+  EXPECT_EQ(*stored, hash);
+  EXPECT_EQ(*incremental_hash, db_.compute_full_db_hash());
+}
+
+// The exclusive commit path stages the same rows as the ordinary deployment
+// lock, so the incremental block hash still matches a full recomputation
+// (the non-exclusive companion is DbHashDeltaNewDeploymentLock...).
+TEST_F(HogDbTest, DbHashDeltaExclusiveDeploymentMatchesFullStateHash)
+{
+  Address addr = make_address(kAddress + 333);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &invoke_tx) {
+    ASSERT_TRUE(invoke_tx.request_deploy_contract(
+        addr, make_test_deployed_hash("hashed deploy", 15),
+        std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
+  });
 }
 
 TEST_F(HogDbTest, InvalidateSiblingBlockTX)

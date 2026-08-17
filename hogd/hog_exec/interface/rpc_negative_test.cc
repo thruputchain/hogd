@@ -32,6 +32,7 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -49,7 +50,7 @@ namespace hogd {
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class RpcNegativeTest : public ::testing::Test {
-public:
+protected:
   void SetUp() override
   {
     server_port_ = rpc_server_.start_server(0);
@@ -75,7 +76,6 @@ public:
         << "Failed to load genesis configuration";
   }
 
-protected:
   struct StalledSyscallMiscSnapshotSetup {
     ContractAddress contract_address;
     AddressAndKey stalled_addrkey;
@@ -146,7 +146,7 @@ protected:
     using syscall_misc_tests_meta =
         ContractTraitMeta<syscall_misc_tests::SyscallMiscTests>;
 
-    auto contract = syscall_misc_tests_meta::load_wasm();
+    auto contract = syscall_misc_tests_meta::load_rv32();
     ContractAddress contract_address =
         NativeContractTestFramework::make_contract_address(1);
     snapshot_server->impl()->setup_create_contract(*contract);
@@ -495,11 +495,13 @@ TEST_F(RpcNegativeTest,
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id)
+                                        recycle_probe_block_id, ProposalTxs{})
                 .error(),
             RPCError::kRPCNone);
   validate_thread.join();
@@ -554,14 +556,221 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id)
+                                        recycle_probe_block_id, ProposalTxs{})
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();
+}
+
+// executorsched_ready is the readiness probe: SystemError before init, OK
+// after. Its only production caller is the bench runner, so nothing else
+// pins the flag semantics.
+TEST_F(RpcNegativeTest, TestReadyBeforeAndAfterInit)
+{
+  EXPECT_EQ(client_.executorsched_ready(), ExecResult::ExecResultSystemError);
+  init_executor();
+  EXPECT_EQ(client_.executorsched_ready(), ExecResult::ExecResultOK);
+}
+
+// A batch against an unknown block returns one SystemError PER TRANSACTION
+// (a vector of the batch's size), not an empty vector or a single error --
+// the coordinator correlates results to transactions by index.
+TEST_F(RpcNegativeTest, TestBatchErrorShapeOnUnknownBlock)
+{
+  init_executor();
+
+  SignedTransactionBatch propose_batch;
+  for (int i = 0; i < 3; ++i) {
+    propose_batch.push_back(
+        SignedTransaction{.tx = make_tx_with_expiry(1'000'000)});
+  }
+  auto propose_result =
+      client_.executorsched_propose_batch(999'999, propose_batch);
+  ASSERT_EQ(propose_result.size(), 3U);
+  for (auto const &r : propose_result) {
+    EXPECT_EQ(r.result(), ExecResult::ExecResultSystemError);
+  }
+
+  ProposedTransactionBatch validate_batch;
+  for (int i = 0; i < 3; ++i) {
+    validate_batch.push_back(ProposedTransaction{
+        .signed_tx = SignedTransaction{.tx = make_tx_with_expiry(1'000'000)},
+        .nondeterministic_proposal_data = {}});
+  }
+  auto validate_result =
+      client_.executorsched_validate_batch(999'999, validate_batch);
+  ASSERT_EQ(validate_result.size(), 3U);
+  for (auto const &r : validate_result) {
+    EXPECT_EQ(r, ExecResult::ExecResultSystemError);
+  }
+}
+
+// Mirror of TestEmptyBatch on the validation path.
+TEST_F(RpcNegativeTest, TestEmptyValidateBatch)
+{
+  init_executor();
+
+  BlockID block_id = 3001;
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+            ExecResult::ExecResultOK);
+  auto db_res = db_client_.dbsched_create_snapshot(
+      0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
+  ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
+
+  ProposedTransactionBatch empty_batch;
+  auto result = client_.executorsched_validate_batch(block_id, empty_batch);
+  EXPECT_EQ(result.size(), 0U);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// TestConflictingModeOpen covers proposal-then-validation; this is the other
+// direction.
+TEST_F(RpcNegativeTest, TestConflictingModeOpenValidationFirst)
+{
+  init_executor();
+
+  BlockID block_id = 3002;
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultSystemError);
+  client_.executorsched_finish_block(block_id);
+}
+
+// Check-ordering pin: the kMaxBytesSignedTransaction size cap runs before the
+// handler's expiry validation, so a transaction that is both oversized and
+// expired reports TxNonDeterministicError (the size arm), not
+// TxValidationFailure. Both single arms are pinned by
+// ProposeRejectsOversizedTransaction / ProposeRejectsExpiredReplayUniquifier;
+// this pins which one wins. Also pins that the rejected result carries no
+// proposal data (the result union has no proposal_data arm for either code).
+TEST_F(RpcNegativeTest, TestOversizedBeatsExpired)
+{
+  init_executor();
+
+  BlockID block_id = 3003;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+
+  auto tx = make_oversized_tx();
+  tx.uniquifier.block_expiry_height = 0;
+
+  EXPECT_EQ(client_
+                .executorsched_propose_transaction(block_id,
+                                                   SignedTransaction{.tx = tx})
+                .result(),
+            ExecResult::ExecResultTxNonDeterministicError);
+
+  client_.executorsched_finish_block(block_id);
+}
+
+// The closing-block window (open_block_count at 0 but an in-flight
+// transaction still holding a context reference): reopening the SAME id in
+// either mode is SystemError, a second finish is SystemError (and must not
+// decrement the count below zero, which would corrupt the reopen guard), and
+// once the straggler resolves and gc runs, the same id opens fresh.
+TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
+{
+  BlockID block_id = 3004;
+  BlockSnapshotServer snapshot_server(block_id);
+  auto snapshot_port = snapshot_server.start_server(0);
+  auto setup = setup_stalled_syscall_misc_snapshot(snapshot_server);
+  x23::Defer cleanup([&] {
+    snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
+  });
+
+  init_executor(make_shard_card(snapshot_port));
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  open_event_block(block_id);
+
+  SignedTransactionBatch batch;
+  batch.push_back(SignedTransaction{
+      .tx = make_stalled_syscall_misc_transaction(setup.contract_address)});
+
+  auto propose_client = make_srpc_multiclient<ExecutorSched1>(
+      x23::HostPort{"localhost", server_port_}, false);
+  std::promise<ExecProposeBatchResult> propose_promise;
+  auto propose_future = propose_promise.get_future();
+  std::thread propose_thread([&] {
+    propose_promise.set_value(
+        propose_client.executorsched_propose_batch(block_id, batch));
+  });
+
+  snapshot_server->impl()->wait_for_stalled_item(setup.stalled_addrkey);
+  EXPECT_EQ(client_.executorsched_finish_block(block_id),
+            ExecResult::ExecResultOK);
+
+  // The block is now closing: count 0, context alive via the stalled tx.
+  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultSystemError);
+  EXPECT_EQ(client_.executorsched_open_validation_block(block_id),
+            ExecResult::ExecResultSystemError);
+  EXPECT_EQ(client_.executorsched_finish_block(block_id),
+            ExecResult::ExecResultSystemError);
+  // The stray finish must not have decremented the count: the reopen guard
+  // still rejects.
+  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultSystemError);
+
+  snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
+  auto result = propose_future.get();
+  ASSERT_EQ(result.size(), 1U);
+  EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
+  propose_thread.join();
+
+  // The straggler resolved and its release_context ran gc, so the same id is
+  // a fresh block again.
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(client_.executorsched_finish_block(block_id),
+            ExecResult::ExecResultOK);
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
+            RPCError::kRPCNone);
+}
+
+// An event-server emit failure surfaces at finish_block: abandoning the
+// event block before an included transaction's emit makes the emit fail with
+// Abandon, which the executor records and the last finish_block drains into
+// its result instead of returning OK. Also pins that an included
+// transaction's propose response carries proposal data (the result union has
+// a proposal_data arm only for OK/Det/RootFrameReverted).
+TEST_F(RpcNegativeTest, TestFinishBlockSurfacesEventEmitFailure)
+{
+  init_executor();
+
+  BlockID block_id = 3005;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+  open_event_block(block_id);
+
+  // Kill the event block out from under the executor before the emit.
+  ASSERT_EQ(event_client_.eventsched_abandon_block(block_id),
+            RPCError::kRPCNone);
+
+  // An undeployed root address resolves via the default-wallet fallback and
+  // is INCLUDED (it burns its nonce and emits events), unlike the rejected
+  // transactions in the other negative tests.
+  auto propose_result = client_.executorsched_propose_transaction(
+      block_id, SignedTransaction{.tx = make_tx_with_expiry(1'000'000)});
+  EXPECT_EQ(propose_result.result(),
+            ExecResult::ExecResultTxDeterministicError);
+  EXPECT_EQ(propose_result.proposal_data().nondeterministic_bit_count, 0U);
+
+  auto finish_result = client_.executorsched_finish_block(block_id);
+  EXPECT_NE(finish_result, ExecResult::ExecResultOK);
+  EXPECT_EQ(finish_result, ExecResult::ExecResultSystemError);
 }
 
 // Genesis load with a consensus value carrying a height other than the genesis

@@ -2,12 +2,14 @@ add_library(hog_indexer STATIC
     db.cc
     event_cursor.cc
     key_format.cc
+    pull_controller.cc
     status.cc
+    topic_layout.cc
 )
 
 target_link_libraries(hog_indexer PUBLIC
     rocksdb
-    hog_event
+    indexer_payload_validation
     metrics
     hogd
 )
@@ -19,10 +21,14 @@ add_executable(hog_indexer_test
     db_test.cc
     event_cursor_test.cc
     key_format_test.cc
+    pull_controller_test.cc
+    strict_ingest_test.cc
+    topic_layout_test.cc
 )
 
 target_link_libraries(hog_indexer_test
     hog_indexer
+    hog_event
     gtest
 )
 gtest_discover_tests(hog_indexer_test)

@@ -283,12 +283,142 @@ ci_control_clear_work_dirs() {
   done
 }
 
+# How long a reaped process gets to exit on SIGTERM before it is escalated to
+# SIGKILL, and how long the SIGKILL then gets to take effect.
+CI_REAP_TERM_TIMEOUT_SEC=${CI_REAP_TERM_TIMEOUT_SEC:-20}
+CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
+
+# The program [ci_remote_reap] runs on one host to reap [$1] (a space-separated
+# list of process names), waiting up to [$2] seconds for SIGTERM to work and
+# [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
+# both, and 3 if the signals could not be sent at all -- a host whose [killall]
+# is broken has not been shown to have a process refusing to die, and
+# must not be reported as though it had.
+#
+# [killall] returns as soon as it has delivered the signal, so reaping with a
+# bare [killall <names>] hands the caller back a host where the processes have
+# been asked to exit but still hold their listening sockets. The benchmark
+# scripts bind fixed ports within seconds of reaping and lose that race: a run
+# whose previous hog-mempool was still on its way out dies with
+# "bind(10.100.0.110:8075): Address already in use", and one whose previous
+# hog-exec was still on its way out dies the same way on 8040. Waiting for the
+# processes to actually go is what makes the reap mean what its callers read it
+# as meaning.
+#
+# The liveness check reads [ps] rather than signalling with another [killall]:
+# it needs no privilege, and signalling a process to ask whether it is there
+# conflates "gone" with "not permitted to signal". Where /proc hides other
+# users' processes [ps] sees nothing and this degrades to the old
+# fire-and-forget behaviour, which is the floor rather than a regression.
+#
+# The names are matched literally, with [grep -xF] over [ps -eo comm=], because
+# [killall] targets them literally. [pgrep -x] would not do: it anchors its
+# operand but still reads it as a regular expression, so the configured
+# [chuckd.dev] also matches a [chuckdXdev] that [killall] never signalled --
+# and a liveness check that answers "alive" about a process nothing is killing
+# waits out both timeouts and then fails the reap.
+ci_reap_program() {
+  cat <<EOF
+procs='$1'
+term_timeout=$2
+kill_timeout=$3
+
+survivors() {
+  found=
+  live=\$(ps -eo comm= 2>/dev/null) || live=
+  for proc in \$procs; do
+    if printf '%s\n' "\$live" | grep -qxF "\$proc"; then
+      found="\$found \$proc"
+    fi
+  done
+  printf '%s' "\$found"
+}
+
+# Polls for up to \$1 seconds. Returns 0 as soon as nothing is left.
+wait_gone() {
+  elapsed=0
+  while :; do
+    [ -n "\$(survivors)" ] || return 0
+    [ "\$elapsed" -lt "\$1" ] || return 1
+    sleep 1
+    elapsed=\$((elapsed + 1))
+  done
+}
+
+# Sends \$1 to every named process. Returns nonzero only when the signal could
+# not be sent at all, which has to be told apart from a process that refused to
+# die: [-q] silences killall's own "no process found", so a nonzero exit that
+# still says something is killall failing rather than an absence of
+# processes to kill.
+signal_all() {
+  err=\$(killall -q "-\$1" \$procs 2>&1)
+  status=\$?
+  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
+    echo "cannot signal processes: \$err" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Signal first and ask questions after: a host that will not report its
+# processes must still have them reaped.
+signal_all TERM || exit 3
+wait_gone "\$term_timeout" && exit 0
+
+echo "alive after SIGTERM, escalating to SIGKILL:\$(survivors)" >&2
+signal_all KILL || exit 3
+wait_gone "\$kill_timeout" && exit 0
+
+echo "alive after SIGKILL:\$(survivors)" >&2
+exit 2
+EOF
+}
+
+# Reaps the named processes on one host and does not return until they are gone.
+# Returns nonzero only when a process outlived SIGKILL, which is a stale host
+# that needs a human. Anything else -- an unreachable host, a host with no
+# [killall] -- is reported and tolerated, because the flaky link to these hosts
+# must not be able to fail a benchmark on its own.
+ci_remote_reap() {
+  local host=$1
+  local processes=$2
+  local output status=0
+
+  output=$(ci_remote_run "$host" \
+    "$(ci_reap_program "$processes" "$CI_REAP_TERM_TIMEOUT_SEC" \
+      "$CI_REAP_KILL_TIMEOUT_SEC")" 2>&1) || status=$?
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output" | sed "s/^/[$host] /" >&2
+  fi
+
+  if [ "$status" -eq 2 ]; then
+    echo "$host still has benchmark processes that survived SIGKILL" >&2
+    return 1
+  fi
+  if [ "$status" -ne 0 ]; then
+    echo "warning: could not reap processes on $host (status $status)" >&2
+  fi
+  return 0
+}
+
 ci_remote_killall_hosts() {
   local processes=$1
   local host
+  local reap_pid
+  local status=0
+  local -a reap_pids=()
   shift
 
+  # A reap now waits out a grace period, so the hosts go concurrently: eight of
+  # them serialised behind one would add minutes to every benchmark step.
   for host in "$@"; do
-    ci_remote_run "$host" "sudo -n /usr/bin/killall -q $processes" || true
+    ci_remote_reap "$host" "$processes" &
+    reap_pids+=("$!")
   done
+  for reap_pid in "${reap_pids[@]}"; do
+    if ! wait "$reap_pid"; then
+      status=1
+    fi
+  done
+  return "$status"
 }

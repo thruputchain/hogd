@@ -790,34 +790,65 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
+SyscallStatus<void>
+SystemCallHandler::validate_new_invocation(
+    ContractAddress const &address, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids) const
+{
+  if (!validate_invoke_flags(flags)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (!invocation_frame_stack_.empty() &&
+      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
+  return {};
+}
+
 std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
                           std::span<uint32_t const> owned_auth_token_ids)
 {
+  // syscall_Invoke_inner() rejects undefined flags before we get here, so
+  // reaching this with invalid ones is a bug, not caller input. Asserted here
+  // even though validate_new_invocation() also checks it -- that check is for
+  // the test FFI boundary, which must report rather than abort.
   CHECK(validate_invoke_flags(flags));
+
   if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::ReadOnly);
   }
 
-  // The SyscallError returns below all happen before a child frame is created,
-  // so they are complete no-ops: nothing is mutated, and the caller leaves its
-  // output state untouched.
-  if (!invocation_frame_stack_.empty() &&
-      !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
-    return {SyscallError{
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-            0};
+  // Rejected before a child frame is created, so this is a complete no-op:
+  // nothing is mutated, and the caller leaves its output state untouched.
+  if (auto admitted =
+          validate_new_invocation(address, flags, owned_auth_token_ids);
+      !admitted.has_value()) {
+    return {admitted.error(), 0};
   }
 
-  // reentrance guard
-  // check if the address is already on the stack
-  if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return {SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance}, 0};
-  }
-
-  auto runtime = resolve_runtime(address);
+  // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
+  // inserts a fresh (possibly negative) entry; that unordered_map insert can
+  // throw std::bad_alloc under memory pressure. invoke() is reached from the
+  // noexcept syscall_Invoke_inner() body, so the exception must not unwind
+  // across that boundary and terminate the executor -- translate it into an
+  // unrecoverable system error instead (issue #3363).
+  auto runtime = [&]() -> SystemStatus<std::unique_ptr<Runtime>> {
+    try {
+      return resolve_runtime(address);
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+      return SystemError{SystemErrorCode::Unrecoverable};
+    } catch (...) {
+      report_dropped_log("unknown exception");
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  }();
   if (!runtime) {
     // invoke() is reached from the noexcept syscall_Invoke_inner() body. A
     // logger allocation/sink failure (typically std::bad_alloc out of memory)
@@ -943,10 +974,27 @@ SystemCallHandler::start_frame(
   // transactional: on failure it restores the state it touched and returns an
   // error. Put the parent's stashed trace back so the surviving parent frame
   // keeps its diagnostics, and report the failure as an unrecoverable error.
-  auto admitted =
-      invocation_frame_stack_.start_frame(invocation.invoked_address,
-                                          std::move(invocation.calldata), flags,
-                                          owned_auth_token_ids);
+  //
+  // The try/catch is a backstop for that transactional contract: if a future
+  // admission path throws instead of returning an error (#2974), translate it
+  // here rather than terminating through the noexcept boundary.
+  auto admitted = [&]() -> SystemStatus<void> {
+    try {
+      return invocation_frame_stack_.start_frame(invocation.invoked_address,
+                                                 std::move(invocation.calldata),
+                                                 flags, owned_auth_token_ids);
+    } catch (std::exception const &e) {
+      try {
+        error("unrecoverable: frame admission threw: {}", e.what());
+      } catch (...) {
+        report_dropped_log("frame-admission failure diagnostic");
+      }
+      return SystemError{SystemErrorCode::Unrecoverable};
+    } catch (...) {
+      report_dropped_log("non-std exception from frame admission");
+      return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  }();
   if (!admitted.has_value()) {
     if (stashed_parent_trace) {
       invocation_frame_trace_ = std::move(stashed_parent_trace);
@@ -963,37 +1011,60 @@ SystemCallHandler::finish_frame(
 {
   assert(!invocation_frame_stack_.empty());
   assert(!last_frame_finished_);
-  if (!result.has_value()) {
-    invocation_frame_stack_.set_active_frame_return(
-        InvocationFrameOutput(InvocationFrameStatusCode::Fault), {});
-  }
 
-  if (invocation_frame_trace_) {
-    try {
-      invocation_frame_stack_.log_trace_finish(*invocation_frame_trace_);
-    } catch (std::exception &e) {
-      // finish_frame() is noexcept and reachable from the test FFI mock-frame
-      // path. Finish-time trace collection (collect_storage_deltas()) allocates
-      // and can throw std::bad_alloc after the real storage writes already
-      // succeeded; treat it as a best-effort trace drop rather than terminating
-      // an honest caller (#2646), preserving the frame cleanup and parent-trace
-      // restoration below. The no-allocation reporter avoids throwing again.
-      report_dropped_log(e.what());
-    }
-  }
-
-  // Finish the frame on the stack first, capturing any try_invoke two-phase-
-  // commit conflict. This must run after log_trace_finish() above (which reads
-  // the finishing frame) and before the parent-trace restore below, so the
-  // conflict can be recorded on this (still-current) child frame's trace.
-  [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
   DbConflictResult try_invoke_conflict{DbDiagnosticLevel::kDbDiagnosticNone};
-  auto res = invocation_frame_stack_.finish_frame(result, execution_mode_data_,
-                                                  &try_invoke_conflict);
-  size_t stack_size_after = invocation_frame_stack_.size();
-  assert(stack_size_after == stack_size - 1);
-  if (stack_size_after == 0) {
-    last_frame_finished_ = true;
+  SystemStatus<std::pair<InvokeResult, bool>> res =
+      SystemError{SystemErrorCode::Unrecoverable};
+  // Frame completion mutates parent-frame state through throwing STL
+  // allocations: the successful-child merge (#3050, #3407), the manual-revert
+  // token restore (#3406), and proposal-bit logging (#3389). Unlike frame
+  // admission (#3058), completion is not transactional, so a throw can leave
+  // the stack partially merged; translating it to Unrecoverable here is still
+  // safe because that error ends the whole transaction, so nothing observes
+  // the partial state. What it must never do is cross this noexcept boundary
+  // and terminate the executor.
+  try {
+    if (!result.has_value()) {
+      invocation_frame_stack_.set_active_frame_return(
+          InvocationFrameOutput(InvocationFrameStatusCode::Fault), {});
+    }
+
+    if (invocation_frame_trace_) {
+      try {
+        invocation_frame_stack_.log_trace_finish(*invocation_frame_trace_);
+      } catch (std::exception &e) {
+        // Finish-time trace collection (collect_storage_deltas()) allocates
+        // and can throw std::bad_alloc after the real storage writes already
+        // succeeded; treat it as a best-effort trace drop rather than failing
+        // the frame (#2646), preserving the frame cleanup and parent-trace
+        // restoration below. The no-allocation reporter avoids throwing again.
+        report_dropped_log(e.what());
+      }
+    }
+
+    // Finish the frame on the stack first, capturing any try_invoke two-phase-
+    // commit conflict. This must run after log_trace_finish() above (which
+    // reads the finishing frame) and before the parent-trace restore below, so
+    // the conflict can be recorded on this (still-current) child frame's
+    // trace.
+    [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
+    res = invocation_frame_stack_.finish_frame(result, execution_mode_data_,
+                                               &try_invoke_conflict);
+    [[maybe_unused]] size_t stack_size_after = invocation_frame_stack_.size();
+    assert(stack_size_after == stack_size - 1);
+    if (invocation_frame_stack_.empty()) {
+      last_frame_finished_ = true;
+    }
+  } catch (std::exception const &e) {
+    try {
+      error("unrecoverable: frame completion threw: {}", e.what());
+    } catch (...) {
+      report_dropped_log("frame-completion failure diagnostic");
+    }
+    return SystemError{SystemErrorCode::Unrecoverable};
+  } catch (...) {
+    report_dropped_log("non-std exception from frame completion");
+    return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   // Record the conflict on this frame's trace. The default-constructed field is
@@ -2000,7 +2071,14 @@ SystemCallHandler::get_native_token_balance(
     }
     auto const &base_item = unmodified_item->base_item();
     assert(base_item.type() == ItemViewType::kNativeTokenBalance);
-    assert(base_item.native_token_balance() >= 0);
+    // Native balances are nonnegative by construction: the commit path's
+    // bounds locks (NNIntSetAddArgs::try_acquire_bounds_lock) refuse any
+    // reservation that would drive a nonnegative base below zero. A negative
+    // committed row can therefore only come from on-disk corruption, so
+    // fail-stop rather than let get_balance_of/get_balance convert it to
+    // uint128_t and hand a contract UINT128_MAX. CHECK, not assert: the
+    // conversion is unguarded exactly where it matters, in NDEBUG builds.
+    CHECK(base_item.native_token_balance() >= 0);
     return base_item.native_token_balance();
   }
 

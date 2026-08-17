@@ -20,21 +20,19 @@ Machine::Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
 {
   if (!program_) {
     construction_trap_ = Trap::kInvalidInstruction;
-    set_trap(Trap::kInvalidInstruction);
-    return;
   }
-  if (!program_->contains_pc(initial_pc_)) {
+  else if (!program_->contains_pc(initial_pc_)) {
     construction_trap_ = Trap::kBadPc;
-    set_trap(Trap::kBadPc);
-    return;
   }
-  if (memory_bytes > kMaxMemoryBytes) {
+  else if (memory_bytes > kMaxMemoryBytes) {
     construction_trap_ = Trap::kBadMemory;
-    set_trap(Trap::kBadMemory);
-    return;
   }
-
-  memory_.resize(memory_bytes);
+  else {
+    memory_.resize(memory_bytes);
+  }
+  // reset() re-applies the sticky construction trap and seeds gas, so a
+  // construction-trapped machine reports the full limit remaining: a machine
+  // that never executed anything charges nothing, matching ThreadedMachine.
   reset(gas);
 }
 

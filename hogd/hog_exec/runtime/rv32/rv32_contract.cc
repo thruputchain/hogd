@@ -58,6 +58,10 @@ Rv32Contract::instantiate(uint64_t gas) const
 
 namespace {
 
+// The TrampolineResult wire contract: panic == 0 means "no panic, result_code
+// carries the SyscallErrorCode" on both sides of the FFI boundary.
+static_assert(std::to_underlying(HostFnErrorCode::NoneOrRecoverable) == 0);
+
 std::pair<std::expected<int32_t, HostFnErrorCode>, GasAmount>
 from_trampoline_result(TrampolineResult result)
 {
@@ -135,6 +139,10 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 
     switch (host_result.error()) {
     case HostFnErrorCode::NoneOrRecoverable:
+      // from_trampoline_result routes panic == 0 to the continue branch, so
+      // this arm is reachable only if that contract changes; abort loudly in
+      // debug test runs rather than silently reporting Unrecoverable.
+      assert(false);
       error("Unrecoverable: HostFnErrorCode::NoneOrRecoverable is not expected "
             "from TrampolineResult");
       return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};

@@ -63,7 +63,7 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
   }
 
   // The body is accumulated alongside the event log and forwarded to the
-  // indexer when the block commits (see send_events_to_indexers).
+  // indexer when it pulls the durable committed record.
   bool ok =
       co_await context->add_event(std::move(event_log), std::move(proposed_tx));
 
@@ -78,9 +78,7 @@ x23::Async<RPCError>
 EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
                                               TxFailureDiagnostic diag)
 {
-  // Fire-and-forget: hand the relay to a detached coroutine and ack the
-  // executor immediately, rather than waiting on the indexer sends.
-  ctx_.spawn_tx_failure_relay(std::move(tx_hash), std::move(diag));
+  ctx_.enqueue_tx_failure(std::move(tx_hash), std::move(diag));
   co_return RPCError::kRPCNone;
 }
 

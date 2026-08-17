@@ -34,7 +34,7 @@ namespace {
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 int_type_test(uint32_t inp_1, int128_t const &inp_128,
               int128_t const &inp_128_by_value, uint32_t &out_1,
-              uint64_t &out_2, int128_t &out_128) noexcept
+              uint64_t &out_2, int128_t &out_128)
 {
   EXPECT_EQ(inp_1, 100);
   EXPECT_EQ(inp_128, int128_t{1} << 70);
@@ -48,7 +48,7 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 span_type_test(std::span<const std::byte> span_in,
-               std::span<std::byte> span_out) noexcept
+               std::span<std::byte> span_out)
 {
   EXPECT_EQ(span_in.size(), 8);
   EXPECT_EQ(span_out.size(), 4);
@@ -65,20 +65,20 @@ span_type_test(std::span<const std::byte> span_in,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-no_return_test() noexcept
+no_return_test()
 {
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-signed_i32_type_test(int32_t input_value) noexcept
+signed_i32_type_test(int32_t input_value)
 {
   EXPECT_EQ(input_value, -1);
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-unsigned_u32_type_test(uint32_t input_value) noexcept
+unsigned_u32_type_test(uint32_t input_value)
 {
   // The inner syscall is only reached when the (by-value, non-pointer) slot
   // narrows cleanly to a u32; the test passes the largest valid u32.
@@ -87,13 +87,13 @@ unsigned_u32_type_test(uint32_t input_value) noexcept
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-gas_metering_test() noexcept
+gas_metering_test()
 {
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-error_syscall_test() noexcept
+error_syscall_test()
 {
   return {SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
           WrappedGasAmount{0}};

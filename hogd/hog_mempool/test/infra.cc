@@ -1,9 +1,11 @@
 #include "hogd/hog_mempool/test/infra.h"
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "consensus.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
@@ -20,7 +22,9 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_event.hh"
 
 namespace hogd {
 
@@ -51,6 +55,11 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
       create_client<SchedDb1>(kAddress, sched_db_server_.port())().value());
   // Initialize backend and blockchain state for tests.
   init_db_backend(std::move(sched_db_client));
+  ConsensusValue initial_value{};
+  initial_value.proposal_header.block_height = -1;
+  Registration::registration().publish_event_canonical_tip(
+      EventCanonicalTip{.block_id = std::numeric_limits<BlockID>::max(),
+                        .consensus_value = std::move(initial_value)});
   init_contracts();
 
   // Start the database RPC servers.
@@ -77,7 +86,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   auth_mempool_server_->impl()->set_auth_server(*auth_server_);
 
   // Start the event RPC servers.
-  event_sched_server_.start_server(/*port=*/0);
+  event_sched_server_->start_server(/*port=*/0);
   event_exec_server_.start_server(/*port=*/0);
 
   // We start the executor server in [register_executor_with_mempool()].
@@ -91,11 +100,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
 
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
-  register_event_with_mempool();
   register_auth_with_mempool();
-  // The executor must register itself *after* the database and event servers
-  // have registered!
-  register_executor_with_mempool();
   register_coordinator_with_mempool()();
 
   if (!skip_genesis_block) {
@@ -104,6 +109,9 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
         mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
             builder.build_or_panic(StorageCostModel::default_cost_model()))(),
         DbSchedResult::DbSchedResultOK);
+    register_event_with_mempool();
+    register_executor_with_mempool();
+    mempool_coord_server_->impl()->finish_runtime_init()();
   }
 }
 

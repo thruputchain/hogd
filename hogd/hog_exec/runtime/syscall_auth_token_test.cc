@@ -776,6 +776,83 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
+// MintAuthToken bytes that fail x23 deserialization (not a serialized
+// AuthTokenNode) are rejected as kInvalidSyscallInput -- the XdrException
+// catch arm. Every other mint in the suite serializes a valid node, so this
+// is the only pin on the malformed-bytes arm. A valid mint afterwards
+// proves the handler survives the rejected call.
+TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenRejectsUndeserializableBytes)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  advance_block();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_contract;
+  fns_contract.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        BlockHeight current_height{};
+        auto h_res = ctx.syscall<SyscallNo::kGetBlockHeight>(current_height);
+        EXPECT_TRUE(h_res.has_value());
+        EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+        constexpr std::array<std::byte, 4> kGarbage = {std::byte{0xde},
+                                                       std::byte{0xad},
+                                                       std::byte{0xbe},
+                                                       std::byte{0xef}};
+        uint32_t id = 0xDEAD'BEEF;
+        auto res = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{current_height + 10},
+            std::span<const std::byte>(kGarbage), id);
+        EXPECT_TRUE(res.has_value());
+        EXPECT_EQ(res.value(),
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        EXPECT_EQ(id, 0xDEAD'BEEF) << "output must be untouched on reject";
+
+        AuthTokenNode node{.consumer_address = kAddr,
+                           .payload = x23::serialize(1U),
+                           .child_nodes = {}};
+        auto serialized = x23::serialize(node);
+        auto ok = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{current_height + 10},
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                           serialized.data()),
+                                       serialized.size()},
+            id);
+        EXPECT_TRUE(ok.has_value());
+        EXPECT_EQ(ok.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        return {};
+      });
+  auto contract = std::make_unique<NativeContract>(std::move(fns_contract));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 // Child consumes a token, gets unwrapped child tokens, returns them to
 // the parent via the Return syscall.  Parent then consumes the returned token.
 //
@@ -3057,6 +3134,151 @@ TEST_F(SyscallAuthTokenTest,
   // Control: with no prior consume, the intervening mint precedes the later
   // consume's freshly allocated child range.
   EXPECT_LT(control.intervening_token_id, control.later_consume.start);
+}
+
+// A child frame that runs out of gas cannot hand a freshly minted auth token
+// back to its parent.
+//
+// This is the frame-level half of the #1759 defence. syscall_entry_outer
+// rewrites a zero-cost syscall to OutOfGas once the frame is exhausted, but
+// the inner syscall has already run by then -- MintAuthToken registers the
+// token in the active frame before the rewrite happens. What makes that safe
+// is that OutOfGas reverts the frame, and commit_failed_child_frame drops the
+// child's returned-token set instead of merging it into the parent's owned
+// set. Both halves have to hold: if either one regresses, the parent ends up
+// owning a capability that an out-of-gas child created.
+TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+
+  // The token ids a child could plausibly have been handed. Ids are allocated
+  // sequentially from zero within a transaction, and nothing else in this test
+  // mints, so a leaked token would land at the front of the range.
+  constexpr std::array<uint32_t, 4> kCandidateTokenIds{0, 1, 2, 3};
+
+  struct ChildObservations {
+    bool ran = false;
+    bool mint_succeeded = false;
+    bool return_succeeded = false;
+  };
+  ChildObservations child_obs;
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        child_obs.ran = true;
+
+        AuthTokenNode root_node{.consumer_address = kCallerAddress,
+                                .payload = x23::serialize(99U),
+                                .child_nodes = {}};
+        auto serialized_root = x23::serialize(root_node);
+        uint32_t token_id = 0;
+        auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000},
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                           serialized_root.data()),
+                                       serialized_root.size()},
+            token_id);
+        child_obs.mint_succeeded =
+            mint_res.has_value() &&
+            mint_res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+
+        // Try to hand the token back regardless of what mint reported -- the
+        // exploit shape is mint-then-Return, and Return is zero-cost too.
+        std::array<uint32_t, 1> returned_ids{token_id};
+        std::array<std::byte, 4> ret_buf{};
+        auto ret_res = ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{ret_buf}, false,
+            std::as_bytes(std::span<const uint32_t>{returned_ids}));
+        // Return reports success through the error channel, as HostFnError.
+        child_obs.return_succeeded =
+            !ret_res.has_value() &&
+            ret_res.error().code() == HostFnErrorCode::Return;
+
+        return InvokeError{InvokeErrorCode::OutOfGas};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            // The child frame starts with nothing to spend, so its first
+            // syscall is entered with the gas already exhausted -- the state
+            // an over-budget wasm contract reaches at a call boundary.
+            .gas_limit = 0,
+            .flags = 0,
+        };
+        CopyableInvokeOutputs invoke_outputs{};
+        auto invoke_res =
+            ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
+                                            std::span<const std::byte>{},
+                                            std::span<uint32_t const>{}, inputs,
+                                            invoke_outputs);
+
+        // The child either never started or faulted; either way it must not
+        // report a successful frame return.
+        if (invoke_res.has_value() &&
+            invoke_res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          EXPECT_EQ(invoke_outputs.frame_status,
+                    InvocationFrameStatusCode::Fault);
+        }
+
+        // Nothing came back across the frame boundary.
+        EXPECT_EQ(invoke_outputs.returned_auth_token_len, 0U);
+
+        // And the parent owns no token the child could have minted.
+        for (uint32_t candidate : kCandidateTokenIds) {
+          EXPECT_FALSE(ctx.handler().check_auth_tokens_owned(
+              std::span<uint32_t const>{&candidate, 1}))
+              << "parent owns token id " << candidate
+              << " minted by an out-of-gas child";
+        }
+
+        return {};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kCallerAddress,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  // If the child ran at all, neither zero-cost syscall may have succeeded.
+  if (child_obs.ran) {
+    EXPECT_FALSE(child_obs.mint_succeeded)
+        << "MintAuthToken succeeded in a frame with no gas";
+    EXPECT_FALSE(child_obs.return_succeeded)
+        << "Return succeeded in a frame with no gas";
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
