@@ -733,7 +733,9 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
             ExecResult::ExecResultOK);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
 }
 
