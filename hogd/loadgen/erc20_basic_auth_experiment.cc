@@ -114,8 +114,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
     return claim;
   }();
 
-  auto erc20_contract = erc20_meta::load_wasm();
-  auto wallet_contract = wallet_meta::load_wasm();
+  auto erc20_contract = erc20_meta::load_rv32();
+  auto wallet_contract = wallet_meta::load_rv32();
   assert(erc20_contract);
   assert(wallet_contract);
 
@@ -184,7 +184,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                     Invocation{
                         .invoked_address = owner_address,
                         .entrypoint = wallet_meta::entrypoint<u8"do_action">(),
-                        .gas_limit = GasAmount{20'000},
+                        .gas_limit = GasAmount{100'000},
                         .calldata = std::move(calldata),
                     },
                 .uniquifier =
@@ -286,7 +286,7 @@ ERC20BasicAuthExperimentState::extend_experiment(
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
-                .gas_limit = GasAmount{20'000},
+                .gas_limit = GasAmount{100'000},
                 .calldata = wallet_meta::make_calldata<u8"do_action">(
                     internal_calldata),
             };
