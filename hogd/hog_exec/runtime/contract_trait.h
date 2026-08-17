@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -24,7 +23,6 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "serialize_calldata.h"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/debug.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -198,27 +196,13 @@ public:
   constexpr static SerializationFormat kSerializationFormat =
       get_format_or_default();
 
-  constexpr static auto load_wasm() requires requires {
-    { ContractTrait::kWasmFile } -> std::convertible_to<std::string_view>;
-  }
-  {
-    return load_contract(ContractTrait::kWasmFile);
-  }
-
   // Loads the contract's compiled RV32 artifact (<name>.rv32a, derived from
-  // kWasmFile) as a kRv32 contract. The artifact filename mirrors the wasm one
-  // produced by the build, so no separate trait field is needed.
+  // kRv32File) as a kRv32 contract.
   static std::shared_ptr<Contract> load_rv32() requires requires {
-    { ContractTrait::kWasmFile } -> std::convertible_to<std::string_view>;
+    { ContractTrait::kRv32File } -> std::convertible_to<std::string_view>;
   }
   {
-    constexpr std::string_view kWasmSuffix = ".wasm";
-    std::string_view wasm_file = ContractTrait::kWasmFile;
-    // kWasmFile must end in .wasm to derive the matching .rv32a name.
-    x23assert(wasm_file.ends_with(kWasmSuffix));
-    std::string rv32_file(
-        wasm_file.substr(0, wasm_file.size() - kWasmSuffix.size()));
-    rv32_file += ".rv32a";
+    std::string_view rv32_file = ContractTrait::kRv32File;
 
     auto contract = std::make_shared<Contract>(ContractType::kRv32);
     contract->rv32_contract() = load_contract_blob(rv32_file);

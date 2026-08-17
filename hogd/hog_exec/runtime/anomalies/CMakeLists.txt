@@ -22,7 +22,7 @@ target_include_directories(
 # built_contracts/itc_erc20.h, so the wasm headers must be generated first.
 add_dependencies(
   anomalies_test_objects
-  all_wasm_headers
+  all_contract_headers
 )
 
 add_executable(

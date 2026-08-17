@@ -1,6 +1,6 @@
 # Project-local Groundhog config.
 #
-# `groundhog build` (0.6.x) requires an active profile. CI and other hermetic
+# `groundhog build` (0.9.x) requires an active profile. CI and other hermetic
 # environments have no global ~/.config/groundhog/config.toml, so pin a
 # default here. The profile's network settings are irrelevant for builds.
 

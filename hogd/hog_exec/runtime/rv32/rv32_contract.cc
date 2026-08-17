@@ -6,6 +6,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "contract.hh"
@@ -56,26 +57,6 @@ Rv32Contract::instantiate(uint64_t gas) const
   return rv32::ThreadedMachine(pre_instantiation_, gas);
 }
 
-namespace {
-
-// The TrampolineResult wire contract: panic == 0 means "no panic, result_code
-// carries the SyscallErrorCode" on both sides of the FFI boundary.
-static_assert(std::to_underlying(HostFnErrorCode::NoneOrRecoverable) == 0);
-
-std::pair<std::expected<int32_t, HostFnErrorCode>, GasAmount>
-from_trampoline_result(TrampolineResult result)
-{
-
-  if (result.panic != std::to_underlying(HostFnErrorCode::NoneOrRecoverable)) {
-    return {std::unexpected(static_cast<HostFnErrorCode>(result.panic)),
-            result.gas_consumed};
-  }
-
-  return {result.result_code, result.gas_consumed};
-}
-
-} // namespace
-
 std::pair<InvokeStatus<void>, GasAmount>
 Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
@@ -110,21 +91,21 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
     // generated syscall output spans write directly into the ThreadedMachine's
     // memory for speed. Syscall handlers that need all-or-nothing output
     // semantics must stage internally before touching those spans.
-    WasmContext wasm_context = {
-        .memory = LinearMemorySlice{.mem = machine.memory().data(),
-                                    .sz = machine.memory().size()},
+    ExecutionContext context = {
+        .memory = std::as_writable_bytes(machine.memory()),
         .gas_remaining = machine.gas_remaining(),
     };
 
-    auto [host_result, gas_consumed] = from_trampoline_result(
-        syscall_entry(host_fn_ctx, wasm_context, pending_ecall->a0,
+    auto [host_result, gas_consumed] =
+        syscall_entry(host_fn_ctx, context, pending_ecall->a0,
                       pending_ecall->a1, pending_ecall->a2, pending_ecall->a3,
                       pending_ecall->a4, pending_ecall->a5, pending_ecall->a6,
-                      pending_ecall->a7));
+                      pending_ecall->a7);
 
     if (host_result.has_value()) {
       result = machine.resume_from_ecall(
-          rv32::HostResult::continue_with(*host_result, gas_consumed));
+          rv32::HostResult::continue_with(std::to_underlying(*host_result),
+                                          gas_consumed));
       continue;
     }
 
@@ -137,7 +118,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 
     GasAmount total_gas_consumed = gas_limit - gas_remaining;
 
-    switch (host_result.error()) {
+    switch (host_result.error().code()) {
     case HostFnErrorCode::NoneOrRecoverable:
       // from_trampoline_result routes panic == 0 to the continue branch, so
       // this arm is reachable only if that contract changes; abort loudly in

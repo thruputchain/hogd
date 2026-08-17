@@ -83,8 +83,6 @@ load_raw_file(std::string_view filename)
     panic("failed to read contract artifact: {}", filename);
   }
 
-  // groundhog build produces already-instrumented wasm; no need to
-  // re-instrument.
   return contents;
 }
 
@@ -94,15 +92,6 @@ ContractBlob
 load_contract_blob(std::string_view filename)
 {
   return load_raw_file(filename);
-}
-
-std::shared_ptr<Contract>
-load_contract(std::string_view filename)
-{
-  auto wasm = load_contract_blob(filename);
-  auto out = std::make_shared<Contract>(ContractType::kWasmi);
-  out->wasmi_contract() = std::move(wasm);
-  return out;
 }
 
 std::shared_ptr<Contract>

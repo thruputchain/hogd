@@ -91,11 +91,8 @@ TEST_F(Sha2InContractTest, InvokeFFFFF)
   ASSERT_EQ(hash_expect.size(), 32);
   ASSERT_EQ(std::memcmp(hash_expect.data(), hash_actual.data(), 32), 0);
 
-  auto method_id_opt = Runtime::method_id_from_name("FFFFFFFFFFFFFFFF");
-  ASSERT_TRUE(method_id_opt.has_value())
-      << "Failed to parse FFFFFFFFFFFFFFFF as method ID";
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  auto entrypoint = entrypoint_from_method_id(*method_id_opt);
+  Runtime::MethodID method_id = 0xFFFFFFFFFFFFFFFF;
+  auto entrypoint = entrypoint_from_method_id(method_id);
 
   auto context = make_hog_exec_context();
 

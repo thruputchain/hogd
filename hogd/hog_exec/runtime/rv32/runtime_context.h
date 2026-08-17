@@ -22,7 +22,7 @@ struct RuntimeContractImage {
   std::shared_ptr<const Program> program;
   std::vector<uint8_t> initial_memory;
   uint32_t memory_bytes = kMaxMemoryBytes;
-  HostFn8 entry = nullptr;
+  SyscallFunction entry = nullptr;
 };
 
 // Experimental test-only RuntimeContext for the RV32 VM. It deliberately uses

@@ -30,7 +30,7 @@
 #include "transaction.hh"
 #include "types.hh"
 
-// RV32 counterpart of fibonacci_wasmonly: deploys the compiled RV32 fibonacci
+// Deploys the compiled RV32 fibonacci
 // contract (fibonacci.rv32a) as a kRv32 contract and drives it through the
 // standard make_hog_exec_context(), which routes kRv32 to the RV32 runtime.
 

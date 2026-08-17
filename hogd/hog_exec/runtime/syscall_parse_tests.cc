@@ -30,7 +30,7 @@ enum class TestSignedEnum : int32_t {
 
 } // namespace
 
-// These tests cover the wasm32 `parse()` path, where every value slot is a bare
+// These tests cover the rv32 `parse()` path, where every value slot is a bare
 // 32-bit word (uint32_t). Narrowing therefore only rejects values for types
 // *narrower* than the slot (sub-32-bit ints, bool, sub-32-bit enums); a
 // uint32_t/int32_t fills the slot, so every bit pattern is valid and there is
@@ -188,7 +188,7 @@ TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
   ASSERT_TRUE(SyscallArgParams<const uint32_t *>::validate(valid_arg));
   ASSERT_NE(SyscallArgParams<const uint32_t *>::deref(valid_arg), nullptr);
 
-  // On the wasm32 path the null sentinel is the all-ones 32-bit slot value.
+  // On the rv32 path the null sentinel is the all-ones 32-bit slot value.
   auto null_arg = SyscallArgParams<const uint32_t *>::parse(
       guard, contract_memory, std::numeric_limits<uint32_t>::max());
   ASSERT_TRUE(SyscallArgParams<const uint32_t *>::validate(null_arg));
