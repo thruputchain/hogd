@@ -881,6 +881,47 @@ TEST_F(SyscallMiscTests, ReadOnlyFaultBeatsReadOnlyRejection)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
+TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<u8"internal_bytestring_set_oob_key">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->syscall_fault_count, 1);
+}
+
+// A hand-written entrypoint record registered outside the #[contract] macro
+// (method id 0xFF) has a wrapper that returns without issuing the Return
+// syscall: verification passes, but dispatch ebreaks.
+TEST_F(SyscallMiscTests, RootInvokeOfEntrypointWithoutReturnSyscallIsDeterministicFault)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = kContractAddress,
+                  .entrypoint = entrypoint_from_method_id(0xFF),
+                  .gas_limit = 100'000,
+                  .calldata = Calldata{},
+              },
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  auto result = handler.root_invoke();
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+}
+
 // #40: reentrance beats resolution. The misc contract runs as the configured
 // default wallet at an UNDEPLOYED address, so its own frame address violates
 // both the reentrance check and (for a nested invoke, which has no wallet
