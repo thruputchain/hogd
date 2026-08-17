@@ -2056,7 +2056,14 @@ SystemCallHandler::get_native_token_balance(
     }
     auto const &base_item = unmodified_item->base_item();
     assert(base_item.type() == ItemViewType::kNativeTokenBalance);
-    assert(base_item.native_token_balance() >= 0);
+    // Native balances are nonnegative by construction: the commit path's
+    // bounds locks (NNIntSetAddArgs::try_acquire_bounds_lock) refuse any
+    // reservation that would drive a nonnegative base below zero. A negative
+    // committed row can therefore only come from on-disk corruption, so
+    // fail-stop rather than let get_balance_of/get_balance convert it to
+    // uint128_t and hand a contract UINT128_MAX. CHECK, not assert: the
+    // conversion is unguarded exactly where it matters, in NDEBUG builds.
+    CHECK(base_item.native_token_balance() >= 0);
     return base_item.native_token_balance();
   }
 
