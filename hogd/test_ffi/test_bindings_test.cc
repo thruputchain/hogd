@@ -25,6 +25,7 @@
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/wasm/test_load_wasm.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -3430,6 +3431,79 @@ TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedWasmStoresChunked)
   // The FFI wrapper must not surface an unrecoverable error: the param-ABI
   // mismatch is a deterministic fault, not a system error.
   EXPECT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
+}
+
+// rv32 twin of the chunked-store test above: the artifact format has no slack
+// section, so the row is pushed past kBigItemThreshold with a full 64 KiB
+// initial memory image (memory_bytes lands exactly at kMaxMemoryBytes, the
+// accept-side limit boundary). Unlike the wasm twin's wrong-ABI export, the
+// program Returns, so the invoke is asserted as a frame success.
+TEST(TestBindingsTest, SetupCreateContractOversizedVerifiedRv32StoresChunked)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  std::vector<uint32_t> words;
+  uint8_t reg = 10;
+  for (const int32_t imm : {6, 0, 0, 0, 0, 0}) {
+    words.push_back(rv32::test_program::addi(reg++, 0, imm));
+  }
+  words.push_back(0x00000073U);
+
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(rv32::test_artifact::build_artifact(
+      words, std::vector<uint8_t>(64 * 1024, 0xA5)));
+
+  auto bytes = x23::serialize(contract);
+  ASSERT_GT(bytes.size(), kBigItemThreshold);
+
+  auto verify_result = do_verify_contract(rc, bytes.data(), bytes.size());
+  ASSERT_EQ(verify_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_EQ(verify_result.success, 1);
+
+  auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
+  EXPECT_EQ(result, kTestFFIErrorCodeNone);
+
+  ContractAddress deployment_addr{};
+  ASSERT_EQ(setup_deploy_contract(db, deployment_addr.data(),
+                                  sha256(contract).data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  ASSERT_EQ(setup_grant_contract_storage_tokens(db, deployment_addr.data(),
+                                                1'000'000),
+            kTestFFIErrorCodeNone);
+
+  SignedTransaction stx{
+      .tx = {.invocation =
+                 {
+                     .invoked_address = deployment_addr,
+                     .entrypoint = entrypoint_from_method_id(0),
+                     .gas_limit = 1'000'000,
+                     .calldata = {},
+                 },
+             .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},
+      .signatures = {},
+  };
+
+  auto *syscall_handler = make_syscall_handler(db, rc, stx);
+  x23::Defer d3([syscall_handler] { close_syscall_handler(syscall_handler); });
+
+  auto invoke_result = root_invoke(syscall_handler, 0);
+  x23::Defer d4([&] { free_ffi_data_buffer(invoke_result.serialized_output); });
+  x23::Defer d5([&] { free_ffi_data_buffer(invoke_result.serialized_trace); });
+  x23::Defer d6([&] { free_ffi_data_buffer(invoke_result.serialized_events); });
+  ASSERT_EQ(invoke_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(invoke_result.serialized_output.data, nullptr);
+  InvocationFrameOutput output;
+  x23::deserialize(&output,
+                   x23::BufView{invoke_result.serialized_output.data,
+                                invoke_result.serialized_output.len});
+  EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 }
 
 // Test that do_verify_contract returns failure for wasm with large memory.
