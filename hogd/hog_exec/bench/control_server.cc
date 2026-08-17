@@ -13,7 +13,7 @@
 #include <string_view>
 #include <thread>
 #include <type_traits>
-#include <unistd.h>
+#include <unistd.h> // NOLINT(misc-include-cleaner)
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -200,6 +200,7 @@ private:
     return hogd_git_hash == expected_hash;
   }
 
+  // NOLINTNEXTLINE(misc-include-cleaner)
   CIProcStatus check_pid_status(pid_t pid,
                                 std::lock_guard<std::mutex> & /*unused*/)
   {
