@@ -904,7 +904,9 @@ TEST_F(EventRpcTest, CloseDoesNotPublishToIndexersBeforeCommit)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
 
-  FailureCapturingIndexerRpc indexer;
+  // Counts via atomics: a publication regression would write them from the
+  // RPC reader thread while this test reads them.
+  CountingIndexerRpc indexer;
   ctx.add_indexer(make_socketpair_indexer_client(&indexer));
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
@@ -917,17 +919,33 @@ TEST_F(EventRpcTest, CloseDoesNotPublishToIndexersBeforeCommit)
   auto result = mempool_rpc.eventsched_close_block(1, 1)();
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
 
-  // The event root is available to the caller, but nothing was published.
-  EXPECT_TRUE(indexer.event_batches.empty());
-
-  // The losing-candidate path: abandon() awaits the close-time detached file
-  // work before deleting, so any publication attempted by close would have
-  // landed in [event_batches] by the time this returns.
+  // The losing-candidate path: the events file is deleted...
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
-  EXPECT_TRUE(indexer.event_batches.empty());
   EXPECT_FALSE(std::filesystem::exists(
       EventBlockContext::final_events_filename(temp_dir(),
                                                result.root_hash())));
+
+  // ...and no indexer ever saw the block. abandon_block() awaits only file
+  // finalization, so reading the counter here would race a send issued later
+  // in close_block()'s detached coroutine. Drain that coroutine first: it
+  // releases the block context's reference, and the block id becomes reusable
+  // only once the last release GCs the context, so a successful reopen proves
+  // everything the coroutine ran up to its release has completed (the same
+  // probe DeadIndexerDoesNotFailCommit uses after commit).
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (true) {
+    auto reopen = ctx.open_block(1)();
+    if (reopen.has_value()) {
+      break;
+    }
+    ASSERT_EQ(reopen.error().code(), EventErrorCode::kExists);
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "block id 1 still not reusable long after abandon";
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_EQ(indexer.events.load(std::memory_order_relaxed), 0UL);
+  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
 }
 
 } // namespace hogd
