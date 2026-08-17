@@ -350,12 +350,28 @@ wait_gone() {
 # die: [-q] silences killall's own "no process found", so a nonzero exit that
 # still says something is sudo or killall failing rather than an absence of
 # processes to kill.
+#
+# The signal is sent under [sudo] where that works, because a benchmark process
+# left behind by a differently-owned run is still a process holding a fixed
+# port. Where it does not -- the bench hosts answer [sudo -n] with "a password
+# is required" -- the reap must not stop there: the benchmark processes are
+# started by this same account through the control server, so an unprivileged
+# [killall] reaches every one of them. Giving up at the [sudo] failure is what
+# made the reap a no-op on these hosts, and a reap that signals nothing leaves
+# the previous suite's [scpd.dev] on 127.0.0.1:4400, where the next suite's
+# [chuckd] finds its own scpd unable to bind and dies with "transport is
+# closed" before it ever listens on 7888.
 signal_all() {
   err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
   status=\$?
   if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
-    return 1
+    unprivileged_err=\$(killall -q "-\$1" \$procs 2>&1)
+    status=\$?
+    if [ "\$status" -ne 0 ] && [ -n "\$unprivileged_err" ]; then
+      echo "cannot signal processes: \$err" \
+        "(unprivileged killall: \$unprivileged_err)" >&2
+      return 1
+    fi
   fi
   return 0
 }
