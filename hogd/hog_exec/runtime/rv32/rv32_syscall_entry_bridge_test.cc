@@ -286,21 +286,19 @@ TEST_F(Rv32SyscallEntryBridgeTest,
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  WasmContext wasm_context{
-      .memory = LinearMemorySlice{.mem = memory.data(), .sz = memory.size()},
+  ExecutionContext context{
+      .memory = std::as_writable_bytes(std::span<uint8_t>(memory)),
       .gas_remaining = kPlentyOfGas,
   };
-  TrampolineResult result =
-      syscall_entry(&handler, wasm_context,
+  const auto result =
+      syscall_entry(&handler, context,
                     static_cast<uint32_t>(SyscallNo::kSHA256), kInputAddress,
                     static_cast<uint32_t>(input.size()),
                     static_cast<uint32_t>(memory.size() - 1), 0, 0, 0, 0);
   finish_frame(handler, std::move(stashed_trace));
 
-  EXPECT_EQ(result.panic,
-            std::to_underlying(HostFnErrorCode::NoneOrRecoverable));
-  EXPECT_EQ(result.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault));
+  ASSERT_TRUE(result.first.has_value());
+  EXPECT_EQ(*result.first, SyscallErrorCode::kSyscallErrorCodeFault);
   EXPECT_EQ(memory, before);
 }
 
@@ -392,9 +390,10 @@ TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 
 TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
 {
-  // Rv32Runtime::invoke_internal calls syscall_entry with WasmContext.memory
-  // backed directly by ThreadedMachine memory; unlike SyscallBridgeHost, there
-  // is no scratch copy between output spans and guest memory.
+  // Rv32Runtime::invoke_internal calls syscall_entry with ExecutionContext
+  // memory backed directly by ThreadedMachine memory; unlike
+  // SyscallBridgeHost, there is no scratch copy between output spans and guest
+  // memory.
   std::vector<uint8_t> memory(256, 0xCC);
   constexpr std::string_view input = "out of gas";
   std::ranges::copy(input, memory.begin() + kInputAddress);
@@ -402,20 +401,21 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  WasmContext wasm_context{
-      .memory = LinearMemorySlice{.mem = memory.data(), .sz = memory.size()},
+  ExecutionContext context{
+      .memory = std::as_writable_bytes(std::span<uint8_t>(memory)),
       .gas_remaining = 0,
   };
-  TrampolineResult result =
-      syscall_entry(&handler, wasm_context,
+  const auto result =
+      syscall_entry(&handler, context,
                     static_cast<uint32_t>(SyscallNo::kSHA256), kInputAddress,
                     static_cast<uint32_t>(input.size()), kOutputAddress, 0, 0,
                     0, 0);
   finish_frame(handler, std::move(stashed_trace),
                std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
 
-  EXPECT_EQ(result.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
-  EXPECT_EQ(result.gas_consumed, 0U);
+  ASSERT_FALSE(result.first.has_value());
+  EXPECT_EQ(result.first.error().code(), HostFnErrorCode::OutOfGas);
+  EXPECT_EQ(result.second, 0U);
   EXPECT_NE(memory, before);
   const SHA256Hash expected = sha256(input);
   EXPECT_TRUE(

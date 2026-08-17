@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
@@ -32,12 +30,9 @@ constexpr uint32_t kBenchMemoryBytes = 4096;
 constexpr uint64_t kBenchGasLimit = 1'000'000'000;
 constexpr uint32_t kFibInput = 20;
 constexpr uint32_t kFib20Result = 6765;
-// Keep rv32_vm_bench independent from generated XDR headers; these values are
+// Keep rv32_vm_bench independent at least partially independent
+// from generated XDR headers; these values are
 // pinned by the syscall/HostFn ABI exercised by the bridge benchmarks below.
-constexpr int32_t kHostFnNoneOrRecoverable = 0;
-constexpr int32_t kHostFnReturn = 3;
-constexpr int32_t kSyscallErrorNone = 0;
-constexpr int32_t kSyscallErrorFault = 1;
 constexpr uint64_t kSyscallSha256 = 0;
 constexpr uint64_t kSyscallReturn = 6;
 constexpr size_t kSha256DigestBytes = 32;
@@ -894,54 +889,44 @@ make_memory_transform_artifact()
       std::move(memory));
 }
 
-TrampolineResult
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 artifact_bench_entry(ExternHostCallContext /*context*/,
-                     WasmContext wasm_context, uint32_t arg0, uint32_t arg1,
+                     ExecutionContext context, uint32_t arg0, uint32_t arg1,
                      uint32_t arg2, uint32_t arg3, uint32_t /*arg4*/,
                      uint32_t /*arg5*/, uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
   if (arg0 == kSyscallReturn) {
-    return TrampolineResult{.result_code = 0,
-                            .panic = kHostFnReturn,
-                            .gas_consumed = 4};
+    return {HostFnError{HostFnErrorCode::Return}, 4};
   }
   if (arg0 == kSyscallSha256) {
-    if (!range_fits(arg1, arg2, wasm_context.memory.sz) ||
-        !range_fits(arg3, kSha256DigestBytes, wasm_context.memory.sz)) {
-      return TrampolineResult{.result_code = kSyscallErrorFault,
-                              .panic = kHostFnNoneOrRecoverable,
-                              .gas_consumed = 4};
+    if (!range_fits(arg1, arg2, context.memory.size()) ||
+        !range_fits(arg3, kSha256DigestBytes, context.memory.size())) {
+      return {SyscallErrorCode::kSyscallErrorCodeFault, 4};
     }
     const auto input_offset = static_cast<size_t>(arg1);
     const auto input_size = static_cast<size_t>(arg2);
     const auto output_offset = static_cast<size_t>(arg3);
     const auto digest = bench_sha256_digest(
-        std::span<const uint8_t>(wasm_context.memory.mem + input_offset,
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(context.memory.data()) + input_offset,
                                  input_size));
     for (size_t i = 0; i < kSha256DigestBytes; ++i) {
-      wasm_context.memory.mem[output_offset + i] = digest[i];
+      reinterpret_cast<uint8_t*>(context.memory.data())[output_offset + i] = digest[i];
     }
-    return TrampolineResult{.result_code = kSyscallErrorNone,
-                            .panic = kHostFnNoneOrRecoverable,
-                            .gas_consumed = 4};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, 4};
   }
-  return TrampolineResult{.result_code = kSyscallErrorFault,
-                          .panic = kHostFnNoneOrRecoverable,
-                          .gas_consumed = 4};
+  return {SyscallErrorCode::kSyscallErrorCodeFault, 4};
 }
 
-TrampolineResult
-bridge_noop_entry(ExternHostCallContext /*context*/, WasmContext wasm_context,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+bridge_noop_entry(ExternHostCallContext /*context*/, ExecutionContext context,
                   uint32_t /*arg0*/, uint32_t /*arg1*/, uint32_t /*arg2*/,
                   uint32_t /*arg3*/, uint32_t /*arg4*/, uint32_t /*arg5*/,
                   uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
-  if (wasm_context.memory.sz > 0) {
-    wasm_context.memory.mem[0] ^= 0x5aU;
+  if (context.memory.size() > 0) {
+    reinterpret_cast<uint8_t*>(context.memory.data())[0] ^= 0x5aU;
   }
-  return TrampolineResult{.result_code = 0,
-                          .panic = kHostFnNoneOrRecoverable,
-                          .gas_consumed = 0};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 void

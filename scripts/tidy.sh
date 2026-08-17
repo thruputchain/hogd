@@ -26,16 +26,13 @@ done
 BUILD_DIR=$(readlink -f "$BUILD_DIR")
 
 # Run clippy (serialized with clang-tidy to avoid OOM)
-cd ${ROOT_DIR}/hogd/rust/wasmi && cargo clippy --no-deps -- -D warnings || exit 1
-cd ${ROOT_DIR}/hogd/rust/wasmtime && cargo clippy --no-deps -- -D warnings || exit 1
 cd ${ROOT_DIR}/hogd/rust/crypto && cargo clippy --no-deps -- -D warnings || exit 1
-cd ${ROOT_DIR}/hogd/rust/synchronized_map && cargo clippy --no-deps -- -D warnings || exit 1
 
 # Run clang-tidy.
 #
 # bugprone-exception-escape walks the whole exception-propagation call graph of
 # every noexcept function, which is super-linear on the heavily
-# template-instantiated WASM contract test/bench TUs: one such file takes 303s
+# template-instantiated contract test/bench TUs: one such file takes 303s
 # with the check on vs 53s with it off, and those files alone set the full-tidy
 # wall at ~5.5min. The check earns its keep on shipped code (it flags real
 # noexcept violations in the syscall handlers), so instead of dropping it

@@ -246,28 +246,29 @@ print_histogram(std::string_view name, const PairHistogram &hist)
   }
 }
 
-// Maps a raw syscall trampoline result onto the Machine's host-result API. This
+// Maps a raw syscall_entry result onto the Machine's host-result API. This
 // mirrors the production threaded path (rv32_contract.cc / syscall_bridge.cc):
 // syscall_entry has already written its output directly into guest memory, so
 // there is nothing to commit here.
 rv32::HostResult
-to_host_result(const TrampolineResult &result)
+to_host_result(
+    const std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> &result)
 {
-  switch (result.panic) {
-  case std::to_underlying(HostFnErrorCode::NoneOrRecoverable):
-    return rv32::HostResult::continue_with(static_cast<uint32_t>(
-                                               result.result_code),
-                                           result.gas_consumed);
-  case std::to_underlying(HostFnErrorCode::Return):
-    return rv32::HostResult::halt(0, result.gas_consumed);
-  case std::to_underlying(HostFnErrorCode::Exit):
-    return rv32::HostResult::halt(static_cast<uint32_t>(result.result_code),
-                                  result.gas_consumed);
-  case std::to_underlying(HostFnErrorCode::OutOfGas):
-    return rv32::HostResult::out_of_gas(result.gas_consumed);
+  const auto &[status, gas_consumed] = result;
+  if (status.has_value()) {
+    return rv32::HostResult::continue_with(
+        static_cast<uint32_t>(std::to_underlying(*status)), gas_consumed);
+  }
+  switch (status.error().code()) {
+  case HostFnErrorCode::Return:
+    return rv32::HostResult::halt(0, gas_consumed);
+  case HostFnErrorCode::Exit:
+    return rv32::HostResult::deterministic_trap(gas_consumed);
+  case HostFnErrorCode::OutOfGas:
+    return rv32::HostResult::out_of_gas(gas_consumed);
   default:
-    return rv32::HostResult::trap(result.gas_consumed,
-                                  static_cast<uint32_t>(result.panic));
+    return rv32::HostResult::trap(
+        gas_consumed, static_cast<uint32_t>(status.error().code()));
   }
 }
 
@@ -340,15 +341,13 @@ private:
           break; // unreachable: kEcall always stashes args
         }
         const rv32::EcallArgs args = *pending;
-        WasmContext wasm_context = {
-            .memory = LinearMemorySlice{.mem = machine.memory().data(),
-                                        .sz = machine.memory().size()},
+        ExecutionContext context = {
+            .memory = std::as_writable_bytes(machine.memory()),
             .gas_remaining = machine.gas_remaining(),
         };
-        const TrampolineResult trampoline =
-            syscall_entry(host_fn_ctx, wasm_context, args.a0, args.a1, args.a2,
-                          args.a3, args.a4, args.a5, args.a6, args.a7);
-        result = machine.complete_ecall(to_host_result(trampoline));
+        result = machine.complete_ecall(to_host_result(
+            syscall_entry(host_fn_ctx, context, args.a0, args.a1, args.a2,
+                          args.a3, args.a4, args.a5, args.a6, args.a7)));
         if (result == rv32::StepResult::kContinue) {
           continue;
         }
@@ -358,11 +357,9 @@ private:
 
     const GasAmount consumed = gas_limit - machine.gas_remaining();
     if (result == rv32::StepResult::kHalted) {
-      // halt_code 0 == clean Return; nonzero == Exit (deterministic failure).
-      if (machine.halt_code() == 0) {
-        return {{}, consumed};
-      }
-      return {InvokeError{InvokeErrorCode::Deterministic}, consumed};
+      // Halt only arises from a clean Return; Exit maps to a deterministic
+      // trap in to_host_result.
+      return {{}, consumed};
     }
     if (machine.trap() == rv32::Trap::kOutOfGas) {
       return {InvokeError{InvokeErrorCode::OutOfGas}, consumed};

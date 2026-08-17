@@ -8,5 +8,5 @@ fi
 BUILD_DIR=$1
 
 # Full rv32_vm_bench output (all benchmarks): canonical/threaded interpreters,
-# fibonacci + compute loops, wasmi comparison, and artifact benchmarks.
+# fibonacci + compute loops, and artifact benchmarks.
 "$BUILD_DIR/hogd/hog_exec/runtime/rv32/rv32_vm_bench"

@@ -728,7 +728,7 @@ wrap_after_parse(AliasGuard &guard, SystemCallHandler &handler,
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
+wrap_outer(SystemCallHandler &handler, ExecutionContext context,
            SyscallNo syscall_no, uint32_t arg1, uint32_t arg2, uint32_t arg3,
            uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7) noexcept
 {
@@ -744,10 +744,6 @@ wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
 
   auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
 
-  std::span<std::byte> contract_memory_span(reinterpret_cast<std::byte *>(
-                                                wasm_context.memory.mem),
-                                            wasm_context.memory.sz);
-
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   auto res = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
@@ -756,10 +752,10 @@ wrap_outer(SystemCallHandler &handler, WasmContext wasm_context,
     AliasGuard guard;
     auto parsed_args = std::tuple{parse<syscall_t::template offset_i<Is>(),
                                         typename syscall_t::template arg_i<Is>>(
-        guard, contract_memory_span, input_args)...};
+        guard, context.memory, input_args)...};
 
     return wrap_after_parse<SyscallMeta>(guard, handler,
-                                         wasm_context.gas_remaining, syscall_no,
+                                         context.gas_remaining, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 

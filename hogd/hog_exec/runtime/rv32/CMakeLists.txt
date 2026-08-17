@@ -61,14 +61,13 @@ add_dependencies(
 target_link_libraries(
   rv32_syscall_bridge
   rv32_vm
+  protocol
 )
 
 target_include_directories(
   rv32_syscall_bridge
   PUBLIC
   ${CMAKE_SOURCE_DIR}
-  PRIVATE
-  ${CMAKE_BINARY_DIR}/hogd/xdr
 )
 
 add_dependencies(

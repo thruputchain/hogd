@@ -1,10 +1,10 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <span>
 
-#include <stdint.h>
+#include "hogd/hog_exec/common/status.h"
+
+namespace hogd {
 
 struct TrampolineResult {
   int32_t result_code;
@@ -12,13 +12,8 @@ struct TrampolineResult {
   uint64_t gas_consumed;
 };
 
-struct LinearMemorySlice {
-  uint8_t *mem;
-  uint64_t sz;
-};
-
-struct WasmContext {
-  struct LinearMemorySlice memory;
+struct ExecutionContext {
+  std::span<std::byte> memory;
   uint64_t gas_remaining;
 };
 
@@ -26,19 +21,9 @@ struct WasmContext {
 // installed by the host when the sandbox is created and handed back, unchanged,
 // to syscall_entry on every host call. Rust treats it as an opaque void*.
 
-// NOLINTBEGIN(modernize-use-using)
 
-typedef void *ExternHostCallContext;
+using ExternHostCallContext = void*;
 
-typedef struct TrampolineResult (*HostFn8)(ExternHostCallContext,
-                                           struct WasmContext, uint32_t,
-                                           uint32_t, uint32_t, uint32_t,
-                                           uint32_t, uint32_t, uint32_t,
-                                           uint32_t);
+using SyscallFunction = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>(*)(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 
-
-// NOLINTEND(modernize-use-using)
-
-#ifdef __cplusplus
-} // extern "C"
-#endif
+}

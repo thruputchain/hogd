@@ -41,7 +41,6 @@
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
-#include "hogd/hog_exec/runtime/trampoline_result.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -263,85 +262,62 @@ append_syscall(std::vector<uint32_t> &program,
   program.push_back(ecall());
 }
 
-TrampolineResult
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
 {
-  return to_trampoline_result(HostFnError{code}, gas_consumed);
+  return {HostFnError{code}, gas_consumed};
 }
 
-TrampolineResult
-make_exit_result(uint32_t code, uint64_t gas_consumed = 4)
-{
-  return {.result_code = static_cast<int32_t>(code),
-          .panic = std::to_underlying(HostFnErrorCode::Exit),
-          .gas_consumed = gas_consumed};
-}
-
-extern "C" TrampolineResult
-unrecoverable_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+unrecoverable_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                     uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Unrecoverable);
 }
 
-extern "C" TrampolineResult
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 validation_failure_entry(ExternHostCallContext /*unused*/,
-                         WasmContext /*unused*/, uint32_t, uint32_t, uint32_t,
+                         ExecutionContext /*unused*/, uint32_t, uint32_t, uint32_t,
                          uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::ValidationFailure);
 }
 
-extern "C" TrampolineResult
-abandon_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+abandon_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
               uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::Abandon);
 }
 
-extern "C" TrampolineResult
-unknown_panic_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
-                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                    uint32_t, uint32_t)
-{
-  return {.result_code = 0, .panic = 999, .gas_consumed = 4};
-}
-
-extern "C" TrampolineResult
-throwing_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+throwing_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
                uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                uint32_t, uint32_t)
 {
   throw 1;
 }
 
-extern "C" TrampolineResult
-host_out_of_gas_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+host_out_of_gas_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
                       uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                       uint32_t, uint32_t, uint32_t)
 {
   return make_host_panic_result(HostFnErrorCode::OutOfGas, 0);
 }
 
-extern "C" TrampolineResult
-exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
-           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
-{
-  return make_exit_result(17);
-}
-
-extern "C" TrampolineResult
-zero_code_exit_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+exit_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
                      uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                      uint32_t, uint32_t)
 {
-  return make_exit_result(0);
+  return make_host_panic_result(HostFnErrorCode::Exit, 0);
 }
 
-extern "C" TrampolineResult
-return_entry(ExternHostCallContext /*unused*/, WasmContext /*unused*/, uint32_t,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+return_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/, uint32_t,
              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
              uint32_t)
 {
@@ -380,7 +356,7 @@ append_return(std::vector<uint32_t> &program, uint32_t length)
 }
 
 rv32::RuntimeContractImage
-make_single_ecall_image(HostFn8 entry)
+make_single_ecall_image(SyscallFunction entry)
 {
   constexpr uint32_t kMemoryBytes = 256;
   std::vector<uint8_t> initial_memory(kMemoryBytes);
@@ -1218,7 +1194,7 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
   auto contract = make_rv32_contract_xdr();
   install_contract(contract);
 
-  auto expect_mapping = [&](HostFn8 entry, InvokeErrorCode expected) {
+  auto expect_mapping = [&](SyscallFunction entry, InvokeErrorCode expected) {
     auto rv32_context = rv32::RuntimeContext(
         {{kRv32ContractId, make_single_ecall_image(entry)}});
     auto handler =
@@ -1234,7 +1210,6 @@ TEST_F(Rv32RuntimeContextTest, HostTrapPanicCodesMapToWasmInvokeOutcomes)
   expect_mapping(&unrecoverable_entry, InvokeErrorCode::Unrecoverable);
   expect_mapping(&validation_failure_entry, InvokeErrorCode::ValidationFailure);
   expect_mapping(&abandon_entry, InvokeErrorCode::Abandon);
-  expect_mapping(&unknown_panic_entry, InvokeErrorCode::Unrecoverable);
 }
 
 TEST_F(Rv32RuntimeContextTest, FatalCodeZeroHostTrapMapsToUnrecoverable)
@@ -1274,7 +1249,7 @@ TEST_F(Rv32RuntimeContextTest, ExitPanicMapsToDeterministicRegardlessOfCode)
 {
   // Parity with the wasm runtime and production Rv32Runtime: Exit is always a
   // deterministic failure; the trampoline result_code is not an exit status.
-  auto expect_deterministic = [&](HostFn8 entry) {
+  auto expect_deterministic = [&](SyscallFunction entry) {
     auto rv32_context = rv32::RuntimeContext(
         {{kRv32ContractId, make_single_ecall_image(entry)}});
     auto contract = make_rv32_contract_xdr();
@@ -1291,7 +1266,6 @@ TEST_F(Rv32RuntimeContextTest, ExitPanicMapsToDeterministicRegardlessOfCode)
   };
 
   expect_deterministic(&exit_entry);
-  expect_deterministic(&zero_code_exit_entry);
 }
 
 TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)

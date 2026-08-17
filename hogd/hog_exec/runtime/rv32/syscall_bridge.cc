@@ -1,6 +1,5 @@
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
 
-#include <cstdint>
 #include <span>
 #include <utility>
 #include <vector>
@@ -13,7 +12,7 @@
 namespace hogd::rv32 {
 
 SyscallBridgeHost::SyscallBridgeHost(ExternHostCallContext context,
-                                     HostFn8 entry)
+                                     SyscallFunction entry)
   : context_(context), entry_(entry)
 {}
 
@@ -44,61 +43,66 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
     return HostResult::trap();
   }
   const std::span<uint8_t> memory(scratch.data(), scratch.size());
-  WasmContext wasm_context{
-      .memory = LinearMemorySlice{.mem = memory.data(), .sz = memory.size()},
+  ExecutionContext context{
+      .memory = std::as_writable_bytes(memory),
       .gas_remaining = view.gas_remaining(),
   };
 
-  TrampolineResult result = {};
+  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> result = {};
   try {
-    result = entry_(context_, wasm_context, args.a0, args.a1, args.a2, args.a3,
+    result = entry_(context_, context, args.a0, args.a1, args.a2, args.a3,
                     args.a4, args.a5, args.a6, args.a7);
   } catch (...) {
     return HostResult::trap();
   }
   last_result_ = result;
 
-  switch (result.panic) {
-  case std::to_underlying(HostFnErrorCode::NoneOrRecoverable):
-    // Fault means the parser/output layer rejected guest memory. Surface the
-    // return code through a0 without committing scratch memory.
-    if (result.result_code ==
-        std::to_underlying(SyscallErrorCode::kSyscallErrorCodeFault)) {
-      return HostResult::continue_with(static_cast<uint32_t>(
-                                           result.result_code),
-                                       result.gas_consumed);
+  if (result.first.has_value()) {
+    // TODO(geoff): why does this bridge handle things differently from the threaded implementation?
+    // Stems from legacy choices on the initial implementation, which we can probably remove.
+    if (*result.first == SyscallErrorCode::kSyscallErrorCodeFault) {
+      return HostResult::continue_with(std::to_underlying(*result.first), result.second);
     }
+
     if (!view.write_memory(0, memory)) {
-      return HostResult::trap(result.gas_consumed);
+      return HostResult::trap(result.second);
     }
-    return HostResult::continue_with(static_cast<uint32_t>(result.result_code),
-                                     result.gas_consumed);
-  case std::to_underlying(HostFnErrorCode::Return):
+
+    return HostResult::continue_with(std::to_underlying(*result.first), result.second);
+  }
+
+  switch(result.first.error().code())
+  {
+  case HostFnErrorCode::NoneOrRecoverable:
+    std::terminate();
+  case HostFnErrorCode::OutOfGas:
+    // The bridge returns out_of_gas before writing any guest memory, so there
+    // is nothing to roll back; complete_ecall no longer snapshots memory.
+    return HostResult::out_of_gas(result.second);
+  case HostFnErrorCode::Return:
     // Return terminates the VM invocation cleanly after committing the same
     // guest-memory output writes the WASM path would expose.
     if (!view.write_memory(0, memory)) {
-      return HostResult::trap(result.gas_consumed);
+      return HostResult::trap(result.second);
     }
-    return HostResult::halt(0, result.gas_consumed);
-  case std::to_underlying(HostFnErrorCode::Exit):
+    return HostResult::halt(0, result.second);
+
+  case HostFnErrorCode::Exit:
     // Exit is a deterministic frame abort on every runtime; the trampoline
     // result_code is not an exit status. Memory still commits, matching the
     // live-memory production bridge.
     if (!view.write_memory(0, memory)) {
-      return HostResult::trap(result.gas_consumed);
+      return HostResult::trap(result.second);
     }
-    return HostResult::deterministic_trap(result.gas_consumed,
-                                          static_cast<uint32_t>(
-                                              result.result_code));
-  case std::to_underlying(HostFnErrorCode::OutOfGas):
-    // The bridge returns out_of_gas before writing any guest memory, so there
-    // is nothing to roll back; complete_ecall no longer snapshots memory.
-    return HostResult::out_of_gas(result.gas_consumed);
-  default:
+    return HostResult::deterministic_trap(result.second);
+  case HostFnErrorCode::ValidationFailure:
+  case HostFnErrorCode::Abandon:
+  case HostFnErrorCode::Unrecoverable:
     // Unknown or fatal host panics trap without committing scratch memory.
-    return HostResult::trap(result.gas_consumed,
-                            static_cast<uint32_t>(result.panic));
+    return HostResult::trap(result.second,
+      static_cast<uint32_t>(result.first.error().code()));
   }
+  std::terminate();
 }
 
 } // namespace hogd::rv32

@@ -30,19 +30,19 @@ namespace hogd::rv32 {
 // instead.
 class SyscallBridgeHost final : public Host {
 public:
-  SyscallBridgeHost(ExternHostCallContext context, HostFn8 entry);
+  SyscallBridgeHost(ExternHostCallContext context, SyscallFunction entry);
 
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override;
 
-  [[nodiscard]] std::optional<TrampolineResult> last_result() const
+  [[nodiscard]] std::optional<std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> last_result() const
   {
     return last_result_;
   }
 
 private:
   ExternHostCallContext context_ = nullptr;
-  HostFn8 entry_ = nullptr;
-  std::optional<TrampolineResult> last_result_;
+  SyscallFunction entry_ = nullptr;
+  std::optional<std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> last_result_;
 };
 
 } // namespace hogd::rv32

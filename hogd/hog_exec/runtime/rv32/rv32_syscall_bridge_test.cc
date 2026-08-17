@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ffi_enums.hh"
+#include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/alias_guard.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
@@ -105,27 +106,44 @@ make_ecall_args(std::initializer_list<uint32_t> regs)
   return args;
 }
 
+// Success result whose a0 continue value is `code`, delivered as the
+// SyscallErrorCode underlying value (the enum has a fixed int32_t underlying
+// type, so out-of-enum test codes are well-defined round trips).
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+make_code_result(int32_t code, uint64_t gas_consumed = 0)
+{
+  return {static_cast<SyscallErrorCode>(code), gas_consumed};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
+{
+  return {HostFnError{code}, gas_consumed};
+}
+
 struct CapturedCall {
   std::array<uint32_t, 8> args = {};
   uint64_t gas_remaining = 0;
   uint64_t memory_size = 0;
   uint8_t first_memory_byte = 0;
   int calls = 0;
-  TrampolineResult result = {.result_code = 0, .panic = 0, .gas_consumed = 0};
+  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> result =
+      make_code_result(0);
 };
 
-TrampolineResult
-capture_entry(ExternHostCallContext context, WasmContext wasm_context,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+capture_entry(ExternHostCallContext context, ExecutionContext exec_context,
               uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
               uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7)
 {
   auto *captured = static_cast<CapturedCall *>(context);
   ++captured->calls;
   captured->args = {arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7};
-  captured->gas_remaining = wasm_context.gas_remaining;
-  captured->memory_size = wasm_context.memory.sz;
-  captured->first_memory_byte = wasm_context.memory.mem[0];
-  wasm_context.memory.mem[7] = 0xa5;
+  captured->gas_remaining = exec_context.gas_remaining;
+  captured->memory_size = exec_context.memory.size();
+  captured->first_memory_byte =
+      std::to_integer<uint8_t>(exec_context.memory[0]);
+  exec_context.memory[7] = std::byte{0xa5};
   return captured->result;
 }
 
@@ -134,21 +152,20 @@ struct SequencedGasCall {
   uint64_t gas_consumed = 0;
 };
 
-TrampolineResult
-sequenced_gas_entry(ExternHostCallContext context, WasmContext wasm_context,
-                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                    uint32_t, uint32_t)
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+sequenced_gas_entry(ExternHostCallContext context,
+                    ExecutionContext exec_context, uint32_t, uint32_t,
+                    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   auto *captured = static_cast<SequencedGasCall *>(context);
   ++captured->calls;
-  wasm_context.memory.mem[8] = static_cast<uint8_t>(0x40 + captured->calls);
-  return {.result_code = 222,
-          .panic = std::to_underlying(HostFnErrorCode::NoneOrRecoverable),
-          .gas_consumed = captured->gas_consumed};
+  exec_context.memory[8] =
+      std::byte{static_cast<uint8_t>(0x40 + captured->calls)};
+  return make_code_result(222, captured->gas_consumed);
 }
 
-TrampolineResult
-throwing_entry(ExternHostCallContext, WasmContext, uint32_t, uint32_t, uint32_t,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+throwing_entry(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t, uint32_t,
                uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
   throw 1;
@@ -162,78 +179,70 @@ enum class ParserProbeMode : uint32_t {
   kUnsignedU32 = 5,
 };
 
-TrampolineResult
-parser_probe_entry(ExternHostCallContext, WasmContext wasm_context,
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+parser_probe_entry(ExternHostCallContext, ExecutionContext context,
                    uint32_t mode, uint32_t arg1, uint32_t arg2, uint32_t arg3,
                    uint32_t arg4, uint32_t, uint32_t, uint32_t)
 {
   AliasGuard guard;
-  std::span<std::byte> memory(reinterpret_cast<std::byte *>(
-                                  wasm_context.memory.mem),
-                              wasm_context.memory.sz);
 
   switch (static_cast<ParserProbeMode>(mode)) {
   case ParserProbeMode::kSpans:
   {
     auto input =
-        SyscallArgParams<std::span<const std::byte>>::parse(guard, memory, arg1,
+        SyscallArgParams<std::span<const std::byte>>::parse(guard, context.memory, arg1,
                                                             arg2);
-    auto output = SyscallArgParams<std::span<std::byte>>::parse(guard, memory,
+    auto output = SyscallArgParams<std::span<std::byte>>::parse(guard, context.memory,
                                                                 arg3, arg4);
     if (!SyscallArgParams<std::span<const std::byte>>::validate(input) ||
         !SyscallArgParams<std::span<std::byte>>::validate(output) ||
         !guard.check()) {
-      return {.result_code = -1, .panic = 0, .gas_consumed = 0};
+      return make_code_result(-1);
     }
     auto in = SyscallArgParams<std::span<const std::byte>>::deref(input);
     auto out = SyscallArgParams<std::span<std::byte>>::deref(output);
     if (!in.empty() && !out.empty()) {
       out[0] = in[0];
     }
-    return {.result_code = 0, .panic = 0, .gas_consumed = 0};
+    return make_code_result(0);
   }
   case ParserProbeMode::kBool:
   {
-    auto parsed = SyscallArgParams<bool>::parse(guard, memory, arg1);
-    return {.result_code = SyscallArgParams<bool>::validate(parsed) ? 0 : -1,
-            .panic = 0,
-            .gas_consumed = 0};
+    auto parsed = SyscallArgParams<bool>::parse(guard, context.memory, arg1);
+    return make_code_result(SyscallArgParams<bool>::validate(parsed) ? 0 : -1);
   }
   case ParserProbeMode::kSignedI32:
   {
-    auto parsed = SyscallArgParams<int32_t>::parse(guard, memory, arg1);
+    auto parsed =
+        SyscallArgParams<int32_t>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<int32_t>::validate(parsed)) {
-      return {.result_code = -2, .panic = 0, .gas_consumed = 0};
+      return make_code_result(-2);
     }
-    return {.result_code = SyscallArgParams<int32_t>::deref(parsed),
-            .panic = 0,
-            .gas_consumed = 0};
+    return make_code_result(SyscallArgParams<int32_t>::deref(parsed));
   }
   case ParserProbeMode::kUnsignedU32:
   {
-    auto parsed = SyscallArgParams<uint32_t>::parse(guard, memory, arg1);
+    auto parsed =
+        SyscallArgParams<uint32_t>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<uint32_t>::validate(parsed)) {
-      return {.result_code = -2, .panic = 0, .gas_consumed = 0};
+      return make_code_result(-2);
     }
-    return {.result_code = std::bit_cast<int32_t>(
-                SyscallArgParams<uint32_t>::deref(parsed)),
-            .panic = 0,
-            .gas_consumed = 0};
+    return make_code_result(
+        std::bit_cast<int32_t>(SyscallArgParams<uint32_t>::deref(parsed)));
   }
   case ParserProbeMode::kOptionalU32:
   {
     auto parsed =
-        SyscallArgParams<const uint32_t *>::parse(guard, memory, arg1);
+        SyscallArgParams<const uint32_t *>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<const uint32_t *>::validate(parsed)) {
-      return {.result_code = -1, .panic = 0, .gas_consumed = 0};
+      return make_code_result(-1);
     }
     const uint32_t *value = SyscallArgParams<const uint32_t *>::deref(parsed);
-    return {.result_code = value == nullptr ? 1 : static_cast<int32_t>(*value),
-            .panic = 0,
-            .gas_consumed = 0};
+    return make_code_result(value == nullptr ? 1
+                                             : static_cast<int32_t>(*value));
   }
   }
-  return {.result_code = -1, .panic = 0, .gas_consumed = 0};
+  return make_code_result(-1);
 }
 
 // Drive parser_probe_entry through the bridge: mode in a0, probe args in
@@ -249,12 +258,12 @@ call_parser_probe(std::vector<uint8_t> &memory,
   return bridge.ecall(view, make_ecall_args(args));
 }
 
-TrampolineResult
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 require_last_result(const SyscallBridgeHost &bridge)
 {
   const auto result = bridge.last_result();
   EXPECT_TRUE(result.has_value());
-  return result.value_or(TrampolineResult{});
+  return result.value_or(std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>{});
 }
 
 constexpr uint32_t kSpansMode = static_cast<uint32_t>(ParserProbeMode::kSpans);
@@ -266,7 +275,7 @@ constexpr uint32_t kOptionalU32Mode =
 constexpr uint32_t kUnsignedU32Mode =
     static_cast<uint32_t>(ParserProbeMode::kUnsignedU32);
 
-TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
+TEST(Rv32SyscallBridgeTest, marshalsRegistersToSyscallEntry)
 {
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(128);
@@ -274,7 +283,7 @@ TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
 
   MachineView view(0, 77, registers, memory);
   CapturedCall captured;
-  captured.result = {.result_code = -7, .panic = 0, .gas_consumed = 12};
+  captured.result = make_code_result(-7, 12);
   SyscallBridgeHost bridge(&captured, capture_entry);
 
   // a0..a7 carry the syscall number plus seven argument words. Distinct,
@@ -301,8 +310,8 @@ TEST(Rv32SyscallBridgeTest, marshalsRegistersToHostFn8)
   EXPECT_EQ(captured.memory_size, memory.size());
   EXPECT_EQ(captured.first_memory_byte, 0x5cU);
   EXPECT_EQ(memory[7], 0xa5U);
-  const TrampolineResult last_result = require_last_result(bridge);
-  EXPECT_EQ(last_result.gas_consumed, 12U);
+  const auto last_result = require_last_result(bridge);
+  EXPECT_EQ(last_result.second, 12U);
 }
 
 TEST(Rv32SyscallBridgeTest, parserProbeAcceptsValidSpansAndZeroLengthEndPointer)
@@ -467,9 +476,7 @@ TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
   std::vector<uint8_t> memory(64);
   memory[7] = 0x11;
   CapturedCall captured;
-  captured.result = {.result_code = 3,
-                     .panic = std::to_underlying(HostFnErrorCode::OutOfGas),
-                     .gas_consumed = 4};
+  captured.result = make_host_panic_result(HostFnErrorCode::OutOfGas, 4);
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
@@ -478,8 +485,9 @@ TEST(Rv32SyscallBridgeTest, hostOutOfGasBecomesOutOfGasWithoutWriteback)
   EXPECT_EQ(result.status, HostStatus::kOutOfGas);
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
-  const TrampolineResult last_result = require_last_result(bridge);
-  EXPECT_EQ(last_result.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
+  const auto last_result = require_last_result(bridge);
+  ASSERT_FALSE(last_result.first.has_value());
+  EXPECT_EQ(last_result.first.error().code(), HostFnErrorCode::OutOfGas);
   EXPECT_EQ(memory[7], 0x11U);
 }
 
@@ -489,10 +497,7 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
   std::vector<uint8_t> memory(64);
   memory[7] = 0x11;
   CapturedCall captured;
-  captured.result = {.result_code = 3,
-                     .panic =
-                         std::to_underlying(HostFnErrorCode::Unrecoverable),
-                     .gas_consumed = 4};
+  captured.result = make_host_panic_result(HostFnErrorCode::Unrecoverable, 4);
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
@@ -504,9 +509,9 @@ TEST(Rv32SyscallBridgeTest, fatalHostPanicBecomesHostTrap)
             static_cast<uint32_t>(HostFnErrorCode::Unrecoverable));
   EXPECT_EQ(result.gas_consumed, 4U);
   EXPECT_EQ(captured.calls, 1);
-  const TrampolineResult last_result = require_last_result(bridge);
-  EXPECT_EQ(last_result.panic,
-            std::to_underlying(HostFnErrorCode::Unrecoverable));
+  const auto last_result = require_last_result(bridge);
+  ASSERT_FALSE(last_result.first.has_value());
+  EXPECT_EQ(last_result.first.error().code(), HostFnErrorCode::Unrecoverable);
   EXPECT_EQ(memory[7], 0x11U);
 }
 
@@ -515,11 +520,7 @@ TEST(Rv32SyscallBridgeTest, recoverableFaultReturnsCodeWithoutWriteback)
   std::array<uint32_t, kRegisterCount> registers = {};
   std::vector<uint8_t> memory(64, 0x55);
   CapturedCall captured;
-  captured.result = {.result_code = std::to_underlying(
-                         SyscallErrorCode::kSyscallErrorCodeFault),
-                     .panic =
-                         std::to_underlying(HostFnErrorCode::NoneOrRecoverable),
-                     .gas_consumed = 4};
+  captured.result = {SyscallErrorCode::kSyscallErrorCodeFault, 4};
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
   const std::vector<uint8_t> before = memory;
@@ -545,9 +546,7 @@ TEST(Rv32SyscallBridgeTest, mapsReturnPanicToHaltZero)
   // capture_entry writes 0xa5 to scratch byte 7; the halt path must commit
   // that scratch back to guest memory (the guest-visible Return output buffer
   // is delivered the same way).
-  captured.result = {.result_code = 3,
-                     .panic = std::to_underlying(HostFnErrorCode::Return),
-                     .gas_consumed = 4};
+  captured.result = make_host_panic_result(HostFnErrorCode::Return, 4);
   HostResult result = bridge.ecall(view, EcallArgs{});
   EXPECT_EQ(result.status, HostStatus::kHalt);
   EXPECT_EQ(result.halt_code(), 0U);
@@ -563,17 +562,12 @@ TEST(Rv32SyscallBridgeTest, mapsExitPanicToDeterministicTrap)
   SyscallBridgeHost bridge(&captured, capture_entry);
   MachineView view(0, 10, registers, memory);
 
-  for (const int32_t result_code : {0, 9}) {
-    memory[7] = 0;
-    captured.result = {.result_code = result_code,
-                       .panic = std::to_underlying(HostFnErrorCode::Exit),
-                       .gas_consumed = 4};
-    HostResult result = bridge.ecall(view, EcallArgs{});
-    EXPECT_EQ(result.status, HostStatus::kTrap);
-    EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
-    EXPECT_EQ(result.gas_consumed, 4U);
-    EXPECT_EQ(memory[7], 0xa5U);
-  }
+  captured.result = make_host_panic_result(HostFnErrorCode::Exit, 4);
+  HostResult result = bridge.ecall(view, EcallArgs{});
+  EXPECT_EQ(result.status, HostStatus::kTrap);
+  EXPECT_EQ(result.trap_payload().kind, HostTrapKind::kDeterministic);
+  EXPECT_EQ(result.gas_consumed, 4U);
+  EXPECT_EQ(memory[7], 0xa5U);
 }
 
 TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
@@ -586,7 +580,7 @@ TEST(Rv32SyscallBridgeTest, machineCompletesEcallThroughBridge)
   Machine machine(program, 160, 20);
 
   CapturedCall captured;
-  captured.result = {.result_code = 1234, .panic = 0, .gas_consumed = 5};
+  captured.result = make_code_result(1234, 5);
   SyscallBridgeHost bridge(&captured, capture_entry);
 
   EXPECT_EQ(machine.step(), StepResult::kContinue);
@@ -612,10 +606,7 @@ TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
   std::vector<uint8_t> second_memory = first_memory;
 
   CapturedCall first_captured;
-  first_captured.result = {.result_code = 17,
-                           .panic = std::to_underlying(
-                               HostFnErrorCode::NoneOrRecoverable),
-                           .gas_consumed = 6};
+  first_captured.result = make_code_result(17, 6);
   CapturedCall second_captured = first_captured;
   SyscallBridgeHost first_bridge(&first_captured, capture_entry);
   SyscallBridgeHost second_bridge(&second_captured, capture_entry);
@@ -631,12 +622,12 @@ TEST(Rv32SyscallBridgeTest, sameInputsProduceSameBridgeResultAndMemory)
   EXPECT_EQ(first_result.continue_value(), second_result.continue_value());
   EXPECT_EQ(first_result.gas_consumed, second_result.gas_consumed);
   EXPECT_EQ(first_memory, second_memory);
-  const TrampolineResult first_last_result = require_last_result(first_bridge);
-  const TrampolineResult second_last_result =
-      require_last_result(second_bridge);
-  EXPECT_EQ(first_last_result.result_code, second_last_result.result_code);
-  EXPECT_EQ(first_last_result.panic, second_last_result.panic);
-  EXPECT_EQ(first_last_result.gas_consumed, second_last_result.gas_consumed);
+  const auto first_last_result = require_last_result(first_bridge);
+  const auto second_last_result = require_last_result(second_bridge);
+  ASSERT_TRUE(first_last_result.first.has_value());
+  ASSERT_TRUE(second_last_result.first.has_value());
+  EXPECT_EQ(*first_last_result.first, *second_last_result.first);
+  EXPECT_EQ(first_last_result.second, second_last_result.second);
 }
 
 TEST(Rv32SyscallBridgeTest, hostGasIsCumulativeAndSecondEcallWritePersists)

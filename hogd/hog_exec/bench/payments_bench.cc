@@ -222,7 +222,7 @@ usage(char *argv[])
 {
   std::println("Usage: {} -e <exec_port> -c <coord_port> -s <server_addr, "
                "repeated (2 required)> -a "
-               "<num_accounts> [-r (use rv32 contracts)]",
+               "<num_accounts>",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -241,7 +241,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:c:s:a")) != -1) {
+  while ((opt = getopt(argc, argv, "e:c:s:a:")) != -1) {
     switch (opt) {
     case 'e':
       exec_port = std::stoi(optarg);

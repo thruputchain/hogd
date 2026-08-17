@@ -1,6 +1,5 @@
 #include <benchmark/benchmark.h>
 
-#include <cstdint>
 #include <memory>
 #include <stdexcept>
 
@@ -13,7 +12,6 @@
 #include "hogd/loadgen/erc20_experiment.h"
 #include "loadgen.hh"
 #include "transaction.hh"
-#include "types.hh"
 
 // In-process benchmark of the contract runtimes on the erc20 + simple_wallet
 // payments workload. Unlike payments_bench (which drives a distributed
