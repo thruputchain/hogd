@@ -1318,5 +1318,64 @@ TEST_F(RcqDoctoredProposalDataTest,
   advance_block();
 }
 
+// Doctored validation data supplying kRetrocausalQueueBlockEntriesMaxLen + 1
+// concurrent observations for one key. Consume #250 is accepted; consume #251
+// trips the per-tx concurrent-consume cap in
+// RetrocausalQueueItem::get_next_item and must surface as ValidationFailure
+// (in proposal mode the same arm is a CHECK: HogDb's commit-time reservation
+// cap keeps committed inserts per (block, key) at or below the cap, so a
+// proposal-mode consumer can never see a 251st concurrent entry).
+TEST_F(RcqDoctoredProposalDataTest,
+       ConcurrentConsumeCapExceededIsValidationFailure)
+{
+  constexpr uint32_t kOverCap = kRetrocausalQueueBlockEntriesMaxLen + 1;
+
+  uint32_t consumes_succeeded = 0;
+  auto consumer_contract = build_contract(
+      [&consumes_succeeded](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("rcq0");
+        for (uint32_t i = 0; i < kOverCap; ++i) {
+          auto res = ctx.handler().retrocausal_queue_consume(key, false);
+          if (!res.has_value())
+            return res.error().to_invoke_error();
+          if (!res.value().has_value())
+            return InvokeError{InvokeErrorCode::Deterministic};
+          ++consumes_succeeded;
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
+  cmap.emplace(1, std::move(consumer_contract));
+  auto native_ctx = std::make_unique<NativeContext>(std::move(cmap));
+
+  NondeterministicProposalData doctored;
+  doctored.nondeterministic_bit_count = kOverCap;
+  doctored.nondeterministic_bits.resize((kOverCap + 7) / 8, 0);
+  for (uint32_t i = 0; i < kOverCap; ++i) {
+    doctored.nondeterministic_bits[i / 8] |=
+        static_cast<uint8_t>(uint8_t{1} << (i % 8));
+  }
+  QueueEntry entry;
+  entry.push_back(7);
+  for (uint32_t i = 0; i < kOverCap; ++i) {
+    doctored.observed_queue_entry_sequence.push_back(entry);
+  }
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto tx = make_invoke_b_tx(0);
+  auto handler =
+      make_new_system_call_handler_validation(tx, *native_ctx,
+                                              std::move(doctored));
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
+  EXPECT_EQ(consumes_succeeded, kRetrocausalQueueBlockEntriesMaxLen);
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
