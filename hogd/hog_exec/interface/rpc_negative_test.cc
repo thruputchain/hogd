@@ -32,6 +32,7 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -49,7 +50,7 @@ namespace hogd {
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class RpcNegativeTest : public ::testing::Test {
-public:
+protected:
   void SetUp() override
   {
     server_port_ = rpc_server_.start_server(0);
@@ -75,7 +76,6 @@ public:
         << "Failed to load genesis configuration";
   }
 
-protected:
   struct StalledSyscallMiscSnapshotSetup {
     ContractAddress contract_address;
     AddressAndKey stalled_addrkey;
@@ -495,11 +495,13 @@ TEST_F(RpcNegativeTest,
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id)
+                                        recycle_probe_block_id, ProposalTxs{})
                 .error(),
             RPCError::kRPCNone);
   validate_thread.join();
@@ -554,11 +556,13 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id)
+                                        recycle_probe_block_id, ProposalTxs{})
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();
@@ -729,7 +733,9 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
             ExecResult::ExecResultOK);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+  EXPECT_EQ(event_client_
+                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .error(),
             RPCError::kRPCNone);
 }
 

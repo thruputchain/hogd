@@ -61,11 +61,8 @@ public:
   static x23::Async<BlockLookupResult>
   get_block_by_height(BlockHeight /*height*/)
   {
-    // The current indexer ingest API receives only a block height, event logs,
-    // and transaction bodies.  It does not receive the ConsensusValue needed
-    // to answer this query.  Keep the newly-added protocol RPC conformant
-    // without manufacturing a value; this can return BlockFound once block
-    // metadata is forwarded to and persisted by the indexer.
+    // The indexer is not a block store. Keep the protocol RPC conformant
+    // without persisting a second copy of each ConsensusValue.
     co_return BlockLookupResult(BlockLookupOutcome::BlockNotFound);
   }
 

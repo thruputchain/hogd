@@ -36,6 +36,40 @@ wait_port_or_report() {
   return 1
 }
 
+# Waits for a process to report a startup milestone without opening a probe
+# connection to its RPC server. Some RPC clients may connect immediately after
+# the listener is published, so a connect-and-close probe can race real traffic.
+wait_control_log_line() {
+  local wanted_label=$1
+  local needle=$2
+  local timeout_sec=${CI_WAIT_PORT_TIMEOUT_SEC:-600}
+  local record host label stdout_path stderr_path
+  local quoted_needle quoted_stderr_path poll_command
+
+  for record in ${CONTROL_LOG_RECORDS[@]+"${CONTROL_LOG_RECORDS[@]}"}; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    [[ $label == "$wanted_label" ]] || continue
+
+    printf -v quoted_needle '%q' "$needle"
+    printf -v quoted_stderr_path '%q' "$stderr_path"
+    printf -v poll_command 'timeout %ss bash -c %q' "$timeout_sec" \
+      "until grep -Fq -- $quoted_needle $quoted_stderr_path; do sleep 0.1; done"
+
+    echo "Waiting for $wanted_label to report: $needle"
+    if remote_run "$host" "$poll_command"; then
+      echo "$wanted_label reported: $needle"
+      return 0
+    fi
+
+    echo "Timed out after ${timeout_sec}s waiting for $wanted_label to report: $needle" >&2
+    replay_control_log "$host" "$label" "$stdout_path" "$stderr_path"
+    return 1
+  done
+
+  echo "no control log record for $wanted_label" >&2
+  return 1
+}
+
 # Replays the tail of one launched process's stdout and stderr. Best effort: a
 # host that has gone away must not replace the failure being reported with a
 # failure of its own.

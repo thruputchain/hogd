@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "event.hh"
+#include "event_outbox_internal.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
@@ -22,19 +23,16 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "indexer.hh"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
-#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
-
-using indexer_event_client_t =
-    IndexerEvent1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
 namespace detail {
 struct EventContext {
@@ -114,13 +112,17 @@ public:
   // was not called). Events must only be emitted while an executor handle is
   // held.
   //
-  // [body] is the full transaction body, accumulated separately from the event
-  // log (it is not hashed into the consensus event trie) and forwarded to the
-  // indexer at commit.
+  // Keep [body] paired with its event log for the durable indexer outbox. It is
+  // not hashed into the consensus event trie.
   x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
+
+  x23::Async<IndexerOutboxCandidatePayload>
+  snapshot_indexer_outbox_candidate(BlockHeight block_height,
+                                    SHA256Hash event_root,
+                                    ProposalTxs proposal_txs);
 
   x23::Async<void> wait_file_done();
   void delete_events_file();
@@ -154,10 +156,6 @@ public:
   // Waits for all executors to close.
   // Returns true if all executors closed normally, false if block was abandoned
   x23::Async<bool> await_all_executors_closed();
-
-  x23::Async<void>
-  send_events_to_indexers(BlockHeight block_height,
-                          std::vector<indexer_event_client_t> &indexers);
 
   void set_closing() { closing_.store(true, std::memory_order_release); }
   bool closing() { return closing_.load(std::memory_order_acquire); }
@@ -200,9 +198,8 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  // Event logs and their transaction bodies, kept paired in one container so
-  // the per-index association cannot cross during the commit-time flatten
-  // (#2826).
+  // Keep event logs and transaction bodies paired while per-thread batches are
+  // flattened into the durable candidate snapshot (#2826).
   PerThread<EventWithBodyBatch> events_with_bodies_;
   PerThread<detail::EventContext> buffers_;
 

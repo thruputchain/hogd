@@ -1,15 +1,19 @@
+#include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <future>
 #include <print>
 #include <string>
+#include <thread>
 
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_event/rpc_context.h"
 #include "hogd/hog_event/rpc_from_exec.h"
@@ -19,7 +23,6 @@
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
-#include "rpc_types.hh"
 #include "sched_event.hh"
 #include "x23/sockio.h"
 
@@ -53,6 +56,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   EventExecServer exec_server(ctx);
   EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
+  mempool_server.max_message_size_ = kEventSchedulerRpcMaxMessageSize;
 
   uint16_t actual_exec_port =
       exec_server.start_server(make_bind_host_port(bind_ip, exec_port));
@@ -78,9 +82,37 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
                  .address_for_sched = address_for_mempool.c_str()};
-  CHECK_EQ(client.schedevent_intro_event(card), RPCError::kRPCNone);
+  constexpr auto kInitialRegistrationRetryDelay = std::chrono::milliseconds(50);
+  constexpr auto kMaxRegistrationRetryDelay = std::chrono::milliseconds(1000);
+  auto retry_delay = kInitialRegistrationRetryDelay;
+  const auto wait_to_retry = [&] {
+    std::this_thread::sleep_for(retry_delay);
+    retry_delay = std::min(retry_delay * 2, kMaxRegistrationRetryDelay);
+  };
+  while (true) {
+    auto prepared = client.schedevent_prepare_event(card);
+    if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+      wait_to_retry();
+      continue;
+    }
+    CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+    EventRegistrationSnapshot snapshot = prepared.snapshot();
+    auto reconciled = ctx.reconcile_outbox_tip(snapshot.tip.block_id,
+                                               snapshot.tip.consensus_value)();
+    if (!reconciled) {
+      panic("event outbox reconciliation failed");
+    }
+    Health::instance().set_current_block_height(
+        snapshot.tip.consensus_value.proposal_header.block_height)();
+    auto activated = client.schedevent_activate_event(snapshot);
+    if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+      break;
+    }
+    CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
+    wait_to_retry();
+  }
 
-  // The event server is initialized. Now block forever.
+  // Registration and durable outbox reconciliation are complete.
   Health::instance().set_status(Health::Status::kOk)();
   info("event initialization complete.");
   std::promise<void>().get_future().wait();

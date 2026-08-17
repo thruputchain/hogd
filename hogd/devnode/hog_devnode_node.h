@@ -26,9 +26,9 @@
 #include "hogd/hog_exec/interface/executor.h"
 #include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
-#include "hogd/hog_indexer/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_db.h"
@@ -100,8 +100,11 @@ private:
   void init_db_backend(HogDbDAO db,
                        std::unique_ptr<sched_db_client_t> sched_db_client);
   void init_indexer_backend();
+  void start_indexer_servers();
+  void reconcile_event_outbox_with_recovered_tip();
+  void validate_event_outbox_against_recovered_tip() const;
   void reconcile_indexer_with_recovered_tip();
-  void register_indexer_with_event_service();
+  void start_indexer_pull();
   void register_db_with_mempool();
   void register_event_with_mempool();
   void register_auth_with_mempool();
@@ -113,7 +116,9 @@ private:
   validate_recovered_data_dir(LocalBootstrapConfig const &requested_config);
   void write_data_dir_metadata() const;
   void load_recovered_bootstrap_metadata(LocalBootstrapConfig const &config);
-  void materialize_bootstrap_accounts(LocalBootstrapConfig const &config);
+  x23::Async<void>
+  materialize_bootstrap_accounts(LocalBootstrapConfig const &config);
+  x23::Async<void> initialize_fresh_event_outbox_origin();
   void commit_initialization_batch(SignedTransactionBatch const &txs);
   void refresh_bootstrap_account_balances();
   void prepare_for_failed_construction() noexcept;
@@ -133,14 +138,14 @@ private:
   // and the event RPC servers below borrow event_ctx_.
   HogDevnodeTmpDir event_dir_;
   HogDevnodeTmpDir indexer_dir_;
+  // Validate persistent HogDb before constructing runtime services. A corrupt
+  // DbTip must not unwind partially constructed RPC/executor lifetimes.
+  std::optional<HogDbDAO> opened_db_;
   std::unique_ptr<IndexDB> indexer_db_;
-  // Declaration order matters: the indexer RPC servers below borrow
+  // Declaration order matters: the indexer services below borrow
   // indexer_failure_cache_ by reference, so it must be declared before (and
   // thus outlive) them.
   RecentTxFailureCache indexer_failure_cache_;
-  // IndexerEventRpc is exposed by the indexer; EventIndexerServer below is
-  // exposed by the event service.
-  std::unique_ptr<RpcServer<IndexerEventRpc>> indexer_event_server_;
   std::unique_ptr<RpcServer<IndexerBlockExplorerRpc>>
       indexer_block_explorer_server_;
   std::unique_ptr<RPCContext> ctx_;
@@ -154,8 +159,10 @@ private:
 
   EventMempoolServer event_sched_server_;
   EventExecServer event_exec_server_;
-  // EventIndexerServer feeds indexer_event_server_ through the event service.
+  // Declaration order keeps the pull endpoint and its borrowed state alive
+  // until the controller has stopped and joined.
   EventIndexerServer event_indexer_server_;
+  std::unique_ptr<IndexerPullController> indexer_pull_controller_;
 
   Executor executor_;
 
