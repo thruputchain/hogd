@@ -101,4 +101,50 @@ TEST_F(SyscallParseHardeningRv32Test,
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
+// The signature half of VerifySignature's size check: 63-byte signature with
+// a valid key is the inner kInvalidSyscallInput, not a parse fault.
+TEST_F(SyscallParseHardeningRv32Test, VerifySignatureRejectsWrongSizeSignature)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_verify_signature_wrong_size_signature">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// A zero-length span with an out-of-range pointer faults; the valid-pointer
+// control succeeds.
+TEST_F(SyscallParseHardeningRv32Test, ZeroLenSpanOobPointerFaults)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_zero_len_span_oob_pointer_fault">(UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// The span end (ptr + len) must be computed wider than 32 bits; a u32-wrapping
+// sum would land back in bounds and accept the span.
+TEST_F(SyscallParseHardeningRv32Test, SpanEndU32WrapFaults)
+{
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation =
+              client_.make_invocation<u8"test_span_end_u32_wrap_fault">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
 } // namespace hogd

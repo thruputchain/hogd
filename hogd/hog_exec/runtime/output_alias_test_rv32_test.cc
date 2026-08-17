@@ -136,6 +136,28 @@ TEST_F(OutputAliasTestRv32Test, InputInputOverlapFault)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
+// Zero-length spans under the half-open alias predicate: strictly inside a
+// prior range faults, at its exact edges does not.
+TEST_F(OutputAliasTestRv32Test, ZeroLenSpanAliasEdges)
+{
+  // The non-aliasing arms log real events, so this test commits and emits
+  // rather than dropping the handler.
+  auto signed_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation =
+              client_.make_invocation<u8"test_log_event_zero_len_data_alias">(
+                  UINT64_MAX),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}}};
+  auto handler = make_new_system_call_handler(signed_tx, *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = signed_tx})());
+}
+
 // Overlapping input with output should fault
 TEST_F(OutputAliasTestRv32Test, InputOutputOverlapFault)
 {

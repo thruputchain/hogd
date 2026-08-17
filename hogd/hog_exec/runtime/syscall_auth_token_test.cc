@@ -776,6 +776,81 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
+// MintAuthToken bytes that fail x23 deserialization (not a serialized
+// AuthTokenNode) are rejected as kInvalidSyscallInput -- the XdrException
+// catch arm. Every other mint in the suite serializes a valid node, so this
+// is the only pin on the malformed-bytes arm. A valid mint afterwards
+// proves the handler survives the rejected call.
+TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenRejectsUndeserializableBytes)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  advance_block();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_contract;
+  fns_contract.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        BlockHeight current_height{};
+        auto h_res = ctx.syscall<SyscallNo::kGetBlockHeight>(current_height);
+        EXPECT_TRUE(h_res.has_value());
+        EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+
+        constexpr std::array<std::byte, 4> kGarbage = {
+            std::byte{0xde}, std::byte{0xad}, std::byte{0xbe}, std::byte{0xef}};
+        uint32_t id = 0xDEAD'BEEF;
+        auto res = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{current_height + 10},
+            std::span<const std::byte>(kGarbage), id);
+        EXPECT_TRUE(res.has_value());
+        EXPECT_EQ(res.value(),
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        EXPECT_EQ(id, 0xDEAD'BEEF) << "output must be untouched on reject";
+
+        AuthTokenNode node{.consumer_address = kAddr,
+                           .payload = x23::serialize(1U),
+                           .child_nodes = {}};
+        auto serialized = x23::serialize(node);
+        auto ok = ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{current_height + 10},
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                           serialized.data()),
+                                       serialized.size()},
+            id);
+        EXPECT_TRUE(ok.has_value());
+        EXPECT_EQ(ok.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+        return {};
+      });
+  auto contract = std::make_unique<NativeContract>(std::move(fns_contract));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 // Child consumes a token, gets unwrapped child tokens, returns them to
 // the parent via the Return syscall.  Parent then consumes the returned token.
 //
