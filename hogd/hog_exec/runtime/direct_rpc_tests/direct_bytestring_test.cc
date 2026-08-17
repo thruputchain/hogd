@@ -4,7 +4,9 @@
 #include <print>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -13,6 +15,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/rpc_msg.hh"
 
 namespace hogd {
 

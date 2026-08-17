@@ -1175,13 +1175,12 @@ TEST(EventServerProxyMapping, BadBlockIdIsAbandonAndDoubleEmitIsUnrecoverable)
   NativeContractTestFramework fw(
       false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
 
-  EventServerProxy proxy(
-      x23::HostPort{"localhost", fw.get_event_exec_port()});
+  EventServerProxy proxy(x23::HostPort{"localhost", fw.get_event_exec_port()});
 
   const BlockID unknown_block = 987654;
 
-  auto emit_status = proxy.emit_event(unknown_block, 0, TxEventLog{},
-                                      ProposedTransaction{})();
+  auto emit_status =
+      proxy.emit_event(unknown_block, 0, TxEventLog{}, ProposedTransaction{})();
   ASSERT_FALSE(emit_status.has_value());
   EXPECT_EQ(emit_status.error().code(), SystemErrorCode::Abandon);
 

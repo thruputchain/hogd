@@ -1366,9 +1366,8 @@ TEST_F(RcqDoctoredProposalDataTest,
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   auto tx = make_invoke_b_tx(0);
-  auto handler =
-      make_new_system_call_handler_validation(tx, *native_ctx,
-                                              std::move(doctored));
+  auto handler = make_new_system_call_handler_validation(tx, *native_ctx,
+                                                         std::move(doctored));
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);

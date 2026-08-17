@@ -796,8 +796,10 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenRejectsUndeserializableBytes)
         EXPECT_TRUE(h_res.has_value());
         EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
-        constexpr std::array<std::byte, 4> kGarbage = {
-            std::byte{0xde}, std::byte{0xad}, std::byte{0xbe}, std::byte{0xef}};
+        constexpr std::array<std::byte, 4> kGarbage = {std::byte{0xde},
+                                                       std::byte{0xad},
+                                                       std::byte{0xbe},
+                                                       std::byte{0xef}};
         uint32_t id = 0xDEAD'BEEF;
         auto res = ctx.syscall<SyscallNo::kMintAuthToken>(
             BlockHeight{current_height + 10},

@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "built_contracts/output_alias_test.h"
+#include "exec_result.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"

@@ -913,15 +913,16 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{
-                .invocation =
-                    Invocation{.invoked_address = deployer_addr,
-                               .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}},
-                .uniquifier = make_new_uniquifier(),
-                .contracts_to_deploy = {blob},
-            }},
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
+                    .contracts_to_deploy = {blob},
+                }},
         context);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -932,14 +933,15 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{
-                .invocation =
-                    Invocation{.invoked_address = deployer_addr,
-                               .entrypoint = entrypoint_from_method_id(1),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}},
-                .uniquifier = make_new_uniquifier(),
-            }},
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
+                }},
         context);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -979,9 +981,9 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   // Child: deploy, assert the expected address, then end the frame as
   // directed -- method 0 manually reverts, method 1 faults, method 2 (the
   // probe) also reverts so the test leaves no deployment behind.
-  auto deploy_then = [blob_hash, deployed_addr](
-                         NativeSyscallContext &ctx,
-                         bool fault) noexcept -> InvokeStatus<void> {
+  auto deploy_then =
+      [blob_hash, deployed_addr](NativeSyscallContext &ctx,
+                                 bool fault) noexcept -> InvokeStatus<void> {
     auto res = ctx.handler().deploy_contract(kNonce, blob_hash);
     if (!res.has_value()) {
       return res.error().to_invoke_error();
@@ -1003,18 +1005,15 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   };
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
-  fns_child.emplace(0,
-                    [deploy_then](NativeSyscallContext &ctx) noexcept {
-                      return deploy_then(ctx, /*fault=*/false);
-                    });
-  fns_child.emplace(1,
-                    [deploy_then](NativeSyscallContext &ctx) noexcept {
-                      return deploy_then(ctx, /*fault=*/true);
-                    });
-  fns_child.emplace(2,
-                    [deploy_then](NativeSyscallContext &ctx) noexcept {
-                      return deploy_then(ctx, /*fault=*/false);
-                    });
+  fns_child.emplace(0, [deploy_then](NativeSyscallContext &ctx) noexcept {
+    return deploy_then(ctx, /*fault=*/false);
+  });
+  fns_child.emplace(1, [deploy_then](NativeSyscallContext &ctx) noexcept {
+    return deploy_then(ctx, /*fault=*/true);
+  });
+  fns_child.emplace(2, [deploy_then](NativeSyscallContext &ctx) noexcept {
+    return deploy_then(ctx, /*fault=*/false);
+  });
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
@@ -1027,9 +1026,10 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
           CopyableInvokeInputs inputs{.entrypoint_id = method,
                                       .gas_limit = UINT64_MAX,
                                       .flags = 0};
-          auto r = ctx.syscall<SyscallNo::kInvoke>(
-              child_addr, std::span<const std::byte>{}, std::span<uint32_t>{},
-              inputs, outputs);
+          auto r = ctx.syscall<SyscallNo::kInvoke>(child_addr,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "invoke of child method " << method << " failed";
@@ -1081,15 +1081,16 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{
-              .invocation = Invocation{.invoked_address = parent_addr,
-                                       .entrypoint =
-                                           entrypoint_from_method_id(0),
-                                       .gas_limit = UINT64_MAX,
-                                       .calldata = {}},
-              .uniquifier = make_new_uniquifier(),
-              .contracts_to_deploy = {blob},
-          }},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = parent_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
+                  .contracts_to_deploy = {blob},
+              }},
       context);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -1164,10 +1165,9 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
                                 .gas_limit = UINT64_MAX,
                                 .flags =
                                     std::to_underlying(InvokeFlag::TryInvoke)};
-    auto r = ctx.syscall<SyscallNo::kInvoke>(leaf_addr,
-                                             std::span<const std::byte>{},
-                                             std::span<uint32_t>{}, inputs,
-                                             outputs);
+    auto r =
+        ctx.syscall<SyscallNo::kInvoke>(leaf_addr, std::span<const std::byte>{},
+                                        std::span<uint32_t>{}, inputs, outputs);
     if (!r.has_value() ||
         r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
         outputs.frame_status != InvocationFrameStatusCode::Return) {
@@ -1197,10 +1197,9 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
     CopyableInvokeInputs inputs{.entrypoint_id = mid_method,
                                 .gas_limit = UINT64_MAX,
                                 .flags = 0};
-    auto r = ctx.syscall<SyscallNo::kInvoke>(mid_addr,
-                                             std::span<const std::byte>{},
-                                             std::span<uint32_t>{}, inputs,
-                                             outputs);
+    auto r =
+        ctx.syscall<SyscallNo::kInvoke>(mid_addr, std::span<const std::byte>{},
+                                        std::span<uint32_t>{}, inputs, outputs);
     if (!r.has_value() ||
         r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
         outputs.frame_status != expected) {
@@ -1248,15 +1247,17 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   auto run_root = [&](Runtime::MethodID method) {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{
-                .invocation =
-                    Invocation{.invoked_address = root_addr,
-                               .entrypoint = entrypoint_from_method_id(method),
-                               .gas_limit = UINT64_MAX,
-                               .calldata = {}},
-                .uniquifier = make_new_uniquifier(),
-                .contracts_to_deploy = {blob},
-            }},
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = root_addr,
+                                   .entrypoint =
+                                       entrypoint_from_method_id(method),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                    .uniquifier = make_new_uniquifier(),
+                    .contracts_to_deploy = {blob},
+                }},
         context);
     ASSERT_TRUE(handler.root_invoke().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
@@ -1319,8 +1320,9 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
         }
 
         ContractAddress out_explicit{};
-        auto s2 = ctx.syscall<SyscallNo::kGetDeployAddress>(
-            &other_addr, kNonce, blob_hash, out_explicit);
+        auto s2 =
+            ctx.syscall<SyscallNo::kGetDeployAddress>(&other_addr, kNonce,
+                                                      blob_hash, out_explicit);
         if (!s2.has_value() ||
             s2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             out_explicit != expected_other || out_explicit == out_null) {
@@ -1333,8 +1335,7 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
         if (!deploy.has_value()) {
           return deploy.error().to_invoke_error();
         }
-        if (!deploy.value().has_value() ||
-            deploy.value().value() != out_null) {
+        if (!deploy.value().has_value() || deploy.value().value() != out_null) {
           ADD_FAILURE() << "DeployContract must land at the null-arm address";
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -1358,15 +1359,16 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{
-              .invocation = Invocation{.invoked_address = deployer_addr,
-                                       .entrypoint =
-                                           entrypoint_from_method_id(0),
-                                       .gas_limit = UINT64_MAX,
-                                       .calldata = {}},
-              .uniquifier = make_new_uniquifier(),
-              .contracts_to_deploy = {blob},
-          }},
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = deployer_addr,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier(),
+                  .contracts_to_deploy = {blob},
+              }},
       context);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);

@@ -122,8 +122,9 @@ TEST_F(SyscallParseHardeningRv32Test, ZeroLenSpanOobPointerFaults)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
-          .invocation = client_.make_invocation<
-              u8"test_zero_len_span_oob_pointer_fault">(UINT64_MAX),
+          .invocation =
+              client_.make_invocation<u8"test_zero_len_span_oob_pointer_fault">(
+                  UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -136,13 +137,13 @@ TEST_F(SyscallParseHardeningRv32Test, ZeroLenSpanOobPointerFaults)
 TEST_F(SyscallParseHardeningRv32Test, SpanEndU32WrapFaults)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_span_end_u32_wrap_fault">(
-                  UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_span_end_u32_wrap_fault">(
+                          UINT64_MAX),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }

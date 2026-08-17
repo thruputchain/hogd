@@ -307,8 +307,7 @@ TEST_F(ViewGatewayRefreshTest, IntroMismatchAndViewAfterShutdown)
 
   EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{"not-a-protocol"}),
             ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol);
-  EXPECT_EQ(gateway.viewgateway_intro(
-                ProtocolCommit{version::kHogdProtocol()}),
+  EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{version::kHogdProtocol()}),
             ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
 
   ViewGatewayResult before = gateway.viewgateway_view(make_read_query())();
@@ -357,9 +356,8 @@ TEST_F(ViewGatewayRefreshTest, RotationOnStaleSnapshotServesFreshHeight)
     auto query = make_read_query();
     ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
     query.invocation = client.make_invocation<u8"read_value">(
-        UINT64_MAX,
-        NativeContractTestFramework::make_storage_key(
-            std::format("uncached_key_{}", i)));
+        UINT64_MAX, NativeContractTestFramework::make_storage_key(
+                        std::format("uncached_key_{}", i)));
     ViewGatewayResult fresh = gateway.viewgateway_view(std::move(query))();
     ASSERT_EQ(fresh.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_GT(fresh.payload().height, height);

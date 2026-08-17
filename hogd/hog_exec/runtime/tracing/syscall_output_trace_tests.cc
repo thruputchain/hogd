@@ -2,20 +2,23 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <unordered_map>
 #include <utility>
 
 #include "auth_claim.hh"
+#include "auth_token.hh"
+#include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -31,6 +34,7 @@
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/format.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -180,8 +184,8 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
     SyscallTraceBody body(SyscallNo::kGetBlockHeight);
     body.get_block_height().outputs =
         SyscallGetBlockHeightOutputs{.result = executing_height};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kGetTransactionStatistics);
@@ -189,8 +193,8 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
         TransactionStatistic::GasRemaining;
     body.get_transaction_statistics().outputs =
         SyscallGetTransactionStatisticsOutputs{.result = 100'000};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kGetMsgSender);
@@ -227,16 +231,20 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
         int128_t current_set = 0;
         bool current_set_opt = false;
         int128_t current_add = 0;
-        auto g1 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            set_key, false, current_set, current_set_opt, current_add);
+        auto g1 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(set_key, false,
+                                                             current_set,
+                                                             current_set_opt,
+                                                             current_add);
         if (!g1.has_value() ||
             g1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             !current_set_opt || current_set != 5 || current_add != 7) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto g2 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            unset_key, false, current_set, current_set_opt, current_add);
+        auto g2 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(unset_key, false,
+                                                             current_set,
+                                                             current_set_opt,
+                                                             current_add);
         if (!g2.has_value() ||
             g2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             current_set_opt || current_add != 0) {
@@ -256,8 +264,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     body.nonnegative_int_set_add().inputs.set_value = to_xdr(int128_t{5});
     body.nonnegative_int_set_add().inputs.add_value = to_xdr(int128_t{7});
     body.nonnegative_int_set_add().inputs.flags = 0;
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kNonnegativeIntGet);
@@ -267,8 +275,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     outputs.current_set = to_xdr(int128_t{5});
     outputs.current_add = to_xdr(int128_t{7});
     body.nonnegative_int_get().outputs = std::move(outputs);
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     // The unset key's trace output must OMIT current_set entirely -- the
@@ -279,8 +287,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     SyscallNonnegativeIntGetOutputs outputs;
     outputs.current_add = to_xdr(int128_t{0});
     body.nonnegative_int_get().outputs = std::move(outputs);
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -332,24 +340,24 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part1);
     body.sha256_update().inputs.reset = true;
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part2);
     body.sha256_update().inputs.reset = false;
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Finalize);
     body.sha256_finalize().inputs.index = 0;
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = expected_hash};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -386,9 +394,9 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
         uint32_t token_id = 0;
         auto m = ctx.syscall<SyscallNo::kMintAuthToken>(
             BlockHeight{ctx.handler().get_block_height().value() + 5},
-            std::span<const std::byte>(
-                reinterpret_cast<const std::byte *>(serialized_node.data()),
-                serialized_node.size()),
+            std::span<const std::byte>(reinterpret_cast<const std::byte *>(
+                                           serialized_node.data()),
+                                       serialized_node.size()),
             token_id);
         if (!m.has_value() ||
             m.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
@@ -412,8 +420,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
         }
         if (written_len != payload.size() ||
             small_buffer[0] != std::byte{payload[0]} ||
-            small_buffer[1] != std::byte{payload[1]} ||
-            unwrapped_count != 0) {
+            small_buffer[1] != std::byte{payload[1]} || unwrapped_count != 0) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -431,18 +438,17 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
     SyscallTraceBody body(SyscallNo::kGetAuthClaim);
     body.get_auth_claim().outputs =
         SyscallGetAuthClaimOutputs{.auth_claim = claim};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kMintAuthToken);
     body.mint_auth_token().inputs.expiry_height = executing_height + 5;
     body.mint_auth_token().inputs.serialized_auth_token.append_range(
         serialized_node);
-    body.mint_auth_token().outputs =
-        SyscallMintAuthTokenOutputs{.token_id = 0};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    body.mint_auth_token().outputs = SyscallMintAuthTokenOutputs{.token_id = 0};
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kConsumeAuthToken);
@@ -454,8 +460,8 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
     outputs.unwrapped_token_id_start = 0;
     outputs.unwrapped_token_id_count = 0;
     body.consume_auth_token().outputs = std::move(outputs);
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -518,8 +524,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueInsert);
     body.retrocausal_queue_insert().inputs.key = key;
     body.retrocausal_queue_insert().inputs.queue_entry = full_entry;
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueuePeekLen);
@@ -527,8 +533,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_peek_len().outputs =
         SyscallRetrocausalQueuePeekLenOutputs{
             .len = static_cast<uint32_t>(entry_bytes.size())};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
@@ -536,8 +542,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_consume().inputs.peek = false;
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -566,30 +572,30 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
       SystemCallHandler::static_get_deploy_address(kAddr, kNonce, blob_hash);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [blob_hash, expected_addr](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        ContractAddress predicted{};
-        auto g = ctx.syscall<SyscallNo::kGetDeployAddress>(
-            static_cast<const ContractAddress *>(nullptr), kNonce, blob_hash,
-            predicted);
-        if (!g.has_value() ||
-            g.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-            predicted != expected_addr) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(0,
+              [blob_hash, expected_addr](
+                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                ContractAddress predicted{};
+                auto g = ctx.syscall<SyscallNo::kGetDeployAddress>(
+                    static_cast<const ContractAddress *>(nullptr), kNonce,
+                    blob_hash, predicted);
+                if (!g.has_value() ||
+                    g.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                    predicted != expected_addr) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        ContractAddress deployed{};
-        auto d = ctx.syscall<SyscallNo::kDeployContract>(kNonce, blob_hash,
-                                                         deployed);
-        if (!d.has_value() ||
-            d.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-            deployed != expected_addr) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        return {};
-      });
+                ContractAddress deployed{};
+                auto d =
+                    ctx.syscall<SyscallNo::kDeployContract>(kNonce, blob_hash,
+                                                            deployed);
+                if (!d.has_value() ||
+                    d.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                    deployed != expected_addr) {
+                  return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                return {};
+              });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
   NativeContext native_context(std::move(cmap));
@@ -621,8 +627,8 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
     body.get_deploy_address().inputs = std::move(inputs);
     body.get_deploy_address().outputs =
         SyscallGetDeployAddressOutputs{.to_be_deployed = expected_addr};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kDeployContract);
@@ -630,8 +636,8 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
     body.deploy_contract().inputs.contract_hash = blob_hash;
     body.deploy_contract().outputs =
         SyscallDeployContractOutputs{.deployed_address = expected_addr};
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -686,8 +692,8 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags = 0;
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kBytestringGet);
@@ -695,8 +701,8 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     SyscallBytestringGetOutputs outputs;
     outputs.bytestring.append_range(value);
     body.bytestring_get().outputs = std::move(outputs);
-    expected.push_back(make_entry(100'000, 100'000, std::move(body),
-                                  ok_status()));
+    expected.push_back(
+        make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
