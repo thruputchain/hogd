@@ -435,13 +435,12 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
                                   ok_status()));
   }
   {
-    // MintAuthToken records inputs only: no impl emplaces outputs, so the
-    // token id is deliberately absent from the trace (it reappears as the
-    // consume's input).
     SyscallTraceBody body(SyscallNo::kMintAuthToken);
     body.mint_auth_token().inputs.expiry_height = executing_height + 5;
     body.mint_auth_token().inputs.serialized_auth_token.append_range(
         serialized_node);
+    body.mint_auth_token().outputs =
+        SyscallMintAuthTokenOutputs{.token_id = 0};
     expected.push_back(make_entry(100'000, 100'000, std::move(body),
                                   ok_status()));
   }
@@ -631,6 +630,71 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
     body.deploy_contract().inputs.contract_hash = blob_hash;
     body.deploy_contract().outputs =
         SyscallDeployContractOutputs{.deployed_address = expected_addr};
+    expected.push_back(make_entry(100'000, 100'000, std::move(body),
+                                  ok_status()));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// BytestringGet follows the same truncation convention as ConsumeAuthToken
+// and RetrocausalQueueConsume: the trace records the FULL stored value while
+// the caller's undersized buffer receives the prefix and written_len reports
+// the full length.
+TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
+{
+  const StorageKeyContractData key = make_storage_key("trace_bs_key");
+  const std::array<uint8_t, 8> value = {'1', '2', '3', '4', '5', '6', '7', '8'};
+
+  auto context = make_single_contract_context(
+      [key, value](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto w = ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(value)),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!w.has_value() ||
+            w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        std::array<std::byte, 4> small_buffer{};
+        RuntimeMemoryLength written_len = 0;
+        auto g = ctx.syscall<SyscallNo::kBytestringGet>(
+            key, std::span<std::byte>(small_buffer), written_len);
+        if (!g.has_value() ||
+            g.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (written_len != value.size() ||
+            small_buffer[0] != std::byte{value[0]} ||
+            small_buffer[3] != std::byte{value[3]}) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kBytestringSet);
+    body.bytestring_set().inputs.key = key;
+    body.bytestring_set().inputs.bytestring.append_range(value);
+    body.bytestring_set().inputs.flags = 0;
+    expected.push_back(make_entry(100'000, 100'000, std::move(body),
+                                  ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kBytestringGet);
+    body.bytestring_get().inputs.key = key;
+    SyscallBytestringGetOutputs outputs;
+    outputs.bytestring.append_range(value);
+    body.bytestring_get().outputs = std::move(outputs);
     expected.push_back(make_entry(100'000, 100'000, std::move(body),
                                   ok_status()));
   }
