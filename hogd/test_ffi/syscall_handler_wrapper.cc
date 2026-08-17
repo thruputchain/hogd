@@ -258,8 +258,31 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     current_gas = gas_runtime->gas_remaining();
   }
 
+  // Every exit owes the parent's synthetic kInvoke a finish_syscall_trace();
+  // throwing ones used to skip it, leaving the parent to serialize a child
+  // Invoke that never opened a frame (#2747). Self-disarming because finishing
+  // twice trips the sentinel CHECK and aborts (#2948).
+  bool syscall_trace_pending = false;
+  auto finish_pending_trace = [&](HostFnStatus<SyscallErrorCode> status) {
+    if (syscall_trace_pending) {
+      syscall_trace_pending = false;
+      handler_.finish_syscall_trace(status, current_gas);
+    }
+  };
+  // try/catch: this runs during unwinding, where an escaping throw terminates.
+  x23::Defer complete_trace_on_unwind([&]() {
+    try {
+      finish_pending_trace(HostFnError{HostFnErrorCode::Unrecoverable});
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+    } catch (...) {
+      report_dropped_log("non-std exception completing mock kInvoke trace");
+    }
+  });
+
   if (handler_.is_running()) {
     handler_.start_syscall_trace(SyscallNo::kInvoke, current_gas);
+    syscall_trace_pending = true;
     if (auto *invoke_trace =
             handler_.get_syscall_trace_data<SyscallNo::kInvoke>()) {
       invoke_trace->inputs = SyscallInvokeInputs{
@@ -316,11 +339,12 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // until the API below can pass tokens. Only locals have been computed by this
   // point, so a refusal pushes no frame and the caller owes no finish; the
   // caller's synthetic kInvoke is traced with production's syscall error and no
-  // gas charged, matching a refused kInvoke.
+  // gas charged, matching a refused kInvoke. Closed before the error() log,
+  // which can throw.
   if (auto admitted = handler_.validate_new_invocation(
           invocation.invoked_address, frame_flags, std::span<uint32_t const>{});
       !admitted.has_value()) {
-    handler_.finish_syscall_trace(admitted.error().code(), current_gas);
+    finish_pending_trace(admitted.error().code());
     error("invalid argument: mock invocation frame not admitted: {}",
           admitted.error().code());
     return kTestFFIErrorCodeInvalidArgument;
@@ -354,10 +378,19 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
     // no backing mock runtime, #2507) and surface an unrecoverable FFI error
     // (#3058). The reserved capacity and unreleased mock_runtime above are
     // harmless.
+    // The parent is still running; close its kInvoke the way production does,
+    // via to_host_fn_error() with no gas consumed.
+    finish_pending_trace(stashed_parent_trace.error().to_host_fn_error());
     error("unrecoverable: frame admission allocation failed in "
           "start_mock_invocation_frame");
     return kTestFFIErrorCodeUnrecoverableError;
   }
+
+  // finish_mock_invocation_frame() owns the record now. Must disarm: the
+  // child's trace is active from here, and finishing against its empty
+  // system_calls trips a CHECK.
+  syscall_trace_pending = false;
+
   // Push exactly one slot per mock frame so this stack stays in lockstep with
   // the handler's invocation-frame depth, and finish_mock_invocation_frame()
   // restores only the trace the finishing frame actually stashed. The slot may
