@@ -3320,9 +3320,9 @@ TEST_F(EventRpcTest, CloseDoesNotMakeCandidatePullableBeforeCommit)
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
-  EXPECT_EQ(
-      exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 1), body)(),
-      RPCError::kRPCNone);
+  EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 1),
+                                              body)(),
+            RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
   auto result = mempool_rpc.eventsched_close_block(1, 1, proposal_txs)();
