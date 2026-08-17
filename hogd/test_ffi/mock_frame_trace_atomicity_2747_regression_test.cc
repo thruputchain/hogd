@@ -1,45 +1,19 @@
 // Regression test for issue #2747 (and its amendment, finding 002). See
 // test_ffi_test_helpers.h.
 //
-// SyscallHandlerContext::start_mock_invocation_frame() synthesizes the parent's
-// kInvoke syscall trace record by hand, because the mock frame path enters at
-// SystemCallHandler::start_frame(), below the wrap_after_parse() bracket that
-// gives production its guarantee: start_syscall_trace(), a noexcept lambda,
-// then finish_syscall_trace() -- so every record production opens is closed on
-// every path.
-//
-// The mock path had no such bracket: it closed the record on exactly one of its
-// exits, the admission refusal. Two others left it open.
-//
-//   * A std::bad_alloc from the throwing work after the append -- the
-//     SyscallInvokeInputs copy that owns the child's variable-length calldata
-//     (finding 002), the clamped Invocation copy that owns it again, the
-//     EmptyRuntime preallocation and the two stack reserve() calls (the
-//     originally reported failure point) -- unwound into
-//     open_mock_invocation_frame()'s catch, which handed the caller a
-//     structured unrecoverable FFI error.
-//   * The start_frame() admission-failure return (#3058) returned the same
-//     error directly, with no allocation failure in this function at all.
-//
-// Either way the appended record stayed behind carrying the sentinels
-// start_syscall_trace() writes for finish_syscall_trace() to overwrite
-// (gas_remaining_at_end == GasAmount max, status Unrecoverable, null outputs),
-// and finishing the parent serialized a child Invoke that never opened a frame.
-//
-// The fix routes every exit through one self-disarming helper: a Defer
-// completes the record if the stack unwinds, the two structured-error returns
-// complete it with the more specific status they have, and the success path
-// disarms once start_frame() hands responsibility to
-// finish_mock_invocation_frame(). Finishing twice is what aborts (#2948), so
-// the helper -- not the call sites -- owns whether a finish is still owed.
+// start_mock_invocation_frame() appended the parent's synthetic kInvoke record
+// and closed it on only one of its exits, the admission refusal. A throwing
+// trace-input copy or preallocation (caught by open_mock_invocation_frame())
+// and the start_frame() failure return (#3058) both left it open, so the
+// parent's later finish serialized a child Invoke that never opened a frame,
+// still carrying start_syscall_trace()'s sentinels. Every exit now runs through
+// one self-disarming helper; finishing twice is the other way to abort (#2948).
 //
 // The allocation failures themselves can only be forced with a global allocator
 // hook, which this suite deliberately does not install (see
-// noexcept_frame_trace_2644_2646_2741_regression_test.cc and
-// trace_syscall_logging_2561_2562_regression_test.cc). What is checkable here
-// is the invariant the fix establishes, on every failure return an honest
-// caller can reach deterministically: after a refused open, the parent's trace
-// holds no record still carrying the start-time sentinels.
+// noexcept_frame_trace_2644_2646_2741_regression_test.cc). What is checkable
+// here is the invariant, on every exit an honest caller reaches
+// deterministically: no record is left carrying the start-time sentinels.
 
 #include <cstddef>
 #include <cstdint>
@@ -107,12 +81,9 @@ finish_frame_and_take_trace(void *handler)
   return trace;
 }
 
-// The exact evidence #2747 reported: a record start_syscall_trace() appended
-// and finish_syscall_trace() never overwrote. Both sentinels are checked, since
-// a *finished* record may legitimately carry an Unrecoverable status, but no
-// finished record can carry GasAmount max as its end gas -- the parent frames
-// here run on a bounded budget, and finish_syscall_trace() CHECKs that it is
-// overwriting the sentinel exactly once.
+// The evidence #2747 reported. End gas is the sentinel to test: a finished
+// record may legitimately carry an Unrecoverable status, but not GasAmount max,
+// since the parent frames here run on a bounded budget.
 void
 expect_no_unfinished_records(InvocationFrameTrace const &trace)
 {
@@ -189,7 +160,6 @@ TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
 
 // An open that fails before start_mock_invocation_frame() runs at all -- the
 // serialized invocation does not parse -- must not touch the parent's trace.
-// This pins the other half of the ordering: nothing is appended speculatively.
 TEST(TestBindingsTest, UnparseableMockFrameOpenAppendsNoInvokeTrace)
 {
   auto *db = make_db();
@@ -229,11 +199,10 @@ TEST(TestBindingsTest, UnparseableMockFrameOpenAppendsNoInvokeTrace)
   expect_no_unfinished_records(trace);
 }
 
-// The success path still records what production records: the *requested* gas
-// limit and flags (captured before the parent-budget clamp and the ReadOnly
-// inheritance), and a child trace attached once the child frame finishes. The
-// reorder moved the input copy earlier; it must not have changed what is
-// copied.
+// The success path disarms the guard and still records what production records:
+// the *requested* gas limit and flags (captured before the parent-budget clamp
+// and the ReadOnly inheritance), with a child trace attached once the child
+// finishes.
 TEST(TestBindingsTest, MockFrameOpenStillTracesRequestedInvokeInputs)
 {
   auto *db = make_db();
