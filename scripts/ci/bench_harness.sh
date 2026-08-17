@@ -292,8 +292,8 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
 # both, and 3 if the signals could not be sent at all -- a host whose [killall]
-# or [sudo] is broken has not been shown to have a process refusing to die, and
-# must not be reported as though it had.
+# is broken has not been shown to have a process refusing to die, and must not
+# be reported as though it had.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
 # bare [killall <names>] hands the caller back a host where the processes have
@@ -350,11 +350,28 @@ wait_gone() {
 # die: [-q] silences killall's own "no process found", so a nonzero exit that
 # still says something is sudo or killall failing rather than an absence of
 # processes to kill.
+#
+# [sudo] is an escalation, not a requirement. The benchmark processes belong to
+# the CI user, which can signal every one of them unaided; the sudo attempt is
+# only there for one left behind under another account. Treating a host with no
+# passwordless sudo as unsignallable gave up before a single signal had been
+# sent, so on those hosts the reap became a no-op that still reported itself as
+# tolerated -- and the stale processes it exists to clear, along with the ports
+# they hold, were handed straight to the next benchmark step. Fall back to an
+# unprivileged [killall] and fail only when that cannot signal either.
 signal_all() {
   err=\$(sudo -n /usr/bin/killall -q "-\$1" \$procs 2>&1)
   status=\$?
+  if [ "\$status" -eq 0 ] || [ -z "\$err" ]; then
+    return 0
+  fi
+  sudo_err=\$err
+
+  err=\$(killall -q "-\$1" \$procs 2>&1)
+  status=\$?
   if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
+    echo "cannot signal processes: \$sudo_err" >&2
+    echo "cannot signal processes unprivileged either: \$err" >&2
     return 1
   fi
   return 0
