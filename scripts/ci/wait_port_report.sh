@@ -116,7 +116,14 @@ wait_control_log_marker() {
 
     echo "Waiting for $wanted_label to report: $marker" >&2
     if ! line=$(remote_run "$host" "$poll_command"); then
-      echo "Timed out after ${timeout_sec}s waiting for $wanted_label to report: $marker" >&2
+      # A wait with no deadline can still end without the marker, when the host
+      # it is watching goes away. Saying it timed out after 0s would name a
+      # deadline that was never set.
+      if [ "$timeout_sec" -eq 0 ]; then
+        echo "Stopped waiting for $wanted_label to report: $marker" >&2
+      else
+        echo "Timed out after ${timeout_sec}s waiting for $wanted_label to report: $marker" >&2
+      fi
       replay_control_log "$host" "$label" "$stdout_path" "$stderr_path"
       return 1
     fi

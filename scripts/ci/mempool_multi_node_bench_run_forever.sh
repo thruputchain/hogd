@@ -484,10 +484,26 @@ done
 # that ends it early, and the marker is how that becomes visible here.
 await_mempool() {
   local label=$1
+  local status
 
-  if ! wait_control_log_marker "$label" "$MEMPOOL_DONE_MARKER" 0 >/dev/null; then
+  if ! status=$(wait_control_log_marker "$label" "$MEMPOOL_DONE_MARKER" 0); then
     echo "$label never reported that it had stopped" >&2
     return 1
+  fi
+
+  if [[ ! $status =~ ^[0-9]+$ ]]; then
+    echo "$label reported an unreadable exit status: [$status]" >&2
+    replay_control_log_for_label "$label"
+    return 1
+  fi
+
+  # A mempool that stopped on its own has ended a run that was supposed to
+  # outlive it, so its status is the run's status rather than something to
+  # note in passing.
+  if [ "$status" -ne 0 ]; then
+    echo "$label $(ci_describe_exit_status "$status")" >&2
+    replay_control_log_for_label "$label"
+    return "$status"
   fi
   echo "$label wait completed"
 }

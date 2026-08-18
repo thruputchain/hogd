@@ -208,6 +208,18 @@ wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 0 2>&1
 ') && status=0 || status=$?
 expect_contains 'zero deadline waits without one' 'timeout 0s' "$out"
 
+# A wait with no deadline that ends anyway -- its host went away -- must not
+# blame a deadline that was never set.
+out=$(REMOTE_RUN_FAILS=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 0 2>&1
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'undeadlined wait that ends' 1 "$status"
+expect_contains 'undeadlined wait says it stopped' \
+  'Stopped waiting for node0_mempool to report' "$out"
+expect_lacks 'undeadlined wait claims no timeout' 'Timed out after 0s' "$out"
+
 # A wait that times out names the process, replays its log, and still ends the
 # script rather than yielding a status the process never reported.
 out=$(REMOTE_RUN_FAILS=1 run_case '
