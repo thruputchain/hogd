@@ -71,7 +71,7 @@ public:
   }
 
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
-  schedgateway_lookup_tx(SignedTransactionHashBatch tx_hashes)
+  schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
   }

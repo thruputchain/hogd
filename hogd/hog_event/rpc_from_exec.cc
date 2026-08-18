@@ -75,7 +75,7 @@ EventExecRpc::eventexecutor_emit_event(BlockID block_id,
 }
 
 x23::Async<RPCError>
-EventExecRpc::eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
+EventExecRpc::eventexecutor_report_tx_failure(TransactionHash tx_hash,
                                               TxFailureDiagnostic diag)
 {
   ctx_.enqueue_tx_failure(std::move(tx_hash), std::move(diag));

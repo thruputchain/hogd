@@ -32,8 +32,7 @@ public:
     co_return IndexerBlockExplorerIntroOutcome::IntroSuccess;
   }
 
-  x23::Async<TxInfoResult>
-  get_transaction_info(const SignedTransactionHash &tx_hash)
+  x23::Async<TxInfoResult> get_transaction_info(const TransactionHash &tx_hash)
   {
     // Careful! If we change this function to use [co_await], but sure to copy
     // the [tx_hash] parameter above rather than keep it as a reference.

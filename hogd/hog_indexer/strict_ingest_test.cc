@@ -79,7 +79,7 @@ TxEventLog
 make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
 {
   TxEventLog log;
-  log.proposed_tx_hash = sha256(body.signed_tx.tx);
+  log.tx_hash = sha256(body.signed_tx.tx);
   if (emitter_fill) {
     TxEmittedEvent event;
     std::ranges::fill(event.contract_address, *emitter_fill);
@@ -92,7 +92,7 @@ make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &canonical_bodies)
 {
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : canonical_bodies) {
     hashes.push_back(sha256(body.signed_tx.tx));
@@ -400,7 +400,7 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
   ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
-  const SignedTransactionHash eventless_hash = sha256(eventless.signed_tx.tx);
+  const TransactionHash eventless_hash = sha256(eventless.signed_tx.tx);
   auto record = db_->get_tx_record(eventless_hash);
   ASSERT_TRUE(record.has_value());
   EXPECT_TRUE(record->events.events.empty());
@@ -491,7 +491,7 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   expect_conflict(body_conflict);
 
   IndexerCommittedBlock event_conflict = valid;
-  event_conflict.payload.event_logs[0].proposed_tx_hash[0] ^= 1;
+  event_conflict.payload.event_logs[0].tx_hash[0] ^= 1;
   event_conflict.payload.consensus_value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(event_conflict.payload.event_logs);
   refresh_identity(event_conflict);
@@ -762,8 +762,8 @@ TEST_F(StrictIndexerTest, AtomicBatchNeverMakesOnePointRowVisibleAlone)
   for (uint64_t i = 0; i < 256; ++i) {
     bodies.push_back(make_body(100 + i, static_cast<uint8_t>(i)));
   }
-  const SignedTransactionHash first_hash = sha256(bodies.front().signed_tx.tx);
-  const SignedTransactionHash last_hash = sha256(bodies.back().signed_tx.tx);
+  const TransactionHash first_hash = sha256(bodies.front().signed_tx.tx);
+  const TransactionHash last_hash = sha256(bodies.back().signed_tx.tx);
   IndexerCommittedBlock block =
       make_block(1, origin.first_prev_hash, std::move(bodies));
   std::atomic<bool> done = false;

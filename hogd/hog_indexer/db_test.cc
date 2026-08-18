@@ -108,7 +108,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   std::ranges::fill(contract_addr2, 0xBB);
 
   TxEventLog event_log1;
-  event_log1.proposed_tx_hash = tx_hash1;
+  event_log1.tx_hash = tx_hash1;
   TxEmittedEvent event1;
   event1.contract_address = contract_addr1;
   event1.num_topics = 0;
@@ -117,7 +117,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   event_log1.events.push_back(event1);
 
   TxEventLog event_log2;
-  event_log2.proposed_tx_hash = tx_hash2;
+  event_log2.tx_hash = tx_hash2;
   TxEmittedEvent event2;
   event2.contract_address = contract_addr2;
   event2.num_topics = 1;
@@ -135,7 +135,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   auto lookup1 = db->get_tx_events(tx_hash1);
   ASSERT_TRUE(lookup1.has_value());
   EXPECT_EQ(lookup1->first, block_height);
-  EXPECT_EQ(lookup1->second.proposed_tx_hash, tx_hash1);
+  EXPECT_EQ(lookup1->second.tx_hash, tx_hash1);
   EXPECT_EQ(lookup1->second.events.size(), 1);
   EXPECT_EQ(lookup1->second.events[0].contract_address, contract_addr1);
 
@@ -143,7 +143,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   auto lookup2 = db->get_tx_events(tx_hash2);
   ASSERT_TRUE(lookup2.has_value());
   EXPECT_EQ(lookup2->first, block_height);
-  EXPECT_EQ(lookup2->second.proposed_tx_hash, tx_hash2);
+  EXPECT_EQ(lookup2->second.tx_hash, tx_hash2);
   EXPECT_EQ(lookup2->second.events.size(), 1);
   EXPECT_EQ(lookup2->second.events[0].contract_address, contract_addr2);
 
@@ -247,11 +247,11 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
 
   // Block 10: one event; block 11: two events.
   TxEventLog event_log1;
-  event_log1.proposed_tx_hash = tx1;
+  event_log1.tx_hash = tx1;
   event_log1.events.push_back(make_event(addr, 0, 0));
 
   TxEventLog event_log2;
-  event_log2.proposed_tx_hash = tx2;
+  event_log2.tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
   event_log2.events.push_back(make_event(addr, 0, 0));
 
@@ -288,11 +288,11 @@ TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
   std::ranges::fill(tx2, 0x02);
 
   TxEventLog event_log1;
-  event_log1.proposed_tx_hash = tx1;
+  event_log1.tx_hash = tx1;
   event_log1.events.push_back(make_event(addr, 0, 0));
 
   TxEventLog event_log2;
-  event_log2.proposed_tx_hash = tx2;
+  event_log2.tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log1}, {}));
@@ -323,7 +323,7 @@ TEST_F(IndexDBTest, GetEventsPaginationWithCursor)
     SHA256Hash tx;
     std::ranges::fill(tx, 0x10 + i);
     TxEventLog log;
-    log.proposed_tx_hash = tx;
+    log.tx_hash = tx;
     log.events.push_back(make_event(addr, 0, 0));
     ASSERT_TRUE(db->consume_events(10 + i, std::vector{log}, {}));
   }
@@ -388,7 +388,7 @@ TEST_F(IndexDBTest, GetEventsTopicFilterPartialMatch)
   // Filter specifies topic0 == 0x20 only.  ev[1] should match (even
   // though it has extra topics); ev[0] should NOT (topic0 differs).
   TxEventLog log;
-  log.proposed_tx_hash = tx;
+  log.tx_hash = tx;
   log.events.push_back(make_event(addr, 1, 0x10));
   log.events.push_back(make_event(addr, 3, 0x20));
   ASSERT_TRUE(db->consume_events(5, std::vector{log}, {}));
@@ -445,7 +445,7 @@ TEST_F(IndexDBTest, GetEventsOrAcrossFilters)
   SHA256Hash tx;
   std::ranges::fill(tx, 0x01);
   TxEventLog log;
-  log.proposed_tx_hash = tx;
+  log.tx_hash = tx;
   log.events.push_back(make_event_manual(2, {0x55, 0x42}));       // ev[0]
   log.events.push_back(make_event_manual(3, {0x10, 0x42, 0x99})); // ev[1]
   log.events.push_back(make_event_manual(3, {0x10, 0x99, 0x42})); // ev[2]
@@ -492,7 +492,7 @@ TEST_F(IndexDBTest, GetEventsDedupContractAcrossFilters)
   std::ranges::fill(tx, 0x01);
 
   TxEventLog log;
-  log.proposed_tx_hash = tx;
+  log.tx_hash = tx;
   log.events.push_back(make_event(addr, 0, 0));
   ASSERT_TRUE(db->consume_events(1, std::vector{log}, {}));
 
@@ -553,7 +553,7 @@ TEST_F(IndexDBTest, GetEventsAnchorAtHeightInclusive)
     SHA256Hash tx;
     std::ranges::fill(tx, static_cast<uint8_t>(h));
     TxEventLog log;
-    log.proposed_tx_hash = tx;
+    log.tx_hash = tx;
     log.events.push_back(make_event(addr, 0, 0));
     ASSERT_TRUE(db->consume_events(h, std::vector{log}, {}));
   }
@@ -591,14 +591,14 @@ TEST_F(IndexDBTest, GetEventsMultiContractInOneTx)
 
   // First tx: two events, both from contract1.
   TxEventLog event_log1;
-  event_log1.proposed_tx_hash = tx_hash1;
+  event_log1.tx_hash = tx_hash1;
   event_log1.events.push_back(make_event(contract_addr1, 0, 0));
   event_log1.events.push_back(make_event(contract_addr1, 2, 0));
 
   // Second tx: one event from contract1 (seq 0), one from
   // contract2 (seq 1) — interleaved within the same TxEventLog.
   TxEventLog event_log2;
-  event_log2.proposed_tx_hash = tx_hash2;
+  event_log2.tx_hash = tx_hash2;
   event_log2.events.push_back(make_event(contract_addr1, 1, 0));
   event_log2.events.push_back(make_event(contract_addr2, 0, 0));
 
@@ -614,13 +614,13 @@ TEST_F(IndexDBTest, GetEventsMultiContractInOneTx)
                    BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
     ASSERT_TRUE(page.has_value());
     ASSERT_EQ(page->events.size(), 3);
-    EXPECT_EQ(page->events[0].proposed_tx_hash, tx_hash1);
+    EXPECT_EQ(page->events[0].tx_hash, tx_hash1);
     EXPECT_EQ(page->events[0].sequence_number, 0);
     EXPECT_EQ(page->events[0].emitted_event.contract_address, contract_addr1);
-    EXPECT_EQ(page->events[1].proposed_tx_hash, tx_hash1);
+    EXPECT_EQ(page->events[1].tx_hash, tx_hash1);
     EXPECT_EQ(page->events[1].sequence_number, 1);
     EXPECT_EQ(page->events[1].emitted_event.contract_address, contract_addr1);
-    EXPECT_EQ(page->events[2].proposed_tx_hash, tx_hash2);
+    EXPECT_EQ(page->events[2].tx_hash, tx_hash2);
     EXPECT_EQ(page->events[2].sequence_number, 0);
     EXPECT_EQ(page->events[2].emitted_event.contract_address, contract_addr1);
   }
@@ -635,7 +635,7 @@ TEST_F(IndexDBTest, GetEventsMultiContractInOneTx)
                    BlockAnchor(BlockAnchorKind::AnchorAtBeginning)));
     ASSERT_TRUE(page.has_value());
     ASSERT_EQ(page->events.size(), 1);
-    EXPECT_EQ(page->events[0].proposed_tx_hash, tx_hash2);
+    EXPECT_EQ(page->events[0].tx_hash, tx_hash2);
     EXPECT_EQ(page->events[0].sequence_number, 1);
     EXPECT_EQ(page->events[0].emitted_event.contract_address, contract_addr2);
   }
@@ -668,7 +668,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   SHA256Hash tx;
   std::ranges::fill(tx, 0x01);
   TxEventLog log;
-  log.proposed_tx_hash = tx;
+  log.tx_hash = tx;
   log.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(42, std::vector{log}, {}));
@@ -679,7 +679,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   SHA256Hash tx2;
   std::ranges::fill(tx2, 0x02);
   TxEventLog event_log2;
-  event_log2.proposed_tx_hash = tx2;
+  event_log2.tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}, {}));
   EXPECT_EQ(db->latest_block(), 42);
@@ -695,7 +695,7 @@ TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
   SHA256Hash tx_low;
   std::ranges::fill(tx_low, 0x10);
   TxEventLog log_low;
-  log_low.proposed_tx_hash = tx_low;
+  log_low.tx_hash = tx_low;
   log_low.events.push_back(make_event(addr_low, 0, 0));
 
   // High address, low block.
@@ -704,7 +704,7 @@ TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
   SHA256Hash tx_high;
   std::ranges::fill(tx_high, 0x20);
   TxEventLog log_high;
-  log_high.proposed_tx_hash = tx_high;
+  log_high.tx_hash = tx_high;
   log_high.events.push_back(make_event(addr_high, 0, 0));
 
   {
@@ -726,7 +726,7 @@ TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
   SHA256Hash tx_next;
   std::ranges::fill(tx_next, 0x30);
   TxEventLog log_next;
-  log_next.proposed_tx_hash = tx_next;
+  log_next.tx_hash = tx_next;
   log_next.events.push_back(make_event(addr_low, 0, 0));
   ASSERT_TRUE(db->consume_events(102, std::vector{log_next}, {}));
   EXPECT_EQ(db->latest_block(), 102);
@@ -759,11 +759,11 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
   std::ranges::fill(tx2, 0x02);
 
   TxEventLog event_log1;
-  event_log1.proposed_tx_hash = tx1;
+  event_log1.tx_hash = tx1;
   event_log1.events.push_back(make_event(addr, 0, 0));
 
   TxEventLog event_log2;
-  event_log2.proposed_tx_hash = tx2;
+  event_log2.tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(5, std::vector{event_log1}, {}));
@@ -803,7 +803,7 @@ TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
   std::ranges::fill(tx1, 0x01);
 
   TxEventLog event_log;
-  event_log.proposed_tx_hash = tx1;
+  event_log.tx_hash = tx1;
   event_log.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log}, {}));
@@ -827,7 +827,7 @@ log_with_tx(ContractAddress const &addr, uint8_t fill)
   SHA256Hash tx;
   std::ranges::fill(tx, fill);
   TxEventLog log;
-  log.proposed_tx_hash = tx;
+  log.tx_hash = tx;
   log.events.push_back(make_event(addr, 0, 0));
   return log;
 }
@@ -1010,11 +1010,11 @@ TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
     ASSERT_TRUE(db.has_value());
 
     TxEventLog at_10;
-    at_10.proposed_tx_hash = tx;
+    at_10.tx_hash = tx;
     at_10.events.push_back(make_event(addr_c, 0, 0));
 
     TxEventLog at_11;
-    at_11.proposed_tx_hash = tx;
+    at_11.tx_hash = tx;
     at_11.events.push_back(make_event(addr_d, 0, 0));
 
     ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));

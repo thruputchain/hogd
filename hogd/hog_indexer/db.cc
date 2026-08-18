@@ -108,7 +108,7 @@ create_tx_index_sst_chunk(
                  serialized.size());
 
     // Index by transaction (in tx_index column family)
-    IndexerKeyFormat::make_tx_key(key_buffer, event_log.proposed_tx_hash);
+    IndexerKeyFormat::make_tx_key(key_buffer, event_log.tx_hash);
     entries.emplace_back(key_buffer, value);
   }
 
@@ -175,9 +175,11 @@ create_contract_index_sst_chunk(
 
     uint32_t sequence_number = 0;
     for (const auto &emitted_event : event_log.events) {
-      IndexerKeyFormat::make_contract_key(
-          key_buffer, emitted_event.contract_address, IndexerKeyFormat::kEvent,
-          block_height, event_log.proposed_tx_hash, sequence_number);
+      IndexerKeyFormat::make_contract_key(key_buffer,
+                                          emitted_event.contract_address,
+                                          IndexerKeyFormat::kEvent,
+                                          block_height, event_log.tx_hash,
+                                          sequence_number);
       entries.emplace_back(key_buffer, empty_string);
       sequence_number++;
     }
@@ -190,8 +192,7 @@ create_contract_index_sst_chunk(
           bodies_chunk[i].signed_tx.tx.invocation.invoked_address;
       IndexerKeyFormat::make_contract_key(key_buffer, root_addr,
                                           IndexerKeyFormat::kRootTx,
-                                          block_height,
-                                          event_log.proposed_tx_hash, 0);
+                                          block_height, event_log.tx_hash, 0);
       entries.emplace_back(key_buffer, empty_string);
     }
   }
@@ -1289,7 +1290,7 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     for (size_t i = 0; i < events.size(); ++i) {
       const TxEventLog &event_log = events[i];
       const ProposedTransaction &body = bodies[i];
-      IndexerKeyFormat::make_tx_key(key, event_log.proposed_tx_hash);
+      IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
 
       std::string existing;
       const rocksdb::Status existing_status =
@@ -1312,13 +1313,13 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
       for (const TxEmittedEvent &emitted_event : event_log.events) {
         IndexerKeyFormat::make_contract_key(key, emitted_event.contract_address,
                                             IndexerKeyFormat::kEvent, height,
-                                            event_log.proposed_tx_hash,
+                                            event_log.tx_hash,
                                             sequence_number++);
         batch.Put(contract_cf_handle_, key, rocksdb::Slice());
       }
       IndexerKeyFormat::make_contract_key(
           key, body.signed_tx.tx.invocation.invoked_address,
-          IndexerKeyFormat::kRootTx, height, event_log.proposed_tx_hash, 0);
+          IndexerKeyFormat::kRootTx, height, event_log.tx_hash, 0);
       batch.Put(contract_cf_handle_, key, rocksdb::Slice());
     }
 
@@ -2078,7 +2079,7 @@ IndexDB::get_events(EventQuery const &query) const
 
     if (matched) {
       IdentifiedEvent ev;
-      ev.proposed_tx_hash = win_pos.tx;
+      ev.tx_hash = win_pos.tx;
       ev.block_height = win_pos.block;
       ev.sequence_number = win_pos.seq;
       ev.emitted_event = emitted_event;

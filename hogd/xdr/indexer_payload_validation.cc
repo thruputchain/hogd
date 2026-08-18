@@ -40,7 +40,7 @@ validate_indexer_canonical_proposal_mapping(
     const ProposalTxs &proposal_txs, const TxEventLogBatch &event_logs,
     const ProposedTransactionBatch &tx_bodies)
 {
-  x23::XdrVec<SignedTransactionHash> canonical_hashes;
+  x23::XdrVec<TransactionHash> canonical_hashes;
   x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
   if (!(co_await parallel_batch_to_t(proposal_txs.hash, canonical_hashes)) ||
       !(co_await parallel_batch_to_t(proposal_txs.nondeterministic_data,
@@ -57,9 +57,9 @@ validate_indexer_canonical_proposal_mapping(
         "canonical proposal and event/body batch cardinalities differ");
   }
 
-  std::unordered_set<SignedTransactionHash, SipHash24Hasher> canonical;
+  std::unordered_set<TransactionHash, SipHash24Hasher> canonical;
   canonical.reserve(canonical_hashes.size());
-  for (const SignedTransactionHash &hash : canonical_hashes) {
+  for (const TransactionHash &hash : canonical_hashes) {
     if (!canonical.insert(hash).second) {
       co_return std::unexpected(
           "canonical ProposalTxs contains duplicate hashes");
@@ -67,8 +67,8 @@ validate_indexer_canonical_proposal_mapping(
   }
 
   for (size_t i = 0; i < tx_bodies.size(); ++i) {
-    const SignedTransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
-    if (body_hash != event_logs[i].proposed_tx_hash) {
+    const TransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
+    if (body_hash != event_logs[i].tx_hash) {
       co_return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
@@ -103,12 +103,12 @@ compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs)
 x23::Async<IndexerPayloadStatus<TxsHash>>
 compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs)
 {
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   if (!(co_await parallel_batch_to_t(proposal_txs.hash, hashes))) {
     co_return std::unexpected("malformed canonical transaction hash batch");
   }
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
-  for (const SignedTransactionHash &hash : hashes) {
+  for (const TransactionHash &hash : hashes) {
     if (!trie.insert(HexArray(hash), std::span<const std::byte>())) {
       co_return std::unexpected(
           "canonical transaction hash batch has duplicates");

@@ -88,7 +88,7 @@ TxEventLog
 make_event(const ProposedTransaction &body, uint8_t marker)
 {
   TxEventLog event;
-  event.proposed_tx_hash = sha256(body.signed_tx.tx);
+  event.tx_hash = sha256(body.signed_tx.tx);
   TxEmittedEvent emitted;
   emitted.contract_address[0] = marker;
   emitted.serialized_event.push_back(marker);
@@ -99,14 +99,14 @@ make_event(const ProposedTransaction &body, uint8_t marker)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &bodies)
 {
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : bodies) {
     hashes.push_back(sha256(body.signed_tx.tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(x23::span<const SignedTransactionHash>(hashes),
+  append_to_parallel_batch(x23::span<const TransactionHash>(hashes),
                            proposal_txs.hash)();
   append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                nondeterministic_data),
@@ -649,7 +649,7 @@ TEST_F(EventRpcTest, TxFailureMailboxDrainsIsBoundedAndDoesNotBlockIngress)
   diag.attempt_height = 42;
   diag.conflict.code = DbConflictCode::kDbConflictReplayProtection;
   for (size_t i = 0; i < EventRPCContext::kMaxTxFailureNotices + 32; ++i) {
-    SignedTransactionHash tx_hash{};
+    TransactionHash tx_hash{};
     tx_hash[0] = static_cast<uint8_t>(i);
     ASSERT_EQ(exec_rpc.eventexecutor_report_tx_failure(tx_hash, diag)(),
               RPCError::kRPCNone);

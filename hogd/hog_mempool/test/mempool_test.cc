@@ -147,7 +147,7 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
-  SignedTransactionHashBatch hashes;
+  TransactionHashBatch hashes;
   hashes.resize(2);
 
   auto result = coordinator.schedcoord_lookup_transactions(hashes)();
@@ -626,7 +626,7 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     EXPECT_TRUE(
         parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
 
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
@@ -752,7 +752,7 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
     EXPECT_TRUE(
         parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
 
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
@@ -852,7 +852,7 @@ TEST(Mempool, Propose)
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
                             tx_hashes)());
@@ -889,14 +889,14 @@ TEST(Mempool, NominateBatch)
     std::set<SignedTransaction> txs_set(txs.begin(), txs.end());
     EXPECT_EQ(parsed_txs_set, txs_set);
 
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), txs.size());
-    std::set<SignedTransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
-                                                         tx_hashes.end());
-    std::set<SignedTransactionHash> tx_hashes_set;
+    std::set<TransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
+                                                   tx_hashes.end());
+    std::set<TransactionHash> tx_hashes_set;
     for (const SignedTransaction &tx : txs) {
       EXPECT_TRUE(tx_hashes_set.insert(sha256(tx.tx)).second);
     }
@@ -986,7 +986,7 @@ TEST(Mempool, NominateTxWithError)
     EXPECT_TRUE(
         parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
 
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
@@ -1082,7 +1082,7 @@ TEST(Mempool, NominateCommit)
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(
         res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
@@ -1144,7 +1144,7 @@ TEST(Mempool, NewlyDeployedContractHogCount)
   ASSERT_EQ(parsed_txs.size(), 1UL);
   EXPECT_EQ(parsed_txs[0], tx);
 
-  SignedTransactionHashBatch tx_hashes;
+  TransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
       res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
   ASSERT_EQ(tx_hashes.size(), 1UL);
@@ -1242,7 +1242,7 @@ TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
 {
   MempoolTestInfra server;
 
-  SignedTransactionHashBatch tx_hashes{SignedTransactionHash{}};
+  TransactionHashBatch tx_hashes{TransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 
@@ -1276,8 +1276,7 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
 {
   MempoolTestInfra server;
 
-  SignedTransactionHashBatch tx_hashes{SignedTransactionHash{},
-                                       SignedTransactionHash{}};
+  TransactionHashBatch tx_hashes{TransactionHash{}, TransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 
@@ -1472,7 +1471,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
   Proposal proposal = res_nominate.proposed_block().proposal;
   proposal.header.block_height++;
   {
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -1527,7 +1526,7 @@ TEST(Mempool, ValidateBatchMissingTx)
   Proposal proposal = res_nominate.proposed_block().proposal;
   proposal.header.block_height++;
   {
-    SignedTransactionHashBatch tx_hashes;
+    TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -1661,7 +1660,7 @@ TEST(Mempool, ProposalUsesTransactionRoot)
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  SignedTransactionHashBatch tx_hashes;
+  TransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
   EXPECT_EQ(proposal.header.txs_hash,
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
@@ -2094,7 +2093,7 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
                                auth_data);
 
   txs[0].tx.auth_claim = make_sign_claim(0);
-  const SignedTransactionHash tx_hash = sha256(txs[0].tx);
+  const TransactionHash tx_hash = sha256(txs[0].tx);
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -2105,7 +2104,7 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-    SignedTransactionHashBatch tx_hashes{tx_hash};
+    TransactionHashBatch tx_hashes{tx_hash};
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
         NondeterministicProposalData{}};
     Proposal proposal{
@@ -2318,10 +2317,10 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
   ASSERT_EQ(parsed_txs.size(), 1UL);
   ASSERT_TRUE(parsed_txs[0] == txs[0] || parsed_txs[0] == txs[1]);
 
-  const SignedTransactionHash tx0_hash = sha256(txs[0].tx);
-  const SignedTransactionHash tx1_hash = sha256(txs[1].tx);
+  const TransactionHash tx0_hash = sha256(txs[0].tx);
+  const TransactionHash tx1_hash = sha256(txs[1].tx);
 
-  SignedTransactionHashBatch tx_hashes;
+  TransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
       res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
   ASSERT_EQ(tx_hashes.size(), 1UL);
@@ -2333,8 +2332,8 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
       tx_nondeterministic_data)());
   EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
 
-  const SignedTransactionHash included_hash = tx_hashes[0];
-  const SignedTransactionHash sibling_hash =
+  const TransactionHash included_hash = tx_hashes[0];
+  const TransactionHash sibling_hash =
       included_hash == tx0_hash ? tx1_hash : tx0_hash;
 
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);

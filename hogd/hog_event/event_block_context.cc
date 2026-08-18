@@ -370,22 +370,22 @@ EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
     });
   }
 
-  x23::XdrVec<SignedTransactionHash> canonical_hashes;
+  x23::XdrVec<TransactionHash> canonical_hashes;
   CHECK(co_await parallel_batch_to_t(payload.proposal_txs.hash,
                                      canonical_hashes));
   CHECK_EQ(canonical_hashes.size(), pairs.size());
 
-  std::unordered_map<SignedTransactionHash, size_t, SipHash24Hasher> by_hash;
+  std::unordered_map<TransactionHash, size_t, SipHash24Hasher> by_hash;
   by_hash.reserve(pairs.size());
   for (size_t i = 0; i < pairs.size(); ++i) {
-    const SignedTransactionHash body_hash = sha256(pairs[i].body.signed_tx.tx);
-    CHECK_EQ(body_hash, pairs[i].event.proposed_tx_hash);
+    const TransactionHash body_hash = sha256(pairs[i].body.signed_tx.tx);
+    CHECK_EQ(body_hash, pairs[i].event.tx_hash);
     CHECK(by_hash.emplace(body_hash, i).second);
   }
 
   payload.event_logs.reserve(pairs.size());
   payload.tx_bodies.reserve(pairs.size());
-  for (const SignedTransactionHash &hash : canonical_hashes) {
+  for (const TransactionHash &hash : canonical_hashes) {
     auto it = by_hash.find(hash);
     CHECK(it != by_hash.end());
     detail::EventWithBody &pair = pairs[it->second];

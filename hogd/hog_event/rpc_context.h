@@ -74,7 +74,7 @@ public:
   x23::Async<EventIndexerPullResult>
   pull_indexer_next(const EventIndexerPullRequest &request);
 
-  void enqueue_tx_failure(SignedTransactionHash tx_hash,
+  void enqueue_tx_failure(TransactionHash tx_hash,
                           TxFailureDiagnostic diagnostic);
   IndexerTxFailureNoticeBatch pull_tx_failures();
 
