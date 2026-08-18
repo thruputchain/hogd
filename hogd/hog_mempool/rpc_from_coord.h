@@ -309,6 +309,9 @@ public:
     last_committed_block_ = db_res.db_tip();
     CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
     CHECK_EQ(last_committed_block_.id, 0UL);
+    Registration::registration().publish_event_canonical_tip(
+        EventCanonicalTip{.block_id = last_committed_block_.id,
+                          .consensus_value = last_committed_block_.value});
     scheduler_->set_current_block(0);
     co_await Health::instance().set_current_block_height(0);
     MempoolMetrics::instance().current_block_height.record(0);

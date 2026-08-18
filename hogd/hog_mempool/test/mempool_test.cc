@@ -616,14 +616,14 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
@@ -666,7 +666,8 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
@@ -742,14 +743,14 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
@@ -792,7 +793,8 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
@@ -976,14 +978,14 @@ TEST(Mempool, NominateTxWithError)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
@@ -1026,7 +1028,8 @@ TEST(Mempool, NominateTxWithError)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, BlockHeightsIncrement)
@@ -1039,14 +1042,14 @@ TEST(Mempool, BlockHeightsIncrement)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     auto res_commit =
         commit_block(server, db_tip, res_nominate.proposed_block());
@@ -1056,7 +1059,8 @@ TEST(Mempool, BlockHeightsIncrement)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, NominateCommit)
@@ -1230,7 +1234,7 @@ TEST(Mempool, Validate)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1329,7 +1333,7 @@ TEST(Mempool, ValidateBatch)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -1371,7 +1375,7 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    ASSERT_EQ(db_tip.value.proposal_header.block_height, 1);
+    ASSERT_EQ(db_tip.value.proposal_header.block_height, 2);
   }
 
   // Submit the same tx again so that hog_db detects the duplicate tx and
@@ -1433,7 +1437,7 @@ TEST(Mempool, ValidateWrongTxsHash)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
     proposal.header.txs_hash[0] ^= 0xff;
   }
@@ -1480,7 +1484,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
     // Remove a transaction from the proposal.
     tx_hashes.pop_back();
@@ -1535,7 +1539,7 @@ TEST(Mempool, ValidateBatchMissingTx)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
   }
 
   // Remove a transaction.
@@ -1580,7 +1584,7 @@ TEST(Mempool, ValidateCommit)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1895,7 +1899,7 @@ TEST(Mempool, ValidateTwo)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1916,7 +1920,7 @@ TEST(Mempool, ValidateTwo)
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
   res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
@@ -1928,7 +1932,7 @@ TEST(Mempool, ValidateTwo)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1945,7 +1949,7 @@ TEST(Mempool, ValidateTwo)
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.id, res_validate.block().block_id);
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 3);
 }
 
 TEST(Mempool, GetTip)
@@ -1959,7 +1963,7 @@ TEST(Mempool, GetTip)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   auto event_tip = Registration::registration().event_canonical_tip();
   if (!event_tip.has_value()) {
     ADD_FAILURE() << "Event canonical tip was not published";
@@ -1987,7 +1991,7 @@ TEST(Mempool, GetTip)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   // The nominated block above also contains [txs[0]], we did not commit the
   // block, so [txs[0]] should not be detected as a duplicate.
@@ -2002,7 +2006,7 @@ TEST(Mempool, GetTip)
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
 
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
@@ -2012,7 +2016,7 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.id, res_validate.block().block_id);
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
   event_tip = Registration::registration().event_canonical_tip();
   if (!event_tip.has_value()) {
     ADD_FAILURE() << "Event canonical tip was not updated";
@@ -2280,7 +2284,7 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
   ASSERT_EQ(pending_proposal.wait_for(std::chrono::seconds(5)),
             std::future_status::ready);
   EXPECT_EQ(pending_proposal.get().outcome(),
-            SchedulerProposalOutcome::SchedulerProposalOK);
+            SchedulerProposalOutcome::SchedulerProposalError);
 }
 
 TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
@@ -2306,6 +2310,7 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
+  server.register_runtime_after_genesis();
 
   const SchedulerGetTipResult parent =
       server.mempool_coord_rpc().schedcoord_get_tip()();
@@ -2348,7 +2353,13 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
 
 TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
 {
-  MempoolTestInfra server;
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  GenesisConfigurationBuilder builder;
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
+                builder.build_or_panic(
+                    StorageCostModel::default_cost_model()))(),
+            DbSchedResult::DbSchedResultOK);
+  server.register_runtime_after_genesis();
 
   const SchedulerGetTipResult parent =
       server.mempool_coord_rpc().schedcoord_get_tip()();

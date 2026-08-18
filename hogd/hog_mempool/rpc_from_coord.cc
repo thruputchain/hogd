@@ -1722,10 +1722,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   }
   GenesisCeremonyResult committed(
       GenesisCeremonyOutcome::GenesisCeremonyCommitted);
-  committed.commit() = {
-      .db_tip = last_committed_block_,
-      .proposal_txs = std::move(committed_proposal_txs),
-  };
+  // Assign the generated union arm's members directly.  Building an aggregate
+  // temporary here and then move-assigning it leaves its nested XDR vectors in
+  // an invalid state with some compiler/optimization combinations, and the
+  // temporary crashes while being destroyed as the coroutine returns.
+  committed.commit().db_tip = last_committed_block_;
+  committed.commit().proposal_txs = std::move(committed_proposal_txs);
   co_return committed;
 }
 

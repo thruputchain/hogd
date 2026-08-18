@@ -104,14 +104,33 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   register_coordinator_with_mempool()();
 
   if (!skip_genesis_block) {
+    const StorageCostModel cost_model = StorageCostModel::default_cost_model();
     GenesisConfigurationBuilder builder;
+    auto root_contract = load_stock_genesis_root_contract();
     CHECK_EQ(
-        mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
-            builder.build_or_panic(StorageCostModel::default_cost_model()))(),
+        mempool_coord_server_->impl()->schedcoord_load_genesis_configuration_v2(
+            builder.build_v2(kNetworkHash, cost_model, *root_contract))(),
         DbSchedResult::DbSchedResultOK);
     register_event_with_mempool();
     register_executor_with_mempool();
     mempool_coord_server_->impl()->finish_runtime_init()();
+
+    const SchedulerGetTipResult parent =
+        mempool_coord_server_->impl()->schedcoord_get_tip()();
+    CHECK_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    SignedTransactionBatch ceremony_txs;
+    ceremony_txs.append_range(
+        builder.make_genesis_ceremony_transactions(cost_model));
+    GenesisCeremonyRequest request{
+        .expected_parent_height = 0,
+        .expected_parent_value_hash = sha256(parent.db_tip().value),
+        .context = ProposalContext{.protocol = 0},
+        .transactions = t_to_parallel_batch(ceremony_txs)(),
+    };
+    CHECK_EQ(mempool_coord_server_->impl()
+                 ->schedulercoord_commit_genesis_ceremony(std::move(request))()
+                 .outcome(),
+             GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   }
 }
 
