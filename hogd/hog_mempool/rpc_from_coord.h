@@ -282,7 +282,8 @@ public:
   x23::Async<DbSchedResult> schedcoord_load_genesis_configuration_v2(
       GenesisConfigurationV2 genesis_configuration)
   {
-    CHECK(ready());
+    CHECK(initialized_.load(std::memory_order_acquire));
+
     x23::CoroGuard commit_cg;
     co_await commit_cg(commit_lock_);
 
