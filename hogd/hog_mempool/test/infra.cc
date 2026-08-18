@@ -7,10 +7,13 @@
 
 #include "consensus.hh"
 #include "db_sched.hh"
+#include "header.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
@@ -23,8 +26,10 @@
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
+#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
