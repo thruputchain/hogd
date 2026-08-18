@@ -25,6 +25,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hog_exec/runtime/contract_trait.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"

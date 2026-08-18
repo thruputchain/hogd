@@ -61,7 +61,8 @@ public:
                                      ConsensusValue value);
 
   static x23::Async<DbSchedResult>
-  dbsched_load_genesis_configuration_v2(GenesisConfigurationV2, ConsensusValue)
+  dbsched_load_genesis_configuration_v2(GenesisConfigurationV2 /*unused*/,
+                                        ConsensusValue /*unused*/)
   {
     co_return DbSchedResult::DbSchedResultError;
   }
