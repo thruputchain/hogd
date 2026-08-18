@@ -70,6 +70,67 @@ wait_control_log_line() {
   return 1
 }
 
+# Waits for a process to announce something in its stderr log and prints what
+# it announced: the rest of the line after [marker]. Where
+# [wait_control_log_line] watches for the start of a process, this watches for
+# the end of one.
+#
+# [control_cli wait] cannot be used for that. The control server answers status
+# queries about the process it started most recently, so on a host that runs
+# more than one service the wait reports on whichever service was launched
+# last, not on the process whose exit ends the run. A wait aimed at a service
+# that runs until teardown never returns at all.
+#
+# The wait polls from here rather than holding one ssh session open for the
+# length of the run: a session left idle that long is not guaranteed to
+# survive, and a connection dropped mid-run would be indistinguishable from a
+# process that never reported. [timeout_sec] of 0 waits indefinitely. Progress
+# and diagnostics go to stderr, so that stdout carries only the reported value.
+wait_control_log_marker() {
+  local wanted_label=$1
+  local marker=$2
+  local timeout_sec=${3:-0}
+  local poll_interval_sec=${4:-5}
+  local record host label stdout_path stderr_path
+  local quoted_marker quoted_stderr_path line deadline=0
+
+  for record in ${CONTROL_LOG_RECORDS[@]+"${CONTROL_LOG_RECORDS[@]}"}; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    [[ $label == "$wanted_label" ]] || continue
+
+    printf -v quoted_marker '%q' "$marker"
+    printf -v quoted_stderr_path '%q' "$stderr_path"
+    # Elapsed time rather than a count of polls: a poll that itself takes a
+    # while -- an ssh to a host that has gone away -- must still count against
+    # the deadline.
+    [ "$timeout_sec" -eq 0 ] || deadline=$((SECONDS + timeout_sec))
+
+    echo "Waiting for $wanted_label to report: $marker" >&2
+    while :; do
+      # An unreachable host and a marker that has not been printed yet are the
+      # same thing here: nothing to report yet, keep waiting until the timeout.
+      line=$(remote_run "$host" \
+        "grep -F -- $quoted_marker $quoted_stderr_path | tail -n 1") || line=''
+      if [[ -n $line ]]; then
+        echo "$wanted_label reported: $line" >&2
+        printf '%s\n' "${line##*"$marker"}"
+        return 0
+      fi
+
+      if [ "$deadline" -ne 0 ] && [ "$SECONDS" -ge "$deadline" ]; then
+        echo "Timed out after ${timeout_sec}s waiting for $wanted_label to report: $marker" >&2
+        replay_control_log "$host" "$label" "$stdout_path" "$stderr_path" >&2
+        return 1
+      fi
+
+      sleep "$poll_interval_sec"
+    done
+  done
+
+  echo "no control log record for $wanted_label" >&2
+  return 1
+}
+
 # Replays the tail of one launched process's stdout and stderr. Best effort: a
 # host that has gone away must not replace the failure being reported with a
 # failure of its own.

@@ -156,4 +156,64 @@ expect_contains 'log milestone timeout names the process' \
 expect_contains 'log milestone timeout replays logs' \
   'node0_mempool on hog7' "$out"
 
+# An exit marker already in the log is reported at once, and only the value the
+# process announced reaches stdout: the caller reads it as an exit status.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+remote_run() { echo "MEMPOOL_BENCH_EXIT status=0"; }
+value=$(wait_control_log_marker node0_mempool "MEMPOOL_BENCH_EXIT status=")
+echo "VALUE[$value]"
+') && status=0 || status=$?
+expect_status 'exit marker present' 0 "$status"
+expect_contains 'exit marker yields the reported value' 'VALUE[0]' "$out"
+expect_contains 'exit marker names what it waits for' \
+  'Waiting for node0_mempool to report: MEMPOOL_BENCH_EXIT status=' "$out"
+
+# A marker that has not been printed yet is waited for, and a poll that cannot
+# reach the host is just another poll with nothing to report.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+# Nothing to report for the first couple of seconds, and unreachable for the
+# first of them.
+remote_run() {
+  [ "$SECONDS" -ge 1 ] || return 1
+  [ "$SECONDS" -ge 2 ] || return 0
+  echo "MEMPOOL_BENCH_EXIT status=137"
+}
+value=$(wait_control_log_marker node0_mempool "MEMPOOL_BENCH_EXIT status=" 60 1)
+echo "VALUE[$value]"
+') && status=0 || status=$?
+expect_status 'exit marker appears later' 0 "$status"
+expect_contains 'exit marker waits for the value' 'VALUE[137]' "$out"
+
+# A marker that never appears ends the wait at its deadline, names the process,
+# replays its logs, and ends the script rather than waiting out the run.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+remote_run() {
+  case "$2" in
+  grep*) return 1 ;;
+  *) echo "REMOTE($1): $2" ;;
+  esac
+}
+wait_control_log_marker node0_mempool "MEMPOOL_BENCH_EXIT status=" 1 1
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'exit marker timeout ends the script' 1 "$status"
+expect_lacks 'exit marker timeout stops the script' 'NOT REACHED' "$out"
+expect_contains 'exit marker timeout names the process' \
+  'waiting for node0_mempool to report: MEMPOOL_BENCH_EXIT status=' "$out"
+expect_contains 'exit marker timeout replays logs' 'node0_mempool on hog7' "$out"
+
+# An unknown label says so rather than waiting forever for a process that was
+# never launched.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node1_mempool "MEMPOOL_BENCH_EXIT status="
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'exit marker for an unknown label ends the script' 1 "$status"
+expect_contains 'exit marker for an unknown label says so' \
+  'no control log record for node1_mempool' "$out"
+
 exit "$fail"

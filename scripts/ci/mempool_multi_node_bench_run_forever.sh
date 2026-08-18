@@ -21,6 +21,11 @@ COMMON_SCP_OPTS=(-o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 SLOT_A_CPUS='0-31,64-95'
 SLOT_B_CPUS='32-63,96-127'
+# The line a mempool's wrapper prints when the mempool exits. This run is meant
+# to be ended by hand rather than by a clock, so the driver waits for it
+# without a deadline: the only thing that line can mean here is that a mempool
+# died.
+MEMPOOL_EXIT_MARKER='MEMPOOL_BENCH_EXIT status='
 HOG_EXEC_SLOT_A_PORT=8040
 HOG_EXEC_SLOT_B_PORT=8041
 HOG_EXEC_SLOT_A_HTTP_PORT=8042
@@ -338,30 +343,26 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-node0_mempool_script=$(
+# Wraps a mempool so that it says how it ended. That line is the driver's only
+# view of the exit: the mempool runs on a host that also runs [hog-db], and the
+# control server can only be asked about the process it started most recently,
+# which is [hog-db] by the time the mempool exits.
+mempool_wrapper_script() {
   cat <<EOF
 set -euo pipefail
 ulimit -c unlimited || true
 set +e
-$(quote_cmd "${node0_mempool_cmd[@]}")
+$(quote_cmd "$@")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+echo "$MEMPOOL_EXIT_MARKER\$status" >&2
 exit \$status
 EOF
-)
-node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
+}
+
+node0_mempool_script=$(mempool_wrapper_script "${node0_mempool_cmd[@]}")
+node1_mempool_script=$(mempool_wrapper_script "${node1_mempool_cmd[@]}")
 
 control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
@@ -461,11 +462,6 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
-node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
-node1_mempool_pid=$!
-
 echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_hog_exec_slot_a" \
@@ -480,10 +476,21 @@ for node in "${NODE_IDS[@]}"; do
     "starting server on network tcp at address $(hog_ip "${CHUCKD_HOSTS[$node]}"):7888"
 done
 
-wait "$node0_mempool_pid"
-echo 'node0 mempool wait completed'
-wait "$node1_mempool_pid"
-echo 'node1 mempool wait completed'
+# Waits for a mempool that is not supposed to stop. This run ends when it is
+# cancelled, so a mempool that exits at all -- however it exited -- is the end
+# of the run and a failure; say which one went and replay its log.
+await_mempool() {
+  local label=$1
+  local status
+
+  status=$(wait_control_log_marker "$label" "$MEMPOOL_EXIT_MARKER") || return 1
+  echo "$label exited with status [$status]" >&2
+  replay_control_log_for_label "$label"
+  return 1
+}
+
+await_mempool node0_mempool
+await_mempool node1_mempool
 
 # We do not save results to the [metrics_history] repo because this CI run
 # should never finish--it should only stop when it is manually cancelled.

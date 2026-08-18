@@ -22,6 +22,13 @@ COMMON_SCP_OPTS=(-o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
 SLOT_A_CPUS='0-31,64-95'
 SLOT_B_CPUS='32-63,96-127'
+# How long the mempools run before [timeout] ends the benchmark, the line their
+# wrapper prints on the way out, and how long the driver waits for that line.
+# The wait covers the whole run again, so a mempool that is merely slow to go is
+# not reported as one that never went.
+MEMPOOL_BENCH_TIMEOUT_SEC=360
+MEMPOOL_EXIT_MARKER='MEMPOOL_BENCH_EXIT status='
+MEMPOOL_EXIT_WAIT_TIMEOUT_SEC=$((MEMPOOL_BENCH_TIMEOUT_SEC * 2))
 HOG_EXEC_SLOT_A_PORT=8040
 HOG_EXEC_SLOT_B_PORT=8041
 HOG_EXEC_SLOT_A_HTTP_PORT=8042
@@ -375,30 +382,29 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-node0_mempool_script=$(
+# Wraps a mempool so that it runs for the length of the benchmark and then says
+# how it ended. Its exit line is the driver's only view of that: the mempool
+# runs on a host that also runs [hog-db], and the control server can only be
+# asked about the process it started most recently, which is [hog-db] by the
+# time the mempool exits. See [await_mempool].
+mempool_wrapper_script() {
   cat <<EOF
 set -euo pipefail
 ulimit -c unlimited || true
 set +e
-$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
+$(quote_cmd timeout "${MEMPOOL_BENCH_TIMEOUT_SEC}s" "$@")
 status=\$?
 set -e
+# The benchmark's own clock is [timeout], so being stopped by it is the
+# expected end of the run rather than a failure.
 [ \$status -eq 124 ] && status=0
+echo "$MEMPOOL_EXIT_MARKER\$status" >&2
 exit \$status
 EOF
-)
-node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
+}
+
+node0_mempool_script=$(mempool_wrapper_script "${node0_mempool_cmd[@]}")
+node1_mempool_script=$(mempool_wrapper_script "${node1_mempool_cmd[@]}")
 
 control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
@@ -498,11 +504,6 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
-node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
-node1_mempool_pid=$!
-
 echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_hog_exec_slot_a" \
@@ -517,16 +518,24 @@ for node in "${NODE_IDS[@]}"; do
     "starting server on network tcp at address $(hog_ip "${CHUCKD_HOSTS[$node]}"):7888"
 done
 
+# Waits for one mempool to finish the benchmark and reports how it ended.
+#
 # A mempool that dies mid-run takes the suite down with it, and by that point
 # every readiness wait has already passed, so nothing else in this script has
 # anything to say about it. Name the status and replay the mempool's own log
 # before exiting on it.
 await_mempool() {
   local label=$1
-  local pid=$2
-  local status=0
+  local status
 
-  wait "$pid" || status=$?
+  status=$(wait_control_log_marker "$label" "$MEMPOOL_EXIT_MARKER" \
+    "$MEMPOOL_EXIT_WAIT_TIMEOUT_SEC") || return 1
+
+  if ! [[ $status =~ ^[0-9]+$ ]]; then
+    echo "$label reported an unreadable exit status: [$status]" >&2
+    replay_control_log_for_label "$label"
+    return 1
+  fi
   if [ "$status" -ne 0 ]; then
     echo "$label $(ci_describe_exit_status "$status")" >&2
     replay_control_log_for_label "$label"
@@ -535,7 +544,7 @@ await_mempool() {
   echo "$label wait completed"
 }
 
-await_mempool node0_mempool "$node0_mempool_pid"
-await_mempool node1_mempool "$node1_mempool_pid"
+await_mempool node0_mempool
+await_mempool node1_mempool
 
 publish_results
