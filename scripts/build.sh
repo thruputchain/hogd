@@ -56,7 +56,8 @@ print_usage() {
   printf -- "  -c sets the compiler (e.g., 'gcc', 'clang')\n"
   printf -- "  -f sets compiler flags (e.g., '-Werror')\n"
   printf -- "  -d sets the build directory (default is 'build')\n"
-  printf -- "  -j sets the number of build jobs (default is NPROC)\n"
+  printf -- "  -j sets the number of build jobs (default is derived from\n"
+  printf -- "     performance cores and RAM; see scripts/build-jobs.sh)\n"
   printf -- "  -t sets the build type (can be 'Release' or 'Debug')\n"
   printf -- "  -x sets cmake additional flags\n"
   printf -- "  -n configure but don't run the build\n"
@@ -155,7 +156,8 @@ CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
 
 if test -z "$NO_BUILD"; then
   if test -z "$BUILD_JOBS"; then
-    BUILD_JOBS="$NPROC"
+    BUILD_JOBS="${HOGD_BUILD_JOBS:-$NPROC}"
+    echo "Building with ${BUILD_JOBS} jobs (override with -j or HOGD_BUILD_JOBS)."
   fi
 
   BUILD_ARGS=(--build "$BUILD_DIR" --parallel "$BUILD_JOBS")
