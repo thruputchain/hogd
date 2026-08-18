@@ -771,35 +771,47 @@ TEST_F(AuthSubscriptionTest, SchedRpcRejectsFutureAuthRowBeforeTipUpdate)
 // behavior change landed, so it verifies rather than drives that change.
 TEST(MakeRpcClientTest, ConnectionRefusedReturnsUnexpected)
 {
-  // Bind a loopback port and keep the socket open for the rest of the test. A
-  // socket that is bound but never listens still answers connect(2) with
-  // ECONNREFUSED, and holding it reserves the port: while it is bound, no other
-  // process on the machine can be handed that port and start listening on it.
+  // Reserve a loopback port, release it, and connect immediately; nothing is
+  // listening there, so the connect is refused. Holding the port bound across
+  // the connect instead - what this test briefly did - is deterministic only on
+  // Linux: macOS drops SYNs sent to a bound-but-not-listening port, so the
+  // connect fails with ETIMEDOUT after several seconds, not ECONNREFUSED.
   //
-  // Releasing the port before connecting - what this test used to do - left a
-  // window where exactly that could happen. Under `ctest --parallel` on a
-  // many-core CI host, hundreds of sibling tests bind ephemeral ports for their
-  // own RPC servers, one of them picked up this port, and the connect the test
-  // expects to be refused succeeded instead.
-  int probe = ::socket(AF_INET, SOCK_STREAM, 0);
-  ASSERT_GE(probe, 0);
-  UniqueFd probe_guard(probe);
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;
-  ASSERT_EQ(::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)),
-            0);
-  socklen_t len = sizeof(addr);
-  ASSERT_EQ(::getsockname(probe, reinterpret_cast<sockaddr *>(&addr), &len), 0);
-  const uint16_t port = ntohs(addr.sin_port);
+  // Releasing the port before connecting leaves a window where a sibling
+  // `ctest --parallel` process can be handed the same ephemeral port for its
+  // own RPC server, making the connect succeed instead of being refused. When
+  // that race hits, retry with a fresh port rather than asserting on the raced
+  // result.
+  constexpr int kPortRaceRetries = 5;
+  for (int attempt = 0; attempt < kPortRaceRetries; ++attempt) {
+    int probe = ::socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_GE(probe, 0);
+    UniqueFd probe_guard(probe);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    ASSERT_EQ(::bind(probe, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)),
+              0);
+    socklen_t len = sizeof(addr);
+    ASSERT_EQ(::getsockname(probe, reinterpret_cast<sockaddr *>(&addr), &len),
+              0);
+    const uint16_t port = ntohs(addr.sin_port);
+    probe_guard.reset();
 
-  x23::HostPort host_port{"127.0.0.1", port};
-  ErrnoStatus<rpc_client_t<AuthDB1>> result =
-      make_rpc_client<AuthDB1>(host_port, /*retry=*/false)();
+    x23::HostPort host_port{"127.0.0.1", port};
+    ErrnoStatus<rpc_client_t<AuthDB1>> result =
+        make_rpc_client<AuthDB1>(host_port, /*retry=*/false)();
 
-  ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error().error_code(), std::errc::connection_refused);
+    if (result.has_value()) {
+      // Lost the race: another process started listening on the released port.
+      continue;
+    }
+    EXPECT_EQ(result.error().error_code(), std::errc::connection_refused);
+    return;
+  }
+  FAIL() << "every probe port was grabbed by a concurrent listener across "
+         << kPortRaceRetries << " attempts";
 }
 
 } // namespace hogd
