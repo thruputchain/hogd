@@ -48,19 +48,34 @@ public:
                               .event = event_card};
   }
 
+  // Waits for [expected_executors] executors to register, then connects to
+  // each one.
+  //
+  // Executors register asynchronously once the coordinator is listening, so
+  // there is no upper bound on how long this legitimately takes: the mempool
+  // has nothing to serve until they arrive, which is precisely the state
+  // [Health::Status::kStarting] reports to whoever is supervising startup (see
+  // [MempoolCoordinatorRpc::finish_runtime_init()]). Wait for them rather than
+  // aborting the process on a wall-clock deadline, matching how the same
+  // startup path waits for the event server in
+  // [MempoolEventRpc::wait_for_registration()]. Log while waiting so a
+  // registration that is genuinely stuck is visible in the logs.
   static x23::Async<x23::Vec<exec_sched_client_t>>
   get_clients(size_t expected_executors)
   {
     co_await default_threadpool().bg();
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (Registration::registration().executors_registered(nullptr) <
-               expected_executors &&
-           std::chrono::steady_clock::now() < deadline) {
+    while (true) {
+      const size_t registered =
+          Registration::registration().executors_registered(nullptr);
+      if (registered >= expected_executors) {
+        break;
+      }
+      warn_every_n_sec(5.0F,
+                       "waiting for executors to register with the "
+                       "coordinator: {} of {} registered",
+                       registered, expected_executors);
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    CHECK_GE(Registration::registration().executors_registered(nullptr),
-             expected_executors);
     x23::Vec<ExecCard> cards;
     Registration::registration().executors_registered(&cards);
 
