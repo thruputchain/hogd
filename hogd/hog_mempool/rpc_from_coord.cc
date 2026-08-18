@@ -2488,8 +2488,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         return_to_runqueue.clear();
 
         CHECK_PTR(commit_plan.committed_cache);
-        const x23::XdrVec<TransactionHash> *remove_from_scheduler =
-            nullptr;
+        const x23::XdrVec<TransactionHash> *remove_from_scheduler = nullptr;
         if (commit_plan.committed_nominated) {
           // The committed block is the block we nominated.
           // [nominated_block_cache_.tx_hashes] also includes the failed txs (in

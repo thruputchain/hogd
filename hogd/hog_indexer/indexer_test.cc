@@ -204,8 +204,7 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   for (std::size_t i = 0; i < page.transactions.size(); i++) {
     EXPECT_EQ(page.transactions[i].height, block_height);
     EXPECT_EQ(page.transactions[i].tx, bodies[i]);
-    EXPECT_EQ(page.transactions[i].events.tx_hash,
-              events[i].tx_hash);
+    EXPECT_EQ(page.transactions[i].events.tx_hash, events[i].tx_hash);
     ASSERT_EQ(page.transactions[i].events.events.size(), 1);
     EXPECT_EQ(page.transactions[i].events.events[0].contract_address,
               events[i].events[0].contract_address);

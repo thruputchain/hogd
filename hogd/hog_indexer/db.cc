@@ -175,9 +175,11 @@ create_contract_index_sst_chunk(
 
     uint32_t sequence_number = 0;
     for (const auto &emitted_event : event_log.events) {
-      IndexerKeyFormat::make_contract_key(
-          key_buffer, emitted_event.contract_address, IndexerKeyFormat::kEvent,
-          block_height, event_log.tx_hash, sequence_number);
+      IndexerKeyFormat::make_contract_key(key_buffer,
+                                          emitted_event.contract_address,
+                                          IndexerKeyFormat::kEvent,
+                                          block_height, event_log.tx_hash,
+                                          sequence_number);
       entries.emplace_back(key_buffer, empty_string);
       sequence_number++;
     }
@@ -190,8 +192,7 @@ create_contract_index_sst_chunk(
           bodies_chunk[i].signed_tx.tx.invocation.invoked_address;
       IndexerKeyFormat::make_contract_key(key_buffer, root_addr,
                                           IndexerKeyFormat::kRootTx,
-                                          block_height,
-                                          event_log.tx_hash, 0);
+                                          block_height, event_log.tx_hash, 0);
       entries.emplace_back(key_buffer, empty_string);
     }
   }

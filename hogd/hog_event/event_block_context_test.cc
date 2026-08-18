@@ -278,25 +278,25 @@ TEST_F(EventBlockContextTest, MultipleExecutors)
   context.executor_open_block();
 
   // Add some events
-  EXPECT_TRUE(context.add_event(
-      TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("test1"))),
-                 .events = {TxEmittedEvent{
-                     .contract_address = {"address1"},
-                     .serialized_event = {1, 2, 3},
-                 }}},
-      ProposedTransaction{})());
+  EXPECT_TRUE(context.add_event(TxEventLog{.tx_hash = sha256(std::as_bytes(
+                                               std::span("test1"))),
+                                           .events = {TxEmittedEvent{
+                                               .contract_address = {"address1"},
+                                               .serialized_event = {1, 2, 3},
+                                           }}},
+                                ProposedTransaction{})());
 
   // First executor closes
   context.executor_close_block();
 
   // Add more events (2 executors still open)
-  EXPECT_TRUE(context.add_event(
-      TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("test2"))),
-                 .events = {TxEmittedEvent{
-                     .contract_address = {"address2"},
-                     .serialized_event = {4, 5, 6},
-                 }}},
-      ProposedTransaction{})());
+  EXPECT_TRUE(context.add_event(TxEventLog{.tx_hash = sha256(std::as_bytes(
+                                               std::span("test2"))),
+                                           .events = {TxEmittedEvent{
+                                               .contract_address = {"address2"},
+                                               .serialized_event = {4, 5, 6},
+                                           }}},
+                                ProposedTransaction{})());
 
   // Second executor closes
   context.executor_close_block();
@@ -672,8 +672,8 @@ TEST_F(EventBlockContextTest,
   context.executor_close_block();
   finish_file(context);
 
-  x23::XdrVec<TransactionHash> canonical_hashes{
-      sha256(body_b.signed_tx.tx), sha256(body_a.signed_tx.tx)};
+  x23::XdrVec<TransactionHash> canonical_hashes{sha256(body_b.signed_tx.tx),
+                                                sha256(body_a.signed_tx.tx)};
   x23::XdrVec<NondeterministicProposalData> canonical_data{
       body_b.nondeterministic_proposal_data,
       body_a.nondeterministic_proposal_data};

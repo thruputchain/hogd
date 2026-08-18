@@ -96,8 +96,7 @@ private:
   x23::CoroLock lock_;
   x23::CoroFutex<bool> should_block_futex_{false};
   x23::CoroFutex<int64_t> failure_report_count_{0};
-  std::vector<std::pair<TransactionHash, TxFailureDiagnostic>>
-      failure_reports_;
+  std::vector<std::pair<TransactionHash, TxFailureDiagnostic>> failure_reports_;
   // Track block lifecycle state (from sched side)
   std::map<BlockID, BlockState> block_states_;
   // Track executor handles per block (from exec side)
@@ -147,9 +146,8 @@ struct TestEventAggregatorExecRpc {
     return event_aggregator_.emit_event(block_id, tx_id, event_log);
   }
 
-  x23::Async<RPCError>
-  eventexecutor_report_tx_failure(TransactionHash tx_hash,
-                                  TxFailureDiagnostic diag)
+  x23::Async<RPCError> eventexecutor_report_tx_failure(TransactionHash tx_hash,
+                                                       TxFailureDiagnostic diag)
   {
     return event_aggregator_.report_tx_failure(std::move(tx_hash),
                                                std::move(diag));

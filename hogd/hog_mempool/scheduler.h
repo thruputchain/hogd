@@ -297,8 +297,7 @@ private:
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
-  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>,
-                  SipHash24Hasher>
+  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
   SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;

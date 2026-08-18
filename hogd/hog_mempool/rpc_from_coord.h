@@ -332,8 +332,7 @@ public:
     }
   }
 
-  static SHA256Hash
-  get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
+  static SHA256Hash get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 

@@ -895,7 +895,7 @@ TEST(Mempool, NominateBatch)
                             tx_hashes)());
     EXPECT_EQ(tx_hashes.size(), txs.size());
     std::set<TransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
-                                                         tx_hashes.end());
+                                                   tx_hashes.end());
     std::set<TransactionHash> tx_hashes_set;
     for (const SignedTransaction &tx : txs) {
       EXPECT_TRUE(tx_hashes_set.insert(sha256(tx.tx)).second);
@@ -1276,8 +1276,7 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
 {
   MempoolTestInfra server;
 
-  TransactionHashBatch tx_hashes{TransactionHash{},
-                                       TransactionHash{}};
+  TransactionHashBatch tx_hashes{TransactionHash{}, TransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 

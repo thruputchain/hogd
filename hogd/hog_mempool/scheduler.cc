@@ -907,8 +907,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
 }
 
 void
-Scheduler::schedule(size_t num_txs,
-                    x23::XdrVec<TransactionHash> &tx_hashes,
+Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
                     x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
@@ -1066,8 +1065,7 @@ Scheduler::schedule(size_t num_txs,
 }
 
 x23::Async<void>
-Scheduler::remove_from_scheduler(
-    x23::span<const TransactionHash> tx_hashes)
+Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -1088,8 +1086,7 @@ Scheduler::remove_from_scheduler(
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
     handles.push_back(
-        [](const ChunkRange *chunk,
-           x23::span<const TransactionHash> tx_hashes,
+        [](const ChunkRange *chunk, x23::span<const TransactionHash> tx_hashes,
            SynchronizedMap<ContractAddress, char, SipHash24Hasher> &accounts,
            Scheduler &scheduler) noexcept -> x23::Async<size_t> {
           co_await default_coropoll().pool_.bg();

@@ -488,8 +488,7 @@ TEST(IndexerPullController,
     ASSERT_TRUE(record.has_value()) << record.error();
     EXPECT_EQ(record->height, 1);
     expect_xdr_equal(record->tx, archival_body);
-    EXPECT_EQ(record->events.tx_hash,
-              sha256(archival_body.signed_tx.tx));
+    EXPECT_EQ(record->events.tx_hash, sha256(archival_body.signed_tx.tx));
     ASSERT_EQ(record->events.events.size(), 1UL);
     expect_xdr_equal(record->events.events.front(),
                      make_event(archival_body, 0xA1).events.front());

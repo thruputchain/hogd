@@ -90,9 +90,9 @@ make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
   ProposalTxs proposal_txs;
   const size_t split = std::min<size_t>(2, hashes.size());
   if (split != 0) {
-    append_to_parallel_batch(
-        x23::span<const TransactionHash>(hashes.data(), split),
-        proposal_txs.hash)();
+    append_to_parallel_batch(x23::span<const TransactionHash>(hashes.data(),
+                                                              split),
+                             proposal_txs.hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data(), split),
                              proposal_txs.nondeterministic_data)();
@@ -229,8 +229,7 @@ make_committed_payload_golden_fixture()
       QueueEntry{0x11, 0x22}, QueueEntry{0x33}};
   payload.tx_bodies.push_back(std::move(body));
 
-  payload.event_logs[0].tx_hash =
-      sha256(payload.tx_bodies[0].signed_tx.tx);
+  payload.event_logs[0].tx_hash = sha256(payload.tx_bodies[0].signed_tx.tx);
   payload.proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs);

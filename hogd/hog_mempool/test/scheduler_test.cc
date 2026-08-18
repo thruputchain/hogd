@@ -581,8 +581,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   // Validate a block.
   x23::Vec<TransactionHash> hashes;
   hashes.push_back(sha256(txs[0].tx));
-  scheduler->remove_from_scheduler(
-      x23::span<const TransactionHash>(hashes))();
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
   EXPECT_EQ(scheduler->size(), 1UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
 
@@ -596,8 +595,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
 
   hashes = {sha256(txs[1].tx)};
-  scheduler->remove_from_scheduler(
-      x23::span<const TransactionHash>(hashes))();
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 }
@@ -622,8 +620,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   x23::Vec<TransactionHash> hashes;
   hashes.push_back(sha256(txs[0].tx));
   hashes.push_back(sha256(txs[1].tx));
-  scheduler->remove_from_scheduler(
-      x23::span<const TransactionHash>(hashes))();
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
@@ -661,8 +658,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   x23::Vec<TransactionHash> hashes;
   hashes.push_back(sha256(txs[0].tx));
   hashes.push_back(sha256(txs[1].tx));
-  scheduler->remove_from_scheduler(
-      x23::span<const TransactionHash>(hashes))();
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 

@@ -62,8 +62,8 @@ public:
   // a given hash; a report for a new hash is dropped when the soft cap is
   // hit.  [watermark] is the caller's current indexed height, used only to
   // reject implausible attempt heights (see kMaxAttemptHeightSlack).
-  void report(const TransactionHash &tx_hash,
-              const TxFailureDiagnostic &diag, BlockHeight watermark)
+  void report(const TransactionHash &tx_hash, const TxFailureDiagnostic &diag,
+              BlockHeight watermark)
   {
     // Malformed or absurd heights are wire input from a peer; drop them
     // rather than let an unprunable entry poison the cap.
@@ -110,12 +110,12 @@ public:
     // height near INT64_MAX can never overflow the arithmetic; equivalent
     // for all in-range values.
     std::vector<TransactionHash> expired;
-    entries_.for_each([&](const std::pair<const TransactionHash,
-                                          TxFailureDiagnostic> &kv) {
-      if (kv.second.attempt_height <= watermark - expiry_delta_) {
-        expired.push_back(kv.first);
-      }
-    });
+    entries_.for_each(
+        [&](const std::pair<const TransactionHash, TxFailureDiagnostic> &kv) {
+          if (kv.second.attempt_height <= watermark - expiry_delta_) {
+            expired.push_back(kv.first);
+          }
+        });
     for (const TransactionHash &tx_hash : expired) {
       auto [entry, lk] = entries_.find(tx_hash);
       // Re-check under the bucket lock: a concurrent re-report at a higher
@@ -135,8 +135,7 @@ private:
   const size_t max_entries_;
 
   // Sharded by tx hash: report()/lookup() lock only the target bucket.
-  mutable SynchronizedMap<TransactionHash, TxFailureDiagnostic,
-                          SipHash24Hasher>
+  mutable SynchronizedMap<TransactionHash, TxFailureDiagnostic, SipHash24Hasher>
       entries_;
   // Approximate live-entry count backing size() and the soft cap.  Maintained
   // alongside entries_ under the same per-bucket locks; exact under

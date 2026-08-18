@@ -3061,20 +3061,19 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
-    auto wait_for_transaction_info =
-        [&reader](const TransactionHash &tx_hash) {
-          const auto deadline =
-              std::chrono::steady_clock::now() + kIndexPollTimeout;
-          TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
-          while (std::chrono::steady_clock::now() < deadline) {
-            result = reader.get_transaction_info(tx_hash)();
-            if (result.outcome() == TxInfoOutcome::TxInfoFound) {
-              break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-          }
-          return result;
-        };
+    auto wait_for_transaction_info = [&reader](const TransactionHash &tx_hash) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + kIndexPollTimeout;
+      TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+      while (std::chrono::steady_clock::now() < deadline) {
+        result = reader.get_transaction_info(tx_hash)();
+        if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      return result;
+    };
 
     auto wallet_contract = load_default_dev_wallet_contract();
     ASSERT_TRUE(wallet_contract);
@@ -3133,8 +3132,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     ASSERT_EQ(prefund_result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(prefund_result.info().events.exec_result,
               ExecResult::ExecResultOK);
-    EXPECT_EQ(prefund_result.info().events.tx_hash,
-              prefund_wallet_tx_hash);
+    EXPECT_EQ(prefund_result.info().events.tx_hash, prefund_wallet_tx_hash);
     ASSERT_EQ(prefund_result.info().events.root_output.status_code(),
               InvocationFrameStatusCode::Return);
 
