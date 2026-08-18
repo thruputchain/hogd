@@ -46,7 +46,6 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "hogd/storage_item/replay_cache.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"

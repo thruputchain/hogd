@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"

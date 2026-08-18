@@ -38,7 +38,6 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/storage_item/replay_cache.h"
 #include "x23/cleanup.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
