@@ -1646,7 +1646,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     cache.tx_hashes.clear();
     cache.tx_hashes.reserve(cache.txs.size());
     for (const SignedTransaction &tx : cache.txs) {
-      cache.tx_hashes.push_back(sha256(tx));
+      cache.tx_hashes.push_back(sha256(tx.tx));
     }
     cache.result_tx_hashes = cache.tx_hashes;
     cache.result_tx_nominations.clear();
