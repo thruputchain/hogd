@@ -961,7 +961,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
 }
 
 void
-EventRPCContext::enqueue_tx_failure(SignedTransactionHash tx_hash,
+EventRPCContext::enqueue_tx_failure(TransactionHash tx_hash,
                                     TxFailureDiagnostic diagnostic)
 {
   std::lock_guard guard(tx_failure_mutex_);

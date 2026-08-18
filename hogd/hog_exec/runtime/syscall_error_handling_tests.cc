@@ -81,10 +81,10 @@ public:
       .gas_limit = 10000,
       .calldata = Calldata{}};
 
-  constexpr static WasmContext make_null_context(GasAmount gas_limit)
+  constexpr static ExecutionContext make_null_context(GasAmount gas_limit)
   {
-    return WasmContext{
-        .memory = LinearMemorySlice{},
+    return ExecutionContext{
+        .memory = std::span<std::byte>{},
         .gas_remaining = gas_limit,
     };
   }

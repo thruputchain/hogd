@@ -8,7 +8,6 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 add_subdirectory(view)
-add_subdirectory(wasm)
 add_subdirectory(item)
 add_subdirectory(anomalies)
 add_subdirectory(direct_rpc_tests)
@@ -54,7 +53,6 @@ target_link_libraries(
 
 add_library(runtime STATIC
   $<TARGET_OBJECTS:runtime_objects>
-  $<TARGET_OBJECTS:wasm_runtime_objects>
   $<TARGET_OBJECTS:rv32_runtime_objects>
   $<TARGET_OBJECTS:item_objects>
 )
@@ -157,7 +155,6 @@ add_dependencies(
   runtime_objects
   generate_syscall_inner_h
   generate_syscall_meta_h
-  generate_wasmtime_ffi_h
   protocol
 )
 
@@ -234,32 +231,25 @@ add_executable(
   rv32/rv32_syscall_entry_bridge_test_main.cc
 )
 
-set(HOGD_RV32_LOWER_BIN "" CACHE FILEPATH
-    "Optional rv32-lower binary used to build the RV32 SDK smoke artifact")
 set(HOGD_RV32_GENERATED_SMOKE_ARTIFACT
     "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter.rv32a")
 set(HOGD_RV32_GENERATED_SMOKE_METADATA
     "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter.rv32.json")
-if(HOGD_RV32_LOWER_BIN)
-  set(HOGD_RV32_SMOKE_ENV
-      ${CMAKE_COMMAND} -E env "RV32_LOWER_BIN=${HOGD_RV32_LOWER_BIN}")
-else()
-  set(HOGD_RV32_SMOKE_ENV)
-endif()
+set(HOGD_RV32_GENERATED_SMOKE_SPEC
+    "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke/rv32_smoke_counter_spec.json")
 
 add_custom_command(
   OUTPUT
     ${HOGD_RV32_GENERATED_SMOKE_ARTIFACT}
     ${HOGD_RV32_GENERATED_SMOKE_METADATA}
+    ${HOGD_RV32_GENERATED_SMOKE_SPEC}
   COMMAND
-    ${HOGD_RV32_SMOKE_ENV}
     /bin/sh
     ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
     rv32_smoke_counter
     "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke"
   DEPENDS
     ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
-    ${CMAKE_SOURCE_DIR}/scripts/rv32_make_smoke_artifact.sh
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
     ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/Cargo.toml
@@ -354,7 +344,7 @@ gtest_discover_tests(rv32_contract_test TEST_PREFIX rv32.contract.)
 add_dependencies(
   rv32_contract_test
   all_riscvs_built # for fibonacci.rv32a (and fibonacci_call.rv32a)
-  all_wasm_headers # for built_contracts/fibonacci.h
+  all_contract_headers # for built_contracts/fibonacci.h
 )
 
 # Offline analysis tool (not part of the main build): dynamic instruction-pair
@@ -386,18 +376,16 @@ gtest_discover_tests(rv32_pair_histogram_test TEST_PREFIX rv32.pairhist.)
 add_dependencies(
   rv32_pair_histogram_test
   all_riscvs_built # for fibonacci.rv32a and itc_erc20.rv32a
-  all_wasm_headers # for built_contracts/fibonacci.h and itc_erc20.h
+  all_contract_headers # for built_contracts/fibonacci.h and itc_erc20.h
 )
 
 add_dependencies(
   runtime_test_objects
-  all_wasm_headers
+  all_contract_headers
   build_tests # for x23/tests/xdrtest.hh
 )
 
 add_dependencies(
   runtime_test
-  all_wasm_contracts
   all_riscvs_built
-  test_unknown_import_wasm
 )

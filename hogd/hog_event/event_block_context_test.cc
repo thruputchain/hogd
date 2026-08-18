@@ -56,11 +56,11 @@ public:
       size_t n =
           x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
       offset += n;
-      auto it = event_logs.insert({log.proposed_tx_hash, log});
+      auto it = event_logs.insert({log.tx_hash, log});
       EXPECT_TRUE(it.second);
       if (!it.second) {
-        error("duplicate event log for proposed tx hash: {}",
-              encode_hex(std::as_bytes(std::span(log.proposed_tx_hash))));
+        error("duplicate event log for tx hash: {}",
+              encode_hex(std::as_bytes(std::span(log.tx_hash))));
       }
     }
     EXPECT_EQ(offset, buf->size());
@@ -87,7 +87,7 @@ TEST_F(EventBlockContextTest, BasicTest)
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
   EXPECT_TRUE(
-      context.add_event(TxEventLog{.proposed_tx_hash =
+      context.add_event(TxEventLog{.tx_hash =
                                        sha256(std::as_bytes(std::span("test"))),
                                    .events = {TxEmittedEvent{
                                        .contract_address = {"test_address"},
@@ -141,7 +141,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
   EXPECT_TRUE(
-      context.add_event(TxEventLog{.proposed_tx_hash =
+      context.add_event(TxEventLog{.tx_hash =
                                        sha256(std::as_bytes(std::span("test"))),
                                    .events = {TxEmittedEvent{
                                        .contract_address = {"test_address"},
@@ -162,7 +162,7 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
   EventBlockContext context2(temp_dir_, 2);
   context2.executor_open_block();
   EXPECT_TRUE(context2.add_event(
-      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
+      TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
@@ -190,7 +190,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
   EventBlockContext context(temp_dir_, 1);
   context.executor_open_block();
   EXPECT_TRUE(
-      context.add_event(TxEventLog{.proposed_tx_hash =
+      context.add_event(TxEventLog{.tx_hash =
                                        sha256(std::as_bytes(std::span("test"))),
                                    .events = {TxEmittedEvent{
                                        .contract_address = {"test_address"},
@@ -211,7 +211,7 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
   EventBlockContext context2(temp_dir_, 2);
   context2.executor_open_block();
   EXPECT_TRUE(context2.add_event(
-      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test"))),
+      TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("test"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"address_test"},
                      .serialized_event = {1, 2, 3},
@@ -242,7 +242,7 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
 
   // Add an initial event to potentially trigger async buffer flushing
   EXPECT_TRUE(context.add_event(
-      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event1"))),
+      TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("event1"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address"},
                      .serialized_event = {1, 2, 3},
@@ -256,7 +256,7 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
   // but it should still update the trie and not panic.
   // open_executor_handles_ is still > 0 (abandon doesn't decrement it).
   EXPECT_TRUE(context.add_event(
-      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("event2"))),
+      TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("event2"))),
                  .events = {TxEmittedEvent{
                      .contract_address = {"test_address2"},
                      .serialized_event = {4, 5, 6},
@@ -278,25 +278,25 @@ TEST_F(EventBlockContextTest, MultipleExecutors)
   context.executor_open_block();
 
   // Add some events
-  EXPECT_TRUE(context.add_event(
-      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test1"))),
-                 .events = {TxEmittedEvent{
-                     .contract_address = {"address1"},
-                     .serialized_event = {1, 2, 3},
-                 }}},
-      ProposedTransaction{})());
+  EXPECT_TRUE(context.add_event(TxEventLog{.tx_hash = sha256(std::as_bytes(
+                                               std::span("test1"))),
+                                           .events = {TxEmittedEvent{
+                                               .contract_address = {"address1"},
+                                               .serialized_event = {1, 2, 3},
+                                           }}},
+                                ProposedTransaction{})());
 
   // First executor closes
   context.executor_close_block();
 
   // Add more events (2 executors still open)
-  EXPECT_TRUE(context.add_event(
-      TxEventLog{.proposed_tx_hash = sha256(std::as_bytes(std::span("test2"))),
-                 .events = {TxEmittedEvent{
-                     .contract_address = {"address2"},
-                     .serialized_event = {4, 5, 6},
-                 }}},
-      ProposedTransaction{})());
+  EXPECT_TRUE(context.add_event(TxEventLog{.tx_hash = sha256(std::as_bytes(
+                                               std::span("test2"))),
+                                           .events = {TxEmittedEvent{
+                                               .contract_address = {"address2"},
+                                               .serialized_event = {4, 5, 6},
+                                           }}},
+                                ProposedTransaction{})());
 
   // Second executor closes
   context.executor_close_block();
@@ -468,7 +468,7 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
         std::memcpy(payload.data(), &idx, sizeof(idx));
 
         TxEventLog event{
-            .proposed_tx_hash = hash,
+            .tx_hash = hash,
             .events = {TxEmittedEvent{
                 .contract_address = {},
                 .num_topics = 0,
@@ -537,7 +537,7 @@ TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
       std::memcpy(payload.data(), &i, sizeof(i));
       co_await context.add_event(
           TxEventLog{
-              .proposed_tx_hash = hash,
+              .tx_hash = hash,
               .events = {TxEmittedEvent{
                   .contract_address = {},
                   .num_topics = 0,
@@ -558,7 +558,7 @@ TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
       std::memcpy(payload.data(), &i, sizeof(i));
       co_await context.add_event(
           TxEventLog{
-              .proposed_tx_hash = hash,
+              .tx_hash = hash,
               .events = {TxEmittedEvent{
                   .contract_address = {},
                   .num_topics = 0,
@@ -594,7 +594,7 @@ make_event_for_body(ProposedTransaction const &body, uint8_t marker)
   emitted_event.serialized_event.push_back(marker);
 
   TxEventLog event;
-  event.proposed_tx_hash = sha256(body.signed_tx.tx);
+  event.tx_hash = sha256(body.signed_tx.tx);
   event.events.push_back(std::move(emitted_event));
   return event;
 }
@@ -672,8 +672,8 @@ TEST_F(EventBlockContextTest,
   context.executor_close_block();
   finish_file(context);
 
-  x23::XdrVec<SignedTransactionHash> canonical_hashes{
-      sha256(body_b.signed_tx.tx), sha256(body_a.signed_tx.tx)};
+  x23::XdrVec<TransactionHash> canonical_hashes{sha256(body_b.signed_tx.tx),
+                                                sha256(body_a.signed_tx.tx)};
   x23::XdrVec<NondeterministicProposalData> canonical_data{
       body_b.nondeterministic_proposal_data,
       body_a.nondeterministic_proposal_data};
@@ -691,11 +691,11 @@ TEST_F(EventBlockContextTest,
   ASSERT_EQ(candidate.event_logs.size(), 2);
   ASSERT_EQ(candidate.tx_bodies.size(), 2);
 
-  EXPECT_EQ(candidate.event_logs[0].proposed_tx_hash, canonical_hashes[0]);
-  EXPECT_EQ(candidate.event_logs[1].proposed_tx_hash, canonical_hashes[1]);
+  EXPECT_EQ(candidate.event_logs[0].tx_hash, canonical_hashes[0]);
+  EXPECT_EQ(candidate.event_logs[1].tx_hash, canonical_hashes[1]);
   for (size_t i = 0; i < candidate.event_logs.size(); i++) {
     EXPECT_EQ(sha256(candidate.tx_bodies[i].signed_tx.tx),
-              candidate.event_logs[i].proposed_tx_hash);
+              candidate.event_logs[i].tx_hash);
   }
 }
 

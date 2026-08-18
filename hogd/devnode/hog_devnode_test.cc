@@ -534,7 +534,7 @@ sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key)
   };
 }
 
-SignedTransactionHashBatch
+TransactionHashBatch
 submit_and_commit(sched_coord_client_t &scheduler,
                   SignedTransactionBatch const &txs)
 {
@@ -555,7 +555,7 @@ submit_and_commit(sched_coord_client_t &scheduler,
   const SchedulerProposedBlock &proposed = proposal.proposed_block();
   SignedTransactionBatch proposed_txs;
   EXPECT_TRUE(parallel_batch_to_t(proposed.txs, proposed_txs)());
-  SignedTransactionHashBatch tx_hashes;
+  TransactionHashBatch tx_hashes;
   tx_hashes.reserve(proposed_txs.size());
   for (const SignedTransaction &tx : proposed_txs) {
     tx_hashes.push_back(sha256(tx.tx));
@@ -2154,7 +2154,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
             .signature = signature,
         }},
     };
-    const SignedTransactionHash tx_hash = sha256(signed_tx.tx);
+    const TransactionHash tx_hash = sha256(signed_tx.tx);
     ASSERT_EQ(
         submit_and_commit(scheduler, SignedTransactionBatch{signed_tx}).size(),
         1UL);
@@ -2172,7 +2172,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().height, 2);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
-    EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
+    EXPECT_EQ(result.info().events.tx_hash, tx_hash);
   }
 
   expect_clean_exit(process);
@@ -2183,7 +2183,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
 
-  SignedTransactionHash tx_hash{};
+  TransactionHash tx_hash{};
   SignedTransaction expected_signed_tx;
   std::optional<ProposedTransaction> expected_indexed_tx;
   std::optional<TxEventLog> expected_event_log;
@@ -2285,7 +2285,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     };
     expected_signed_tx = signed_tx;
     tx_hash = sha256(signed_tx.tx);
-    SignedTransactionHashBatch committed =
+    TransactionHashBatch committed =
         submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
     if (committed.size() != 1) {
       const int status = process.terminate();
@@ -2313,7 +2313,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     ASSERT_EQ(payload->event_logs.size(), 1UL);
     expected_indexed_tx = payload->tx_bodies[0];
     expected_event_log = payload->event_logs[0];
-    EXPECT_EQ(expected_event_log->proposed_tx_hash, tx_hash);
+    EXPECT_EQ(expected_event_log->tx_hash, tx_hash);
   }
 
   {
@@ -3005,8 +3005,8 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
         }},
     };
 
-    const SignedTransactionHash tx_hash = sha256(signed_tx.tx);
-    SignedTransactionHashBatch nominated_hashes =
+    const TransactionHash tx_hash = sha256(signed_tx.tx);
+    TransactionHashBatch nominated_hashes =
         submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
     if (nominated_hashes.size() != 1UL) {
       int status = process.terminate();
@@ -3030,7 +3030,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
 
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
-    EXPECT_EQ(result.info().events.proposed_tx_hash, tx_hash);
+    EXPECT_EQ(result.info().events.tx_hash, tx_hash);
   }
 
   expect_clean_exit(process);
@@ -3062,20 +3062,19 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
-    auto wait_for_transaction_info =
-        [&reader](const SignedTransactionHash &tx_hash) {
-          const auto deadline =
-              std::chrono::steady_clock::now() + kIndexPollTimeout;
-          TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
-          while (std::chrono::steady_clock::now() < deadline) {
-            result = reader.get_transaction_info(tx_hash)();
-            if (result.outcome() == TxInfoOutcome::TxInfoFound) {
-              break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-          }
-          return result;
-        };
+    auto wait_for_transaction_info = [&reader](const TransactionHash &tx_hash) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + kIndexPollTimeout;
+      TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+      while (std::chrono::steady_clock::now() < deadline) {
+        result = reader.get_transaction_info(tx_hash)();
+        if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      return result;
+    };
 
     auto wallet_contract = load_default_dev_wallet_contract();
     ASSERT_TRUE(wallet_contract);
@@ -3122,9 +3121,9 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     };
     SignedTransaction signed_prefund_wallet_tx =
         sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second);
-    const SignedTransactionHash prefund_wallet_tx_hash =
+    const TransactionHash prefund_wallet_tx_hash =
         sha256(signed_prefund_wallet_tx.tx);
-    SignedTransactionHashBatch prefund_hashes =
+    TransactionHashBatch prefund_hashes =
         submit_and_commit(scheduler,
                           SignedTransactionBatch{signed_prefund_wallet_tx});
     ASSERT_EQ(prefund_hashes.size(), 1UL);
@@ -3134,8 +3133,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     ASSERT_EQ(prefund_result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(prefund_result.info().events.exec_result,
               ExecResult::ExecResultOK);
-    EXPECT_EQ(prefund_result.info().events.proposed_tx_hash,
-              prefund_wallet_tx_hash);
+    EXPECT_EQ(prefund_result.info().events.tx_hash, prefund_wallet_tx_hash);
     ASSERT_EQ(prefund_result.info().events.root_output.status_code(),
               InvocationFrameStatusCode::Return);
 
@@ -3155,9 +3153,9 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     };
     SignedTransaction signed_create_wallet_tx =
         sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second);
-    const SignedTransactionHash create_wallet_tx_hash =
+    const TransactionHash create_wallet_tx_hash =
         sha256(signed_create_wallet_tx.tx);
-    SignedTransactionHashBatch create_hashes =
+    TransactionHashBatch create_hashes =
         submit_and_commit(scheduler,
                           SignedTransactionBatch{signed_create_wallet_tx});
     if (create_hashes.size() != 1UL) {
@@ -3172,7 +3170,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
     TxInfoResult result = wait_for_transaction_info(create_wallet_tx_hash);
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
-    EXPECT_EQ(result.info().events.proposed_tx_hash, create_wallet_tx_hash);
+    EXPECT_EQ(result.info().events.tx_hash, create_wallet_tx_hash);
     ASSERT_EQ(result.info().events.root_output.status_code(),
               InvocationFrameStatusCode::Return);
     ReturnBuffer expected_return_buffer(created_wallet_address.begin(),

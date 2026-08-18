@@ -1,93 +1,14 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 
 #include <exception>
-#include <memory>
-#include <string_view>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/syscall_entry.h"
-#include "hogd/hog_exec/runtime/wasm/wasmi_runtime.h" // IWYU pragma: keep
-#include "hogd/hog_exec/runtime/wasm/wasmtime_runtime.h"
 #include "x23/format.h"
 
 namespace hogd {
-
-// create RuntimeContext with no imported functions
-std::unique_ptr<RuntimeContext>
-make_runtime_context(RuntimeEngine engine)
-{
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-  {
-    // For now, wasmtime is used even when engine is kWasmi
-    static WasmtimeGlobalContext wasmtime_global_context =
-        WasmtimeGlobalContext(8);
-    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
-  }
-  default:
-    return nullptr;
-  }
-}
-
-namespace {
-// The Wasm host import names form the contract-visible `marmot::syscall` ABI.
-// link_fn() forwards these bytes to Rust, which decodes them as UTF-8 and
-// compares them exactly against the canonical SDK Wasm import names. Pin them
-// to `u8"..."` literals so the bytes are the standard-mandated UTF-8 (== ASCII)
-// encoding rather than implementation-defined ordinary-literal bytes that
-// depend on `-fexec-charset`; an alternate execution charset could otherwise
-// fail Rust UTF-8 decoding or register a manifest that does not match canonical
-// SDK imports. See hogd issue #2654.
-constexpr std::u8string_view kSyscallModuleName = u8"marmot";
-constexpr std::u8string_view kSyscallFnName = u8"syscall";
-
-std::string_view
-as_char_view(std::u8string_view s)
-{
-  return std::string_view(reinterpret_cast<char const *>(s.data()), s.size());
-}
-
-WasmtimeGlobalContext
-make_wasmtime_hog_exec_global_context()
-{
-  auto context = WasmtimeGlobalContext(8);
-  auto ok = context.link_fn(as_char_view(kSyscallModuleName),
-                            as_char_view(kSyscallFnName), &syscall_entry);
-  CHECK(ok);
-  return context;
-}
-
-[[maybe_unused]]
-WasmiGlobalContext
-make_wasmi_hog_exec_global_context()
-{
-  auto context = WasmiGlobalContext();
-  auto ok = context.link_fn(as_char_view(kSyscallModuleName),
-                            as_char_view(kSyscallFnName), &syscall_entry);
-  CHECK(ok);
-  return context;
-}
-
-} // namespace
-
-std::unique_ptr<RuntimeContext>
-make_hog_exec_wasm_context(RuntimeEngine engine)
-{
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-  {
-    // For now, wasmtime is used even when engine is kWasmi
-    static WasmtimeGlobalContext wasmtime_global_context =
-        make_wasmtime_hog_exec_global_context();
-    return std::make_unique<WasmtimeContext>(wasmtime_global_context);
-  }
-  default:
-    return nullptr;
-  }
-}
 
 InvokeResult
 Runtime::invoke(MethodID method_id, uint64_t gas_limit)

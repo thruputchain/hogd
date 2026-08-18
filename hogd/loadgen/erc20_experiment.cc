@@ -87,10 +87,8 @@ ERC20ExperimentState::generate_experiment()
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
   using wallet_meta = ContractTraitMeta<simple_wallet::SimpleWallet>;
 
-  auto erc20_contract =
-      use_rv32_ ? erc20_meta::load_rv32() : erc20_meta::load_wasm();
-  auto wallet_contract =
-      use_rv32_ ? wallet_meta::load_rv32() : wallet_meta::load_wasm();
+  auto erc20_contract = erc20_meta::load_rv32();
+  auto wallet_contract = wallet_meta::load_rv32();
   assert(erc20_contract);
   assert(wallet_contract);
 

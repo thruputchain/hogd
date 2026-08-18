@@ -82,7 +82,7 @@ TxEventLog
 make_event(const ProposedTransaction &body, std::uint8_t marker)
 {
   TxEventLog event{};
-  event.proposed_tx_hash = sha256(body.signed_tx.tx);
+  event.tx_hash = sha256(body.signed_tx.tx);
   TxEmittedEvent emitted{};
   emitted.contract_address[0] = marker;
   emitted.serialized_event.push_back(marker);
@@ -93,14 +93,14 @@ make_event(const ProposedTransaction &body, std::uint8_t marker)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &bodies)
 {
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : bodies) {
     hashes.push_back(sha256(body.signed_tx.tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(x23::span<const SignedTransactionHash>(hashes),
+  append_to_parallel_batch(x23::span<const TransactionHash>(hashes),
                            proposal_txs.hash)();
   append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                nondeterministic_data),
@@ -313,7 +313,7 @@ public:
   }
 
   const IndexerOutboxOrigin &origin() const { return origin_; }
-  const SignedTransactionHash &failure_hash() const { return notice_.tx_hash; }
+  const TransactionHash &failure_hash() const { return notice_.tx_hash; }
 
 private:
   IndexerOutboxOrigin origin_{};
@@ -488,8 +488,7 @@ TEST(IndexerPullController,
     ASSERT_TRUE(record.has_value()) << record.error();
     EXPECT_EQ(record->height, 1);
     expect_xdr_equal(record->tx, archival_body);
-    EXPECT_EQ(record->events.proposed_tx_hash,
-              sha256(archival_body.signed_tx.tx));
+    EXPECT_EQ(record->events.tx_hash, sha256(archival_body.signed_tx.tx));
     ASSERT_EQ(record->events.events.size(), 1UL);
     expect_xdr_equal(record->events.events.front(),
                      make_event(archival_body, 0xA1).events.front());

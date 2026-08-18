@@ -30,8 +30,7 @@ target_link_libraries(
 add_dependencies(
   hog_devnode
   all_riscv_contracts
-  all_wasm_contracts
-  all_wasm_headers
+  all_contract_headers
 )
 target_include_directories(
   hog_devnode
@@ -83,7 +82,6 @@ target_link_libraries(
 add_dependencies(
   hog_devnode_test
   all_riscv_contracts
-  all_wasm_contracts
   hog-devnode
 )
 gtest_discover_tests(
@@ -111,8 +109,7 @@ target_link_libraries(
 add_dependencies(
   bootstrap_manifest_test
   all_riscv_contracts
-  all_wasm_contracts
-  all_wasm_headers
+  all_contract_headers
 )
 gtest_discover_tests(bootstrap_manifest_test)
 
@@ -140,8 +137,7 @@ target_link_libraries(
 add_dependencies(
   hosted_bootstrap_generator_test
   all_riscv_contracts
-  all_wasm_contracts
-  all_wasm_headers
+  all_contract_headers
   hog-hosted-bootstrap
 )
 gtest_discover_tests(hosted_bootstrap_generator_test)

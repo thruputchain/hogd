@@ -14,32 +14,18 @@ BUILD_DIR=$1
 
 # Put metrics to run here
 
-# Codesize metrics
-## fibonaci.wasm
-./scripts/make_metric_file.sh fibonacci-codesize $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR fibonacci >metrics_history/metrics/fibonacci-codesize/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
-## itc_erc20.wasm
-./scripts/make_metric_file.sh erc20-codesize $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 >metrics_history/metrics/erc20-codesize/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
-## initial_token_claim.wasm
-./scripts/make_metric_file.sh initial_token_claim-codesize $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim >metrics_history/metrics/initial_token_claim-codesize/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
-# RV32 codesize metrics: size of the on-chain .rv32a artifact for the same
-# contracts measured above for wasm.
+# Codesize metrics: size of the on-chain .rv32a artifact image.
 ## fibonacci.rv32a
 ./scripts/make_metric_file.sh fibonacci-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR fibonacci rv32a >metrics_history/metrics/fibonacci-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
+./scripts/metrics/codesize.sh $BUILD_DIR fibonacci >metrics_history/metrics/fibonacci-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## itc_erc20.rv32a
 ./scripts/make_metric_file.sh erc20-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 rv32a >metrics_history/metrics/erc20-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
+./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 >metrics_history/metrics/erc20-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## initial_token_claim.rv32a
 ./scripts/make_metric_file.sh initial_token_claim-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim rv32a >metrics_history/metrics/initial_token_claim-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
+./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim >metrics_history/metrics/initial_token_claim-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 # Performance metrics
 ## hog_db_bench (roundrobin_payments)
@@ -66,33 +52,21 @@ BUILD_DIR=$1
 ./scripts/make_metric_file.sh hog-db-bench-rcq-sweep $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/hog_db_bench_rcq_sweep.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-rcq-sweep/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## mass fibonacci.wasm calls
-./scripts/make_metric_file.sh fibonacci-wasmonly $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR >metrics_history/metrics/fibonacci-wasmonly/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
-## mass fibonacci.rv32a calls (same workload as fibonacci-wasmonly, RV32 runtime)
+## mass fibonacci.rv32a calls
 ./scripts/make_metric_file.sh fibonacci-rv32only $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/fibonacci_rv32only_bench.sh $BUILD_DIR >metrics_history/metrics/fibonacci-rv32only/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## rv32 vm benchmarks (canonical + direct-threaded interpreter: fibonacci, compute loops, wasmi/artifact comparisons)
+## rv32 vm benchmarks (canonical + direct-threaded interpreter: fibonacci, compute loops, artifact benchmarks)
 ./scripts/make_metric_file.sh rv32-vm-bench $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/rv32_vm_bench.sh $BUILD_DIR >metrics_history/metrics/rv32-vm-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## payments_bench 10 accounts
-./scripts/make_metric_file.sh payments-bench-10 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
+./scripts/make_metric_file.sh payments-bench-rv32-10 $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## payments_bench 2 accounts
-./scripts/make_metric_file.sh payments-bench-2 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/payments_bench.sh $BUILD_DIR 2 >metrics_history/metrics/payments-bench-2/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
-## payments_bench 10 accounts, rv32 contracts (same workload as payments-bench-10, RV32 runtime)
-./scripts/make_metric_file.sh payments-bench-rv32-10 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/payments_bench.sh $BUILD_DIR 10 rv32 >metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
-
-## payments_bench 2 accounts, rv32 contracts (same workload as payments-bench-2, RV32 runtime)
 ./scripts/make_metric_file.sh payments-bench-rv32-2 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/payments_bench.sh $BUILD_DIR 2 rv32 >metrics_history/metrics/payments-bench-rv32-2/$GIT_branch/${GIT_commit_time}_$GIT_commit
+./scripts/metrics/payments_bench.sh $BUILD_DIR 2 >metrics_history/metrics/payments-bench-rv32-2/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## tx size stats
 ./scripts/make_metric_file.sh tx-size-stats $GIT_branch $GIT_commit $GIT_commit_time
@@ -102,9 +76,9 @@ BUILD_DIR=$1
 ./scripts/make_metric_file.sh gas-usage-metric $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/gas_usage_metric.sh $BUILD_DIR >metrics_history/metrics/gas-usage-metric/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## artifact sizes
-./scripts/make_metric_file.sh artifact-sizes $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/artifact_sizes.sh $BUILD_DIR >metrics_history/metrics/artifact-sizes/$GIT_branch/${GIT_commit_time}_$GIT_commit
+## rv32 artifact sizes (per-contract .rv32a size across the built contract set)
+./scripts/make_metric_file.sh artifact-sizes-rv32 $GIT_branch $GIT_commit $GIT_commit_time
+./scripts/metrics/artifact_sizes.sh $BUILD_DIR >metrics_history/metrics/artifact-sizes-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 ## x23 metrics
 ./scripts/make_metric_file.sh x23-metrics $GIT_branch $GIT_commit $GIT_commit_time

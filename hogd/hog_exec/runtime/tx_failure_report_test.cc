@@ -29,6 +29,7 @@ namespace hogd {
 // failed 2-phase-commit push. Parameterized over the db test double: real
 // hog_db produces diagnostics for proposal blocks; the mock produces none, so
 // no report may be sent.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class TxFailureReportTest : public ::testing::TestWithParam<TestDB>,
                             public NativeContractTestFramework {
 public:

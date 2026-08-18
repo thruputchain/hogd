@@ -108,8 +108,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 #                        rust-toolchain.toml references it yet); having it baked
 #                        in means flipping the pins won't trigger a fresh rustup
 #                        download on the Namespace runners.
-#   - nightly-2026-02-12 built_contracts/rust-toolchain.toml (wasm32 + build-std,
-#                        also used for the riscv32im contracts via -Zbuild-std)
+#   - nightly-2026-02-12 built_contracts/rust-toolchain.toml (riscv32im
+#                        contracts via -Zbuild-std)
 RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     $SUDO mkdir -p /usr/local/rustup /usr/local/cargo \
     && $SUDO chmod 777 /usr/local/rustup /usr/local/cargo \
@@ -117,9 +117,8 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     && rustup component add clippy rustfmt --toolchain 1.93.0 \
     && rustup toolchain install 1.96.0 --profile minimal \
     && rustup component add clippy rustfmt --toolchain 1.96.0 \
-    && rustup target add wasm32-unknown-unknown riscv32im-unknown-none-elf --toolchain 1.96.0 \
+    && rustup target add riscv32im-unknown-none-elf --toolchain 1.96.0 \
     && rustup toolchain install nightly-2026-02-12 --profile minimal \
-    && rustup target add wasm32-unknown-unknown --toolchain nightly-2026-02-12 \
     && rustup component add rust-src clippy rustfmt --toolchain nightly-2026-02-12 \
     && cargo install --locked --version 0.29.2 cbindgen \
     && $SUDO chmod -R a+rwx /usr/local/rustup /usr/local/cargo

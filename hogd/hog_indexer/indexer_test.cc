@@ -86,7 +86,7 @@ create_event_logs()
   std::ranges::fill(contract_addr1, 0xBB);
 
   TxEventLog event_log0;
-  event_log0.proposed_tx_hash = tx_hash0;
+  event_log0.tx_hash = tx_hash0;
   TxEmittedEvent event0;
   event0.contract_address = contract_addr0;
   event0.num_topics = 0;
@@ -95,7 +95,7 @@ create_event_logs()
   event_log0.events.push_back(event0);
 
   TxEventLog event_log1;
-  event_log1.proposed_tx_hash = tx_hash1;
+  event_log1.tx_hash = tx_hash1;
   TxEmittedEvent event1;
   event1.contract_address = contract_addr1;
   event1.num_topics = 1;
@@ -143,21 +143,21 @@ TEST_F(IndexerTest, FindTx)
 
   // Look up the first tx.
   TxInfoResult result0 =
-      block_explorer_->get_transaction_info(events[0].proposed_tx_hash)();
+      block_explorer_->get_transaction_info(events[0].tx_hash)();
   EXPECT_EQ(result0.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(result0.info().height, block_height);
   EXPECT_EQ(result0.info().tx, bodies[0]);
-  EXPECT_EQ(result0.info().events.proposed_tx_hash, events[0].proposed_tx_hash);
+  EXPECT_EQ(result0.info().events.tx_hash, events[0].tx_hash);
   EXPECT_EQ(result0.info().events.events.size(), 1);
   EXPECT_EQ(result0.info().events.events[0].contract_address,
             events[0].events[0].contract_address);
 
   // Look up the second tx.
   TxInfoResult result1 =
-      block_explorer_->get_transaction_info(events[1].proposed_tx_hash)();
+      block_explorer_->get_transaction_info(events[1].tx_hash)();
   EXPECT_EQ(result1.outcome(), TxInfoOutcome::TxInfoFound);
   EXPECT_EQ(result1.info().height, block_height);
-  EXPECT_EQ(result1.info().events.proposed_tx_hash, events[1].proposed_tx_hash);
+  EXPECT_EQ(result1.info().events.tx_hash, events[1].tx_hash);
   EXPECT_EQ(result1.info().events.events.size(), 1);
   EXPECT_EQ(result1.info().events.events[0].contract_address,
             events[1].events[0].contract_address);
@@ -204,8 +204,7 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   for (std::size_t i = 0; i < page.transactions.size(); i++) {
     EXPECT_EQ(page.transactions[i].height, block_height);
     EXPECT_EQ(page.transactions[i].tx, bodies[i]);
-    EXPECT_EQ(page.transactions[i].events.proposed_tx_hash,
-              events[i].proposed_tx_hash);
+    EXPECT_EQ(page.transactions[i].events.tx_hash, events[i].tx_hash);
     ASSERT_EQ(page.transactions[i].events.events.size(), 1);
     EXPECT_EQ(page.transactions[i].events.events[0].contract_address,
               events[i].events[0].contract_address);
@@ -243,7 +242,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   std::ranges::fill(tx_hash, 0x33);
 
   TxEventLog event_log; // no events emitted
-  event_log.proposed_tx_hash = tx_hash;
+  event_log.tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
   ingest_legacy_events(block_height, TxEventLogBatch{event_log},
@@ -282,7 +281,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   std::ranges::fill(tx_hash, 0x44);
 
   TxEventLog event_log;
-  event_log.proposed_tx_hash = tx_hash;
+  event_log.tx_hash = tx_hash;
   TxEmittedEvent ev;
   ev.contract_address = emitter_b; // event emitted by B, not the root A
   ev.num_topics = 0;
@@ -336,7 +335,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     std::ranges::fill(h, static_cast<char>(0x50 + i));
     hashes.push_back(h);
     TxEventLog log;
-    log.proposed_tx_hash = h;
+    log.tx_hash = h;
     ingest_legacy_events(static_cast<BlockHeight>(300 + i),
                          TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
@@ -376,7 +375,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
     body.signed_tx.tx.uniquifier.nonce = fill;
     body.signed_tx.tx.invocation.invoked_address = addr;
     TxEventLog log;
-    std::ranges::fill(log.proposed_tx_hash, fill);
+    std::ranges::fill(log.tx_hash, fill);
     TxEmittedEvent event;
     event.contract_address = addr;
     log.events.push_back(event);
@@ -460,7 +459,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     std::ranges::fill(h, static_cast<char>(0x90 + i));
 
     TxEventLog log;
-    log.proposed_tx_hash = h;
+    log.tx_hash = h;
     logs.push_back(log); // present, but emits no events
 
     ProposedTransaction body;
@@ -483,7 +482,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     // Each eventless tx must still have produced its ROOT_TX row.
     TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
     ASSERT_EQ(page.refs.size(), 1);
-    EXPECT_EQ(page.refs[0].tx_hash, logs[i].proposed_tx_hash);
+    EXPECT_EQ(page.refs[0].tx_hash, logs[i].tx_hash);
   }
 }
 
@@ -491,7 +490,7 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
 {
   TxEventLogBatch events = create_event_logs();
   ProposedTransactionBatch bodies = create_tx_bodies(events.size());
-  const SignedTransactionHash tx_hash = events[0].proposed_tx_hash;
+  const TransactionHash tx_hash = events[0].tx_hash;
 
   // Report a failure for a tx with no committed record.
   failure_cache_.report(tx_hash, make_failure_diag(100), db_->latest_block());
@@ -511,7 +510,7 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
 
 TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
 {
-  SignedTransactionHash failed_hash;
+  TransactionHash failed_hash;
   std::ranges::fill(failed_hash, 0x7F);
   failure_cache_.report(failed_hash, make_failure_diag(100),
                         db_->latest_block());
@@ -520,7 +519,7 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   // watermark. Give each block one distinct committed tx.
   for (BlockHeight h = 100; h <= 105; h++) {
     TxEventLog log;
-    std::ranges::fill(log.proposed_tx_hash, static_cast<uint8_t>(h));
+    std::ranges::fill(log.tx_hash, static_cast<uint8_t>(h));
     ProposedTransaction body;
     body.signed_tx.tx.uniquifier.nonce = h;
     ingest_legacy_events(h, TxEventLogBatch{log},
@@ -539,7 +538,7 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
 
 TEST_F(IndexerTest, UnknownTxStillNotFound)
 {
-  SignedTransactionHash tx_hash;
+  TransactionHash tx_hash;
   std::ranges::fill(tx_hash, 0x03);
   TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoNotFound);
@@ -561,7 +560,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
 
   auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
     TxEventLog log;
-    log.proposed_tx_hash = tx;
+    log.tx_hash = tx;
     TxEmittedEvent ev;
     ev.contract_address = addr;
     ev.num_topics = 0;
@@ -603,7 +602,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   EXPECT_EQ(event_page.latest_block, 10);
   ASSERT_EQ(event_page.events.size(), 1);
   EXPECT_EQ(event_page.events[0].block_height, 10);
-  EXPECT_EQ(event_page.events[0].proposed_tx_hash, tx10);
+  EXPECT_EQ(event_page.events[0].tx_hash, tx10);
 
   // Scan 2 -- unfiltered transaction list: only block 10 appears.
   TransactionQuery tx_query{};

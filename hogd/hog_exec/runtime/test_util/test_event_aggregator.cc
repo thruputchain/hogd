@@ -204,7 +204,7 @@ TestEventAggregator::get_events_by_hash(BlockID block_id,
   }
 
   for (auto const &[tx_id, event_log] : it->second) {
-    if (event_log.proposed_tx_hash == tx_hash) {
+    if (event_log.tx_hash == tx_hash) {
       co_return std::optional<TxEventLog>(event_log);
     }
   }
@@ -213,7 +213,7 @@ TestEventAggregator::get_events_by_hash(BlockID block_id,
 }
 
 x23::Async<RPCError>
-TestEventAggregator::report_tx_failure(SignedTransactionHash tx_hash,
+TestEventAggregator::report_tx_failure(TransactionHash tx_hash,
                                        TxFailureDiagnostic diag)
 {
   {
@@ -238,7 +238,7 @@ TestEventAggregator::wait_for_failure_reports(int64_t n)
   }
 }
 
-x23::Async<std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>>
+x23::Async<std::vector<std::pair<TransactionHash, TxFailureDiagnostic>>>
 TestEventAggregator::get_failure_reports()
 {
   x23::CoroGuard cg;

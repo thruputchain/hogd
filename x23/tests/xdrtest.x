@@ -217,7 +217,7 @@ struct TxEmittedEvent {
 };
 
 struct TxEventLog {
-  SHA256Hash proposed_tx_hash; // sha256(ProposedTransaction)
+  SHA256Hash tx_hash; // sha256(Transaction)
   TxEmittedEvent events<>;
 };
 

@@ -57,7 +57,7 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
-  void schedule(size_t num_txs, x23::XdrVec<SignedTransactionHash> &tx_hashes,
+  void schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
                 x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
@@ -68,7 +68,7 @@ public:
                                  BlockHeight block_height);
 
   std::shared_ptr<const SignedTransaction>
-  find_tx(const SignedTransactionHash &tx_hash)
+  find_tx(const TransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_.find(tx_hash);
     if (tx_value_ptr) {
@@ -79,7 +79,7 @@ public:
   }
 
   void get_txs_for_account(const ContractAddress &address,
-                           SignedTransactionHashBatch &tx_hashes,
+                           TransactionHashBatch &tx_hashes,
                            SignedTransactionBatch &txs)
   {
     // The method is called by [MempoolCoordinatorRpc], which may try to find
@@ -102,7 +102,7 @@ public:
   {
     size_t num_inserted = 0;
     for (auto it = begin; it != end; it++) {
-      const SignedTransactionHash &tx_hash = *it;
+      const TransactionHash &tx_hash = *it;
       const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
       CHECK_PTR(tx_value_ptr);
       if (insert_tx_into_runqueue(tx_hash, *tx_value_ptr)) {
@@ -115,7 +115,7 @@ public:
   }
 
   x23::Async<void>
-  remove_from_scheduler(x23::span<const SignedTransactionHash> hashes);
+  remove_from_scheduler(x23::span<const TransactionHash> hashes);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -179,7 +179,7 @@ public:
 private:
   struct TxKey {
     BlockHeight expiry_block_height;
-    SignedTransactionHash tx_hash;
+    TransactionHash tx_hash;
 
     bool operator<(const TxKey &other) const noexcept
     {
@@ -246,7 +246,7 @@ private:
   // more efficient for the caller to do a single [fetch_add()] to [size_]
   // rather than have [insert_tx_into_runqueue()] increment [size_] for every
   // single tx.
-  bool insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
+  bool insert_tx_into_runqueue(const TransactionHash &tx_hash,
                                const std::shared_ptr<TxValue> &tx_value);
   bool add_txs_helper(const SignedTransaction &tx);
 
@@ -297,8 +297,7 @@ private:
   // TODO(jhumphri): We currently do not free txs from [txs_]. I think we can
   // free them automatically without too much overhead/garbage collection with
   // smart pointers (e.g., [std::shared_ptr<>]).
-  SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>,
-                  SipHash24Hasher>
+  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_;
   // Per-account scheduler state, including hog ages and the account runqueue.
   SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;

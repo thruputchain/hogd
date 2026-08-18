@@ -620,7 +620,7 @@ MempoolCoordinatorRpc::add_finish_all_executors_nodes(
 
 SHA256Hash
 MempoolCoordinatorRpc::get_txset_hash(
-    const x23::XdrVec<SignedTransactionHash> &hashes)
+    const x23::XdrVec<TransactionHash> &hashes)
 {
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
@@ -906,7 +906,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
     x23::Vec<size_t> handle_end_indices;
     x23::Vec<ScheduledChunk> scheduled_chunks;
     x23::Vec<SummarizedChunk> summarized_chunks;
-    x23::Vec<x23::XdrVec<SignedTransactionHash>> txset_hash_chunks;
+    x23::Vec<x23::XdrVec<TransactionHash>> txset_hash_chunks;
     size_t num_tx_outcomes_processed{0};
     size_t tx_write_idx{0};
     size_t num_scheduled{0};
@@ -1029,7 +1029,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             for (size_t tx_idx = state->num_tx_outcomes_processed;
                  tx_idx < state->handle_end_indices[i]; tx_idx++) {
               if (cache.statuses[tx_idx]) {
-                const SignedTransactionHash &tx_hash = cache.tx_hashes[tx_idx];
+                const TransactionHash &tx_hash = cache.tx_hashes[tx_idx];
                 cache.result_tx_hashes.push_back(tx_hash);
                 state->txset_hash_chunks[i].push_back(tx_hash);
                 if (state->tx_write_idx != tx_idx) {
@@ -1070,7 +1070,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           if (!state->scheduled_chunks[i].active) {
             return;
           }
-          const x23::XdrVec<SignedTransactionHash> &tx_hashes =
+          const x23::XdrVec<TransactionHash> &tx_hashes =
               state->txset_hash_chunks[i];
           WorkerPool &worker_pool = WorkerPool::get_default_pool();
           const size_t num_threads = std::max(available_parallelism() / 2, 1UL);
@@ -1113,7 +1113,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           }
           const size_t start = state->summarized_chunks[i].start;
           const size_t end = state->summarized_chunks[i].end;
-          x23::span<const SignedTransactionHash> tx_hashes_span(
+          x23::span<const TransactionHash> tx_hashes_span(
               cache.result_tx_hashes.begin() + start,
               cache.result_tx_hashes.begin() + end);
           co_await append_to_parallel_batch(tx_hashes_span,
@@ -1747,7 +1747,7 @@ MempoolCoordinatorRpc::validate_batch_chunk(
 
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
 MempoolCoordinatorRpc::prepare_validation_chunk(
-    x23::span<const SignedTransactionHash> tx_hashes,
+    x23::span<const TransactionHash> tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
   PreparedValidationChunk prepared;
@@ -1762,7 +1762,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
   for (const ChunkRange &lookup_chunk : lookup_chunks) {
     lookup_handles.push_back(
         [](const ChunkRange *lookup_chunk,
-           x23::span<const SignedTransactionHash> tx_hashes,
+           x23::span<const TransactionHash> tx_hashes,
            x23::span<const NondeterministicProposalData> tx_nominations,
            x23::Vec<ProposedTransaction> &proposed_txs,
            x23::Vec<bool> &tx_found,
@@ -1814,7 +1814,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
 
 x23::Async<MempoolCoordinatorRpc::PreparedAndValidatedChunk>
 MempoolCoordinatorRpc::prepare_and_validate_chunk(
-    BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
+    BlockID block_id, x23::span<const TransactionHash> tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations)
 {
   co_await default_coropoll().pool_.bg();
@@ -2012,7 +2012,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
-  x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+  x23::XdrVec<TransactionHash> missing_tx_hashes;
   PendingBlock cache{};
   bool validated = true;
   SchedulerValidationResult result(
@@ -2223,7 +2223,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         chunk_handles.reserve(validation_chunks.size());
 
         for (const ChunkRange &chunk : validation_chunks) {
-          x23::span<const SignedTransactionHash> tx_hashes_span(
+          x23::span<const TransactionHash> tx_hashes_span(
               cache.tx_hashes.begin() + chunk.start,
               cache.tx_hashes.begin() + chunk.end);
           x23::span<const NondeterministicProposalData> tx_nominations_span(
@@ -2271,7 +2271,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   auto check_validation_node = validation_dag.async<void>(
       "check validation chunks", validation_dag.after(prepare_validate_node),
       [&]() -> x23::Async<void> {
-        for (const SignedTransactionHash &tx_hash : missing_tx_hashes) {
+        for (const TransactionHash &tx_hash : missing_tx_hashes) {
           if (tx_failed_authentication(tx_hash)) {
             co_await cancel_with_result(
                 SchedulerValidationOutcome::SchedulerValidationInvalid,
@@ -2717,13 +2717,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         // into the nominated block. [nominated_block_cache_.tx_hashes] includes
         // every tx we attempted during scheduling, including txs that later
         // failed proposal and were added to [failed_tx_hashes].
-        static std::unordered_set<SignedTransactionHash, SipHash24Hasher>
+        static std::unordered_set<TransactionHash, SipHash24Hasher>
             return_to_runqueue;
         return_to_runqueue.clear();
 
         CHECK_PTR(commit_plan.committed_cache);
-        const x23::XdrVec<SignedTransactionHash> *remove_from_scheduler =
-            nullptr;
+        const x23::XdrVec<TransactionHash> *remove_from_scheduler = nullptr;
         if (commit_plan.committed_nominated) {
           // The committed block is the block we nominated.
           // [nominated_block_cache_.tx_hashes] also includes the failed txs (in
@@ -2745,7 +2744,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
           // Any of the txs in the committed (validated) block that were also in
           // the nominated block should not be returned to the runqueue.
-          for (const SignedTransactionHash &hash : *remove_from_scheduler) {
+          for (const TransactionHash &hash : *remove_from_scheduler) {
             if (return_to_runqueue.empty()) {
               break;
             }
@@ -2759,7 +2758,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         CHECK_PTR(remove_from_scheduler);
         remove_from_scheduler_size = remove_from_scheduler->size();
         co_await scheduler_->remove_from_scheduler(
-            x23::span<const SignedTransactionHash>(*remove_from_scheduler));
+            x23::span<const TransactionHash>(*remove_from_scheduler));
         if (commit_plan.committed_nominated) {
           x23::CoroGuard cg;
           co_await cg(scheduler_->global_lock_);
@@ -2886,14 +2885,14 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
-  static SignedTransactionHashBatch tx_hashes;
+  static TransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();
   txs.clear();
   for (const KeyChange &change : key_changes) {
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
-    static SignedTransactionHashBatch change_tx_hashes;
+    static TransactionHashBatch change_tx_hashes;
     static SignedTransactionBatch change_txs;
     change_tx_hashes.clear();
     change_txs.clear();
@@ -2906,7 +2905,7 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
       co_await auth_client_->authmempool_verify_transactions(
           scheduler_->current_block(), txs);
   CHECK_EQ(auth_ret.size(), tx_hashes.size());
-  x23::Vec<SignedTransactionHash> to_remove;
+  x23::Vec<TransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
     const AuthErrorCode &code = auth_ret[i];
     if (code != AuthErrorCode::kAuthSuccess) {

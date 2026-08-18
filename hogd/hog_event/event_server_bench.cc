@@ -127,7 +127,7 @@ TxEventLog
 create_fake_event_log(size_t tx_id)
 {
   TxEventLog event_log{};
-  event_log.proposed_tx_hash = sha256(create_fake_body(tx_id).signed_tx.tx);
+  event_log.tx_hash = sha256(create_fake_body(tx_id).signed_tx.tx);
 
   // Create some fake events (3 events per transaction)
   for (size_t i = 0; i < 3; i++) {
@@ -247,7 +247,7 @@ run_event_bench(const std::string &exec_server_addr,
   if (res1 != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close executor event handle");
   }
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   hashes.reserve(num_events);
   nondeterministic_data.reserve(num_events);

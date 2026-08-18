@@ -34,7 +34,7 @@ target_link_libraries(
 )
 add_dependencies(
   exec_interface_test_objects
-  all_wasm_headers
+  all_contract_headers
 )
 
 add_executable(

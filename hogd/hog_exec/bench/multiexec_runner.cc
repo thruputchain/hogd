@@ -372,7 +372,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto end_coros_time = x23::fastclock::get_ns();
   double elapsed_time = end_coros_time - start_coros_time;
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   hashes.reserve(txs->size());
   for (const SignedTransaction &tx : *txs) {
     hashes.push_back(sha256(tx.tx));

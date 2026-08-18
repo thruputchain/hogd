@@ -12,10 +12,10 @@ namespace hogd {
 
 namespace {
 
-SignedTransactionHash
+TransactionHash
 make_hash(uint8_t fill)
 {
-  SignedTransactionHash hash;
+  TransactionHash hash;
   std::ranges::fill(hash, fill);
   return hash;
 }
