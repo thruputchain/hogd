@@ -19,11 +19,11 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/lthash16.h"
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
-#include "hogd/hogdb/db_hash.h"
-#include "hogd/hogdb/hog_types.h" // BlockTXID
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/rpc_context.h"
-#include "hogd/hogdb/rpc_from_sched.h"
+#include "hogd/hog_db/db_hash.h"
+#include "hogd/hog_db/hog_types.h" // BlockTXID
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 
@@ -47,7 +47,7 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
       Database::open(dir->get_path(), Database::estimate_heap_size(kHeapSize),
                      0);
   CHECK(db.has_value());
-  HogDBDAO dao(RAMDB(std::move(*db)));
+  HogDbDAO dao(RAMDB(std::move(*db)));
   RPCContext ctx(std::move(dao), nullptr);
 
   // Fresh db: tip at height -1 so genesis is allowed to load.
@@ -60,7 +60,7 @@ load_genesis_for_shard(uint32_t shard_id, uint32_t total_shards)
                                        .total_shards = total_shards,
                                        .shard_function_id = kShardFunctionId});
 
-  HogDBSchedRpc sched(ctx);
+  HogDbSchedRpc sched(ctx);
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
   DbSchedResult res =

@@ -65,7 +65,6 @@
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
-#include "hogd/hog_indexer/rpc_from_event.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/scheduler.h"
@@ -850,7 +849,7 @@ HogDevnodeNode::start_indexer_servers()
 void
 HogDevnodeNode::reconcile_event_outbox_with_recovered_tip()
 {
-  const DbTip tip = ctx_->get_tip();
+  const DbTip tip = default_shard_db().get_tip();
   auto reconciled = event_ctx_.reconcile_outbox_tip(tip.id, tip.value)();
   if (!reconciled) {
     throw std::runtime_error(
@@ -861,7 +860,7 @@ HogDevnodeNode::reconcile_event_outbox_with_recovered_tip()
 void
 HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
 {
-  const DbTip tip = ctx_->get_tip();
+  const DbTip tip = default_shard_db().get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
   auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
   if (!latest) {
@@ -1035,8 +1034,8 @@ HogDevnodeNode::materialize_bootstrap_accounts(
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config, network_hash_,
-                                             ctx_->get_cost_model());
+      build_local_bootstrap_account_artifact(
+          config, network_hash_, default_shard_db().get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
   genesis_configuration_v2_ = artifact.genesis_configuration_v2;
   CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
@@ -1061,7 +1060,7 @@ HogDevnodeNode::materialize_bootstrap_accounts(
 x23::Async<void>
 HogDevnodeNode::initialize_fresh_event_outbox_origin()
 {
-  const DbTip genesis_tip = ctx_->get_tip();
+  const DbTip genesis_tip = default_shard_db().get_tip();
   if (genesis_tip.value.proposal_header.block_height != 0) {
     throw std::runtime_error(
         "fresh devnode genesis did not establish canonical height 0");

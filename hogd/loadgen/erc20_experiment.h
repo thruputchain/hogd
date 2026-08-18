@@ -73,8 +73,9 @@ private:
   GasAmount filler_gas_limit() const
   {
     const uint64_t marginal = 2'500ULL * (filler_items_ ? filler_items_ : 1);
-    const uint64_t base = use_rv32_ ? 100'000ULL : 20'000ULL;
-    return GasAmount{base + (use_rv32_ ? 3ULL : 1ULL) * marginal};
+    // rv32 is the only artifact since wasm was deleted, so only its profile
+    // remains: a higher floor and a steeper per-byte cost.
+    return GasAmount{100'000ULL + 3ULL * marginal};
   }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);

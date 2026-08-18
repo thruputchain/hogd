@@ -175,46 +175,6 @@ function(add_contract_header target_name)
   add_dependencies(all_contract_headers ${target_name}_header)
 endfunction()
 
-# Build all WASMs (and specs) via groundhog-cli
-add_wasm_builds(
-  SPEC_CONTRACTS
-    fibonacci
-    fibonacci_call
-    cxs_roundtrip
-    txs_roundtrip
-    dev_wallet
-    deploy_and_transfer
-    read_only_test
-    manual_revert_test
-    manual_revert_caller
-    simple_wallet
-    simple_wallet_authclaim
-    storage_filler
-    sha256_wrapper
-    initial_token_claim
-    itc_erc20
-    authclaim_test
-    htlc
-    payment_channel
-    return_fault_test
-    tuple_return
-    no_syscall_test
-    syscall_misc_tests
-    syscall_parse_hardening_test
-    nnint_output_fault_test
-    output_alias_test
-    calldata_wrapper
-    delegate_call_test
-    ed25519_verify_wrapper
-    view_gateway_test
-  RAW_CONTRACTS
-    hash_bug
-    calldata_raw
-    sha256_raw
-    fibonacci_raw
-    nocontract_wallet
-)
-
 add_executable(contract_loader_test contract_loader_test.cc)
 target_link_libraries(contract_loader_test
   contract_loader

@@ -100,7 +100,7 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 // already in the db (see [dbsched_load_genesis_configuration]), so the preloaded
 // items are accounted for rather than corrupting the hash.
 void
-preload_synthetic_items(HogDBDAO &db, const ShardIdentity &identity,
+preload_synthetic_items(HogDbDAO &db, const ShardIdentity &identity,
                         size_t num_items, size_t bytes_per_item)
 {
   std::vector<std::byte> value(bytes_per_item, std::byte{0xab});
@@ -112,7 +112,7 @@ preload_synthetic_items(HogDBDAO &db, const ShardIdentity &identity,
       continue;
     }
     const ItemKey key = make_item_key(addr, uint64_t{0});
-    HogDBStatus<void> status =
+    HogDbStatus<void> status =
         bytes_per_item ? db.write_bytes(key, value)
                        : db.write_nnint128(key, static_cast<int128_t>(i) + 1);
     if (!status.has_value()) {

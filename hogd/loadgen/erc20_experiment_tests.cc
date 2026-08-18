@@ -196,7 +196,7 @@ TEST_F(StorageFillerTest, SixtyFourItems)
 
 TEST_F(ERC20ExperimentTest, Basic)
 {
-  run_payments_experiment(/*use_rv32=*/false);
+  run_payments_experiment();
 }
 
 // Same payments workload, but the erc20 and wallet contracts are the compiled

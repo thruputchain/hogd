@@ -155,7 +155,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
   // writes to the single shard that owns that address.
   if (filler_instances_ > 0) {
     using filler_meta = ContractTraitMeta<storage_filler::StorageFiller>;
-    auto filler_contract = filler_meta::load_wasm();
+    auto filler_contract = filler_meta::load_rv32();
     assert(filler_contract);
     const SHA256Hash filler_hash = sha256(*filler_contract);
     filler_addresses_.reserve(filler_instances_);

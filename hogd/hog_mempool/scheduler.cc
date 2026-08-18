@@ -25,7 +25,6 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_shard_routing/shard_router.h"
 #include "hogd/db_shard_routing/sharding.h"
 #include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"

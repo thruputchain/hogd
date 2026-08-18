@@ -8,8 +8,8 @@
 #include "db_sched.hh"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/lthash16.h"
-#include "hogd/hogdb/db_hash.h"
-#include "hogd/mempool/sharded_db_sched.h"
+#include "hogd/hog_db/db_hash.h"
+#include "hogd/hog_mempool/sharded_db_sched.h"
 #include "types.hh"
 
 namespace hogd {

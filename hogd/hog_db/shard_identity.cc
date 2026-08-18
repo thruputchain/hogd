@@ -1,4 +1,4 @@
-#include "hogd/hogdb/shard_identity.h"
+#include "hogd/hog_db/shard_identity.h"
 
 #include <cstdint>
 #include <expected>
@@ -9,19 +9,19 @@
 #include "sched_db.hh" // ShardIdentity
 
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
-#include "hogd/hogdb/hogdb_dao.h"
-#include "hogd/hogdb/status.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/status.h"
 
 namespace hogd {
 
 std::expected<ShardIdentity, std::string>
-establish_shard_identity(HogDBDAO &db,
+establish_shard_identity(HogDbDAO &db,
                          std::optional<std::uint32_t> flag_shard_id,
                          std::optional<std::uint32_t> flag_total_shards)
 {
   // Stored under a kGlobalMetadata key, so it is excluded from the consensus
   // hash.
-  HogDBStatus<ShardIdentity> persisted = db.read_shard_identity();
+  HogDbStatus<ShardIdentity> persisted = db.read_shard_identity();
   if (persisted) {
     ShardIdentity identity = *persisted;
     if ((flag_shard_id && *flag_shard_id != identity.shard_id) ||
@@ -41,7 +41,7 @@ establish_shard_identity(HogDBDAO &db,
     }
     return identity;
   }
-  if (persisted.error().code() != HogDBCode::kNotFound) {
+  if (persisted.error().code() != HogDbCode::kNotFound) {
     // An unreadable identity record is not the same as "no record" -- do not
     // silently overwrite it.
     return std::unexpected(

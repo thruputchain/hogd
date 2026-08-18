@@ -11,7 +11,7 @@
 #include "types.hh"
 
 #include "hogd/db_shard_routing/sharded_client.h"
-#include "hogd/mempool/shared.h" // db_sched_client_t
+#include "hogd/hog_mempool/shared.h" // db_sched_client_t
 #include "x23/async.h"
 #include "x23/vec.h"
 

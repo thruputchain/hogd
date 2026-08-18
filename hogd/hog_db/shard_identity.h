@@ -9,7 +9,7 @@
 
 namespace hogd {
 
-class HogDBDAO;
+class HogDbDAO;
 
 // Resolve which shard a ramdb directory is, persisting the answer on a db that
 // does not carry one yet. A persisted record is authoritative and the flags
@@ -19,7 +19,7 @@ class HogDBDAO;
 //
 // Returns the resolved identity, or a message the caller fail-stops on.
 std::expected<ShardIdentity, std::string>
-establish_shard_identity(HogDBDAO &db,
+establish_shard_identity(HogDbDAO &db,
                          std::optional<std::uint32_t> flag_shard_id,
                          std::optional<std::uint32_t> flag_total_shards);
 

@@ -2013,11 +2013,14 @@ TEST(HogDevnode, ShardedGatewayServesAccountsOnEveryShard)
       "1000000000",
   });
   Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), kAccounts);
 
+  // Derive the funded set the way the devnode does, so the addresses queried
+  // below are the ones it actually wrote: a local bootstrap funds a faucet
+  // alongside the [kAccounts] user accounts.
   const BootstrapAccountArtifact artifact =
-      build_bootstrap_account_artifact({.count = kAccounts});
-  ASSERT_EQ(artifact.accounts.size(), kAccounts);
+      build_local_bootstrap_account_artifact({.user_account_count = kAccounts});
+  ASSERT_EQ(artifact.accounts.size(), kAccounts + 1UL);
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), artifact.accounts.size());
 
   // Guard the premise: if every account happened to land on one shard the test
   // would pass without exercising the split at all.
@@ -2048,10 +2051,10 @@ TEST(HogDevnode, ShardedGatewayServesAccountsOnEveryShard)
 
     DbGatewayResult result = client.dbgateway_get_items(batch)();
     ASSERT_EQ(result.error(), RPCError::kRPCNone);
-    ASSERT_EQ(result.payload().items.size(), kAccounts);
+    ASSERT_EQ(result.payload().items.size(), artifact.accounts.size());
     // Every funded account resolves, whichever shard holds it, and the batch
     // comes back in input order.
-    for (std::size_t i = 0; i < kAccounts; ++i) {
+    for (std::size_t i = 0; i < artifact.accounts.size(); ++i) {
       EXPECT_EQ(result.payload().items[i].error(), RPCError::kRPCNone)
           << "account " << i << " on shard "
           << shard_of_address(artifact.accounts[i].address, kShards);

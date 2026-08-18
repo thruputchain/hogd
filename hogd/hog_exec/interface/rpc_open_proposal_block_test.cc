@@ -21,7 +21,6 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
-#include "hogd/hog_exec/runtime/test_util/hogdb_wrapper.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"

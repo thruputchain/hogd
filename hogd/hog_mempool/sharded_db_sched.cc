@@ -1,4 +1,4 @@
-#include "hogd/mempool/sharded_db_sched.h"
+#include "hogd/hog_mempool/sharded_db_sched.h"
 
 #include <memory>
 #include <span>
@@ -16,8 +16,8 @@
 #include "hogd/crypto/crypto.h"             // sha256
 #include "hogd/crypto/lthash16.h"           // LtHash16
 #include "hogd/db_shard_routing/sharding.h" // shard_of_address, kShardFunctionId
-#include "hogd/hogdb/db_hash.h" // db_hash_from_lthash16, lthash16_from_db_hash
-#include "hogd/mempool/shared.h"
+#include "hogd/hog_db/db_hash.h" // db_hash_from_lthash16, lthash16_from_db_hash
+#include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"

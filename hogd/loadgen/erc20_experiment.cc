@@ -129,7 +129,7 @@ ERC20ExperimentState::generate_experiment()
   if (filler_instances_ > 0) {
     using filler_meta = ContractTraitMeta<storage_filler::StorageFiller>;
     auto filler_contract =
-        use_rv32_ ? filler_meta::load_rv32() : filler_meta::load_wasm();
+        filler_meta::load_rv32();
     assert(filler_contract);
     const SHA256Hash filler_hash = sha256(*filler_contract);
     filler_addresses_.reserve(filler_instances_);
