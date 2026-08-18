@@ -52,6 +52,13 @@ CHUCKD_CONFIG_DIR="$REPO_ROOT/scripts/ci/chuckd-configs"
 CHUCKD_INSTANCES=(970c9b 982951)
 CHUCKD_SEEDS=(7704454085476916988 668639415096168636)
 
+# How long the mempools run before the benchmark is over, and the sentinel each
+# one prints when it stops. The sentinel is how this script learns a mempool has
+# exited; see [await_mempool] for why the control server cannot tell it.
+MEMPOOL_RUN_SEC=360
+MEMPOOL_EXIT_SENTINEL='CI_MEMPOOL_EXIT_STATUS='
+MEMPOOL_EXIT_TIMEOUT_SEC=$((MEMPOOL_RUN_SEC + 120))
+
 export CI_CONTROL_PORT=$("$BUILD_ROOT/hogd/utils/get_port" kCIControlServerPort)
 export LOADGEN_PORT=11222
 export LOADGEN_HTTP_PORT=11223
@@ -375,30 +382,26 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-node0_mempool_script=$(
+# Runs a mempool for its allotted time and reports how it ended on a sentinel
+# line, so that a reader of its log -- rather than the control server, which
+# only tracks the most recently started process on the host -- can await it.
+# Reaching the allotted time is how the benchmark finishes, not a failure.
+make_mempool_script() {
   cat <<EOF
 set -euo pipefail
 ulimit -c unlimited || true
 set +e
-$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
+$(quote_cmd timeout "${MEMPOOL_RUN_SEC}s" "$@")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+echo "${MEMPOOL_EXIT_SENTINEL}\$status" >&2
 exit \$status
 EOF
-)
-node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
+}
+
+node0_mempool_script=$(make_mempool_script "${node0_mempool_cmd[@]}")
+node1_mempool_script=$(make_mempool_script "${node1_mempool_cmd[@]}")
 
 control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
@@ -498,11 +501,6 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
-node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
-node1_mempool_pid=$!
-
 echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_hog_exec_slot_a" \
@@ -521,12 +519,23 @@ done
 # every readiness wait has already passed, so nothing else in this script has
 # anything to say about it. Name the status and replay the mempool's own log
 # before exiting on it.
+#
+# The status comes from the sentinel the mempool prints, not from
+# [control_cli wait]. That command waits on whatever the control server started
+# most recently on the host, which on a mempool host is hog-db: it is launched
+# there once the mempool's database port is up, and it blocks forever by
+# design. Waiting on it never returned, so instead of finishing -- or failing --
+# here, the suite sat silent until the schedule's deadline killed the whole job.
 await_mempool() {
   local label=$1
-  local pid=$2
-  local status=0
+  local status
 
-  wait "$pid" || status=$?
+  if ! status=$(wait_control_log_status "$label" "$MEMPOOL_EXIT_SENTINEL" \
+    "$MEMPOOL_EXIT_TIMEOUT_SEC"); then
+    echo "$label never reported an exit status" >&2
+    return 1
+  fi
+
   if [ "$status" -ne 0 ]; then
     echo "$label $(ci_describe_exit_status "$status")" >&2
     replay_control_log_for_label "$label"
@@ -535,7 +544,7 @@ await_mempool() {
   echo "$label wait completed"
 }
 
-await_mempool node0_mempool "$node0_mempool_pid"
-await_mempool node1_mempool "$node1_mempool_pid"
+await_mempool node0_mempool
+await_mempool node1_mempool
 
 publish_results

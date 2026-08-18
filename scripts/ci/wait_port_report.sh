@@ -70,6 +70,60 @@ wait_control_log_line() {
   return 1
 }
 
+# Waits for a process to report its own exit status on a sentinel line, and
+# prints the status it reported.
+#
+# [control_cli wait] cannot be used for this. It waits on whatever the control
+# server started most recently on that host, not on the process the caller
+# launched, so a script that starts a second, longer-lived server on the same
+# host afterwards waits on that one instead -- and if that one blocks forever,
+# so does the wait. Have the process report its own status and read it back out
+# of its log, which is true no matter what else runs on the host.
+#
+# The status goes to stdout so the caller can capture it; progress and
+# diagnostics go to stderr so they survive that capture.
+wait_control_log_status() {
+  local wanted_label=$1
+  local prefix=$2
+  local timeout_sec=${3:-${CI_WAIT_PORT_TIMEOUT_SEC:-600}}
+  local record host label stdout_path stderr_path
+  local quoted_prefix quoted_stderr_path poll_command output status
+
+  for record in ${CONTROL_LOG_RECORDS[@]+"${CONTROL_LOG_RECORDS[@]}"}; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    [[ $label == "$wanted_label" ]] || continue
+
+    printf -v quoted_prefix '%q' "$prefix"
+    printf -v quoted_stderr_path '%q' "$stderr_path"
+    printf -v poll_command 'timeout %ss bash -c %q' "$timeout_sec" \
+      "until line=\$(grep -F -- $quoted_prefix $quoted_stderr_path | tail -n 1); [ -n \"\$line\" ]; do sleep 0.1; done; printf '%s\\n' \"\$line\""
+
+    echo "Waiting for $wanted_label to report: ${prefix}<status>" >&2
+    if ! output=$(remote_run "$host" "$poll_command"); then
+      echo "Timed out after ${timeout_sec}s waiting for $wanted_label to report its exit status" >&2
+      replay_control_log "$host" "$label" "$stdout_path" "$stderr_path" >&2
+      return 1
+    fi
+
+    # Keep the digits that follow the last sentinel in the log: a run that
+    # reused this file must be read as the run that wrote last.
+    status=${output##*"$prefix"}
+    status=${status%%[!0-9]*}
+    if [[ -z $status ]]; then
+      echo "$wanted_label reported an unreadable exit status: $output" >&2
+      replay_control_log "$host" "$label" "$stdout_path" "$stderr_path" >&2
+      return 1
+    fi
+
+    echo "$wanted_label reported: ${prefix}${status}" >&2
+    printf '%s\n' "$status"
+    return 0
+  done
+
+  echo "no control log record for $wanted_label" >&2
+  return 1
+}
+
 # Replays the tail of one launched process's stdout and stderr. Best effort: a
 # host that has gone away must not replace the failure being reported with a
 # failure of its own.

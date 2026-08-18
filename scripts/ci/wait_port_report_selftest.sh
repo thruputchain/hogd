@@ -156,4 +156,62 @@ expect_contains 'log milestone timeout names the process' \
 expect_contains 'log milestone timeout replays logs' \
   'node0_mempool on hog7' "$out"
 
+# A process reports its own exit status, so the wait does not depend on the
+# control server's idea of which process on the host is the most recent one.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out "/tmp/mempool err.log"
+remote_run() { echo "CI_MEMPOOL_EXIT_STATUS=0"; }
+status=$(wait_control_log_status node0_mempool CI_MEMPOOL_EXIT_STATUS=)
+echo "GOT[$status]"
+') && status=0 || status=$?
+expect_status 'exit status reported' 0 "$status"
+expect_contains 'exit status is captured alone' 'GOT[0]' "$out"
+expect_contains 'exit status wait names the process' \
+  'node0_mempool reported: CI_MEMPOOL_EXIT_STATUS=0' "$out"
+
+# A nonzero status is passed back as the process reported it.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+remote_run() { echo "CI_MEMPOOL_EXIT_STATUS=134"; }
+status=$(wait_control_log_status node0_mempool CI_MEMPOOL_EXIT_STATUS=)
+echo "GOT[$status]"
+') && status=0 || status=$?
+expect_status 'nonzero exit status reported' 0 "$status"
+expect_contains 'nonzero exit status is captured' 'GOT[134]' "$out"
+
+# A mempool that never reports -- because it was killed outright -- must end the
+# script with its log replayed, not hang until the schedule's deadline.
+out=$(REMOTE_RUN_FAILS=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_status node0_mempool CI_MEMPOOL_EXIT_STATUS= 480
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unreported exit status ends the script' 1 "$status"
+expect_lacks 'unreported exit status stops the script' 'NOT REACHED' "$out"
+expect_contains 'unreported exit status names the timeout' \
+  'Timed out after 480s waiting for node0_mempool' "$out"
+expect_contains 'unreported exit status replays logs' \
+  'node0_mempool on hog7' "$out"
+
+# A log that says something other than a status is a failure, not a status of 0.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+remote_run() { echo "CI_MEMPOOL_EXIT_STATUS=oops"; }
+wait_control_log_status node0_mempool CI_MEMPOOL_EXIT_STATUS=
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unreadable exit status fails' 1 "$status"
+expect_lacks 'unreadable exit status stops the script' 'NOT REACHED' "$out"
+expect_contains 'unreadable exit status says so' \
+  'reported an unreadable exit status' "$out"
+
+# An unknown label is reported rather than silently waited on forever.
+out=$(run_case '
+wait_control_log_status node1_mempool CI_MEMPOOL_EXIT_STATUS=
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'exit status of an unknown label fails' 1 "$status"
+expect_contains 'exit status of an unknown label says so' \
+  'no control log record for node1_mempool' "$out"
+
 exit "$fail"
