@@ -28,6 +28,16 @@ expect_contains() {
   fi
 }
 
+expect_equals() {
+  local label=$1 want=$2 got=$3
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL $label: got [$got], want [$want]"
+    fail=1
+  else
+    echo "ok   $label"
+  fi
+}
+
 expect_lacks() {
   local label=$1 needle=$2 haystack=$3
   if [[ "$haystack" == *"$needle"* ]]; then
@@ -52,6 +62,10 @@ ci_wait_port() {
 }
 remote_run() {
   [ \"\${REMOTE_RUN_FAILS:-0}\" != 1 ] || { echo 'ssh: closed' >&2; return 255; }
+  if [ -n \"\${REMOTE_RUN_STDOUT+set}\" ]; then
+    printf '%s\n' \"\$REMOTE_RUN_STDOUT\"
+    return 0
+  fi
   echo \"REMOTE(\$1): \$2\"
 }
 record() { CONTROL_LOG_RECORDS+=(\"\$1|\$2|\$3|\$4\"); }
@@ -155,5 +169,79 @@ expect_contains 'log milestone timeout names the process' \
   'waiting for node0_mempool to report: PORT mempool.executor=8071' "$out"
 expect_contains 'log milestone timeout replays logs' \
   'node0_mempool on hog7' "$out"
+
+# A process reports its own outcome by writing a marker as it exits, and the
+# wait yields whatever follows the marker -- and only that, so a caller can
+# capture it.
+out=$(REMOTE_RUN_STDOUT='I[0818 12:57:38] MEMPOOL_RUN_COMPLETE status=2' run_case '
+record hog5 node0_hog_exec_slot_a /tmp/exec.out /tmp/exec.err
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 2>/dev/null
+') && status=0 || status=$?
+expect_status 'marker wait' 0 "$status"
+expect_equals 'marker wait yields only what follows the marker' '2' "$out"
+
+# A zero status is a result like any other, not an absent one.
+out=$(REMOTE_RUN_STDOUT='MEMPOOL_RUN_COMPLETE status=0' run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 2>/dev/null
+') && status=0 || status=$?
+expect_status 'zero marker value' 0 "$status"
+expect_equals 'zero marker value is yielded' '0' "$out"
+
+# The wait reads the end of the log rather than all of it, and looks at a pace
+# that does not compete with the benchmark writing it.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out "/tmp/mempool err.log"
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 660 2>&1
+') && status=0 || status=$?
+expect_contains 'marker wait reads only the tail' 'tail\ -n\ 20' "$out"
+expect_contains 'marker wait polls slowly' 'sleep\ 2' "$out"
+expect_contains 'marker wait quotes the remote path' '/tmp/mempool\\\ err.log' "$out"
+expect_contains 'marker wait honours an explicit deadline' 'timeout 660s' "$out"
+
+# A deadline of 0 is [timeout]'s "no deadline", for a run that only ends when
+# it is stopped by hand.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 0 2>&1
+') && status=0 || status=$?
+expect_contains 'zero deadline waits without one' 'timeout 0s' "$out"
+
+# A wait that times out names the process, replays its log, and still ends the
+# script rather than yielding a status the process never reported.
+out=$(REMOTE_RUN_FAILS=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 2>&1
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'marker wait timeout ends the script' 1 "$status"
+expect_contains 'marker wait timeout names the process' \
+  'waiting for node0_mempool to report: MEMPOOL_RUN_COMPLETE status=' "$out"
+expect_contains 'marker wait timeout replays logs' 'node0_mempool on hog7' "$out"
+expect_lacks 'marker wait timeout stops the script' 'NOT REACHED' "$out"
+
+# A line that came back without the marker is not a status of its own.
+out=$(REMOTE_RUN_STDOUT='' run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node0_mempool "MEMPOOL_RUN_COMPLETE status=" 2>&1
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unreadable marker line fails' 1 "$status"
+expect_contains 'unreadable marker line says so' \
+  'node0_mempool reported an unreadable [MEMPOOL_RUN_COMPLETE status=] line' "$out"
+expect_lacks 'unreadable marker line stops the script' 'NOT REACHED' "$out"
+
+# An unknown label says so rather than reporting someone else's marker.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_marker node1_mempool "MEMPOOL_RUN_COMPLETE status=" 2>&1
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'marker wait of an unknown label' 1 "$status"
+expect_contains 'marker wait of an unknown label says so' \
+  'no control log record for node1_mempool' "$out"
+expect_lacks 'marker wait of an unknown label stops the script' \
+  'NOT REACHED' "$out"
 
 exit "$fail"

@@ -74,6 +74,17 @@ export EVENT_MEMPOOL_PORT=8091
 export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
+# What each mempool writes to its stderr when it stops, with its exit status
+# appended. This run has no scheduled end, so the marker only ever appears
+# because a mempool died -- which is the one thing that should end the run.
+#
+# The status has to come from the mempool's own log. [control_cli wait] answers
+# with the state of the most recently started process on the host it is asked
+# about, and hog-db is started on the mempool's host after the mempool -- it
+# needs the mempool's db RPC server listening first. A wait on that host
+# therefore reports hog-db rather than the mempool it is meant to be watching.
+MEMPOOL_DONE_MARKER='MEMPOOL_RUN_COMPLETE status='
+
 node_dir() {
   printf '%s/node%s' "$BENCH_ROOT" "$1"
 }
@@ -338,30 +349,23 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-node0_mempool_script=$(
+# Runs one mempool with no time limit and reports how it ended, so the script
+# that launched it learns that it stopped rather than waiting on it forever.
+make_mempool_script() {
   cat <<EOF
 set -euo pipefail
 ulimit -c unlimited || true
 set +e
-$(quote_cmd "${node0_mempool_cmd[@]}")
+$(quote_cmd "$@")
 status=\$?
 set -e
-[ \$status -eq 124 ] && status=0
+echo "${MEMPOOL_DONE_MARKER}\$status" >&2
 exit \$status
 EOF
-)
-node1_mempool_script=$(
-  cat <<EOF
-set -euo pipefail
-ulimit -c unlimited || true
-set +e
-$(quote_cmd "${node1_mempool_cmd[@]}")
-status=\$?
-set -e
-[ \$status -eq 124 ] && status=0
-exit \$status
-EOF
-)
+}
+
+node0_mempool_script=$(make_mempool_script "${node0_mempool_cmd[@]}")
+node1_mempool_script=$(make_mempool_script "${node1_mempool_cmd[@]}")
 
 control_start_with_ulimit "$node0_mempool_host" "node0_mempool" "$SLOT_B_CPUS" \
   /usr/bin/bash -lc "$node0_mempool_script"
@@ -461,11 +465,6 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
-node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
-node1_mempool_pid=$!
-
 echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_hog_exec_slot_a" \
@@ -480,10 +479,21 @@ for node in "${NODE_IDS[@]}"; do
     "starting server on network tcp at address $(hog_ip "${CHUCKD_HOSTS[$node]}"):7888"
 done
 
-wait "$node0_mempool_pid"
-echo 'node0 mempool wait completed'
-wait "$node1_mempool_pid"
-echo 'node1 mempool wait completed'
+# Block until a mempool stops. This run is meant to be ended by hand, so the
+# wait is given no deadline; a mempool that dies on its own is the one thing
+# that ends it early, and the marker is how that becomes visible here.
+await_mempool() {
+  local label=$1
+
+  if ! wait_control_log_marker "$label" "$MEMPOOL_DONE_MARKER" 0 >/dev/null; then
+    echo "$label never reported that it had stopped" >&2
+    return 1
+  fi
+  echo "$label wait completed"
+}
+
+await_mempool node0_mempool
+await_mempool node1_mempool
 
 # We do not save results to the [metrics_history] repo because this CI run
 # should never finish--it should only stop when it is manually cancelled.
