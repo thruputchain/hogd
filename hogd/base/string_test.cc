@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "hogd/base/network_hash.h"
 #include "hogd/base/span.h"
 #include "hogd/base/string.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
@@ -86,6 +88,37 @@ TEST(NetworkHashTest, RejectsNonCanonicalLengthsAndInvalidHex)
   EXPECT_FALSE(parse_network_hash("1").has_value());
   EXPECT_FALSE(parse_network_hash(std::string(64, 'g')).has_value());
   EXPECT_FALSE(parse_network_hash(std::string(66, '0')).has_value());
+}
+
+TEST(PrintIecRateTest, DividesByElapsedSeconds)
+{
+  EXPECT_EQ(print_iec_rate(2UL << 20, 2.0), "1MiB");
+  EXPECT_EQ(print_iec_rate(1UL << 30, 1.0, true), "1 GiB");
+}
+
+// A zero interval is legal for steady_clock, so the quotient goes non-finite:
+// infinity when bytes were written, NaN when none were. Converting either to
+// size_t is undefined behavior (#2900), so both must report zero. Under
+// -fsanitize=float-cast-overflow an unguarded implementation aborts here.
+TEST(PrintIecRateTest, ZeroElapsedReportsZeroInsteadOfConvertingNonFinite)
+{
+  EXPECT_EQ(print_iec_rate(1UL << 30, 0.0), "0B");
+  EXPECT_EQ(print_iec_rate(0, 0.0), "0B");
+  EXPECT_EQ(print_iec_rate(1UL << 30, 0.0, true), "0 B");
+}
+
+// elapsed() is steady_clock-backed and cannot go backwards, but the helper is
+// public API and must not convert a negative quotient to an unsigned type.
+TEST(PrintIecRateTest, NegativeElapsedReportsZero)
+{
+  EXPECT_EQ(print_iec_rate(1UL << 30, -1.0), "0B");
+}
+
+// A finite quotient can still exceed SIZE_MAX for a small enough interval.
+TEST(PrintIecRateTest, SaturatesRatesTooLargeForSizeT)
+{
+  EXPECT_EQ(print_iec_rate(std::numeric_limits<size_t>::max(), 1e-9),
+            print_iec_bytes(std::numeric_limits<size_t>::max()));
 }
 
 } // namespace hogd

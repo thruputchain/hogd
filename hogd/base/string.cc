@@ -2,8 +2,10 @@
 
 #include <bit>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <format>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -119,6 +121,27 @@ std::string
 print_si_bytes(size_t val, bool add_space)
 {
   return pretty_print(kSiByteUnits, val, add_space);
+}
+
+std::string
+print_iec_rate(size_t bytes, double seconds, bool add_space)
+{
+  // A zero interval is permitted by steady_clock, so the quotient can be
+  // infinity (bytes > 0) or NaN (bytes == 0). Screen both out, along with a
+  // magnitude that would not fit, before converting to size_t: every one of
+  // those conversions is undefined behavior (#2900).
+  double rate = static_cast<double>(bytes) / seconds;
+  if (!(seconds > 0) || !std::isfinite(rate))
+    return print_iec_bytes(0, add_space);
+
+  // static_cast<double>(SIZE_MAX) rounds up to exactly 2^64, so this rejects
+  // precisely the values that would overflow the conversion.
+  constexpr auto kLimit =
+      static_cast<double>(std::numeric_limits<size_t>::max());
+  if (rate >= kLimit)
+    return print_iec_bytes(std::numeric_limits<size_t>::max(), add_space);
+
+  return print_iec_bytes(static_cast<size_t>(rate), add_space);
 }
 
 std::string
