@@ -62,7 +62,7 @@ public:
   // a given hash; a report for a new hash is dropped when the soft cap is
   // hit.  [watermark] is the caller's current indexed height, used only to
   // reject implausible attempt heights (see kMaxAttemptHeightSlack).
-  void report(const SignedTransactionHash &tx_hash,
+  void report(const TransactionHash &tx_hash,
               const TxFailureDiagnostic &diag, BlockHeight watermark)
   {
     // Malformed or absurd heights are wire input from a peer; drop them
@@ -92,7 +92,7 @@ public:
   }
 
   std::optional<TxFailureDiagnostic>
-  lookup(const SignedTransactionHash &tx_hash) const
+  lookup(const TransactionHash &tx_hash) const
   {
     auto [entry, lk] = entries_.find(tx_hash);
     if (entry == nullptr) {
@@ -109,14 +109,14 @@ public:
     // Subtract-form comparison (attempt <= watermark - delta) so a stored
     // height near INT64_MAX can never overflow the arithmetic; equivalent
     // for all in-range values.
-    std::vector<SignedTransactionHash> expired;
-    entries_.for_each([&](const std::pair<const SignedTransactionHash,
+    std::vector<TransactionHash> expired;
+    entries_.for_each([&](const std::pair<const TransactionHash,
                                           TxFailureDiagnostic> &kv) {
       if (kv.second.attempt_height <= watermark - expiry_delta_) {
         expired.push_back(kv.first);
       }
     });
-    for (const SignedTransactionHash &tx_hash : expired) {
+    for (const TransactionHash &tx_hash : expired) {
       auto [entry, lk] = entries_.find(tx_hash);
       // Re-check under the bucket lock: a concurrent re-report at a higher
       // attempt height may have refreshed the entry since we scanned it.
@@ -135,7 +135,7 @@ private:
   const size_t max_entries_;
 
   // Sharded by tx hash: report()/lookup() lock only the target bucket.
-  mutable SynchronizedMap<SignedTransactionHash, TxFailureDiagnostic,
+  mutable SynchronizedMap<TransactionHash, TxFailureDiagnostic,
                           SipHash24Hasher>
       entries_;
   // Approximate live-entry count backing size() and the soft cap.  Maintained

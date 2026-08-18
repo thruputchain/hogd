@@ -423,7 +423,7 @@ Scheduler::get_hog_age_from_pending_nomination_if_exists(
 }
 
 bool
-Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
+Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
                                    const std::shared_ptr<TxValue> &tx_value)
 {
   const ContractAddress &account = tx_value->tx.tx.invocation.invoked_address;
@@ -441,7 +441,7 @@ Scheduler::insert_tx_into_runqueue(const SignedTransactionHash &tx_hash,
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx)
 {
-  const SignedTransactionHash &tx_hash = sha256(tx.tx);
+  const TransactionHash &tx_hash = sha256(tx.tx);
   std::shared_ptr<TxValue> value;
   {
     // The tx may already exist in [txs_] because it is okay to add a tx back
@@ -866,7 +866,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
   bool ret = (lower_it != txs.end());
   if (remove_expired_txs) {
     for (auto it = txs.begin(); it != lower_it; it++) {
-      const SignedTransactionHash &tx_hash = it->first.tx_hash;
+      const TransactionHash &tx_hash = it->first.tx_hash;
       CHECK_EQ(txs_.remove(tx_hash), 1UL);
     }
     size_t to_remove = std::distance(txs.begin(), lower_it);
@@ -908,7 +908,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
 
 void
 Scheduler::schedule(size_t num_txs,
-                    x23::XdrVec<SignedTransactionHash> &tx_hashes,
+                    x23::XdrVec<TransactionHash> &tx_hashes,
                     x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
@@ -955,7 +955,7 @@ Scheduler::schedule(size_t num_txs,
         // This removes expired txs.
         for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
              it_remove++) {
-          const SignedTransactionHash &tx_hash = it_remove->first.tx_hash;
+          const TransactionHash &tx_hash = it_remove->first.tx_hash;
           CHECK_EQ(txs_.remove(tx_hash), 1UL);
         }
         size_t to_remove = std::distance(txs_to_schedule.begin(), it);
@@ -967,7 +967,7 @@ Scheduler::schedule(size_t num_txs,
         CHECK(removed_accounts.insert(account).second);
         break;
       }
-      const SignedTransactionHash &tx_hash = it->first.tx_hash;
+      const TransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
       const uint128_t hogs_available =
           from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
@@ -1067,7 +1067,7 @@ Scheduler::schedule(size_t num_txs,
 
 x23::Async<void>
 Scheduler::remove_from_scheduler(
-    x23::span<const SignedTransactionHash> tx_hashes)
+    x23::span<const TransactionHash> tx_hashes)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -1089,15 +1089,15 @@ Scheduler::remove_from_scheduler(
   for (size_t i = 0; i < chunks.size(); i++) {
     handles.push_back(
         [](const ChunkRange *chunk,
-           x23::span<const SignedTransactionHash> tx_hashes,
+           x23::span<const TransactionHash> tx_hashes,
            SynchronizedMap<ContractAddress, char, SipHash24Hasher> &accounts,
            Scheduler &scheduler) noexcept -> x23::Async<size_t> {
           co_await default_coropoll().pool_.bg();
 
-          x23::span<const SignedTransactionHash> hash_chunk(
+          x23::span<const TransactionHash> hash_chunk(
               tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
           size_t num_removed_from_runqueue = 0;
-          for (const SignedTransactionHash &tx_hash : hash_chunk) {
+          for (const TransactionHash &tx_hash : hash_chunk) {
             // Even if the *nominated* block is being committed and thus the txs
             // have been removed from the runqueue, it is possible that the
             // coordinator called [submit_unvetted()/submit_vetted()] and passed

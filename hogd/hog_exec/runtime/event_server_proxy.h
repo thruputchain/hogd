@@ -56,7 +56,7 @@ public:
   // self-contained and can safely outlive this proxy; a slow or dead event
   // server costs nothing but the dropped report -- RPC errors are logged and
   // swallowed, because a diagnostic must never disturb execution.
-  x23::Async<void> report_tx_failure(SignedTransactionHash tx_hash,
+  x23::Async<void> report_tx_failure(TransactionHash tx_hash,
                                      TxFailureDiagnostic diag);
 
 private:
@@ -86,7 +86,7 @@ public:
 
   // Awaitable; see EventServerProxy::report_tx_failure. Callers
   // fire-and-forget.
-  x23::Async<void> report_tx_failure(SignedTransactionHash tx_hash,
+  x23::Async<void> report_tx_failure(TransactionHash tx_hash,
                                      TxFailureDiagnostic diag) const
   {
     return event_server_proxy_.report_tx_failure(std::move(tx_hash),

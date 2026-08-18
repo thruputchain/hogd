@@ -128,7 +128,7 @@ PerTransactionEventServerProxy::emit_events(
 }
 
 x23::Async<void>
-EventServerProxy::report_tx_failure(SignedTransactionHash tx_hash,
+EventServerProxy::report_tx_failure(TransactionHash tx_hash,
                                     TxFailureDiagnostic diag)
 {
   // Copy the client up front (before the first co_await, so it happens while

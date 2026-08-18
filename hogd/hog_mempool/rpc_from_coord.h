@@ -277,7 +277,7 @@ public:
   }
 
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
-  schedcoord_lookup_transactions(const SignedTransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
     x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
     if (!ready()) {
@@ -285,7 +285,7 @@ public:
       co_return ret;
     }
     ret.reserve(tx_hashes.size());
-    for (const SignedTransactionHash &tx_hash : tx_hashes) {
+    for (const TransactionHash &tx_hash : tx_hashes) {
       std::shared_ptr<const SignedTransaction> tx =
           scheduler_->find_tx(tx_hash);
       if (tx) {
@@ -333,7 +333,7 @@ public:
   }
 
   static SHA256Hash
-  get_txset_hash(const x23::XdrVec<SignedTransactionHash> &hashes);
+  get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 
@@ -403,16 +403,16 @@ private:
     DbTip db_tip;
     BlockID block_id;
     x23::XdrVec<SignedTransaction> txs;
-    x23::XdrVec<SignedTransactionHash> tx_hashes;
+    x23::XdrVec<TransactionHash> tx_hashes;
 
-    x23::XdrVec<SignedTransactionHash> result_tx_hashes;
+    x23::XdrVec<TransactionHash> result_tx_hashes;
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerProposalResult proposal_result;
 
     x23::Vec<bool> statuses = x23::Vec<bool>(kMaxBlockSize, false);
     x23::Vec<x23::XdrVec<NondeterministicProposalData>>
         transaction_nomination_chunks;
-    x23::XdrVec<SignedTransactionHash> failed_tx_hashes;
+    x23::XdrVec<TransactionHash> failed_tx_hashes;
   };
   struct JointCommitResult {
     DbBlockResult db;
@@ -430,12 +430,12 @@ private:
 
   struct PreparedValidationChunk {
     x23::Vec<ProposedTransaction> proposed_txs;
-    x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+    x23::XdrVec<TransactionHash> missing_tx_hashes;
   };
 
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
-    x23::XdrVec<SignedTransactionHash> missing_tx_hashes;
+    x23::XdrVec<TransactionHash> missing_tx_hashes;
     bool validated = true;
   };
 
@@ -596,11 +596,11 @@ private:
                        size_t executor_idx);
 
   x23::Async<PreparedValidationChunk> prepare_validation_chunk(
-      x23::span<const SignedTransactionHash> tx_hashes,
+      x23::span<const TransactionHash> tx_hashes,
       x23::span<const NondeterministicProposalData> tx_nominations);
 
   x23::Async<PreparedAndValidatedChunk> prepare_and_validate_chunk(
-      BlockID block_id, x23::span<const SignedTransactionHash> tx_hashes,
+      BlockID block_id, x23::span<const TransactionHash> tx_hashes,
       x23::span<const NondeterministicProposalData> tx_nominations);
 
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(
@@ -704,7 +704,7 @@ private:
     }
   }
 
-  void mark_tx_failed_authentication(const SignedTransactionHash &tx_hash)
+  void mark_tx_failed_authentication(const TransactionHash &tx_hash)
   {
     const BlockHeight expiry =
         last_committed_block_.value.proposal_header.block_height +
@@ -716,7 +716,7 @@ private:
     tx_hashes.insert(tx_hash, 0);
   }
 
-  bool tx_failed_authentication(const SignedTransactionHash &tx_hash)
+  bool tx_failed_authentication(const TransactionHash &tx_hash)
   {
     const BlockHeight min_unexpired_height =
         last_committed_block_.value.proposal_header.block_height + 1;
@@ -773,7 +773,7 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
 
   using FailedAuthenticationTxSet =
-      SynchronizedMap<SignedTransactionHash, char, SipHash24Hasher>;
+      SynchronizedMap<TransactionHash, char, SipHash24Hasher>;
   SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
       failed_authentication_txs_;
 

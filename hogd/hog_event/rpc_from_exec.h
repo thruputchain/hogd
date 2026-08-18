@@ -28,7 +28,7 @@ public:
                            ProposedTransaction proposed_tx);
 
   x23::Async<RPCError>
-  eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
+  eventexecutor_report_tx_failure(TransactionHash tx_hash,
                                   TxFailureDiagnostic diag);
 
 private:

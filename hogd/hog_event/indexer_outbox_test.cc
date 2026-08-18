@@ -67,7 +67,7 @@ make_event(const ProposedTransaction &body, uint8_t marker,
            bool with_emitted_event = true)
 {
   TxEventLog event;
-  event.proposed_tx_hash = sha256(body.signed_tx.tx);
+  event.tx_hash = sha256(body.signed_tx.tx);
   if (with_emitted_event) {
     TxEmittedEvent emitted;
     emitted.contract_address[0] = marker;
@@ -80,7 +80,7 @@ make_event(const ProposedTransaction &body, uint8_t marker,
 ProposalTxs
 make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
 {
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : proposal_bodies) {
     hashes.push_back(sha256(body.signed_tx.tx));
@@ -91,14 +91,14 @@ make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
   const size_t split = std::min<size_t>(2, hashes.size());
   if (split != 0) {
     append_to_parallel_batch(
-        x23::span<const SignedTransactionHash>(hashes.data(), split),
+        x23::span<const TransactionHash>(hashes.data(), split),
         proposal_txs.hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data(), split),
                              proposal_txs.nondeterministic_data)();
   }
   if (split != hashes.size()) {
-    append_to_parallel_batch(x23::span<const SignedTransactionHash>(
+    append_to_parallel_batch(x23::span<const TransactionHash>(
                                  hashes.data() + split, hashes.size() - split),
                              proposal_txs.hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
@@ -191,9 +191,9 @@ make_committed_payload_golden_fixture()
   value.upgrades = {{0xde, 0xad, 0xbe, 0xef}, {1, 2, 3}};
 
   TxEventLog event;
-  event.proposed_tx_hash.fill(0);
-  event.proposed_tx_hash[0] = 0x21;
-  event.proposed_tx_hash[31] = 0x40;
+  event.tx_hash.fill(0);
+  event.tx_hash[0] = 0x21;
+  event.tx_hash[31] = 0x40;
   event.exec_result = ExecResult::ExecResultTxRootFrameReverted;
   event.root_output.status_code(InvocationFrameStatusCode::Abort);
   event.root_output.abort_buffer() = {0xfa, 0xce, 0xb0, 0x0c, 0x01};
@@ -229,7 +229,7 @@ make_committed_payload_golden_fixture()
       QueueEntry{0x11, 0x22}, QueueEntry{0x33}};
   payload.tx_bodies.push_back(std::move(body));
 
-  payload.event_logs[0].proposed_tx_hash =
+  payload.event_logs[0].tx_hash =
       sha256(payload.tx_bodies[0].signed_tx.tx);
   payload.proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
@@ -1340,12 +1340,12 @@ TEST_F(IndexerOutboxTest,
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(481);
 
-  x23::XdrVec<SignedTransactionHash> hashes;
+  x23::XdrVec<TransactionHash> hashes;
   ASSERT_TRUE(parallel_batch_to_t(candidate.proposal_txs.hash, hashes)());
   ASSERT_EQ(hashes.size(), 3);
 
   IndexerOutboxCandidatePayload missing = candidate;
-  x23::XdrVec<SignedTransactionHash> missing_hashes = hashes;
+  x23::XdrVec<TransactionHash> missing_hashes = hashes;
   missing_hashes.pop_back();
   missing.proposal_txs.hash = t_to_parallel_batch(missing_hashes)();
   write_payload(dir_, filename, missing);
@@ -1355,7 +1355,7 @@ TEST_F(IndexerOutboxTest,
             std::string::npos);
 
   IndexerOutboxCandidatePayload duplicate = candidate;
-  x23::XdrVec<SignedTransactionHash> duplicate_hashes = hashes;
+  x23::XdrVec<TransactionHash> duplicate_hashes = hashes;
   duplicate_hashes[1] = duplicate_hashes[0];
   duplicate.proposal_txs.hash = t_to_parallel_batch(duplicate_hashes)();
   write_payload(dir_, filename, duplicate);

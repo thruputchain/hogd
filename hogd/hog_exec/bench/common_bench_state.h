@@ -115,7 +115,7 @@ public:
   void set_event_proposal_transactions(
       std::span<const SignedTransaction> transactions)
   {
-    x23::XdrVec<SignedTransactionHash> hashes;
+    x23::XdrVec<TransactionHash> hashes;
     x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
     hashes.reserve(transactions.size());
     nondeterministic_data.resize(transactions.size());

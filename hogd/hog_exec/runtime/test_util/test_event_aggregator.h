@@ -61,13 +61,13 @@ public:
   get_events_by_hash(BlockID block_id, SHA256Hash const &tx_hash);
 
   // Records a forwarded tx-failure diagnostic (executor -> event server).
-  x23::Async<RPCError> report_tx_failure(SignedTransactionHash tx_hash,
+  x23::Async<RPCError> report_tx_failure(TransactionHash tx_hash,
                                          TxFailureDiagnostic diag);
 
   // Blocks until at least [n] failure reports have arrived.
   x23::Async<void> wait_for_failure_reports(int64_t n);
 
-  x23::Async<std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>>
+  x23::Async<std::vector<std::pair<TransactionHash, TxFailureDiagnostic>>>
   get_failure_reports();
 
   // Blocking control: block emit_event calls until unblock_emit_events is
@@ -96,7 +96,7 @@ private:
   x23::CoroLock lock_;
   x23::CoroFutex<bool> should_block_futex_{false};
   x23::CoroFutex<int64_t> failure_report_count_{0};
-  std::vector<std::pair<SignedTransactionHash, TxFailureDiagnostic>>
+  std::vector<std::pair<TransactionHash, TxFailureDiagnostic>>
       failure_reports_;
   // Track block lifecycle state (from sched side)
   std::map<BlockID, BlockState> block_states_;
@@ -148,7 +148,7 @@ struct TestEventAggregatorExecRpc {
   }
 
   x23::Async<RPCError>
-  eventexecutor_report_tx_failure(SignedTransactionHash tx_hash,
+  eventexecutor_report_tx_failure(TransactionHash tx_hash,
                                   TxFailureDiagnostic diag)
   {
     return event_aggregator_.report_tx_failure(std::move(tx_hash),

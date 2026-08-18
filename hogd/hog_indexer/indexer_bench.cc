@@ -47,7 +47,7 @@ create_fake_event_log(uint32_t tx_id, size_t num_events_per_tx,
 {
   TxEventLog event_log{};
   // Use tx_id to create a unique hash
-  event_log.proposed_tx_hash = sha256(tx_id);
+  event_log.tx_hash = sha256(tx_id);
 
   // Create events from different contract addresses
   for (size_t i = 0; i < num_events_per_tx; i++) {
