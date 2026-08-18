@@ -73,6 +73,13 @@ list(APPEND TEST_EXECUTABLES test_rpc_dispatch_race)
 add_test(NAME rpc_dispatch_race COMMAND test_rpc_dispatch_race -d 5 -t 8)
 set_tests_properties(rpc_dispatch_race PROPERTIES TIMEOUT 60)
 
+# Not registered as a ctest -- soak test for the two-in-flight-calls await
+# shape behind hogd ISSUES.md #6.  Run with -b for the pre-fix bare shape.
+add_executable(test_two_call_await_race ${EXCLUDE_TOKEN} two_call_await_race.cc)
+target_link_libraries(test_two_call_await_race x23 xdrtest)
+use_x23(test_two_call_await_race)
+list(APPEND TEST_EXECUTABLES test_two_call_await_race)
+
 add_executable(test_shutdown_race ${EXCLUDE_TOKEN} shutdown_race.cc)
 target_link_libraries(test_shutdown_race x23 xdrtest)
 use_x23(test_shutdown_race)

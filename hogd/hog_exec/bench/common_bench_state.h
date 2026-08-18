@@ -216,12 +216,13 @@ private:
   {
     std::string server_addrport =
         hog_db_addr() + ":" + std::to_string(exec_port_);
-    db_proxy_ = std::make_unique<DatabaseProxy>(ShardedDB(IntroExecResult{
-        .exec_id = 0,
-        .shards = {ShardCard{.shard_id = 0,
-                             .total_shards = 1,
-                             .shard_function_id = kShardFunctionId,
-                             .address_for_exec = server_addrport.c_str()}}}));
+    db_proxy_ = std::make_unique<DatabaseProxy>(ShardedDB(
+        IntroExecResult{.exec_id = 0,
+                        .shards = {ShardCard{
+                            .identity = {.shard_id = 0,
+                                         .total_shards = 1,
+                                         .shard_function_id = kShardFunctionId},
+                            .address_for_exec = server_addrport.c_str()}}}));
   }
 
   void start_db_server()

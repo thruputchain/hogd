@@ -30,9 +30,18 @@ class ViewGatewayRpc {
 public:
   using rpc_service = ViewGateway1;
 
-  ViewGatewayRpc(std::string const &db_executor_address,
+  // [db_executor_addresses] is indexed by shard id, so views route to the shard
+  // that owns the state they read.
+  ViewGatewayRpc(std::vector<std::string> const &db_executor_addresses,
                  std::string const &event_host, std::uint16_t event_exec_port,
                  std::size_t nthreads = 2);
+  // Single-shard convenience for a hogexec that reaches one db.
+  ViewGatewayRpc(std::string const &db_executor_address,
+                 std::string const &event_host, std::uint16_t event_exec_port,
+                 std::size_t nthreads = 2)
+    : ViewGatewayRpc(std::vector<std::string>{db_executor_address}, event_host,
+                     event_exec_port, nthreads)
+  {}
 
   static ViewGatewayIntroOutcome
   viewgateway_intro(ProtocolCommit const &protocol);
@@ -103,6 +112,11 @@ static_assert(is_ViewGateway1<ViewGatewayRpc *, x23::MaybeAsync>);
 
 class ViewGatewayServer : public RpcServer<ViewGatewayRpc> {
 public:
+  ViewGatewayServer(std::vector<std::string> const &db_executor_addresses,
+                    std::string const &event_host,
+                    std::uint16_t event_exec_port)
+    : RpcServer(db_executor_addresses, event_host, event_exec_port)
+  {}
   ViewGatewayServer(std::string const &db_executor_address,
                     std::string const &event_host,
                     std::uint16_t event_exec_port)

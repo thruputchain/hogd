@@ -146,7 +146,7 @@ ShardedDbSched::close_snapshot(BlockID block_id)
 }
 
 x23::Async<DbBlockResult>
-ShardedDbSched::commit_snapshot(BlockID block_id, ConsensusValue value)
+ShardedDbSched::commit_snapshot(BlockID block_id, ConsensusValue const &value)
 {
   std::vector<DbBlockResult> results =
       co_await shards_.broadcast_collect<DbBlockResult>([&](auto &client) {

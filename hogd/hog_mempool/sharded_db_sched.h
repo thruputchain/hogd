@@ -77,7 +77,7 @@ public:
   // cross-shard TODO(sharding) notes).
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
-                                            ConsensusValue value);
+                                            ConsensusValue const &value);
 
   // Fan out in shard order, stopping at the first non-OK. The cross-shard
   // readiness barrier is the caller's concern.

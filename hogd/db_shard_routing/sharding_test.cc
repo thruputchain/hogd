@@ -293,17 +293,19 @@ TEST(ShardedBatchTest, GatherViewSerializesLikeMaterializedVec)
 // A minimal stand-in for ShardCard: order_shards_by_id is templated and only
 // reads these three fields, so the test needs no protocol types.
 struct FakeCard {
-  uint32_t shard_id;
-  uint32_t total_shards;
-  uint32_t shard_function_id;
+  struct {
+    uint32_t shard_id;
+    uint32_t total_shards;
+    ShardFunction shard_function_id;
+  } identity;
 };
 
 FakeCard
 make_card(uint32_t id, uint32_t total)
 {
-  return FakeCard{.shard_id = id,
-                  .total_shards = total,
-                  .shard_function_id = kShardFunctionId};
+  return FakeCard{.identity = {.shard_id = id,
+                               .total_shards = total,
+                               .shard_function_id = kShardFunctionId}};
 }
 
 // A well-formed set binds each shard at its declared id, regardless of the
@@ -353,7 +355,8 @@ TEST(OrderShardsById, RejectsIdOutOfRange)
 TEST(OrderShardsById, RejectsWrongRoutingFunction)
 {
   std::vector<FakeCard> cards{make_card(0, 1)};
-  cards[0].shard_function_id = kShardFunctionId + 1;
+  // A routing function this binary does not implement.
+  cards[0].identity.shard_function_id = static_cast<ShardFunction>(99);
   auto order = order_shards_by_id(cards);
   ASSERT_FALSE(order.has_value());
   EXPECT_NE(order.error().find("routing function"), std::string::npos);

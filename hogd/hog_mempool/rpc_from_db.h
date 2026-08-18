@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string_view>
 #include <utility>
 
 #include "db_sched.hh"
@@ -11,6 +12,7 @@
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/version.h"
 #include "sched_db.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -34,6 +36,15 @@ public:
 
   static x23::Async<void> scheddb_intro_shard(ShardCard card)
   {
+    // A skewed peer encoded this card to a different ShardCard layout, so the
+    // fields decoded above are shifted, not merely stale -- reject before any
+    // of them are believed. Unlike the coord and auth intros there is no
+    // outcome to return, so this is fatal.
+    if (std::string_view(card.protocol) !=
+        std::string_view(version::kHogdProtocol())) {
+      panic("db shard protocol {} does not match {}; refusing to register",
+            card.protocol.c_str(), version::kHogdProtocol());
+    }
     // We add 1 because we print this before we actually add the shard below.
     info("db shard with card {} connected. {} total shards connected.",
          x23::show(card),

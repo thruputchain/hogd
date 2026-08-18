@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <print>
 #include <optional>
 #include <set>
 
@@ -105,6 +106,98 @@ protected:
     }
   }
 };
+
+// What a state-filler transaction costs, and therefore how fast a run can grow
+// state. An erc20 transfer adds ~392 bytes, so filling a large cache by
+// transfers alone takes hours; the filler raises the bytes-per-tx, and the open
+// question is how many writes fit in one invocation's gas budget.
+//
+// One case per item count, because the fixture's database keeps its blocks and
+// genesis may only load into an empty one -- a loop inside a single test dies on
+// the second iteration.
+class StorageFillerTest : public ERC20ExperimentTest {
+protected:
+  // Executes one filler transaction writing [items] x 1 KiB and returns the gas
+  // it consumed, or nullopt if the invocation failed (the gas ceiling).
+  std::optional<GasAmount> measure(uint32_t items)
+  {
+    auto state = std::make_shared<ERC20ExperimentState>(
+        ERC20PaymentsConfig{
+            .num_addresses = 10,
+        },
+        /*use_rv32=*/false, /*num_virtual_addresses=*/0,
+        /*filler_instances=*/4, /*filler_items=*/items,
+        /*filler_item_bytes=*/1024, /*filler_period=*/1);
+    auto result = state->generate_experiment()();
+    if (!result.has_value()) {
+      return std::nullopt;
+    }
+    run_genesis_initialization(result.value().genesis_configuration);
+    for (auto &init_block : result.value().initialization_txs) {
+      for (auto &tx : init_block) {
+        auto handler = make_new_system_call_handler(tx, *runtime_context_);
+        if (!handler.root_invoke().is_root_success() ||
+            handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+          return std::nullopt;
+        }
+        if (!handler.emit_events(ExecResult::ExecResultOK,
+                                 ProposedTransaction{.signed_tx = tx})()) {
+          return std::nullopt;
+        }
+      }
+      advance_block();
+    }
+    LoadgenStatus<LoadgenExtension> raw = state->extend_experiment(4, 10)();
+    if (!raw.has_value()) {
+      return std::nullopt;
+    }
+    SignedTransactionBatch txs;
+    parallel_batch_to_t(raw.value().work_txs, txs)();
+    if (txs.empty()) {
+      return std::nullopt;
+    }
+    auto handler = make_new_system_call_handler(txs[0], *runtime_context_);
+    auto invoke_res = handler.root_invoke();
+    if (!invoke_res.is_root_success()) {
+      return std::nullopt;
+    }
+    EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    return invoke_res.gas_consumed_;
+  }
+};
+
+TEST_F(StorageFillerTest, OneItem)
+{
+  auto gas = measure(1);
+  ASSERT_TRUE(gas.has_value()) << "a single 1 KiB write must fit in one tx";
+  std::println("filler 1 x 1KiB: gas={}", gas.value());
+}
+
+TEST_F(StorageFillerTest, FourItems)
+{
+  auto gas = measure(4);
+  std::println("filler 4 x 1KiB: {}", gas ? std::to_string(gas.value())
+                                          : std::string("over the limit"));
+}
+
+TEST_F(StorageFillerTest, SixteenItems)
+{
+  auto gas = measure(16);
+  std::println("filler 16 x 1KiB: {}", gas ? std::to_string(gas.value())
+                                           : std::string("over the limit"));
+}
+
+TEST_F(StorageFillerTest, SixtyFourItems)
+{
+  auto gas = measure(64);
+  std::println("filler 64 x 1KiB: {}", gas ? std::to_string(gas.value())
+                                           : std::string("over the limit"));
+}
+
+TEST_F(ERC20ExperimentTest, Basic)
+{
+  run_payments_experiment(/*use_rv32=*/false);
+}
 
 // Same payments workload, but the erc20 and wallet contracts are the compiled
 // rv32 artifacts run through the RV32 runtime. Exercises the rv32 wallet

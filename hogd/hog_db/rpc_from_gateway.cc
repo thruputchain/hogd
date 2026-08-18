@@ -4,6 +4,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // generated x23 headers
 #include "address_auth.hh"
@@ -17,6 +18,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/db_shard_routing/sharding.h" // shard_of_key
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/rpc_context.h"
@@ -155,7 +157,7 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 DbGatewayResult
 HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
-  HogDbDAO &db = ctx_.get_db();
+  size_t const shard_count = shards_.size();
 
   // Snapshot the committed tip once up-front so every item in the response
   // is labeled with the same height.  This is a TOCTOU: a block that
@@ -172,21 +174,52 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
   // retry should never happen in practice.  The bounded cap is purely a
   // backstop against pathological commit churn; exhausting it is reported as
   // an internal error rather than looping forever.
+  //
+  // With more than one shard that snapshot has to be coherent across all of
+  // them, since the response carries a single block_height. Shard tips agree on
+  // height except while a commit is landing, so a disagreement means we caught
+  // the fan-out mid-flight and retry rather than label items from two heights.
   constexpr int kMaxAttempts = 5;
   for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
     // If a commit is mid-publication, wait it out so the tip and ramdb data
     // are consistent before reading (rather than burning a retry attempt).
-    ctx_.wait_for_no_commit_publishing();
+    for (RPCContext *shard : shards_) {
+      shard->wait_for_no_commit_publishing();
+    }
 
-    DbTip tip = ctx_.get_tip();
+    std::vector<DbTip> tips;
+    tips.reserve(shard_count);
+    for (RPCContext *shard : shards_) {
+      tips.push_back(shard->get_tip());
+    }
+    BlockHeight const height = tips[0].value.proposal_header.block_height;
+    bool heights_agree = true;
+    for (DbTip const &tip : tips) {
+      if (tip.value.proposal_header.block_height != height) {
+        heights_agree = false;
+        break;
+      }
+    }
+    if (!heights_agree) [[unlikely]] {
+      continue;
+    }
 
     DbGatewayPayload payload;
-    payload.block_height = tip.value.proposal_header.block_height;
+    payload.block_height = height;
     payload.items.reserve(batch.size());
-    for (AddressAndKey const &k : batch)
-      payload.items.push_back(read_one_item(db, k));
+    for (AddressAndKey const &k : batch) {
+      RPCContext *owner = shards_[shard_of_key(k, shard_count)];
+      payload.items.push_back(read_one_item(owner->get_db(), k));
+    }
 
-    if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
+    bool stale = false;
+    for (size_t s = 0; s < shard_count; ++s) {
+      if (shards_[s]->is_committed_read_stale(tips[s])) [[unlikely]] {
+        stale = true;
+        break;
+      }
+    }
+    if (stale) [[unlikely]] {
       continue;
     }
 

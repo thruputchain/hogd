@@ -21,6 +21,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -43,7 +44,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
+#include "hogd/db_shard_routing/sharding.h" // kShardFunctionId, shard_of_address
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
@@ -57,11 +58,14 @@
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/hog_db/rpc_from_gateway.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_db/shard_identity.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
+#include "hogd/hog_indexer/rpc_from_event.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/scheduler.h"
@@ -162,6 +166,16 @@ require_io(ErrnoStatus<void> status, std::string_view operation)
     throw std::runtime_error(
         std::format("{} failed: {}", operation, status.error()));
   }
+}
+
+// Shard 0 keeps the historical name so a single-shard data dir written before
+// sharding still recovers. Opening one under the wrong --num-db-shards is
+// caught by the persisted ShardIdentity rather than by the directory layout.
+std::string
+ramdb_subdir(std::size_t shard_id)
+{
+  return shard_id == 0 ? std::string(kRamDbSubdir)
+                       : std::format("{}.{}", kRamDbSubdir, shard_id);
 }
 
 std::filesystem::path
@@ -522,26 +536,41 @@ HogDevnodeNode::HogDevnodeNode(
     std::string bind_host, std::uint16_t requested_scheduler_port,
     LocalBootstrapConfig const &bootstrap_config,
     std::optional<std::filesystem::path> const &data_dir,
-    NetworkHash network_hash, std::size_t ramdb_bytes)
+    NetworkHash network_hash, std::size_t ramdb_bytes,
+    std::size_t num_db_shards)
   : bind_host_(std::move(bind_host)), network_hash_(network_hash),
     data_dir_(data_dir), bootstrap_config_(bootstrap_config),
-    ramdb_bytes_(ramdb_bytes), runtime_dir_(data_dir, kRuntimeSubdir),
-    db_dir_(data_dir, kRamDbSubdir), event_dir_(data_dir, kEventSubdir),
-    indexer_dir_(data_dir, kIndexerSubdir), opened_db_([this] {
-      // Reject incompatible bootstrap intent before opening or migrating any
-      // persisted chain state.
-      preflight_data_dir_metadata(data_dir_, bootstrap_config_, network_hash_);
-      return open_db_backend();
-    }()),
-    event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
-    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
+    ramdb_bytes_(ramdb_bytes), num_db_shards_(num_db_shards),
+    runtime_dir_(data_dir, kRuntimeSubdir), event_dir_(data_dir, kEventSubdir),
+    indexer_dir_(data_dir, kIndexerSubdir), event_ctx_(event_dir_.directory()),
+    event_sched_server_(event_ctx_), event_exec_server_(event_ctx_),
+    event_indexer_server_(event_ctx_)
 {
   try {
     // A composed devnode exclusively owns the process-wide registration
     // namespace, so discard stale in-process state before startup.
     Registration::registration().clear();
-    HogDbDAO db = std::move(*opened_db_);
-    opened_db_.reset();
+    if (num_db_shards_ == 0) {
+      throw std::runtime_error("hog-devnode requires at least one db shard");
+    }
+    if (ramdb_bytes_ < num_db_shards_) {
+      throw std::runtime_error(
+          std::format("ramdb capacity {} is too small to split across {} db "
+                      "shards",
+                      ramdb_bytes_, num_db_shards_));
+    }
+    // Reject incompatible bootstrap intent before opening or migrating any
+    // persisted chain state.
+    preflight_data_dir_metadata(data_dir_, bootstrap_config_, network_hash_);
+    // Open every shard's ramdb before binding anything, so a failed integrity
+    // check still fails before the node starts advertising ports.
+    std::vector<HogDbDAO> dbs;
+    dbs.reserve(num_db_shards_);
+    for (std::size_t shard_id = 0; shard_id < num_db_shards_; ++shard_id) {
+      db_shards_.push_back(
+          std::make_unique<DbShard>(data_dir_, ramdb_subdir(shard_id)));
+      dbs.push_back(open_db_backend(shard_id));
+    }
 
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -559,39 +588,53 @@ HogDevnodeNode::HogDevnodeNode(
     mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
-    auto sched_db_client_res =
-        create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
-    if (!sched_db_client_res)
-      panic("devnode connect to sched_db failed: {}",
-            sched_db_client_res.error().error_code().message());
-    auto sched_db_client =
-        std::make_unique<sched_db_client_t>(std::move(*sched_db_client_res));
-    init_db_backend(std::move(db), std::move(sched_db_client));
+    for (std::size_t shard_id = 0; shard_id < num_db_shards_; ++shard_id) {
+      DbShard &shard = *db_shards_[shard_id];
+      auto sched_db_client_res =
+          create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+      if (!sched_db_client_res)
+        panic("devnode connect to sched_db failed: {}",
+              sched_db_client_res.error().error_code().message());
+      auto sched_db_client =
+          std::make_unique<sched_db_client_t>(std::move(*sched_db_client_res));
+      init_db_backend(shard_id, std::move(dbs[shard_id]),
+                      std::move(sched_db_client));
 
-    // [db_executor_server_] handles RPCs from the executor.
-    db_executor_server_ = std::make_unique<HogDbExecutorServer>(*ctx_);
-    db_executor_server_->start_server(
-        make_bind_host_port(bind_host_, /*port=*/0));
-    // [db_scheduler_server_] handles RPCs from the mempool.
-    db_scheduler_server_ = std::make_unique<HogDbSchedServer>(*ctx_);
-    (*db_scheduler_server_)->max_message_size_ = kDevRpcMaxMessageSize;
-    db_scheduler_server_->start_server(make_bind_host_port(bind_host_,
-                                                           /*port=*/0));
-    db_auth_server_ = std::make_unique<HogDbAuthServer>(*ctx_);
-    db_auth_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
-    // Read-only state reads served to the public RPC gateway over x23.
-    db_gateway_server_ = std::make_unique<HogDbGatewayServer>(*ctx_);
+      // [executor_server] handles RPCs from the executor.
+      shard.executor_server = std::make_unique<HogDbExecutorServer>(*shard.ctx);
+      shard.executor_server->start_server(
+          make_bind_host_port(bind_host_, /*port=*/0));
+      // [scheduler_server] handles RPCs from the mempool.
+      shard.scheduler_server = std::make_unique<HogDbSchedServer>(*shard.ctx);
+      (*shard.scheduler_server)->max_message_size_ = kDevRpcMaxMessageSize;
+      shard.scheduler_server->start_server(make_bind_host_port(bind_host_,
+                                                               /*port=*/0));
+      shard.auth_server = std::make_unique<HogDbAuthServer>(*shard.ctx);
+      shard.auth_server->start_server(make_bind_host_port(bind_host_,
+                                                          /*port=*/0));
+    }
+
+    // Read-only state reads served to the public RPC gateway over x23. One
+    // server for every shard, splitting each batch to the owning shard.
+    db_gateway_server_ = std::make_unique<HogDbGatewayServer>(shard_contexts());
     db_gateway_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
 
-    std::string dbauth_address =
-        format_advertised_address(bind_host_, db_auth_server_->port());
-    auto dbauth_res = make_dbauth_client(dbauth_address)();
-    if (!dbauth_res)
-      panic("devnode connect to dbauth failed: {}",
-            dbauth_res.error().error_code().message());
-    dbauth_client_t dbauth_client = std::move(*dbauth_res);
-    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+    // Auth routes by address, so it binds every shard. [db_shards_] is already
+    // indexed by shard id, which is the order DBAuthClient expects.
+    std::vector<dbauth_client_t> dbauth_clients;
+    dbauth_clients.reserve(num_db_shards_);
+    for (std::size_t shard_id = 0; shard_id < num_db_shards_; ++shard_id) {
+      std::string dbauth_address =
+          format_advertised_address(bind_host_,
+                                    db_shards_[shard_id]->auth_server->port());
+      auto dbauth_res = make_dbauth_client(dbauth_address)();
+      if (!dbauth_res)
+        panic("devnode connect to dbauth shard {} at {} failed: {}", shard_id,
+              dbauth_address, dbauth_res.error().error_code().message());
+      dbauth_clients.push_back(std::move(*dbauth_res));
+    }
+    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_clients));
 
     auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
     auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -611,9 +654,18 @@ HogDevnodeNode::HogDevnodeNode(
     event_indexer_server_.start_server(make_bind_host_port(bind_host_,
                                                            /*port=*/0));
 
-    view_gateway_server_ = std::make_unique<ViewGatewayServer>(
-        format_advertised_address(bind_host_, db_executor_server_->port()),
-        bind_host_, event_exec_server_.port());
+    // Every shard's executor address in shard-id order, so a view reads through
+    // the shard that owns the state it touches.
+    std::vector<std::string> db_executor_addresses;
+    db_executor_addresses.reserve(num_db_shards_);
+    for (std::unique_ptr<DbShard> const &shard : db_shards_) {
+      db_executor_addresses.push_back(
+          format_advertised_address(bind_host_,
+                                    shard->executor_server->port()));
+    }
+    view_gateway_server_ =
+        std::make_unique<ViewGatewayServer>(db_executor_addresses, bind_host_,
+                                            event_exec_server_.port());
     view_gateway_server_->start_server(make_bind_host_port(bind_host_,
                                                            /*port=*/0));
 
@@ -703,13 +755,16 @@ HogDevnodeNode::~HogDevnodeNode()
 
     view_gateway_server_->impl()->shut_down();
     view_gateway_server_.reset();
+    // Borrows every shard's context, so it goes before any of them.
     db_gateway_server_.reset();
-    db_auth_server_.reset();
-    db_scheduler_server_.reset();
-    db_executor_server_.reset();
-    // [ctx_] holds a sched_db_client, so destroy it after the scheduler-facing
-    // database servers are gone.
-    ctx_.reset();
+    // Each shard's [ctx] holds a sched_db_client, so destroy it after that
+    // shard's scheduler-facing database servers are gone.
+    for (std::unique_ptr<DbShard> &shard : db_shards_) {
+      shard->auth_server.reset();
+      shard->scheduler_server.reset();
+      shard->executor_server.reset();
+      shard->ctx.reset();
+    }
   } catch (const std::exception &e) {
     error("~HogDevnodeNode received exception: {}", e.what());
     CHECK(false);
@@ -727,7 +782,8 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
     // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
     // (which broadcasts on the coordinator's [auth_data_height_]) via the
     // registered callback, and is destroyed after [mempool_coord_server_].
-    // Unlike ~HogDevnodeNode, this cleanup does not reset [ctx_], so the DB's
+    // Unlike ~HogDevnodeNode, this cleanup does not reset the shards' [ctx], so
+    // the DB's
     // auth-change subscription manager does not drain in-flight forwards for
     // us. Drain the auth server directly -- [~RpcServer] waits for in-flight
     // handlers -- before the member destructors that run after we rethrow tear
@@ -744,9 +800,9 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure
     // injection), the scheduler is running a detached coroutine that sends RPCs
-    // to [db_scheduler_server_]. The member destructors that run after we
-    // rethrow will tear down [db_scheduler_server_], so shut the scheduler down
-    // first or the detached coroutine may send on an invalid file descriptor.
+    // to the shards' [scheduler_server]. The member destructors that run after
+    // we rethrow will tear those down, so shut the scheduler down first or the
+    // detached coroutine may send on an invalid file descriptor.
     // The scheduler is only registered once register_coordinator_with_mempool()
     // has run, so skip this when construction failed before then.
     std::shared_ptr<Scheduler> scheduler =
@@ -854,7 +910,7 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
     return;
   }
 
-  const DbTip tip = ctx_->get_tip();
+  const DbTip tip = default_shard_db().get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
   const BlockHeight indexed_height = indexer_db_->latest_block();
   if (indexed_height > tip_height) {
@@ -939,23 +995,27 @@ HogDevnodeNode::write_data_dir_metadata() const
       build_data_dir_metadata_json(
           bootstrap_config_,
           build_genesis_configuration(bootstrap_config_, network_hash_,
-                                      ctx_->get_cost_model())));
+                                      default_shard_db().get_cost_model())));
 }
 
 void
 HogDevnodeNode::load_recovered_bootstrap_metadata(
     LocalBootstrapConfig const &config)
 {
+  StorageCostModel const &cost_model = default_shard_db().get_cost_model();
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config, network_hash_,
-                                             ctx_->get_cost_model());
+      build_local_bootstrap_account_artifact(config, network_hash_, cost_model);
   genesis_configuration_ = std::move(artifact.genesis_configuration);
-  genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
+  genesis_configuration_.storage_cost_model = cost_model.to_xdr();
   genesis_configuration_v2_ = std::move(artifact.genesis_configuration_v2);
-  genesis_configuration_v2_.storage_cost_model =
-      ctx_->get_cost_model().to_xdr();
+  genesis_configuration_v2_.storage_cost_model = cost_model.to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
-  if (ctx_->get_tip().value.proposal_header.block_height == 0) {
+  if (config.user_account_count == 0) {
+    // No user accounts means no initialization block was ever committed, so a
+    // tip of 0 is the correct recovered state rather than a broken data dir.
+    return;
+  }
+  if (default_shard_db().get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
         "hog-devnode data dir has bootstrap genesis but no initialization "
         "block; reinitialize the data dir");
@@ -1045,8 +1105,11 @@ void
 HogDevnodeNode::refresh_bootstrap_account_balances()
 {
   for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
+    // 'D' and 'B' keys are routed by address, so ask the shard that owns this
+    // account rather than any fixed one.
+    HogDbDAO &db = db_for(account.address).get_db();
     HogDbStatus<AddressAuthData> auth_data =
-        ctx_->get_db().read_address_auth_data(account.address);
+        db.read_address_auth_data(account.address);
     if (!auth_data.has_value()) {
       throw std::runtime_error(
           "bootstrap account metadata does not match recovered chain: missing "
@@ -1054,8 +1117,7 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
     }
     validate_bootstrap_account_auth_data(account, *auth_data);
 
-    HogDbStatus<int128_t> balance =
-        ctx_->get_db().read_address_balance(account.address);
+    HogDbStatus<int128_t> balance = db.read_address_balance(account.address);
     if (!balance.has_value()) {
       throw std::runtime_error(
           "bootstrap account metadata does not match recovered chain: missing "
@@ -1072,23 +1134,23 @@ HogDevnodeNode::refresh_bootstrap_account_balances()
 }
 
 HogDbDAO
-HogDevnodeNode::open_db_backend() const
+HogDevnodeNode::open_db_backend(std::size_t shard_id) const
 {
-  DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::check(db_dir_.directory(), ramdb_bytes_);
+  std::string const &db_dir = db_shards_[shard_id]->dir.directory();
+  const std::size_t shard_bytes = ramdb_bytes_ / num_db_shards_;
+  DBStatus<std::uint64_t> lsn = run_ramdb_open(shard_bytes, [&] {
+    return Database::check(db_dir, shard_bytes);
   });
   if (!lsn.has_value()) {
-    lsn.error().raise("ramdb integrity check failed for '{}'",
-                      db_dir_.directory());
+    lsn.error().raise("ramdb integrity check failed for '{}'", db_dir);
   }
-  info("database '{}' passed integrity check; current LSN is {}",
-       db_dir_.directory(), *lsn);
+  info("database '{}' passed integrity check; current LSN is {}", db_dir, *lsn);
 
-  DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
-    return Database::open_lsn(db_dir_.directory(), *lsn, ramdb_bytes_);
+  DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(shard_bytes, [&] {
+    return Database::open_lsn(db_dir, *lsn, shard_bytes);
   });
   if (!ramdb.has_value()) {
-    ramdb.error().raise("ramdb open failed for '{}'", db_dir_.directory());
+    ramdb.error().raise("ramdb open failed for '{}'", db_dir);
   }
 
   HogDbDAO db(RAMDB(std::move(*ramdb)));
@@ -1141,51 +1203,98 @@ HogDevnodeNode::open_db_backend() const
 
 void
 HogDevnodeNode::init_db_backend(
-    HogDbDAO db, std::unique_ptr<sched_db_client_t> sched_db_client)
+    std::size_t shard_id, HogDbDAO db,
+    std::unique_ptr<sched_db_client_t> sched_db_client)
 {
-  ctx_ =
+  DbShard &shard = *db_shards_[shard_id];
+  shard.ctx =
       std::make_unique<RPCContext>(std::move(db), std::move(sched_db_client));
-  if (ctx_->has_committed_tip()) {
-    HogDbStatus<StorageCostModel> cost_model = ctx_->get_db().read_cost_model();
+
+  // Establish the identity before genesis: it is what makes this shard write
+  // only the items it owns, so the shards' partial hashes sum to the unsharded
+  // value.
+  std::expected<ShardIdentity, std::string> identity =
+      establish_shard_identity(shard.ctx->get_db(),
+                               static_cast<std::uint32_t>(shard_id),
+                               static_cast<std::uint32_t>(num_db_shards_));
+  if (!identity) {
+    throw std::runtime_error(
+        std::format("db shard {}: {}", shard_id, identity.error()));
+  }
+  shard.ctx->set_shard_identity(*identity);
+
+  if (shard.ctx->has_committed_tip()) {
+    HogDbStatus<StorageCostModel> cost_model =
+        shard.ctx->get_db().read_cost_model();
     if (!cost_model) {
       panic("failed to read recovered cost model: {}", cost_model.error());
     }
-    ctx_->initialize_cost_model(*cost_model);
+    shard.ctx->initialize_cost_model(*cost_model);
+    // Every shard replicates the '<' globals, so a recovered chain is recovered
+    // on all of them or the set has diverged.
+    if (shard_id != 0 && !recovered_existing_chain_) {
+      throw std::runtime_error(std::format(
+          "db shard {} recovered a committed chain but shard 0 did not",
+          shard_id));
+    }
     recovered_existing_chain_ = true;
-    info("recovered hog-devnode database at committed height {}",
-         ctx_->get_tip().value.proposal_header.block_height);
+    info("recovered hog-devnode database at committed height {} (shard {})",
+         shard.ctx->get_tip().value.proposal_header.block_height, shard_id);
   }
   else {
-    ctx_->initialize_cost_model(StorageCostModel::default_cost_model());
+    if (recovered_existing_chain_) {
+      throw std::runtime_error(std::format(
+          "db shard {} has no committed chain but an earlier shard does",
+          shard_id));
+    }
+    shard.ctx->initialize_cost_model(StorageCostModel::default_cost_model());
   }
+}
+
+std::vector<RPCContext *>
+HogDevnodeNode::shard_contexts()
+{
+  std::vector<RPCContext *> contexts;
+  contexts.reserve(db_shards_.size());
+  for (std::unique_ptr<DbShard> const &shard : db_shards_) {
+    contexts.push_back(shard->ctx.get());
+  }
+  return contexts;
+}
+
+RPCContext &
+HogDevnodeNode::db_for(ContractAddress const &address)
+{
+  return *db_shards_[shard_of_address(address, num_db_shards_)]->ctx;
 }
 
 void
 HogDevnodeNode::register_db_with_mempool()
 {
-  auto client_res =
-      create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
-  if (!client_res)
-    panic("devnode register_db_with_mempool connect failed: {}",
-          client_res.error().error_code().message());
-  auto client = std::move(*client_res);
-  std::string exec_address =
-      format_advertised_address(bind_host_, db_executor_server_->port());
-  std::string sched_address =
-      format_advertised_address(bind_host_, db_scheduler_server_->port());
-  std::string auth_address =
-      format_advertised_address(bind_host_, db_auth_server_->port());
-  const BlockHeight block_height =
-      std::max<BlockHeight>(ctx_->get_tip().value.proposal_header.block_height,
-                            BlockHeight{0});
-  client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
-                              .block_height = block_height,
-                              .shard_id = 0,
-                              .total_shards = 1,
-                              .shard_function_id = kShardFunctionId,
-                              .address_for_exec = exec_address.c_str(),
-                              .address_for_sched = sched_address.c_str(),
-                              .address_for_auth = auth_address.c_str()})();
+  for (std::size_t shard_id = 0; shard_id < num_db_shards_; ++shard_id) {
+    DbShard const &shard = *db_shards_[shard_id];
+    auto client_res =
+        create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+    if (!client_res)
+      panic("devnode register_db_with_mempool connect failed: {}",
+            client_res.error().error_code().message());
+    auto client = std::move(*client_res);
+    std::string exec_address =
+        format_advertised_address(bind_host_, shard.executor_server->port());
+    std::string sched_address =
+        format_advertised_address(bind_host_, shard.scheduler_server->port());
+    std::string auth_address =
+        format_advertised_address(bind_host_, shard.auth_server->port());
+    const BlockHeight block_height = std::max<BlockHeight>(
+        shard.ctx->get_tip().value.proposal_header.block_height,
+        BlockHeight{0});
+    client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
+                                .block_height = block_height,
+                                .identity = shard.ctx->get_shard_identity(),
+                                .address_for_exec = exec_address.c_str(),
+                                .address_for_sched = sched_address.c_str(),
+                                .address_for_auth = auth_address.c_str()})();
+  }
 }
 
 void

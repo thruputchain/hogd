@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <future>
 #include <limits>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // XDR headers
 #include "rpc_types.hh"
@@ -25,20 +27,25 @@
 #include "hogd/base/network.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"             // IWYU pragma: keep
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/db_shard_routing/sharding.h"
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hog_db/hog_age_reconciliation.h"
-#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/hog_db/rpc_from_gateway.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_db/shard_identity.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/virtual_address.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -73,8 +80,61 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
       std::move(*client));
 }
 
+// BENCHMARK HACK (not for merge): fills a shard's ramdb with synthetic state so
+// a large cache can be measured full without first committing the transactions
+// needed to fill it. Filling 300 GB by transaction traffic takes ~10 hours per
+// run at the ~20k tx/s this system sustains at large state; this takes minutes.
+//
+// Items are storage items ([write_nnint128]), not balances, so they invent no
+// hogs and cannot trip the hog-conservation invariant. Addresses come from
+// [make_virtual_address], the same derivation the load generator uses for its
+// synthetic recipients, so the filler distributes across shards exactly as the
+// workload does. Each shard writes only the addresses it owns, so the shards'
+// partial db hashes still sum to the whole-db hash -- which is also why this
+// cannot be used with more than one shard: each shard's pre-genesis db differs,
+// so their genesis hashes differ and the mempool refuses to start on "db shard
+// tip divergence". Replicating the items instead would make every item hash on
+// every shard, breaking the sum-of-partials invariant, so 1 shard it is.
+//
+// This runs before genesis, which recomputes its base db hash over whatever is
+// already in the db (see [dbsched_load_genesis_configuration]), so the preloaded
+// items are accounted for rather than corrupting the hash.
+void
+preload_synthetic_items(HogDBDAO &db, const ShardIdentity &identity,
+                        size_t num_items, size_t bytes_per_item)
+{
+  std::vector<std::byte> value(bytes_per_item, std::byte{0xab});
+  size_t written = 0;
+  ElapsedTimer timer;
+  for (size_t i = 0; i < num_items; ++i) {
+    const ContractAddress addr = make_virtual_address(i);
+    if (shard_of_address(addr, identity.total_shards) != identity.shard_id) {
+      continue;
+    }
+    const ItemKey key = make_item_key(addr, uint64_t{0});
+    HogDBStatus<void> status =
+        bytes_per_item ? db.write_bytes(key, value)
+                       : db.write_nnint128(key, static_cast<int128_t>(i) + 1);
+    if (!status.has_value()) {
+      // Out of room is the expected way this ends when the target exceeds the
+      // cache: report where it stopped rather than dying, so the run still
+      // measures a full shard.
+      warn("preload stopped after {} items ({} scanned): {}", written, i,
+           status.error());
+      break;
+    }
+    if (++written % 10'000'000 == 0) {
+      info("preload: {} items written in {:.1f} s", written,
+           timer.elapsed());
+    }
+  }
+  info("preload complete: {} items on shard {} of {} in {:.1f} s", written,
+       identity.shard_id, identity.total_shards, timer.elapsed());
+}
+
 int
-hog_db_init(std::string_view path, size_t ram_bytes,
+hog_db_init(std::string_view path, size_t ram_bytes, size_t preload_items,
+           size_t preload_bytes_per_item,
            const std::string *coordinator_addr, std::string_view bind_ip,
            uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
            uint16_t gateway_port, uint16_t metrics_port,
@@ -149,78 +209,22 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     Health::instance().set_current_block_height(-1)();
   }
 
-  // Resolve shard identity: a persisted record is authoritative (flags only
-  // confirm); with no record the flags seed it (default single-shard) and it is
-  // persisted. Under a kGlobalMetadata key, so excluded from the consensus
-  // hash.
-  ShardIdentity shard_identity{};
-  {
-    HogDbStatus<ShardIdentity> persisted = ctx.get_db().read_shard_identity();
-    if (persisted) {
-      shard_identity = *persisted;
-      if ((flag_shard_id && *flag_shard_id != shard_identity.shard_id) ||
-          (flag_total_shards &&
-           *flag_total_shards != shard_identity.total_shards)) {
-        critical("shard identity mismatch: persisted {{id={}, total={}}} but "
-                 "flags {{id={}, total={}}}; refusing to start",
-                 shard_identity.shard_id, shard_identity.total_shards,
-                 flag_shard_id ? std::to_string(*flag_shard_id) : "unset",
-                 flag_total_shards ? std::to_string(*flag_total_shards)
-                                   : "unset");
-        return EXIT_FAILURE;
-      }
-      if (shard_identity.shard_function_id != kShardFunctionId) {
-        critical("shard routing-function mismatch: persisted {} but this "
-                 "binary uses {}; refusing to start",
-                 shard_identity.shard_function_id, kShardFunctionId);
-        return EXIT_FAILURE;
-      }
-    }
-    else if (persisted.error().code() != HogDBCode::kNotFound) {
-      // An unreadable identity record is not the same as "no record" -- do not
-      // silently overwrite it.
-      critical("failed to read shard identity: {}; refusing to start",
-               persisted.error());
-      return EXIT_FAILURE;
-    }
-    else {
-      shard_identity =
-          ShardIdentity{.shard_id = flag_shard_id.value_or(0),
-                        .total_shards = flag_total_shards.value_or(1),
-                        .shard_function_id = kShardFunctionId};
-      // A db with committed state but no identity predates sharding, so it
-      // holds the full single-shard dataset and can only be shard 0 of 1 --
-      // reject flags that would relabel it. A fresh db may adopt any valid
-      // identity.
-      if (tip.has_value() &&
-          (shard_identity.shard_id != 0 || shard_identity.total_shards != 1)) {
-        critical("db has committed state but no shard identity (pre-sharding); "
-                 "it can only be shard 0 of 1, not id={} of {}; refusing to "
-                 "start",
-                 shard_identity.shard_id, shard_identity.total_shards);
-        return EXIT_FAILURE;
-      }
-      if (shard_identity.total_shards < 1 ||
-          shard_identity.shard_id >= shard_identity.total_shards) {
-        critical("invalid shard identity: id={}, total={}; require "
-                 "total >= 1 and 0 <= id < total",
-                 shard_identity.shard_id, shard_identity.total_shards);
-        return EXIT_FAILURE;
-      }
-      if (auto w = ctx.get_db().write_shard_identity(shard_identity); !w) {
-        critical("failed to persist shard identity: {}", w.error());
-        return EXIT_FAILURE;
-      }
-      if (auto c = ctx.get_db().commit(); !c) {
-        critical("failed to commit shard identity: {}", c.error());
-        return EXIT_FAILURE;
-      }
-    }
+  std::expected<ShardIdentity, std::string> resolved_identity =
+      establish_shard_identity(ctx.get_db(), flag_shard_id, flag_total_shards);
+  if (!resolved_identity) {
+    critical("{}; refusing to start", resolved_identity.error());
+    return EXIT_FAILURE;
   }
+  const ShardIdentity shard_identity = *resolved_identity;
   info("shard identity: id={}, total_shards={}, function_id={}",
        shard_identity.shard_id, shard_identity.total_shards,
        shard_identity.shard_function_id);
   ctx.set_shard_identity(shard_identity);
+
+  if (preload_items) {
+    preload_synthetic_items(ctx.get_db(), shard_identity, preload_items,
+                            preload_bytes_per_item);
+  }
 
   HogDbStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
   if (!reconcile_status.has_value()) {
@@ -274,9 +278,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     ShardCard card{.protocol = version::kHogdProtocol(),
                    .upid = {},
                    .block_height = 0,
-                   .shard_id = shard_identity.shard_id,
-                   .total_shards = shard_identity.total_shards,
-                   .shard_function_id = shard_identity.shard_function_id,
+                   .identity = shard_identity,
                    .address_for_exec = exec_address.c_str(),
                    .address_for_sched = sched_address.c_str(),
                    .address_for_auth = auth_address.c_str()};
@@ -306,7 +308,8 @@ print_usage(char *argv[])
                "[--executor-port <port>] [--mempool-port <port>] "
                "[--auth-port <port>] [--gateway-port <port>] "
                "[--metrics-port <port>] [--shard-id <n>] "
-               "[--total-shards <n>] [-h|--help] [--version]",
+               "[--total-shards <n>] [--preload-items <n>] "
+               "[--preload-bytes-per-item <n>] [-h|--help] [--version]",
                argv[0]);
 }
 
@@ -338,6 +341,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string bind_ip;
   std::string coordinator_addr_raw;
   std::optional<size_t> ram_bytes;
+  size_t preload_items = 0;
+  size_t preload_bytes_per_item = 0;
   uint16_t exec_port = 0;
   uint16_t mempool_port = 0;
   uint16_t auth_port = 0;
@@ -369,6 +374,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     }
     if (arg == "--bind-ip" && i + 1 < argc) {
       bind_ip = argv[++i];
+      continue;
+    }
+    if (arg == "--preload-items" && i + 1 < argc) {
+      preload_items = hogd::parse_integer_arg<size_t>("--preload-items",
+                                                      argv[++i], argv, usage);
+      continue;
+    }
+    if (arg == "--preload-bytes-per-item" && i + 1 < argc) {
+      preload_bytes_per_item = hogd::parse_integer_arg<size_t>(
+          "--preload-bytes-per-item", argv[++i], argv, usage);
       continue;
     }
     if (arg == "--ram-bytes" && i + 1 < argc) {
@@ -409,7 +424,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   const std::string *coordinator_addr =
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
-  return hogd::hog_db_init(path, *ram_bytes, coordinator_addr, bind_ip,
+  return hogd::hog_db_init(path, *ram_bytes, preload_items,
+                          preload_bytes_per_item, coordinator_addr, bind_ip,
                           exec_port, mempool_port, auth_port, gateway_port,
                           metrics_port, shard_id, total_shards);
 };

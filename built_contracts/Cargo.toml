@@ -33,6 +33,7 @@ members = [
     "integration_test_contracts/sha256_raw",
     "integration_test_contracts/sha256_wrapper",
     "integration_test_contracts/simple_wallet",
+    "integration_test_contracts/storage_filler",
     "integration_test_contracts/simple_wallet_authclaim",
     "integration_test_contracts/syscall_misc_tests",
     "integration_test_contracts/syscall_parse_hardening_test",

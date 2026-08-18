@@ -67,7 +67,8 @@ inline constexpr size_t kDefaultShard = 0;
 
 // Identifies shard_of_address; persisted/declared per shard, mismatch is
 // fail-stop. Bump when shard_of_address changes.
-inline constexpr uint32_t kShardFunctionId = 0;
+inline constexpr ShardFunction kShardFunctionId =
+    ShardFunction::Fnv1aPlaceholder;
 
 // Deterministic within a process. Precondition: shard_count >= 1; returns a
 // value in [0, shard_count).
@@ -106,27 +107,27 @@ order_shards_by_id(Cards const &cards)
   assert(num_shards >= 1);
   std::vector<size_t> order(num_shards, SIZE_MAX);
   for (size_t i = 0; i < num_shards; ++i) {
-    auto const &card = cards[i];
-    if (card.total_shards != num_shards) {
+    auto const &identity = cards[i].identity;
+    if (identity.total_shards != num_shards) {
       return std::unexpected(std::format(
           "db shard {} declares total_shards={} but {} shards present",
-          card.shard_id, card.total_shards, num_shards));
+          identity.shard_id, identity.total_shards, num_shards));
     }
-    if (card.shard_function_id != kShardFunctionId) {
+    if (identity.shard_function_id != kShardFunctionId) {
       return std::unexpected(std::format(
           "db shard {} uses routing function {} but this binary uses {}",
-          card.shard_id, card.shard_function_id, kShardFunctionId));
+          identity.shard_id, identity.shard_function_id, kShardFunctionId));
     }
-    if (card.shard_id >= num_shards) {
+    if (identity.shard_id >= num_shards) {
       return std::unexpected(
           std::format("db shard id {} out of range for {} shards",
-                      card.shard_id, num_shards));
+                      identity.shard_id, num_shards));
     }
-    if (order[card.shard_id] != SIZE_MAX) {
+    if (order[identity.shard_id] != SIZE_MAX) {
       return std::unexpected(
-          std::format("duplicate db shard id {}", card.shard_id));
+          std::format("duplicate db shard id {}", identity.shard_id));
     }
-    order[card.shard_id] = i;
+    order[identity.shard_id] = i;
   }
   return order;
 }

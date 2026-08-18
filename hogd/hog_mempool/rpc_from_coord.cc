@@ -570,8 +570,14 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
                                                                  txs);
 }
 
+// [value] is borrowed from the caller's [PendingBlock], which outlives this
+// call. Taking it by value would put the copy in a temporary on the stack of
+// [commit_block], which suspends, so the copy's cleanup would run against a
+// stack frame that no longer exists if a commit RPC throws. The one copy the
+// wire needs is made by the RPC stub, in its own coroutine frame.
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id,
+                                       const ConsensusValue &value)
 {
   co_return co_await sharded_db_sched_client_->commit_snapshot(block_id, value);
 }
@@ -1309,6 +1315,14 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
     }
   }
   if (first_exception) {
+    // The commit failure itself logged nothing when this crashed the mempool.
+    try {
+      std::rethrow_exception(first_exception);
+    } catch (const std::exception &e) {
+      error("commit_block for block {} failed: {}", cache.block_id, e.what());
+    } catch (...) {
+      error("commit_block for block {} failed", cache.block_id);
+    }
     std::rethrow_exception(first_exception);
   }
   if (result.db.result() == DbSchedResult::DbSchedResultOK &&

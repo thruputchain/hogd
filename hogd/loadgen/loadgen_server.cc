@@ -21,7 +21,11 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
   case ExperimentType::kExperimentTypeERC20Payments:
   {
     auto state =
-        std::make_shared<ERC20ExperimentState>(config.erc20_payments());
+        std::make_shared<ERC20ExperimentState>(config.erc20_payments(), false,
+                                               num_virtual_addresses_,
+                                               filler_instances_, filler_items_,
+                                               filler_item_bytes_,
+                                               filler_period_);
     auto res = co_await state->generate_experiment();
     if (!res) {
       co_return LoadgenResult(res.error().code());
@@ -35,8 +39,11 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
   }
   case ExperimentType::kExperimentTypeERC20BasicAuthPayments:
   {
-    auto state = std::make_shared<ERC20BasicAuthExperimentState>(
-        config.erc20_payments());
+    auto state =
+        std::make_shared<ERC20BasicAuthExperimentState>(
+            config.erc20_payments(), num_virtual_addresses_, filler_instances_,
+            filler_items_, filler_item_bytes_, filler_period_,
+            filler_keyspace_);
     auto res = co_await state->generate_experiment();
     if (!res) {
       co_return LoadgenResult(res.error().code());

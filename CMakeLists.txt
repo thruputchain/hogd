@@ -170,6 +170,15 @@ option(CRC32C_USE_GLOG "" OFF)
 option(CRC32C_INSTALL "" OFF)
 add_subdirectory(external/crc32c)
 
+# crc32c's vendored Google Benchmark runs `add_definitions(-UNDEBUG)` for every
+# non-Debug build (external/crc32c/third_party/benchmark/test/CMakeLists.txt),
+# and it lands in this directory's COMPILE_OPTIONS -- after
+# CMAKE_CXX_FLAGS_RELEASE on the command line, so it wins. Without this a
+# Release build has assertions live: `is_debug_build()` is true, hogdb runs the
+# debug invariants on every commit, and multi-shard runs die at genesis
+# (ISSUES.md #7). Re-assert NDEBUG for everything defined below.
+add_compile_options($<$<NOT:$<CONFIG:Debug>>:-DNDEBUG>)
+
 # Enable blake3
 add_subdirectory(external/blake3/c)
 

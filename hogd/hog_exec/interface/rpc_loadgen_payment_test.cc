@@ -90,9 +90,9 @@ protected:
         .protocol = hogd::version::kHogdProtocol(),
         .upid = {},
         .block_height = 0,
-        .shard_id = 0,
-        .total_shards = 1,
-        .shard_function_id = kShardFunctionId,
+        .identity = {.shard_id = 0,
+                     .total_shards = 1,
+                     .shard_function_id = kShardFunctionId},
         .address_for_exec =
             std::format("localhost:{}", db_wrapper_.exec_port()).c_str(),
         .address_for_sched =

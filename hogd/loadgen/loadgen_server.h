@@ -24,6 +24,20 @@ public:
   // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
   static constexpr size_t kRpcMaxMessageSize = 0x7fffffff;
 
+  // Size of the synthetic recipient address space handed to every experiment
+  // this server generates; zero keeps transfers inside the wallet set. Set
+  // once at startup, before the server accepts calls.
+  uint64_t num_virtual_addresses_ = 0;
+
+  // State-filler knobs, server-side for the same reason as
+  // num_virtual_addresses_: changing them needs no change to the loadgen RPC.
+  // Zero instances disables the filler. See ERC20ExperimentState.
+  uint32_t filler_instances_ = 0;
+  uint32_t filler_items_ = 0;
+  uint32_t filler_item_bytes_ = 0;
+  uint32_t filler_period_ = 1;
+  uint64_t filler_keyspace_ = 0;
+
   x23::Async<LoadgenResult> generate_experiment(ExperimentConfig config);
 
   x23::Async<LoadgenExtensionResult>

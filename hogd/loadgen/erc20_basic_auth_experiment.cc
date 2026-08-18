@@ -12,6 +12,7 @@
 
 #include "auth_claim.hh"
 #include "built_contracts/itc_erc20.h"
+#include "built_contracts/storage_filler.h"
 #include "built_contracts/simple_wallet_authclaim.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -20,6 +21,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/loadgen/status.h"
+#include "hogd/loadgen/virtual_address.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "storage_item.hh"
@@ -128,8 +130,11 @@ ERC20BasicAuthExperimentState::generate_experiment()
   const ContractAddress owner_address = get_owner_address();
 
   constexpr int128_t kWalletInitialHogsEpsilon = 100'000;
+  // The filler instances draw from the same fixed supply, and build() rejects
+  // an over-allocation, so they have to be counted here.
   const auto num_initial_allocations =
-      static_cast<int128_t>(wallets_.size()) + 1;
+      static_cast<int128_t>(wallets_.size()) + 1 +
+      static_cast<int128_t>(filler_instances_);
   const int128_t wallet_initial_hogs =
       (GenesisConfigurationLoader::initial_hog_token_supply() /
        num_initial_allocations) -
@@ -143,6 +148,28 @@ ERC20BasicAuthExperimentState::generate_experiment()
                              wallet_initial_hogs);
   erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
       sha256(*erc20_contract), make_nonce(0));
+
+  // Deploy the state fillers. [fill] with a zero count writes nothing, so it
+  // serves as the genesis initializer too. Many instances because storage items
+  // are keyed by the contract's address: one instance would pin every byte it
+  // writes to the single shard that owns that address.
+  if (filler_instances_ > 0) {
+    using filler_meta = ContractTraitMeta<storage_filler::StorageFiller>;
+    auto filler_contract = filler_meta::load_wasm();
+    assert(filler_contract);
+    const SHA256Hash filler_hash = sha256(*filler_contract);
+    filler_addresses_.reserve(filler_instances_);
+    for (uint32_t i = 0; i < filler_instances_; ++i) {
+      builder.add_initial_config(
+          filler_contract, make_nonce(i), filler_meta::entrypoint<u8"fill">(),
+          filler_meta::make_calldata<u8"fill">(uint64_t{0}, uint32_t{0},
+                                             uint32_t{0}),
+          wallet_initial_hogs);
+      filler_addresses_.push_back(
+          GenesisConfigurationLoader::calculate_deployed_address(
+              filler_hash, make_nonce(i)));
+    }
+  }
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -258,13 +285,19 @@ ERC20BasicAuthExperimentState::extend_experiment(
           uint64_t base_nonce = std::uniform_int_distribution<uint64_t>(
               0, std::numeric_limits<uint64_t>::max())(gen);
 
-          auto make_account_pair = [&]() -> std::pair<size_t, size_t> {
+          auto make_transfer = [&]() -> std::pair<size_t, ContractAddress> {
             auto sender = dist(gen);
+            if (num_virtual_addresses_ > 0) {
+              std::uniform_int_distribution<uint64_t> virtual_dist(
+                  0, num_virtual_addresses_ - 1);
+              return std::make_pair(sender,
+                                    make_virtual_address(virtual_dist(gen)));
+            }
             auto receiver = sender;
             while (receiver == sender) {
               receiver = dist(gen);
             }
-            return std::make_pair(sender, receiver);
+            return std::make_pair(sender, wallets_[receiver].address);
           };
 
           using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
@@ -272,27 +305,44 @@ ERC20BasicAuthExperimentState::extend_experiment(
               ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
 
           for (size_t j = start; j < end; ++j) {
-            auto [sender, receiver] = make_account_pair();
+            auto [sender, receiver_address] = make_transfer();
             uint128_t amount = 10;
 
             // has to match the deserialized objects in simple_wallet::do_action
             static auto entrypoint_transfer =
                 erc20_meta::entrypoint<u8"transfer">();
+            using filler_meta = ContractTraitMeta<storage_filler::StorageFiller>;
+            static auto entrypoint_fill = filler_meta::entrypoint<u8"fill">();
+            // Every filler_period'th transaction writes state instead of moving
+            // tokens, round-robin over the instances so what it writes lands on
+            // every shard. The transaction's nonce keys each call uniquely, so
+            // these insert rather than overwrite.
+            const bool do_fill =
+                !filler_addresses_.empty() && (j % filler_period_) == 0;
             Calldata internal_calldata =
-                x23::serialize(erc20_address_, entrypoint_transfer,
-                               GasAmount{1'000'000},
-                               erc20_meta::make_calldata<u8"transfer">(
-                                   wallets_[receiver].address,
-                                   make_amount(amount)));
+                do_fill
+                    ? x23::serialize(
+                          filler_addresses_[j % filler_addresses_.size()],
+                          entrypoint_fill, GasAmount{1'000'000},
+                          filler_meta::make_calldata<u8"fill">(
+                              filler_keyspace_
+                                  ? static_cast<uint64_t>(j % filler_keyspace_)
+                                  : static_cast<uint64_t>(j + 1),
+                              filler_items_, filler_item_bytes_))
+                    : x23::serialize(
+                          erc20_address_, entrypoint_transfer,
+                          GasAmount{1'000'000},
+                          erc20_meta::make_calldata<u8"transfer">(
+                              receiver_address, make_amount(amount)));
 
             static auto entrypoint_do_action =
                 wallet_meta::entrypoint<u8"do_action">();
             Invocation invocation = {
                 .invoked_address = wallets_[sender].address,
                 .entrypoint = entrypoint_do_action,
-                .gas_limit = GasAmount{100'000},
-                .calldata = wallet_meta::make_calldata<u8"do_action">(
-                    internal_calldata),
+                .gas_limit = do_fill ? filler_gas_limit() : GasAmount{100'000},
+                .calldata =
+                    wallet_meta::make_calldata<u8"do_action">(internal_calldata),
             };
 
             work_txs[j] = SignedTransaction{

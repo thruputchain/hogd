@@ -64,7 +64,7 @@ public:
 
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 1'000'000;
-  static constexpr size_t kDefaultMempoolTxSizeLimit = 5'000'000;
+  static constexpr size_t kDefaultMempoolTxSizeLimit = 50'000'000;
 
   static constexpr size_t kNumSchedulerIterations = 25;
   static_assert(kMaxBlockSize % kNumSchedulerIterations == 0);
@@ -287,13 +287,21 @@ public:
         scheduler_->size());
     MempoolMetrics::instance().scheduler_tx_cache_size.record(
         scheduler_->tx_cache_size());
-    scheduler_->transfer_finished_.store(
-        last_committed_block_.value.proposal_header.block_height);
-
     // Every shard loaded genesis OK: open the barrier so hog transfer deltas
     // can be processed (every shard can now serve the sharded hog-age reads).
     scheduler_->all_shards_genesis_ready_.store(true);
     scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
+
+    // Then wait for those deltas to land, rather than seeding
+    // [transfer_finished_] ourselves. Returning early reports genesis as loaded
+    // while the scheduler still has no hogs for the genesis accounts, so a
+    // caller that submits as soon as this returns -- hog-devnode's
+    // initialization batch, chuckd's init batch -- has its txs discarded for
+    // "all hogs available 0". Waiting cannot hang on a shard that owns none of
+    // genesis: hogdb dispatches a HogsTransferred for every committed block
+    // even when it has no deltas (see BackgroundCommitWorker::commit_job).
+    co_await wait_for_transfer_data(
+        last_committed_block_.value.proposal_header.block_height);
 
     co_return DbSchedResult::DbSchedResultOK;
   }
@@ -608,7 +616,7 @@ private:
                                                       BlockHeight block_height,
                                                       const ProposalTxs &txs);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
-                                            ConsensusValue value);
+                                            const ConsensusValue &value);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
   x23::Vec<x23::DagNode<void>>

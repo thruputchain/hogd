@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <string_view>
 
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
@@ -11,6 +12,7 @@
 #include "hogd/hog_exec/interface/executor.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/version.h"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
@@ -34,6 +36,21 @@ public:
 
   static x23::Async<IntroExecResult> schedexec_intro_exec(ExecCard card)
   {
+    // The reply hands back every ShardCard, so a skewed executor would decode
+    // them to a different layout. IntroExecResult has no outcome to reject
+    // with, so this is fatal.
+    if (std::string_view(card.protocol) !=
+        std::string_view(version::kHogdProtocol())) {
+      panic("executor protocol {} does not match {}; refusing to register",
+            card.protocol.c_str(), version::kHogdProtocol());
+    }
+    info("executor with card {} connected. {} total executors connected.",
+         x23::show(card),
+         // We add 1 because we print this before we actually add the executor
+         // below.
+         Registration::registration().executors_registered(/*cards=*/nullptr) +
+             1);
+
     size_t exec_id = Registration::registration().register_executor(card);
     info("executor with card {} connected as {}. {} total executors connected.",
          x23::show(card), exec_id,
