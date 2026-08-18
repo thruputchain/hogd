@@ -42,6 +42,14 @@ std::string print_iec_bytes(size_t val, bool add_space = false);
 // print_si_bytes converts an integer into SI units.
 std::string print_si_bytes(size_t val, bool add_space = false);
 
+// print_iec_rate converts bytes/seconds into IEC units, without the trailing
+// "/s". Callers must not compute the quotient themselves and pass it to
+// print_iec_bytes: a zero elapsed interval makes the quotient non-finite, and
+// converting a non-finite (or out-of-range) double to size_t is undefined
+// behavior (#2900). A non-positive interval reports a rate of zero.
+std::string print_iec_rate(size_t bytes, double seconds,
+                           bool add_space = false);
+
 // parse_integer transforms a string into an integer type. It returns
 // std::nullopt if parsing failed.
 template<std::integral T>
