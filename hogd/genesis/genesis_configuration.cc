@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -23,7 +24,6 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
