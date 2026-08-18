@@ -185,7 +185,7 @@ TEST(Scheduler, Single)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
   EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
-            age->average_ages[kHogAgeGroupToSchedule] + 1);
+            age->average_ages[kHogAgeGroupToSchedule] + 2);
 }
 
 TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
@@ -228,7 +228,7 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
             (5'000'000'000 * 10) - gas_limit);
   EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
             gas_limit);
-  EXPECT_EQ(after_commit->average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  EXPECT_EQ(after_commit->average_ages[kHogAgeGroupAlreadyScheduled], 2);
   after_lock.unlock();
 }
 
@@ -560,7 +560,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 2);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }

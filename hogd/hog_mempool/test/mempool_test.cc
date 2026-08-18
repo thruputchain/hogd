@@ -1201,8 +1201,10 @@ TEST(Mempool, CommitBlockNotFound)
 
   MempoolTestInfra server;
 
+  ConsensusValue value{};
+  value.proposal_header.block_height = 2;
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      /*block_id=*/1, ConsensusValue{})();
+      /*block_id=*/1, std::move(value))();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
 }
 
@@ -2048,15 +2050,11 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
+  auth_data.last_written_height = 1;
   auth_data.required_weight = 1;
 
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes_initial = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
-
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
@@ -2071,15 +2069,14 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // Now raise the required_weight to 10 — the tx (weight 1) no longer qualifies
   auth_data.required_weight = 10;
-  auth_data.last_written_height = 1;
+  auth_data.last_written_height = 2;
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   KeyChangeBatch key_changes_update = {
       {.address = MempoolTestInfra::kAccountAddresses[0],
        .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
 
-  server.register_auth_data_updates(0, std::move(key_changes_initial))();
-  server.register_auth_data_updates(1, std::move(key_changes_update))();
+  server.register_auth_data_updates(2, std::move(key_changes_update))();
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
