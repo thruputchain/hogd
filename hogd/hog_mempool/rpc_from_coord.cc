@@ -1548,10 +1548,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     }
   }
 
-  if (genesis_ceremony_pre_nomination_test_hook_) {
-    genesis_ceremony_pre_nomination_test_hook_();
-  }
-
   // This path deliberately bypasses scheduler admission and its HogAge state.
   // It also does not consume the scheduler's auth cache: executors read the
   // height-0 root authorization from the database snapshot. Waiting for the
