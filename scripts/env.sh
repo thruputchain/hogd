@@ -21,6 +21,15 @@ SH_FORMAT=shfmt
 
 # enable custom environment setup if file conf.sh is present
 if [ -f ${SCRIPT_DIR}/conf.sh ]; then
+  # Tell build-jobs.sh whether NPROC below is this file's detected default or a
+  # deliberate pin. Comparing values cannot answer that: CI writes lines like
+  # `echo 'NPROC=20' >> scripts/conf.sh`, and a runner pinned to exactly its own
+  # core count would be indistinguishable from no pin at all. Not exported --
+  # build-jobs.sh is sourced into this same shell and unsets it after use, so it
+  # never reaches the compiler's environment.
+  if grep -qE '^[[:space:]]*(export[[:space:]]+)?NPROC=' ${SCRIPT_DIR}/conf.sh 2>/dev/null; then
+    HOGD_NPROC_PINNED=1
+  fi
   source ${SCRIPT_DIR}/conf.sh
 fi
 
