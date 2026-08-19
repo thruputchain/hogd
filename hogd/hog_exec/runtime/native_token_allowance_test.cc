@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
