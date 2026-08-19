@@ -773,16 +773,14 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   // any account receiving HOGs for the first time. Seed those accounts with an
   // empty HogAge; process_transfers_helper() below puts the received balance in
   // the received group at this block's height.
-  //
-  // Aggregate missing-account deltas for validation in case more than one DB
-  // shard reports a delta for the same address. A missing account cannot have
-  // a zero or negative final balance.
   std::unordered_map<ContractAddress, int128_t, SipHash24Hasher>
       missing_account_deltas;
   for (const Delta &delta : transfers.deltas) {
     if (!missing.contains(delta.address)) {
       continue;
     }
+    // Only one DB shard should report a delta for an account.
+    CHECK(!missing_account_deltas.contains(delta.address));
     int128_t &total = missing_account_deltas[delta.address];
     CHECK(!integer_add_overflow(total, from_xdr(delta.hog_delta), &total));
   }
