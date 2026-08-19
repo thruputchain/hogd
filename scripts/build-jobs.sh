@@ -56,8 +56,9 @@
 #                lscpu, else sysfs topology. This is what drops SMT siblings,
 #                and it stays exact under asymmetric SMT, offline CPUs, and
 #                arbitrary pinning.
-#      On macOS the split is reported directly: hw.perflevel0.logicalcpu on
-#      Apple silicon, falling back to hw.physicalcpu on Intel Macs.
+#      On macOS the split is reported directly by hw.perflevel0.logicalcpu.
+#      Apple silicon has no SMT, so where that sysctl is missing (some VMs)
+#      using every core is already correct and needs no special case.
 #
 #      usable_cores is nproc/hw.ncpu, further clamped on Linux by the cgroup CPU
 #      quota, because `docker run --cpus=N` sets a CFS quota that nproc does not
@@ -184,15 +185,12 @@ _hogd_mem_src=none
 if [[ "$OSTYPE" == "darwin"* ]]; then
   _hogd_cores=$(_hogd_sysctl_int hw.ncpu)
 
-  # Apple silicon exposes the P-core count directly. Intel Macs do not, so fall
-  # back to physical cores, which excludes hyperthreads.
+  # Apple silicon exposes the P-core count directly. If the sysctl is missing
+  # (some VMs flatten the topology) the shared fallback below uses every core,
+  # which is the right answer there: Apple silicon has no SMT, so physical and
+  # logical counts are identical.
   _hogd_fast_cores=$(_hogd_sysctl_int hw.perflevel0.logicalcpu)
-  if _hogd_is_pos_int "${_hogd_fast_cores}"; then
-    _hogd_fast_src=perflevel0
-  else
-    _hogd_fast_cores=$(_hogd_sysctl_int hw.physicalcpu)
-    _hogd_is_pos_int "${_hogd_fast_cores}" && _hogd_fast_src=physicalcpu
-  fi
+  _hogd_is_pos_int "${_hogd_fast_cores}" && _hogd_fast_src=perflevel0
 
   _hogd_mem_bytes=$(_hogd_sysctl_int hw.memsize)
   if _hogd_is_pos_int "${_hogd_mem_bytes}"; then
