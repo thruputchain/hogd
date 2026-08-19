@@ -23,9 +23,11 @@ namespace hogd {
 
 namespace {
 
-using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> (*)(
-    SystemCallHandler &, ExecutionContext, SyscallNo, uint32_t, uint32_t,
-    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) noexcept;
+using SyscallFunc = MaybeAsyncSyscallResult (*)(SystemCallHandler &,
+                                                ExecutionContext, SyscallNo,
+                                                uint32_t, uint32_t, uint32_t,
+                                                uint32_t, uint32_t, uint32_t,
+                                                uint32_t) noexcept;
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
@@ -45,7 +47,7 @@ constexpr auto kSyscallTable =
 
 // returns gas_consumed, syscall error>
 template<std::same_as<uint32_t>... Args>
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 syscall_entry_inner(SystemCallHandler *syscall_handler,
                     ExecutionContext context, uint32_t syscall_no,
                     Args... args) noexcept
@@ -82,7 +84,7 @@ syscall_entry_inner(SystemCallHandler *syscall_handler,
 
 } // namespace
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 syscall_entry(ExternHostCallContext call_context, ExecutionContext context,
               uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
               uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7)

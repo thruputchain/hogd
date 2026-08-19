@@ -294,7 +294,7 @@ TEST_F(Rv32SyscallEntryBridgeTest,
       syscall_entry(&handler, context,
                     static_cast<uint32_t>(SyscallNo::kSHA256), kInputAddress,
                     static_cast<uint32_t>(input.size()),
-                    static_cast<uint32_t>(memory.size() - 1), 0, 0, 0, 0);
+                    static_cast<uint32_t>(memory.size() - 1), 0, 0, 0, 0)();
   finish_frame(handler, std::move(stashed_trace));
 
   ASSERT_TRUE(result.first.has_value());
@@ -409,7 +409,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
       syscall_entry(&handler, context,
                     static_cast<uint32_t>(SyscallNo::kSHA256), kInputAddress,
                     static_cast<uint32_t>(input.size()), kOutputAddress, 0, 0,
-                    0, 0);
+                    0, 0)();
   finish_frame(handler, std::move(stashed_trace),
                std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
 

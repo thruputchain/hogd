@@ -55,61 +55,52 @@ Yes as the *seam*, with three qualifications.
    time afterwards instead of in one flag-day diff.
 
 2. **`syscall_entry` is not the only seam.** Three callers consume the syscall
-   ABI, and all three have to be handled in the same change:
+   ABI. All three block on the result in the first PR; only the first two ever
+   stop blocking:
    - `Rv32Runtime::invoke_internal` (`rv32_contract.cc:100`) — the production
-     path. Already shaped correctly: `ThreadedMachine` suspends at the ecall
-     and returns to the loop, so no interpreter C++ stack is live across the
-     syscall. This becomes a coroutine cleanly.
+     path. Already shaped correctly for step 2: `ThreadedMachine` suspends at
+     the ecall and returns to the loop, so no interpreter C++ stack is live
+     across the syscall, and the loop becomes a coroutine cleanly.
    - `NativeSyscallContext::syscall<>` (`native_syscall_context.h:51`) — the
      precompiles. `precompile_native_token.cc:151,183` issue
      `NonnegativeIntGet` / `NonnegativeIntSetAdd`, i.e. real DB reads on the
-     payment hot path. So `NativeContract::function_t`
+     payment hot path. So at step 2 `NativeContract::function_t`
      (`native_runtime.h:52`, currently
      `UniqueFunction<InvokeStatus<void>(NativeSyscallContext&) const noexcept>`)
      has to become an `Async`-returning signature and all three precompiles
-     become coroutines. This is the second-largest chunk of work after the
+     become coroutines. That is the second-largest chunk of work after the
      syscall wrapper itself.
    - `mock_syscall_entrypoint` (`test_ffi/mock_syscall_entry.h:53`) — the
      `extern "C"` ABI the Rust SDK tests call. It stays synchronous and blocks
-     with `MaybeAsync::operator()()`; test_ffi's DB is a local mock, so its
-     inners never suspend and the value arm is always taken.
+     with `MaybeAsync::operator()()` for good; test_ffi's DB is a local mock,
+     so its bodies never suspend and the value arm is always taken.
 
    `rv32::RuntimeContext` (`rv32/runtime_context.cc`) calls `syscall_entry`
    from *inside* `machine.run(host)` and cannot suspend — but its header says
    "Experimental test-only", so it can keep blocking via `operator()()`.
    `SyscallFunction` (`runtime_exports.h`) is only used by that test context.
 
-3. **`MaybeAsync` only pays off with a compile-time split.** A coroutine always
-   allocates its frame, so writing `wrap_after_parse` as a coroutine would cost
-   an allocation on every syscall — worse than today. Split on the inner's
-   return type instead:
+3. **The wrapper allocates a frame per syscall, and that is the accepted cost
+   for now.** A coroutine always allocates, and wrap_after_parse() has to be
+   one: its epilogue (output tracing, gas accounting, the kCanReturn Exit
+   override, disarm_outputs, finish_syscall_trace) runs after the body's
+   result, and the parsed-argument tuple the body writes through cannot be
+   relocated while a suspended body holds references into it. So the tuple and
+   the epilogue live in one frame, and the frame is created whether or not the
+   body actually suspends. At a few dozen syscalls per transaction that is
+   worth measuring before optimizing.
 
-   ```cpp
-   if constexpr (is_maybe_async<typename syscall_t::ret_t>) { ... }
-   ```
+   Inner syscall bodies do *not* change: a body returning a plain
+   SyscallInnerResult lands in MaybeAsync's value arm, and the co_await on it
+   is free. A body that needs to wait switches its declared return type to
+   MaybeAsyncSyscallInnerResult, one at a time.
 
-   - sync-only syscalls (SHA256, GetMsgSender, ConsoleLog, …): today's code
-     verbatim, returns the pair into `MaybeAsync`'s value arm. Zero frames,
-     zero perf delta.
-   - async-capable syscalls: `wrap_outer` itself is the coroutine. It has to
-     be. `WritableOutput<T>` stages the output value *inside itself*
-     (`syscall_argument_parsers.h:25-55`) and copies it back to contract memory
-     in its destructor; `deref` hands the inner a `T&` pointing into the
-     tuple. So the inner writes into tuple-resident storage and holds that
-     reference across its suspension — the tuple must already live in the
-     frame *before* the inner is called. Moving it into a continuation
-     afterwards both dangles and, because `WritableOutput`'s move ctor
-     transfers write-back ownership, silently drops the output.
-
-   `AliasGuard` does *not* need to move into the frame: `Async`'s promise uses
-   `std::suspend_never initial_suspend()` (`x23/async.h:294`), so the body runs
-   eagerly to the first real suspension, and `guard.check()` happens well
-   before that.
-
-   A later optimization, if the per-syscall frame shows up in profiles, is to
-   hoist the parsed-arg storage into the `invoke_internal` frame (which is live
-   across the syscall anyway) so a snapshot-cache *hit* on a DB-touching
-   syscall stays allocation-free. Not step 1.
+   If the per-syscall frame does show up, the fix is to make the awaited thing
+   a bespoke awaiter that *owns* the argument tuple and runs the body in
+   await_ready(): it lives in the caller's MaybeAsync local, so nothing is
+   heap-allocated unless the body really suspends. That makes the wrapper lazy
+   (the body no longer runs at the call), which is why it is not the first
+   move.
 
 ## Blocking is only legal off the x23 pool
 
@@ -122,10 +113,10 @@ which can cause deadlock" (`x23/srpc.h:333-336`) — which is precisely why the
 
 Two consequences:
 
-- The incremental plan works. Through steps 1-4 execution still runs on
+- The incremental plan works. Until the last step execution still runs on
   `DispatchPool` workers, which are not x23 pool threads, so any not-yet-
   coroutinized caller may legally block on a `MaybeAsync`.
-- At step 5 that stops being true, and every remaining blocking call becomes a
+- At the last step that stops being true, and every remaining blocking call becomes a
   bug. The assert is a useful net but only in debug: `x23assert` compiles to
   nothing under `NDEBUG` (`x23/debug.h:206`), so in a release build a leftover
   blocking call silently consumes a pool worker instead of panicking. Do the
@@ -152,13 +143,12 @@ transactions are coroutines, two of them interleave on one thread at every
 suspension point.
 
 - **`PerTransactionDatabaseProxy::current_subtransaction_batch_`
-  (`item/database_proxy.h:192`) is `inline static thread_local` and is broken by
-  this.** `add_delta` accumulates into it and `try_push_current_subtransaction`
+  (`item/database_proxy.h:192`) was `inline static thread_local` and is broken
+  by this.** `add_delta` accumulates into it and `try_push_current_subtransaction`
   clears it after the RPC returns (`:160-162`); a second transaction resuming
   on the same thread during that RPC clobbers the batch. This must become
   per-proxy state (with the buffer reuse preserved some other way) *before*
-  anything suspends. This is the one hard blocker and it can land on its own,
-  today, with no async in sight.
+  anything suspends; it is part of the first PR.
 - `rv32::memory_slot_pool` (`rv32/threaded_machine.h:171`) is fine — acquire
   and release both operate on the current thread's pool, so a machine that
   migrates threads across a suspension just returns its buffer to a different
@@ -189,13 +179,12 @@ read in the process.
 
 ## Staging
 
-0. Move `current_subtransaction_batch_` off `thread_local`. Independently
-   landable, no async.
-1. Coroutinize the syscall seam: `syscall_entry` / `wrap_outer` /
-   `wrap_after_parse` return `x23::MaybeAsync<std::pair<HostFnStatus<
-   SyscallErrorCode>, GasAmount>>`, with the `if constexpr` split above. No
-   inner syscall changes; the generator keeps emitting plain `std::pair`.
-   Adapt the three consumers. Behavior-identical.
+1. (this PR) Move `current_subtransaction_batch_` off `thread_local`, and
+   coroutinize the syscall seam: `syscall_entry` / `wrap_outer` return
+   `MaybeAsyncSyscallResult`, `wrap_after_parse` becomes an
+   `x23::Async<SyscallResult>` coroutine owning the parsed args and the alias
+   guard. No inner syscall changes; all three consumers block on the result
+   with `operator()()`. Behavior-identical.
 2. Coroutinize the spine upward: `Runtime::invoke` → `Async<InvokeResult>`,
    `SystemCallHandler::{invoke, root_invoke}`, `NativeContract::function_t`,
    `run_propose_transaction` / `run_validate_transaction` /
@@ -209,10 +198,10 @@ read in the process.
    `ExecutorContext` and `ViewGatewayRpc`; retune `-nthreads` onto the x23
    `ThreadPool`.
 
-## Risk to watch at step 5
+## Risk to watch at the last step
 
 Contract execution is CPU-bound and today it is confined to the DispatchPool,
-leaving the CoroPoll/ThreadPool workers free for I/O. After step 5 a
+leaving the CoroPoll/ThreadPool workers free for I/O. After that step a
 long-running RV32 invocation occupies an x23 `ThreadPool` worker until it
 suspends. Gas bounds the work, but the pool has to be sized for it, and
 anything that must stay responsive (shutdown, heartbeats, the coordinator RPC

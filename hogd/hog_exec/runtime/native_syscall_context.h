@@ -46,10 +46,12 @@ public:
           std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    // std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+    // Native contract bodies are plain noexcept functions, so they block on
+    // the syscall rather than awaiting it; see the same note in
+    // Rv32Runtime::invoke_internal().
     auto [res, gas_consumed] =
         wrap_after_parse<Meta>(guard, handler_, gas_remaining(),
-                               Meta::kSyscallNo, parsed);
+                               Meta::kSyscallNo, std::move(parsed))();
 
     consume_gas(gas_consumed);
     return res;

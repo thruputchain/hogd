@@ -52,10 +52,12 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
       .gas_remaining = view.gas_remaining(),
   };
 
-  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> result = {};
+  // This bridge drives the non-suspending Machine, whose run loop has no way
+  // to yield, so it blocks on the syscall result rather than awaiting it.
+  SyscallResult result = {};
   try {
     result = entry_(context_, context, args.a0, args.a1, args.a2, args.a3,
-                    args.a4, args.a5, args.a6, args.a7);
+                    args.a4, args.a5, args.a6, args.a7)();
   } catch (...) {
     return HostResult::trap();
   }
