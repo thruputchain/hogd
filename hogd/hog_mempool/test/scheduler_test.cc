@@ -590,11 +590,10 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  // The genesis block triggers the [auth_data_changed()] callback in the
-  // mempool, which calls [remove_from_scheduler()]. We call the same method
-  // below, so to avoid a data race, we wait for the [auth_data_changed()]
-  // callback to complete.
-  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/0)();
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. We call
+  // the same method below, so wait for both callbacks to complete.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();
@@ -629,11 +628,10 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  // The genesis block triggers the [auth_data_changed()] callback in the
-  // mempool, which calls [remove_from_scheduler()]. We call the same method
-  // below, so to avoid a data race, we wait for the [auth_data_changed()]
-  // callback to complete.
-  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/0)();
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. We call
+  // the same method below, so wait for both callbacks to complete.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();
@@ -661,11 +659,10 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  // The genesis block triggers the [auth_data_changed()] callback in the
-  // mempool, which calls [remove_from_scheduler()]. We call the same method
-  // below, so to avoid a data race, we wait for the [auth_data_changed()]
-  // callback to complete.
-  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/0)();
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. We call
+  // the same method below, so wait for both callbacks to complete.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();
