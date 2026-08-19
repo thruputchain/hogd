@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
@@ -17,7 +16,6 @@
 #include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "types.hh"
 
 namespace hogd {
 

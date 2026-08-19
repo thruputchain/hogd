@@ -889,19 +889,19 @@ make_memory_transform_artifact()
       std::move(memory));
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 artifact_bench_entry(ExternHostCallContext /*context*/,
                      ExecutionContext context, uint32_t arg0, uint32_t arg1,
                      uint32_t arg2, uint32_t arg3, uint32_t /*arg4*/,
                      uint32_t /*arg5*/, uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
   if (arg0 == kSyscallReturn) {
-    return {HostFnError{HostFnErrorCode::Return}, 4};
+    return SyscallResult{HostFnError{HostFnErrorCode::Return}, 4};
   }
   if (arg0 == kSyscallSha256) {
     if (!range_fits(arg1, arg2, context.memory.size()) ||
         !range_fits(arg3, kSha256DigestBytes, context.memory.size())) {
-      return {SyscallErrorCode::kSyscallErrorCodeFault, 4};
+      return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
     }
     const auto input_offset = static_cast<size_t>(arg1);
     const auto input_size = static_cast<size_t>(arg2);
@@ -913,12 +913,12 @@ artifact_bench_entry(ExternHostCallContext /*context*/,
       reinterpret_cast<uint8_t *>(context.memory.data())[output_offset + i] =
           digest[i];
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNone, 4};
+    return SyscallResult{SyscallErrorCode::kSyscallErrorCodeNone, 4};
   }
-  return {SyscallErrorCode::kSyscallErrorCodeFault, 4};
+  return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 bridge_noop_entry(ExternHostCallContext /*context*/, ExecutionContext context,
                   uint32_t /*arg0*/, uint32_t /*arg1*/, uint32_t /*arg2*/,
                   uint32_t /*arg3*/, uint32_t /*arg4*/, uint32_t /*arg5*/,
@@ -927,7 +927,7 @@ bridge_noop_entry(ExternHostCallContext /*context*/, ExecutionContext context,
   if (context.memory.size() > 0) {
     reinterpret_cast<uint8_t *>(context.memory.data())[0] ^= 0x5aU;
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  return SyscallResult{SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 void

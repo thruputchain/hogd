@@ -132,7 +132,7 @@ struct CapturedCall {
       make_code_result(0);
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 capture_entry(ExternHostCallContext context, ExecutionContext exec_context,
               uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
               uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7)
@@ -153,7 +153,7 @@ struct SequencedGasCall {
   uint64_t gas_consumed = 0;
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 sequenced_gas_entry(ExternHostCallContext context,
                     ExecutionContext exec_context, uint32_t, uint32_t, uint32_t,
                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
@@ -165,7 +165,7 @@ sequenced_gas_entry(ExternHostCallContext context,
   return make_code_result(222, captured->gas_consumed);
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 throwing_entry(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t,
                uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
@@ -180,7 +180,7 @@ enum class ParserProbeMode : uint32_t {
   kUnsignedU32 = 5,
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 parser_probe_entry(ExternHostCallContext, ExecutionContext context,
                    uint32_t mode, uint32_t arg1, uint32_t arg2, uint32_t arg3,
                    uint32_t arg4, uint32_t, uint32_t, uint32_t)
