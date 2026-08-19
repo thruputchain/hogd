@@ -490,14 +490,18 @@ disarm_outputs(std::tuple<Args...> &args)
 // body that answers immediately (all of them today) returns its result into
 // MaybeAsync's value arm and never suspends.
 //
-// [args] and [guard] are taken by value so they live in this coroutine's frame.
+// [args] is taken by value so it lives in this coroutine's frame.
 // WritableOutput<T> stages a syscall's output inside itself and flushes it to
 // contract memory in its destructor, and deref() hands the body a reference
 // into the tuple, so the tuple has to stay put for as long as a suspended body
 // holds those references.
+//
+// The alias guard arrives as the bool it would have been asked for: the caller
+// registers every parsed argument against it and this only needs the verdict,
+// so there is nothing to keep alive across a suspension.
 template<is_syscall_meta SyscallMeta, typename Args>
 x23::Async<SyscallResult>
-wrap_after_parse(AliasGuard guard, SystemCallHandler &handler,
+wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
                  const GasAmount gas_remaining, SyscallNo syscall_no, Args args)
 {
   using syscall_t =
@@ -522,7 +526,7 @@ wrap_after_parse(AliasGuard guard, SystemCallHandler &handler,
     }
 
     // Check whether any inputs/outputs were aliased
-    if (!guard.check()) {
+    if (!no_aliasing_violation) {
       try {
         trace("Syscall {} faulted due to aliased memory regions", kSyscall);
       } catch (std::exception const &e) {
@@ -802,7 +806,7 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
     // before the arguments are copied into it, so parsed_args is untouched on
     // this path and is still ours to disarm.
     try {
-      return wrap_after_parse<SyscallMeta>(guard, handler,
+      return wrap_after_parse<SyscallMeta>(guard.check(), handler,
                                            context.gas_remaining, syscall_no,
                                            std::move(parsed_args));
     } catch (std::exception const &e) {

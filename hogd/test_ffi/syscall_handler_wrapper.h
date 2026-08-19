@@ -360,7 +360,7 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
     // synchronously, so it blocks on the syscall result rather than awaiting
     // it.  Its database is a local mock, so nothing suspends anyway.
     auto [inner_res, gas] =
-        wrap_after_parse<SyscallMeta>(guard, handler->to_handler(),
+        wrap_after_parse<SyscallMeta>(guard.check(), handler->to_handler(),
                                       gas_runtime->gas_remaining(), syscall_no,
                                       std::move(parsed_args))();
     gas_runtime->consume_gas(gas);

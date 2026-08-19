@@ -50,7 +50,7 @@ public:
     // the syscall rather than awaiting it; see the same note in
     // Rv32Runtime::invoke_internal().
     auto [res, gas_consumed] =
-        wrap_after_parse<Meta>(guard, handler_, gas_remaining(),
+        wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
                                Meta::kSyscallNo, std::move(parsed))();
 
     consume_gas(gas_consumed);
