@@ -274,6 +274,99 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   return {Result<void, ERC20Exception>::make_ok()};
 }
 
+InvokeStatus<Result<void, ERC20Exception>>
+burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
+{
+  if (!ctx.consume_gas(1)) {
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  auto sender = get_msg_sender(ctx);
+  if (!sender) {
+    return sender.error();
+  }
+  auto height = ctx.handler().get_block_height();
+  if (!height) {
+    return height.error().to_invoke_error();
+  }
+  if (*sender != kGenesisRootContractAddress || *height > 1) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  const uint128_t unsigned_amount =
+      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+  if (unsigned_amount > kMaxInt128) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+  const int128_t signed_amount = unsigned_amount;
+
+  // Match the reference ERC20's strict balance debit: reject before staging
+  // any state if the requested burn exceeds the owner's running balance.
+  auto owner_balance = ctx.handler().get_native_token_balance(owner);
+  if (!owner_balance) {
+    return owner_balance.error().to_invoke_error();
+  }
+  if (!owner_balance.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (signed_amount > owner_balance.value().value()) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+
+  int128_t supply_base{};
+  bool supply_base_present{};
+  int128_t supply_add{};
+  auto get =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
+                                                 true, supply_base,
+                                                 supply_base_present,
+                                                 supply_add);
+  if (!get) {
+    return NativeContractBuilder::host_fn_error_conversion(get.error());
+  }
+  const int128_t supply_delta = -signed_amount;
+  if (*get != SyscallErrorCode::kSyscallErrorCodeNone || !supply_base_present ||
+      integer_add_overflow(supply_add, supply_delta)) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  const int128_t new_add = supply_add + supply_delta;
+  if (integer_add_overflow(supply_base, new_add) || supply_base + new_add < 0) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  auto debit = ctx.handler().modify_native_token_balance(owner, supply_delta);
+  if (!debit) {
+    return debit.error().to_invoke_error();
+  }
+  if (!debit.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  auto set = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+      kNativeTokenTotalSupplyKey, &supply_base, new_add,
+      std::to_underlying(StorageDeltaFlags::None));
+  if (!set) {
+    return NativeContractBuilder::host_fn_error_conversion(set.error());
+  }
+  if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  ContractAddress zero{};
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{.from_address = owner,
+                                               .to_address = zero,
+                                               .amount =
+                                                   to_xdr(signed_amount)});
+  if (!event_buf) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
+    return emitted.error();
+  }
+  return {Result<void, ERC20Exception>::make_ok()};
+}
+
 // implementation functions
 InvokeStatus<Result<void, ERC20Exception>>
 transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
@@ -643,8 +736,7 @@ make_native_token_contract()
   builder.add<itc_erc20::ERC20, u8"mint">(mint_impl);
 
   // burn
-  builder.add<itc_erc20::ERC20, u8"burn">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, u8"burn", 1>);
+  builder.add<itc_erc20::ERC20, u8"burn">(burn_impl);
 
   // total_supply
   builder.add<itc_erc20::ERC20, u8"total_supply">(
