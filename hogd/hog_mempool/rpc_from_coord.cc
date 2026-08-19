@@ -1548,11 +1548,34 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     }
   }
 
-  // This path deliberately bypasses scheduler admission and its HogAge state.
-  // It also does not consume the scheduler's auth cache: executors read the
-  // height-0 root authorization from the database snapshot. Waiting for the
-  // asynchronous scheduler notifications here can deadlock an otherwise valid
-  // zero-supply genesis whose empty transfer callback has not arrived yet.
+  // Wait for the height-0 auth update and verify the transactions without
+  // holding either coordinator lock. The auth_data_changed() callback needs
+  // commit_lock_. Check the parent before waiting, then check it again under
+  // the nomination lock below so a concurrent ceremony cannot make this stale
+  // verification usable.
+  {
+    x23::CoroGuard cache_guard;
+    co_await cache_guard(nominated_block_cache_lock_);
+    const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
+    if (last_committed_block_.value.proposal_header.block_height != 0 ||
+        parent_hash != request.expected_parent_value_hash) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+    }
+    if (nominated_block_cache_.block_id != 0) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+  }
+
+  co_await wait_for_auth_data(/*expected_height=*/0);
+
+  AuthErrorCodeBatch auth_results =
+      co_await auth_client_->authmempool_verify_transactions(0, txs);
+  if (auth_results.size() != txs.size() ||
+      std::ranges::any_of(auth_results, [](AuthErrorCode auth_result) {
+        return auth_result != AuthErrorCode::kAuthSuccess;
+      })) {
+    co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
+  }
 
   BlockID block_id = 0;
   ProposalTxs committed_proposal_txs;
@@ -1570,9 +1593,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     // the cache. Do not also take commit_lock_ here: the asynchronous height-0
     // auth callback can hold it while genesis ceremony execution is pending.
     const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
-    if (last_committed_block_.value.proposal_header.block_height == 1) {
-      co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
-    }
     if (last_committed_block_.value.proposal_header.block_height != 0 ||
         parent_hash != request.expected_parent_value_hash) {
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);

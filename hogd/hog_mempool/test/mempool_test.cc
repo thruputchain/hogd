@@ -2317,6 +2317,21 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
       builder.make_genesis_ceremony_transactions(cost_model));
+
+  SignedTransactionBatch unauthorized_txs = ceremony_txs;
+  unauthorized_txs[0].tx.auth_claim.source_address_claim().required_weight = 1;
+  GenesisCeremonyRequest unauthorized_request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(parent.db_tip().value),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = t_to_parallel_batch(unauthorized_txs)(),
+  };
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_commit_genesis_ceremony(
+                    std::move(unauthorized_request))()
+                .outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
+
   ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
   GenesisCeremonyRequest request{
       .expected_parent_height = 0,
