@@ -21,8 +21,10 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "rpc_types.hh"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -453,14 +455,13 @@ class RecordingMempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
 
-  static x23::Async<IntroAuthResult>
-  mempoolauth_intro_auth(AuthCard /*card*/)
+  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
   {
     co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
   }
 
-  x23::Async<void>
-  mempoolauth_auth_data_changed(BlockHeight height, KeyChangeBatch key_changes)
+  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
+                                                 KeyChangeBatch key_changes)
   {
     height_ = height;
     batch_size_ = key_changes.size();
@@ -486,8 +487,7 @@ TEST(AuthServerSubscribeTest, SynchronizesMempoolToIntroHeight)
   RpcServer<RecordingMempoolAuthRpc> mempool_server;
   const uint16_t mempool_port = mempool_server.start_server(0);
   x23::HostPort mempool_address;
-  ASSERT_TRUE(
-      mempool_address.parse(std::format("localhost:{}", mempool_port)));
+  ASSERT_TRUE(mempool_address.parse(std::format("localhost:{}", mempool_port)));
   sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(mempool_address)().value();
 

@@ -548,6 +548,10 @@ HogDbSchedRpc::dbsched_load_genesis_configuration_v2(
     co_return DbSchedResult::DbSchedResultError;
   }
 
+  if constexpr (is_debug_build()) {
+    block_id_state_manager_.log_block_id_tip(kGenesisBlockID);
+  }
+
   const StorageLongHash base_hash = ctx_.get_db().compute_full_db_hash();
   auto block =
       ctx_.open_block_tx(kGenesisBlockID,

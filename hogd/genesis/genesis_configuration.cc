@@ -283,10 +283,9 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
       static_cast<uint128_t>(cost_model.get_nnint_cost());
 
   std::vector<SignedTransaction> transactions;
-  transactions.reserve(
-      std::max<std::size_t>(1, (entries_.size() +
-                                kDistributionsPerTransaction - 1) /
-                                   kDistributionsPerTransaction));
+  transactions.reserve(std::max<std::size_t>(
+      1, (entries_.size() + kDistributionsPerTransaction - 1) /
+             kDistributionsPerTransaction));
 
   for (std::size_t begin = 0; begin < std::max<std::size_t>(1, entries_.size());
        begin += kDistributionsPerTransaction) {

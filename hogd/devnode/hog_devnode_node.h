@@ -111,7 +111,7 @@ private:
   void start_indexer_pull();
   void register_db_with_mempool();
   void register_event_with_mempool();
-  void register_auth_with_mempool();
+  AuthCard register_auth_with_mempool();
   void register_executor_with_mempool();
   x23::Async<void> register_coordinator_with_mempool();
   LocalBootstrapConfig

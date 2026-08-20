@@ -224,8 +224,9 @@ public:
 
   sched_coord_client_t mempool_coord_client()
   {
-    auto client = create_client<SchedulerCoord1>(
-        MempoolTestInfra::kAddress, mempool_coord_server_.port())();
+    auto client =
+        create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                       mempool_coord_server_.port())();
     CHECK(client.has_value());
     return std::move(*client);
   }

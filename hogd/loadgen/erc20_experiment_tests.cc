@@ -6,7 +6,6 @@
 
 #include "exec_result.hh"
 #include "hogd/base/xdr_util.h"
-#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"

@@ -508,14 +508,16 @@ done
 # directly here would wait forever on the long-lived database instead. Make a
 # short marker waiter the most recent process; it exits with the status written
 # by the corresponding timed mempool wrapper.
-node0_mempool_wait_script=$(cat <<EOF
+node0_mempool_wait_script=$(
+  cat <<EOF
 set -euo pipefail
 while [[ ! -f $(printf '%q' "$node0_mempool_exit_file") ]]; do sleep 1; done
 read -r status <$(printf '%q' "$node0_mempool_exit_file")
 exit "\$status"
 EOF
 )
-node1_mempool_wait_script=$(cat <<EOF
+node1_mempool_wait_script=$(
+  cat <<EOF
 set -euo pipefail
 while [[ ! -f $(printf '%q' "$node1_mempool_exit_file") ]]; do sleep 1; done
 read -r status <$(printf '%q' "$node1_mempool_exit_file")
