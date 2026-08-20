@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -15,16 +16,12 @@
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/init.h"
-#include "indexer.hh"
-#include "proposal.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
