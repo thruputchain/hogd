@@ -1,7 +1,6 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "event_outbox_internal.hh"
 
-#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -28,9 +27,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/crypto/crypto.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "proposal.hh"
@@ -359,42 +356,17 @@ EventBlockContext::snapshot_indexer_outbox_candidate(
       .proposal_txs_hash = std::move(proposal_txs_hash),
   };
 
-  EventWithBodyBatch pairs;
-  {
-    std::unique_lock ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(ul, [&pairs](EventWithBodyBatch &batch) {
-      pairs.reserve(pairs.size() + batch.size());
-      for (detail::EventWithBody &pair : batch) {
-        pairs.push_back(std::move(pair));
-      }
-    });
-  }
-
-  // Per-thread event RPCs can complete in any order. Sort compact keys rather
-  // than the much larger event/body objects, then move each pair exactly once.
-  // Transaction-hash order gives equivalent candidates identical durable bytes
-  // without retransmitting ProposalTxs.
-  struct PairOrderKey {
-    TransactionHash tx_hash;
-    size_t pair_index;
-  };
-  std::vector<PairOrderKey> order;
-  order.reserve(pairs.size());
-  for (size_t i = 0; i < pairs.size(); ++i) {
-    order.push_back({.tx_hash = pairs[i].event.tx_hash, .pair_index = i});
-  }
-  std::ranges::sort(order, {}, &PairOrderKey::tx_hash);
-
-  payload.event_logs.reserve(pairs.size());
-  payload.tx_bodies.reserve(pairs.size());
-  for (size_t i = 0; i < order.size(); ++i) {
-    if (i != 0) {
-      CHECK_LT(order[i - 1].tx_hash, order[i].tx_hash);
+  // Each EventWithBody was created as one pair by add_event. Flatten the
+  // per-thread batches in lockstep; the indexer is insensitive to pair order.
+  std::unique_lock ul = events_with_bodies_.lock_threads();
+  events_with_bodies_.for_each(ul, [&payload](EventWithBodyBatch &batch) {
+    payload.event_logs.reserve(payload.event_logs.size() + batch.size());
+    payload.tx_bodies.reserve(payload.tx_bodies.size() + batch.size());
+    for (detail::EventWithBody &pair : batch) {
+      payload.event_logs.push_back(std::move(pair.event));
+      payload.tx_bodies.push_back(std::move(pair.body));
     }
-    detail::EventWithBody &pair = pairs[order[i].pair_index];
-    payload.event_logs.push_back(std::move(pair.event));
-    payload.tx_bodies.push_back(std::move(pair.body));
-  }
+  });
   co_return payload;
 }
 

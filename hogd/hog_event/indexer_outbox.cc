@@ -38,7 +38,6 @@
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
-#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -204,16 +203,8 @@ validate_candidate(const IndexerOutboxCandidatePayload &payload)
       payload.event_root) {
     co_return std::unexpected("event root differs from payload identity");
   }
-  if (auto mapping = validate_indexer_event_body_mapping(payload.event_logs,
-                                                         payload.tx_bodies);
-      !mapping) {
-    co_return std::unexpected(mapping.error());
-  }
-  for (size_t i = 1; i < payload.event_logs.size(); ++i) {
-    if (payload.event_logs[i].tx_hash <= payload.event_logs[i - 1].tx_hash) {
-      co_return std::unexpected(
-          "candidate event/body hashes are not strictly increasing");
-    }
+  if (payload.event_logs.size() != payload.tx_bodies.size()) {
+    co_return std::unexpected("event/body batch cardinalities differ");
   }
   co_return IndexerOutboxStatus<void>{};
 }

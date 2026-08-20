@@ -5,7 +5,6 @@
 #include <chrono> // IWYU pragma: keep
 #include <fcntl.h>
 #include <filesystem>
-#include <future>
 #include <latch>
 #include <limits>
 #include <memory>
@@ -1759,7 +1758,7 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
   expect_xdr_equal(*loaded, committed);
 }
 
-TEST_F(EventRpcTest, PrepublishedConsensusRejectsDifferentFullCandidatePayload)
+TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresCandidatePayload)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1797,8 +1796,8 @@ TEST_F(EventRpcTest, PrepublishedConsensusRejectsDifferentFullCandidatePayload)
   ASSERT_TRUE(
       ctx.indexer_outbox_store().publish_candidate(changed)().has_value());
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(452, value)(),
-            RPCError::kRPCUnrecoverable);
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(452).value());
+            RPCError::kRPCNone);
+  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(452).value());
   auto retained = ctx.indexer_outbox_store().load_committed(13)();
   ASSERT_TRUE(retained.has_value()) << retained.error();
   expect_xdr_equal(*retained, committed);

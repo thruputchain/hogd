@@ -24,57 +24,31 @@
 namespace hogd {
 namespace {
 
-template<typename HashConsumer>
-IndexerPayloadStatus<void>
-validate_event_body_mapping(const TxEventLogBatch &event_logs,
-                            const ProposedTransactionBatch &tx_bodies,
-                            HashConsumer &&consume_hash)
+IndexerPayloadStatus<TxsHash>
+validate_event_body_mapping_and_compute_root(
+    const TxEventLogBatch &event_logs,
+    const ProposedTransactionBatch &tx_bodies)
 {
   if (event_logs.size() != tx_bodies.size()) {
     return std::unexpected("event/body batch cardinalities differ");
   }
 
+  MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   for (size_t i = 0; i < tx_bodies.size(); ++i) {
     const TransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
     if (body_hash != event_logs[i].tx_hash) {
       return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
-    if (!consume_hash(body_hash)) {
+    if (!trie.insert(HexArray(body_hash), std::span<const std::byte>())) {
       return std::unexpected("event/body batch contains duplicate hashes");
     }
-  }
-  return {};
-}
-
-IndexerPayloadStatus<TxsHash>
-validate_event_body_mapping_and_compute_root(
-    const TxEventLogBatch &event_logs,
-    const ProposedTransactionBatch &tx_bodies)
-{
-  MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
-  auto valid = validate_event_body_mapping(
-      event_logs, tx_bodies, [&trie](const TransactionHash &body_hash) {
-        return trie.insert(HexArray(body_hash), std::span<const std::byte>());
-      });
-  if (!valid) {
-    return std::unexpected(valid.error());
   }
   trie.generate_all_hashes(/*num_threads=*/1);
   return trie.get_root_hash();
 }
 
 } // namespace
-
-IndexerPayloadStatus<void>
-validate_indexer_event_body_mapping(const TxEventLogBatch &event_logs,
-                                    const ProposedTransactionBatch &tx_bodies)
-{
-  return validate_event_body_mapping(event_logs, tx_bodies,
-                                     [](const TransactionHash &) {
-                                       return true;
-                                     });
-}
 
 SHA256Hash
 compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs)
