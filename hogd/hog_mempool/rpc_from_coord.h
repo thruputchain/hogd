@@ -284,42 +284,50 @@ public:
   {
     CHECK(initialized_.load(std::memory_order_acquire));
 
-    x23::CoroGuard commit_cg;
-    co_await commit_cg(commit_lock_);
+    DbSchedResult ret;
+    {
+      x23::CoroGuard commit_cg;
+      co_await commit_cg(commit_lock_);
 
-    if (last_committed_block_.value.proposal_header.block_height != -1 ||
-        genesis_configuration.network_hash != network_hash_) {
-      co_return DbSchedResult::DbSchedResultError;
+      if (last_committed_block_.value.proposal_header.block_height != -1 ||
+          genesis_configuration.network_hash != network_hash_) {
+        co_return DbSchedResult::DbSchedResultError;
+      }
+      CHECK_EQ(auth_data_height(), -1);
+      CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
+
+      ConsensusValue genesis_value{};
+      genesis_value.proposal_header.block_height = 0;
+      genesis_value.proposal_header.network_hash = network_hash_;
+      ret = co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
+          genesis_configuration, genesis_value);
+      if (ret != DbSchedResult::DbSchedResultOK) {
+        co_return ret;
+      }
+
+      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
+      last_committed_block_ = db_res.db_tip();
+      CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
+      CHECK_EQ(last_committed_block_.id, 0UL);
+      Registration::registration().publish_event_canonical_tip(
+          EventCanonicalTip{.block_id = last_committed_block_.id,
+                            .consensus_value = last_committed_block_.value});
+      scheduler_->set_current_block(0);
+      co_await Health::instance().set_current_block_height(0);
+      MempoolMetrics::instance().current_block_height.record(0);
+      MempoolMetrics::instance().scheduler_pending_tx_count.record(
+          scheduler_->size());
+      MempoolMetrics::instance().scheduler_tx_cache_size.record(
+          scheduler_->tx_cache_size());
+      scheduler_->transfer_finished_.store(0);
     }
-    CHECK_EQ(auth_data_height(), -1);
-    CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
 
-    ConsensusValue genesis_value{};
-    genesis_value.proposal_header.block_height = 0;
-    genesis_value.proposal_header.network_hash = network_hash_;
-    DbSchedResult ret =
-        co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
-            genesis_configuration, genesis_value);
-    if (ret != DbSchedResult::DbSchedResultOK) {
-      co_return ret;
-    }
-
-    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
-    CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
-    last_committed_block_ = db_res.db_tip();
-    CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
-    CHECK_EQ(last_committed_block_.id, 0UL);
-    Registration::registration().publish_event_canonical_tip(
-        EventCanonicalTip{.block_id = last_committed_block_.id,
-                          .consensus_value = last_committed_block_.value});
-    scheduler_->set_current_block(0);
-    co_await Health::instance().set_current_block_height(0);
-    MempoolMetrics::instance().current_block_height.record(0);
-    MempoolMetrics::instance().scheduler_pending_tx_count.record(
-        scheduler_->size());
-    MempoolMetrics::instance().scheduler_tx_cache_size.record(
-        scheduler_->tx_cache_size());
-    scheduler_->transfer_finished_.store(0);
+    // The database's height-0 notification reaches us through the auth server,
+    // whose callback also takes commit_lock_.  Release that lock explicitly
+    // before waiting, and do not acknowledge the genesis load until the
+    // downstream auth state is usable by the ceremony RPC.
+    co_await wait_for_auth_data(/*expected_height=*/0);
     co_return ret;
   }
 
