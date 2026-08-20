@@ -2326,8 +2326,6 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   ASSERT_FALSE(total_supply.has_value());
   EXPECT_EQ(total_supply.error(), HogDbCode::kNotFound);
 
-  server.register_runtime_after_genesis();
-
   const SchedulerGetTipResult parent =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -2346,10 +2344,26 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       .context = ProposalContext{.protocol = 0},
       .transactions = t_to_parallel_batch(unauthorized_txs)(),
   };
-  EXPECT_EQ(server.mempool_coord_rpc()
-                .schedulercoord_commit_genesis_ceremony(
-                    std::move(unauthorized_request))()
-                .outcome(),
+  auto coordinator_client = server.mempool_coord_client();
+  std::promise<void> ceremony_started;
+  auto ceremony_started_future = ceremony_started.get_future();
+  auto pending_unauthorized = std::async(std::launch::async, [&] {
+    auto ceremony = coordinator_client.schedulercoord_commit_genesis_ceremony(
+        std::move(unauthorized_request));
+    ceremony_started.set_value();
+    return ceremony();
+  });
+  ASSERT_EQ(ceremony_started_future.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  EXPECT_EQ(pending_unauthorized.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+  EXPECT_FALSE(server.mempool_coord_rpc().ready());
+
+  server.register_runtime_after_genesis();
+
+  ASSERT_EQ(pending_unauthorized.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  EXPECT_EQ(pending_unauthorized.get().outcome(),
             GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
 
   ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
@@ -2363,7 +2377,6 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   // Exercise the RPC encoding and coroutine return path.  Directly invoking
   // MempoolCoordinatorRpc does not cover ownership of the nested
   // ParallelBatch vectors in GenesisCeremonyResult.
-  auto coordinator_client = server.mempool_coord_client();
   GenesisCeremonyResult result =
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);

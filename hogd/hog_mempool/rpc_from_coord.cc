@@ -1524,18 +1524,17 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   co_return nominated_block_cache_.proposal_result;
 }
 
-// GCC 15 miscompiles this coroutine at -O3: its generated cleanup path calls a
-// destructor through a frame slot whose lifetime has already ended.  Keep this
-// one-shot control-plane path at -O2 until the CI toolchain moves past that
-// compiler bug.
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 15
-__attribute__((optimize("O2")))
-#endif
 x23::Async<GenesisCeremonyResult>
 MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     GenesisCeremonyRequest request)
 {
-  CHECK(ready());
+  // Loading height 0 can complete before the event server and executors have
+  // registered.  The coordinator is allowed to submit the ceremony as soon as
+  // it observes that tip, so wait for the runtime just like ordinary block
+  // proposal does instead of treating this startup race as a fatal invariant.
+  while (!ready()) {
+    co_await ready_waiters_.wait(false);
+  }
   auto result = [](GenesisCeremonyOutcome outcome) {
     return GenesisCeremonyResult(outcome);
   };
