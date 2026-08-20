@@ -2335,6 +2335,7 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   ceremony_txs.append_range(
       builder.make_genesis_ceremony_transactions(cost_model));
   ASSERT_EQ(ceremony_txs.size(), 1);
+  ASSERT_EQ(ceremony_txs[0].tx.contracts_to_deploy.size(), 1);
 
   SignedTransactionBatch unauthorized_txs = ceremony_txs;
   unauthorized_txs[0].tx.auth_claim.source_address_claim().required_weight = 1;

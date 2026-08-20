@@ -45,7 +45,9 @@ protected:
       check_uniquifier(tx.tx.uniquifier);
       auto handler = make_new_system_call_handler(tx, *runtime_context_);
       auto invoke_res = handler.root_invoke();
-      ASSERT_TRUE(invoke_res.is_root_success());
+      ASSERT_TRUE(invoke_res.is_root_success())
+          << "invoke error: " << invoke_res.result_.error().raw_code()
+          << ", gas consumed: " << invoke_res.gas_consumed_;
       auto res = handler.try_commit_transaction();
       ASSERT_TRUE(res == ExecResult::ExecResultOK);
       ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
@@ -117,7 +119,9 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
 {
   auto state =
       std::make_shared<ERC20BasicAuthExperimentState>(ERC20PaymentsConfig{
-          .num_addresses = 10,
+          // Cross the genesis ceremony's per-transaction distribution limit
+          // so this test exercises a multi-transaction ceremony.
+          .num_addresses = 17,
       });
   auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());

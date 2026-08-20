@@ -14,6 +14,7 @@
 #include <span>
 #include <string_view>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -265,10 +266,15 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
   root_client_t client(kGenesisRootContractAddress);
   constexpr static GasAmount kDistributionGas =
       std::numeric_limits<GasAmount>::max();
+  // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
+  // vector comfortably below that limit, including allocator and contract
+  // stack space. A ceremony is one atomic height-1 block, but it may contain
+  // several root transactions.
+  constexpr static std::size_t kDistributionsPerTransaction = 16;
 
-  // One transaction creates all economic state. It funds the first root
-  // balance and replay-cache rows, plus the native-token balance and supply
-  // rows, exactly once; no zero-valued economic rows are needed at height 0.
+  // Every transaction executes independently against the height-0 snapshot,
+  // so make each one self-funding. The minted funding is consumed by the rows
+  // that transaction creates; no economic state needs to be prewritten.
   const uint128_t root_funding =
       static_cast<uint128_t>(cost_model.get_balance_cost()) +
       static_cast<uint128_t>(cost_model.get_replay_cache_cost(1));
@@ -276,35 +282,55 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
       static_cast<uint128_t>(cost_model.get_balance_cost()) +
       static_cast<uint128_t>(cost_model.get_nnint_cost());
 
-  x23::Vec<genesis_root::Distribution, UINT32_MAX> distributions;
-  decltype(Transaction{}.contracts_to_deploy) contracts_to_deploy;
-  distributions.reserve(entries_.size());
-  contracts_to_deploy.reserve(entries_.size());
-  for (auto const &entry : entries_) {
-    CHECK_GE(entry.amount, 0);
-    distributions.push_back(genesis_root::Distribution{
-        .nonce = entry.config.initial_nonce,
-        .contract_hash = entry.config.contract_hash,
-        .initializer = entry.config.entrypoint,
-        .initializer_calldata = entry.config.calldata,
-        .allocation = to_xdr(static_cast<uint128_t>(entry.amount)),
-    });
-    contracts_to_deploy.push_back(*entry.deployed_contract);
-  }
+  std::vector<SignedTransaction> transactions;
+  transactions.reserve(
+      std::max<std::size_t>(1, (entries_.size() +
+                                kDistributionsPerTransaction - 1) /
+                                   kDistributionsPerTransaction));
 
-  return {SignedTransaction{
-      .tx = Transaction{
-          .invocation = client.make_invocation<u8"distribute">(
-              kDistributionGas, distributions, make_contract_u128(root_funding),
-              make_contract_u128(token_funding)),
-          .uniquifier =
-              {
-                  .block_expiry_height =
-                      std::numeric_limits<BlockHeight>::max(),
-                  .nonce = 0,
-              },
-          .contracts_to_deploy = std::move(contracts_to_deploy),
-      }}};
+  for (std::size_t begin = 0; begin < std::max<std::size_t>(1, entries_.size());
+       begin += kDistributionsPerTransaction) {
+    const std::size_t end =
+        std::min(entries_.size(), begin + kDistributionsPerTransaction);
+    x23::Vec<genesis_root::Distribution, UINT32_MAX> distributions;
+    decltype(Transaction{}.contracts_to_deploy) contracts_to_deploy;
+    std::unordered_set<SHA256Hash, SipHash24Hasher> attached_contract_hashes;
+    distributions.reserve(end - begin);
+    attached_contract_hashes.reserve(end - begin);
+    for (std::size_t i = begin; i < end; ++i) {
+      auto const &entry = entries_[i];
+      CHECK_GE(entry.amount, 0);
+      distributions.push_back(genesis_root::Distribution{
+          .nonce = entry.config.initial_nonce,
+          .contract_hash = entry.config.contract_hash,
+          .initializer = entry.config.entrypoint,
+          .initializer_calldata = entry.config.calldata,
+          .allocation = to_xdr(static_cast<uint128_t>(entry.amount)),
+      });
+      // A transaction attaches contract code by hash. Attach each distinct
+      // artifact only once within the transaction, even when many accounts use
+      // the same wallet implementation.
+      if (attached_contract_hashes.insert(entry.config.contract_hash).second) {
+        contracts_to_deploy.push_back(*entry.deployed_contract);
+      }
+    }
+
+    transactions.push_back(SignedTransaction{
+        .tx = Transaction{
+            .invocation = client.make_invocation<u8"distribute">(
+                kDistributionGas, distributions,
+                make_contract_u128(root_funding),
+                make_contract_u128(token_funding)),
+            .uniquifier =
+                {
+                    .block_expiry_height =
+                        std::numeric_limits<BlockHeight>::max(),
+                    .nonce = transactions.size(),
+                },
+            .contracts_to_deploy = std::move(contracts_to_deploy),
+        }});
+  }
+  return transactions;
 }
 
 StorageKey
