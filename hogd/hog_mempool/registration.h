@@ -48,20 +48,10 @@ public:
   // worker can starve the very handler it is waiting for. See the ThreadPool
   // affinity rules in x23/x23/threadpool.h.
 
-  // How many executors have registered. Waiters wanting [n] executors read
-  // the count, and if it is short, suspend until it moves:
-  //
-  //     for (;;) {
-  //       const size_t registered = reg.registered_executor_count();
-  //       if (registered >= n)
-  //         break;
-  //       co_await reg.wait_for_executor_count_change(registered);
-  //     }
-  //
-  // Reading the count *before* suspending is what makes the wakeup impossible
-  // to lose: if an executor registers in between, the count no longer matches
-  // [registered], so [wait_for_executor_count_change()] returns without
-  // suspending and sends the caller back around to re-read.
+  // How many executors have registered. Pass the count you read to
+  // [wait_for_executor_count_change()], which then only suspends while the
+  // count is still that value -- so an executor registering between the read
+  // and the wait cannot leave the caller parked on a stale count.
   size_t registered_executor_count() { return registered_executors_.load(); }
   x23::CoroFutex<size_t>::Awaiter
   wait_for_executor_count_change(size_t registered)
@@ -102,17 +92,15 @@ public:
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.push_back(card);
       exec_id = exec_cards_.size() - 1;
-      // Publish under the same lock that serializes the pushes, so the count
-      // only ever moves forward. Capturing the size here and storing it after
-      // unlocking would let two concurrent registrations publish out of order
-      // and leave the count behind [exec_cards_], stranding a waiter that
-      // wants the higher count with nothing left to wake it. Publishing after
-      // the push also means a waiter seeing [n] can always read back [n]
-      // cards.
+      // Publish under the lock that serializes the pushes, so the count only
+      // moves forward and always trails [exec_cards_]. Capturing the size and
+      // storing it after unlocking lets two concurrent registrations publish
+      // out of order, leaving a waiter for the higher count parked with
+      // nothing left to wake it.
       registered_executors_.store(exec_cards_.size());
     }
-    // Broadcast outside [exec_cards_mutex_]: the waiters resume on the thread
-    // pool and the first thing they do is re-take it.
+    // Broadcast outside the lock: the waiters resume on the pool and the first
+    // thing they do is re-take it.
     registered_executors_.broadcast(&default_threadpool());
     return exec_id;
   }
@@ -296,9 +284,11 @@ public:
     {
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.clear();
+      registered_executors_.store(0);
     }
     {
       std::unique_lock lk(event_mutex_);
+      event_ready_.store(false);
       event_registered_ = false;
       event_card_ = EventCard{};
       active_event_snapshot_.reset();
@@ -314,11 +304,6 @@ public:
     }
     auth_registered_ = false;
     auth_card_ = AuthCard{};
-    // Retract both signals, so a waiter that arrives after this reset parks
-    // rather than reading a readiness this cleared away. Any waiter already
-    // parked stays parked, which is what the pre-reset state would have done.
-    registered_executors_.store(0);
-    event_ready_.store(false);
   }
 
 private:
@@ -333,23 +318,27 @@ private:
   }
 
   // Publish event readiness and wake its waiters. Call with [event_mutex_]
-  // released: the waiters resume on the thread pool and immediately re-take
-  // it. Readiness is monotonic until [clear()], so this only ever moves false
-  // -> true and a repeat call is harmless.
+  // released: the waiters resume on the pool and immediately re-take it.
   //
-  // Unlike the executor count, this is safe to publish after unlocking even
-  // though [ready] is computed under the lock: the only value ever stored is
-  // true and a not-ready caller stores nothing, so concurrent publishes
-  // converge on true regardless of the order they land in. Whichever state
-  // change completes readiness observes it and publishes, so no wakeup is
-  // lost.
+  // Only the false -> true edge broadcasts. [publish_event_canonical_tip()]
+  // runs on every commit, so broadcasting unconditionally would put a
+  // [ThreadPool::go()] on the commit hot path forever after startup, with no
+  // waiters left to notify.
   void publish_event_ready(bool ready)
   {
     if (!ready) {
       return;
     }
-    event_ready_.store(true);
-    event_ready_.broadcast(&default_threadpool());
+    const bool became_ready = event_ready_.rmw([](bool &current) {
+      if (current) {
+        return false;
+      }
+      current = true;
+      return true;
+    });
+    if (became_ready) {
+      event_ready_.broadcast(&default_threadpool());
+    }
   }
 
   // No one should construct a [Registration] instance directly. Instead, use

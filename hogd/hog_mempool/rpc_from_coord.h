@@ -504,7 +504,6 @@ private:
         co_await MempoolAuthRpc::get_client());
 
     initialized_.store(true, std::memory_order_release);
-    initialized_.notify_all();
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }

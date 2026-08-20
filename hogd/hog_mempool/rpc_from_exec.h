@@ -54,10 +54,21 @@ public:
     // worker can starve the very handler we are waiting for. Suspend on the
     // executor count instead. See [Registration::registered_executor_count()].
     Registration &reg = Registration::registration();
+    bool logged_wait = false;
     while (true) {
       const size_t registered = reg.registered_executor_count();
       if (registered >= expected_executors) {
         break;
+      }
+      if (!logged_wait) {
+        // Startup blocks here until the executors arrive, and there is no
+        // deadline, so say so once: otherwise a wedged startup is just
+        // [/health] stuck reporting "starting" with nothing in the log. Each
+        // executor that does arrive logs itself from [schedexec_intro_exec()].
+        info("waiting for executors to register with the coordinator: {} of {} "
+             "registered",
+             registered, expected_executors);
+        logged_wait = true;
       }
       co_await reg.wait_for_executor_count_change(registered);
     }

@@ -64,10 +64,13 @@ public:
   static x23::Async<EventCard> wait_for_registration()
   {
     Registration &reg = Registration::registration();
-    EventCard card;
-    while (!(reg.event_ready() && reg.event_registered(&card))) {
+    while (!reg.event_ready()) {
       co_await reg.wait_for_event_ready();
     }
+    // Readiness is only published while the event is registered, so the card
+    // is set by the time we get here.
+    EventCard card;
+    reg.event_registered(&card);
     co_return card;
   }
 
