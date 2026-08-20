@@ -472,6 +472,38 @@ disarm_outputs(std::tuple<Args...> &args)
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 }
 
+// Translates the exception currently being handled into the Unrecoverable
+// result a syscall body's failure produces, disarming the staged outputs on
+// the way out.
+//
+// Call this only from inside a catch handler: the operand-less throw rethrows
+// the in-flight exception so it can be classified here instead of at each
+// site. That keeps this a plain function rather than a coroutine, so calling
+// it from a handler inside wrap_after_parse_async() costs no second frame --
+// which a lambda containing the co_await would.
+template<typename... Args>
+SyscallInnerResult
+translate_syscall_body_exception(SyscallNo syscall_no,
+                                 std::tuple<Args...> &args) noexcept
+{
+  try {
+    throw;
+  } catch (std::exception const &e) {
+    // The diagnostic itself allocates and could throw again (issue #3372);
+    // report through the no-allocation fallback if it does.
+    try {
+      error("unrecoverable: syscall {} body threw: {}", syscall_no, e.what());
+    } catch (...) {
+      report_dropped_syscall_trace("syscall-body exception diagnostic");
+    }
+  } catch (...) {
+    report_dropped_syscall_trace("non-std exception from syscall body");
+  }
+  disarm_outputs(args);
+  return SyscallInnerResult{HostFnError{HostFnErrorCode::Unrecoverable},
+                            WrappedGasAmount{0}};
+}
+
 // report_dropped_syscall_trace() lives in syscall_types.h so the per-syscall
 // inner bodies (which also materialize optional XDR trace outputs and must not
 // panic on allocation failure) can share it.
@@ -499,10 +531,15 @@ disarm_outputs(std::tuple<Args...> &args)
 // The alias guard arrives as the bool it would have been asked for: the caller
 // registers every parsed argument against it and this only needs the verdict,
 // so there is nothing to keep alive across a suspension.
+//
+// Callers go through wrap_after_parse() rather than calling this directly --
+// creating the coroutine can throw, and that has to be translated exactly once,
+// in a place nobody has to remember.
 template<is_syscall_meta SyscallMeta, typename Args>
 x23::Async<SyscallResult>
-wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
-                 const GasAmount gas_remaining, SyscallNo syscall_no, Args args)
+wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
+                       const GasAmount gas_remaining, SyscallNo syscall_no,
+                       Args args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
@@ -526,7 +563,7 @@ wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
     }
 
     // Check whether any inputs/outputs were aliased
-    if (!no_aliasing_violation) {
+    if (!alias_check_passed) {
       try {
         trace("Syscall {} faulted due to aliased memory regions", kSyscall);
       } catch (std::exception const &e) {
@@ -614,22 +651,8 @@ wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
             std::get<ExtraArgs>(extra_args)...,
             SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                 std::get<Is>(args))...);
-      } catch (std::exception const &e) {
-        // The diagnostic itself allocates and could throw again (issue
-        // #3372); report through the no-allocation fallback if it does.
-        try {
-          error("unrecoverable: syscall {} body threw: {}", kSyscall, e.what());
-        } catch (...) {
-          report_dropped_syscall_trace("syscall-body exception diagnostic");
-        }
-        disarm_outputs(args);
-        return SyscallInnerResult{HostFnError{HostFnErrorCode::Unrecoverable},
-                                  WrappedGasAmount{0}};
       } catch (...) {
-        report_dropped_syscall_trace("non-std exception from syscall body");
-        disarm_outputs(args);
-        return SyscallInnerResult{HostFnError{HostFnErrorCode::Unrecoverable},
-                                  WrappedGasAmount{0}};
+        return translate_syscall_body_exception(kSyscall, args);
       }
     }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
@@ -641,24 +664,14 @@ wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
   // completed its Async with an exception rethrows at this co_await rather
   // than at the call above, so the same translation the direct call gets has
   // to be repeated here (issue #3400 and siblings).
-  // Seeded with the translation so the catch arms only report and disarm: a
-  // co_await cannot go inside a lambda without turning it into a second
-  // coroutine, and SyscallInnerResult is not default-constructible, so the
-  // return-from-each-arm shape used above is unavailable here.
+  // Seeded only because SyscallInnerResult is not default-constructible; every
+  // path below overwrites it.
   SyscallInnerResult body_result{HostFnError{HostFnErrorCode::Unrecoverable},
                                  WrappedGasAmount{0}};
   try {
     body_result = co_await body;
-  } catch (std::exception const &e) {
-    try {
-      error("unrecoverable: syscall {} body threw: {}", kSyscall, e.what());
-    } catch (...) {
-      report_dropped_syscall_trace("syscall-body exception diagnostic");
-    }
-    disarm_outputs(args);
   } catch (...) {
-    report_dropped_syscall_trace("non-std exception from syscall body");
-    disarm_outputs(args);
+    body_result = translate_syscall_body_exception(kSyscall, args);
   }
 
   auto [syscall_result, gas_consumed] = std::move(body_result);
@@ -767,6 +780,48 @@ wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
                                               gas_remaining)};
 }
 
+// Creates wrap_after_parse_async()'s coroutine and translates a failure to do
+// so into a structured result.
+//
+// The frame is allocated in this noexcept context before any of the body runs,
+// and x23's promises do not define get_return_object_on_allocation_failure, so
+// an exhausted heap throws right here. All three callers of the syscall ABI --
+// the RV32 ecall loop, the native precompiles, and test_ffi's extern "C" mock
+// entrypoint -- need that translated rather than terminating the executor, and
+// two of them do not go through wrap_outer(), so the guard belongs here rather
+// than at any one call site.
+//
+// The staged outputs are deliberately not disarmed on this path. args is moved
+// into the coroutine's by-value parameter before the ramp allocates, so by the
+// time the throw arrives the outputs this frame owned live in that parameter,
+// which unwinding destroys -- flushing them. What is left here is already
+// disarmed by WritableOutput's move constructor, so disarming it again would
+// be a no-op dressed up as a safeguard. The result is Unrecoverable, which
+// fails the whole transaction, so the flushed bytes are discarded with it.
+template<is_syscall_meta SyscallMeta, typename Args>
+MaybeAsyncSyscallResult
+wrap_after_parse(bool alias_check_passed, SystemCallHandler &handler,
+                 const GasAmount gas_remaining, SyscallNo syscall_no,
+                 Args &&args) noexcept
+{
+  try {
+    return wrap_after_parse_async<SyscallMeta>(alias_check_passed, handler,
+                                               gas_remaining, syscall_no,
+                                               std::forward<Args>(args));
+  } catch (std::exception const &e) {
+    try {
+      error("unrecoverable: syscall {} frame allocation failed: {}", syscall_no,
+            e.what());
+    } catch (...) {
+      report_dropped_syscall_trace("syscall frame allocation diagnostic");
+    }
+    return SyscallResult{HostFnError{HostFnErrorCode::Unrecoverable}, 0};
+  } catch (...) {
+    report_dropped_syscall_trace("non-std exception allocating syscall frame");
+    return SyscallResult{HostFnError{HostFnErrorCode::Unrecoverable}, 0};
+  }
+}
+
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
@@ -799,32 +854,11 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
               typename syscall_t::template arg_i<Is>>(guard, context.memory,
                                                       input_args)...};
 
-    // Creating wrap_after_parse's coroutine allocates its frame here, in this
-    // noexcept caller's context and before any of its body runs. x23's promises
-    // do not define get_return_object_on_allocation_failure, so an exhausted
-    // heap throws right here; translate it the way a throwing syscall body is
-    // translated rather than terminating the executor. The frame is allocated
-    // before the arguments are copied into it, so parsed_args is untouched on
-    // this path and is still ours to disarm.
-    try {
-      return wrap_after_parse<SyscallMeta>(guard.check(), handler,
-                                           context.gas_remaining, syscall_no,
-                                           std::move(parsed_args));
-    } catch (std::exception const &e) {
-      try {
-        error("unrecoverable: syscall {} frame allocation failed: {}",
-              syscall_no, e.what());
-      } catch (...) {
-        report_dropped_syscall_trace("syscall frame allocation diagnostic");
-      }
-      disarm_outputs(parsed_args);
-      return SyscallResult{HostFnError{HostFnErrorCode::Unrecoverable}, 0};
-    } catch (...) {
-      report_dropped_syscall_trace(
-          "non-std exception allocating syscall frame");
-      disarm_outputs(parsed_args);
-      return SyscallResult{HostFnError{HostFnErrorCode::Unrecoverable}, 0};
-    }
+    // wrap_after_parse() is noexcept and translates a failure to allocate the
+    // coroutine frame, so nothing escapes into this noexcept lambda.
+    return wrap_after_parse<SyscallMeta>(guard.check(), handler,
+                                         context.gas_remaining, syscall_no,
+                                         std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 
   return res;

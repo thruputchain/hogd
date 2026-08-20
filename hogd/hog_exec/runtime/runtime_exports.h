@@ -21,10 +21,16 @@ using ExternHostCallContext = void *;
 // the gas actually charged.
 using SyscallResult = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>;
 
-// Syscalls are coroutinized.  One that can answer immediately -- the common
-// case -- returns its SyscallResult directly and allocates nothing; one that
-// has to wait, e.g. on a database RPC, returns an Async the caller co_awaits
-// (or, from a synchronous caller, blocks on with operator()).
+// Syscalls are coroutinized: this is either a SyscallResult outright or an
+// Async the caller co_awaits (or, from a synchronous caller, blocks on with
+// operator()).
+//
+// Today it is always the Async arm. wrap_after_parse_async() is a coroutine
+// unconditionally, so every syscall allocates a frame even though no inner
+// body suspends yet; the value arm here only starts carrying traffic once that
+// wrapper stops being a coroutine for bodies that cannot wait. The value arm
+// on MaybeAsyncSyscallInnerResult, one layer down, is the one that is free
+// today -- see syscall_types.h.
 using MaybeAsyncSyscallResult = x23::MaybeAsync<SyscallResult>;
 
 using SyscallFunction = MaybeAsyncSyscallResult (*)(

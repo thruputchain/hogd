@@ -472,7 +472,7 @@ non_std_exception_syscall_func()
 } // namespace
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-template<auto Func> struct ThrowingSyscallMeta {
+template<auto Func> struct FuncSyscallMeta {
   constexpr static bool kIsReadOnlySyscall = false;
   constexpr static auto kInnerFunc = Func;
 
@@ -483,7 +483,7 @@ template<auto Func> struct ThrowingSyscallMeta {
   constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
 };
 
-static_assert(is_syscall_meta<ThrowingSyscallMeta<&bad_alloc_syscall_func>>);
+static_assert(is_syscall_meta<FuncSyscallMeta<&bad_alloc_syscall_func>>);
 
 // An exception escaping a syscall body (e.g. std::bad_alloc from an
 // allocating storage/cache insert) must be translated to a structured
@@ -501,7 +501,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowingSyscallTranslatedToUnrecoverable)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
-      wrap_outer<ThrowingSyscallMeta<&bad_alloc_syscall_func>>(
+      wrap_outer<FuncSyscallMeta<&bad_alloc_syscall_func>>(
           handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0,
           0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
@@ -523,7 +523,7 @@ TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
-      wrap_outer<ThrowingSyscallMeta<&non_std_exception_syscall_func>>(
+      wrap_outer<FuncSyscallMeta<&non_std_exception_syscall_func>>(
           handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0,
           0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
@@ -864,14 +864,12 @@ namespace {
 // suspends yet, so these are what pin wrap_after_parse()'s coroutine path:
 // yielding to the thread pool means the wrapper's epilogue runs on a different
 // thread than the one that entered the syscall.
-MaybeAsyncSyscallInnerResult
+x23::Async<SyscallInnerResult>
 suspending_syscall_func()
 {
-  return []() -> x23::Async<SyscallInnerResult> {
-    co_await default_threadpool().bg();
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                                 WrappedGasAmount{1000}};
-  }();
+  co_await default_threadpool().bg();
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{1000}};
 }
 
 // A body that fails after it suspended.  The exception surfaces at
@@ -884,41 +882,7 @@ throw_after_suspending()
   throw std::bad_alloc();
 }
 
-MaybeAsyncSyscallInnerResult
-suspending_throwing_syscall_func()
-{
-  return throw_after_suspending();
-}
-
 } // namespace
-
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-struct SuspendingSyscallMeta {
-  constexpr static bool kIsReadOnlySyscall = false;
-  constexpr static auto kInnerFunc = &suspending_syscall_func;
-
-  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
-  constexpr static bool kCanReturn = true;
-  constexpr static std::array<std::string_view, 0> kInputNames = {};
-  constexpr static std::array<std::string_view, 0> kOutputNames = {};
-  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
-};
-
-static_assert(is_syscall_meta<SuspendingSyscallMeta>);
-
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-struct SuspendingThrowingSyscallMeta {
-  constexpr static bool kIsReadOnlySyscall = false;
-  constexpr static auto kInnerFunc = &suspending_throwing_syscall_func;
-
-  constexpr static SyscallNo kSyscallNo = kNoTracingSyscall;
-  constexpr static bool kCanReturn = true;
-  constexpr static std::array<std::string_view, 0> kInputNames = {};
-  constexpr static std::array<std::string_view, 0> kOutputNames = {};
-  constexpr static std::array<SyscallErrorCode, 0> kAllowedErrors = {};
-};
-
-static_assert(is_syscall_meta<SuspendingThrowingSyscallMeta>);
 
 TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyRoundTrips)
 {
@@ -932,9 +896,9 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyRoundTrips)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
-      wrap_outer<SuspendingSyscallMeta>(handler, make_null_context(10000),
-                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                        0)();
+      wrap_outer<FuncSyscallMeta<&suspending_syscall_func>>(
+          handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0,
+          0, 0)();
   ASSERT_TRUE(syscall_res.has_value());
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_consumed, 1000);
@@ -957,9 +921,9 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyStillMeteredOnResume)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
-      wrap_outer<SuspendingSyscallMeta>(handler, make_null_context(10),
-                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
-                                        0)();
+      wrap_outer<FuncSyscallMeta<&suspending_syscall_func>>(
+          handler, make_null_context(10), kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+          0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 10);
@@ -979,10 +943,9 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
                   .has_value());
 
   auto [syscall_res, gas_consumed] =
-      wrap_outer<SuspendingThrowingSyscallMeta>(handler,
-                                                make_null_context(10000),
-                                                kNoTracingSyscall, 0, 0, 0, 0,
-                                                0, 0, 0)();
+      wrap_outer<FuncSyscallMeta<&throw_after_suspending>>(
+          handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0,
+          0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, 0);
