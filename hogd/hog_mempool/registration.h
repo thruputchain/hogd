@@ -13,6 +13,7 @@
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
+#include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/vec.h"
 
@@ -39,28 +40,28 @@ public:
 
   // Waiting for a peer to register. Suspend on these rather than polling: a
   // registration arrives on an RPC handler that the thread pool has to run, so
-  // a wait that blocks a pool worker can starve the handler it is waiting for.
-  // The last worker on a runqueue cannot migrate away, and idle workers park on
-  // their own queues rather than stealing -- see x23/x23/threadpool.h.
-
-  // How many executors have registered. Pass the count you read to
-  // [wait_for_executor_count_change()], which suspends only while the count is
-  // still that value, so a registration in between cannot be missed.
-  size_t registered_executor_count() { return registered_executors_.load(); }
-  x23::CoroFutex<size_t>::Awaiter
-  wait_for_executor_count_change(size_t registered)
+  // a wait that blocks a pool worker can starve the handler it is waiting for
+  // -- see the affinity rules in x23/x23/threadpool.h.
+  x23::Async<void> wait_for_executors(size_t count)
   {
-    return registered_executors_.wait(registered);
+    size_t registered;
+    while ((registered = registered_executors_.load()) < count) {
+      co_await registered_executors_.wait(registered);
+    }
+    co_return;
+  }
+
+  x23::Async<void> wait_for_event_ready()
+  {
+    while (!event_ready_.load()) {
+      co_await event_ready_.wait(false);
+    }
+    co_return;
   }
 
   // Whether the event has both activated and published a canonical tip at a
-  // real height -- the condition the mempool's startup path waits on. Suspend
-  // with [while (!event_ready()) co_await wait_for_event_ready();].
+  // real height.
   bool event_ready() { return event_ready_.load(); }
-  x23::CoroFutex<bool>::Awaiter wait_for_event_ready()
-  {
-    return event_ready_.wait(false);
-  }
 
   // Coordinator.
   void register_coordinator(const CoordCard &card)
@@ -91,7 +92,6 @@ public:
       // strand a waiter for the higher count.
       registered_executors_.store(exec_cards_.size());
     }
-    // Broadcast outside the lock; the waiters re-take it immediately.
     registered_executors_.broadcast(&default_threadpool());
     return exec_id;
   }
@@ -221,8 +221,6 @@ public:
     {
       std::unique_lock lk(event_mutex_);
       event_canonical_tip_ = std::move(tip);
-      // Readiness gates on the tip's height as well as activation, so a new
-      // tip can be what completes it.
       ready = event_ready_locked();
     }
     publish_event_ready(ready);
@@ -325,8 +323,6 @@ private:
   Registration() = default;
   ~Registration() = default;
 
-  // Each is written and broadcast only by the registration that changes it, so
-  // a waiter wakes only for the thing it is waiting for.
   x23::CoroFutex<size_t> registered_executors_{0};
   x23::CoroFutex<bool> event_ready_{false};
 

@@ -786,8 +786,6 @@ private:
   std::atomic<bool> ready_ = false;
   x23::CoroFutex<bool> ready_waiters_{false};
   std::atomic<bool> initialized_ = false;
-  // Coroutine-visible mirror of [initialized_], so [finish_runtime_init()] can
-  // wait for initialization without blocking a thread-pool worker.
   x23::CoroFutex<bool> initialized_waiters_{false};
 
   std::chrono::steady_clock::time_point last_commit_ =
