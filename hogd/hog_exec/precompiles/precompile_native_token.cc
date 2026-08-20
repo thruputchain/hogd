@@ -206,11 +206,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   if (!sender) {
     return sender.error();
   }
-  auto height = ctx.handler().get_block_height();
-  if (!height) {
-    return height.error().to_invoke_error();
-  }
-  if (*sender != kGenesisRootContractAddress || *height > 1) {
+  if (*sender != kGenesisRootContractAddress) {
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 
@@ -284,11 +280,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   if (!sender) {
     return sender.error();
   }
-  auto height = ctx.handler().get_block_height();
-  if (!height) {
-    return height.error().to_invoke_error();
-  }
-  if (*sender != kGenesisRootContractAddress || *height > 1) {
+  if (*sender != kGenesisRootContractAddress) {
     return InvokeError{InvokeErrorCode::Deterministic};
   }
 

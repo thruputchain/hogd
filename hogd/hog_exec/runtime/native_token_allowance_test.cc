@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/genesis_root.h"
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -20,6 +21,7 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -1650,7 +1652,7 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
 }
 
 TEST_F(NativeTokenAllowanceTest,
-       GenesisRootBurnReducesBalanceAndSupplyAndEmitsEvent)
+       GenesisRootBurnAuthorityIsNotHeightLimitedByPrecompile)
 {
   constexpr static ContractAddress kOwnerAddr = make_contract_address(236);
   constexpr static int128_t kInitialSupply = 1'000;
@@ -1685,11 +1687,10 @@ TEST_F(NativeTokenAllowanceTest,
     auto client =
         ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto burn = client.invoke_opt<u8"burn">(ctx, kOwnerAddr, make_amount(1));
-    if (burn.has_value() && burn.value().has_value() &&
-        burn.value().value().has_value() &&
-        burn.value().value().value().is_ok()) {
-      ADD_FAILURE()
-          << "genesis-root burn unexpectedly succeeded after height 1";
+    if (!burn.has_value() || !burn.value().has_value() ||
+        !burn.value().value().has_value() ||
+        !burn.value().value().value().is_ok()) {
+      ADD_FAILURE() << "genesis-root burn failed after height 1";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
@@ -1758,7 +1759,8 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_TRUE(expected_event);
   EXPECT_TRUE(std::ranges::equal(event.serialized_event, *expected_event));
 
-  // The same root loses its supply-management authority after the ceremony.
+  // The precompile continues to trust the root after the ceremony. Issuance
+  // policy, including any height restriction, belongs to the root contract.
   setup_grant_storage_token(kGenesisRootContractAddress,
                             replay_cache_cost_charged(1));
   auto late_tx = SignedTransaction{
@@ -1781,10 +1783,32 @@ TEST_F(NativeTokenAllowanceTest,
   owner_balance = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(kOwnerAddr));
   ASSERT_TRUE(owner_balance.has_value());
-  EXPECT_EQ(from_xdr(owner_balance->nnint()), kInitialSupply - kBurnAmount);
+  EXPECT_EQ(from_xdr(owner_balance->nnint()), kInitialSupply - kBurnAmount - 1);
   total_supply = lookup_storage_item_from_db(supply_addrkey);
   ASSERT_TRUE(total_supply.has_value());
-  EXPECT_EQ(from_xdr(total_supply->nnint()), kInitialSupply - kBurnAmount);
+  EXPECT_EQ(from_xdr(total_supply->nnint()), kInitialSupply - kBurnAmount - 1);
+}
+
+TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
+{
+  auto root_contract = load_stock_genesis_root_contract();
+  write_contract(root_contract);
+  write_deployment(kGenesisRootContractAddress, root_contract);
+
+  advance_block();
+  ASSERT_GT(get_block_number(), 1UL);
+
+  ContractTraitClient<genesis_root::GenesisRoot> root_client(
+      kGenesisRootContractAddress);
+  auto tx = Transaction{
+      .invocation = root_client.make_invocation<u8"distribute">(
+          UINT64_MAX, SHA256Hash{}, SHA256Hash{}, ContractEntrypointID{},
+          Calldata{}, make_amount(0), make_amount(0)),
+      .uniquifier = make_new_uniquifier(),
+  };
+  auto runtime_context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(tx, *runtime_context);
+  EXPECT_FALSE(handler.root_invoke().is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
