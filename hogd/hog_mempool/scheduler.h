@@ -199,6 +199,13 @@ private:
   struct AccountState {
     HogAge hog_age{};
     std::map<TxKey, std::shared_ptr<TxValue>> txs;
+    // True when [hog_age] has changed since it was last written to hogdb. The
+    // scheduler is the source of truth for hog ages, so every mutation of
+    // [hog_age] must set this, and [write_all_average_hog_ages_to_db()] clears
+    // it after persisting. This lets that persistence pass write only the
+    // accounts that actually changed rather than every account the scheduler
+    // has ever observed (see GitHub issue #3404).
+    bool hog_age_dirty = false;
   };
 
   struct PendingNominationState {
