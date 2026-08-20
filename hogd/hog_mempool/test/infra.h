@@ -222,6 +222,14 @@ public:
     return *mempool_coord_server_->impl();
   }
 
+  sched_coord_client_t mempool_coord_client()
+  {
+    auto client = create_client<SchedulerCoord1>(
+        MempoolTestInfra::kAddress, mempool_coord_server_.port())();
+    CHECK(client.has_value());
+    return std::move(*client);
+  }
+
   // This getter is used by [mempool_test.cc].
   CoordinatorSchedRpc &coord_sched_rpc()
   {

@@ -2360,9 +2360,12 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       .transactions = parallel,
   };
 
+  // Exercise the RPC encoding and coroutine return path.  Directly invoking
+  // MempoolCoordinatorRpc does not cover ownership of the nested
+  // ParallelBatch vectors in GenesisCeremonyResult.
+  auto coordinator_client = server.mempool_coord_client();
   GenesisCeremonyResult result =
-      server.mempool_coord_rpc().schedulercoord_commit_genesis_ceremony(
-          request)();
+      coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
 
@@ -2383,7 +2386,7 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   EXPECT_EQ(*server.read_address_balance(kGenesisRootContractAddress), 0);
 
   GenesisCeremonyResult retry =
-      server.mempool_coord_rpc().schedulercoord_commit_genesis_ceremony(
+      coordinator_client.schedulercoord_commit_genesis_ceremony(
           std::move(request))();
   EXPECT_EQ(retry.outcome(),
             GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);

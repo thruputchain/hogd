@@ -1698,7 +1698,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     SchedulerProposedBlock &proposed = cache.proposal_result.proposed_block();
     proposed.block_id = block_id;
     co_await t_to_parallel_batch(cache.txs, proposed.txs);
-    proposed.proposal.transactions = std::move(ceremony_proposal_txs);
+    // ParallelBatch contains nested x23::Vec members.  Keep each owner valid
+    // until its normal destructor runs: GCC's optimized coroutine lowering can
+    // otherwise reuse the moved-from frame slot before emitting its cleanup.
+    // This path runs only once at genesis, so the copies are immaterial.
+    proposed.proposal.transactions = ceremony_proposal_txs;
     proposed.proposal.header = ProposalHeader{
         .ext = {},
         .network_hash = network_hash_,
@@ -1738,12 +1742,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   }
   GenesisCeremonyResult committed(
       GenesisCeremonyOutcome::GenesisCeremonyCommitted);
-  // Assign the generated union arm's members directly.  Building an aggregate
-  // temporary here and then move-assigning it leaves its nested XDR vectors in
-  // an invalid state with some compiler/optimization combinations, and the
-  // temporary crashes while being destroyed as the coroutine returns.
+  // Assign the generated union arm's members directly and copy the nested
+  // ParallelBatch vectors.  Moving the enclosing generated type can leave an
+  // optimized GCC coroutine cleanup referring to a reused frame slot.
   committed.commit().db_tip = last_committed_block_;
-  committed.commit().proposal_txs = std::move(committed_proposal_txs);
+  committed.commit().proposal_txs = committed_proposal_txs;
   co_return committed;
 }
 
