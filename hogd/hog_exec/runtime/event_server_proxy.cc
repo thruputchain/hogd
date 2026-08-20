@@ -90,14 +90,26 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
   try {
     r = co_await client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log,
                                                   proposed_tx);
-  } catch (x23::XdrException const &e) {
-    // The RPC client can throw (an over-cap payload throws XdrBadInput; a
-    // failed call throws XdrCallFailed) instead of returning a status; on this
-    // detached event coroutine an uncaught throw would terminate the executor
-    // (#2857). Catch the XDR base so no RPC-layer throw escapes; anything else
-    // (e.g. bad_alloc) is a genuine bug and still terminates.
-    error("Unrecoverable: event emission threw before an RPC status: {}",
-          e.what());
+  } catch (std::exception const &e) {
+    // The RPC client can throw instead of returning a status; on this detached
+    // event coroutine an uncaught throw would terminate the executor (#2857).
+    // Contain every escaping throw here and return a structured Unrecoverable
+    // result instead. This covers:
+    //   - x23::XdrBadInput   -- client-side, over-cap payload
+    //   - x23::XdrCallFailed -- failed call
+    //   - std::bad_alloc     -- local OOM, e.g. while serializing the request
+    //                           via x23::make_record (which runs before the
+    //                           first co_await in send_call, so its throw
+    //                           propagates out of the co_await above).
+    // The diagnostic itself allocates while formatting and can throw again
+    // under the same memory pressure, so guard it and fall back to the
+    // no-allocation reporter (cf. database_proxy.cc commit_transaction).
+    try {
+      error("Unrecoverable: event emission threw before an RPC status: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("event emission failure diagnostic");
+    }
     co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
   if (r != RPCError::kRPCNone) {
@@ -144,12 +156,18 @@ EventServerProxy::report_tx_failure(TransactionHash tx_hash,
     if (r != RPCError::kRPCNone) {
       warn("tx-failure report dropped by event server: {}", r);
     }
-  } catch (x23::XdrException const &e) {
-    // Best-effort: the RPC client can throw (XdrBadInput / XdrCallFailed)
-    // instead of returning a status; swallow the RPC-layer throw so it never
-    // escapes. Anything else (e.g. bad_alloc) is a genuine bug and still
-    // terminates -- matching emit_event's #2857 containment above.
-    warn("tx-failure report send failed: {}", e.what());
+  } catch (std::exception const &e) {
+    // Best-effort: the RPC client can throw instead of returning a status;
+    // swallow every escaping throw here so nothing escapes into the detached
+    // coroutine and terminates the executor (#2857). Matches emit_event's
+    // containment above; std::bad_alloc from x23::make_record serialization
+    // is included, and the diagnostic is guarded because warn() itself
+    // allocates while formatting and can throw again under memory pressure.
+    try {
+      warn("tx-failure report send failed: {}", e.what());
+    } catch (...) {
+      report_dropped_log("tx-failure report send failure diagnostic");
+    }
   }
   co_return;
 }
