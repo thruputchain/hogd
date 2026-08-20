@@ -62,6 +62,7 @@ struct BenchmarkState : public CommonBenchState {
 
     auto genesis_configuration = result.value().genesis_configuration;
     run_genesis_configuration(genesis_configuration,
+                              result.value().genesis_ceremony_txs,
                               result.value().initialization_txs);
 
     auto work_txs_raw = exp.extend_experiment(num_txs, 1'000'000)();

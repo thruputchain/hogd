@@ -471,7 +471,8 @@ for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
-    --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
+    --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 \
+    --network-hash 0000000000000000000000000000000000000000000000000000000000000001 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
     --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
     --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400

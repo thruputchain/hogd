@@ -132,6 +132,10 @@ public:
   void run_genesis_configuration(
       GenesisConfiguration const &genesis_configuration,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
+  void run_genesis_configuration(
+      GenesisConfigurationV2 const &genesis_configuration,
+      InitializationBlock const &genesis_ceremony_txs,
+      x23::XdrVec<InitializationBlock> const &initialization_txs);
 
   TransactionID allocate_txid()
   {
@@ -401,6 +405,52 @@ CommonBenchState::run_genesis_configuration(
       }
     }
     advance_block();
+  }
+}
+
+inline void
+CommonBenchState::run_genesis_configuration(
+    GenesisConfigurationV2 const &genesis_configuration,
+    InitializationBlock const &genesis_ceremony_txs,
+    x23::XdrVec<InitializationBlock> const &initialization_txs)
+{
+  assert(block_number_ == 0);
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
+  auto r = coord_client_->dbsched_load_genesis_configuration_v2(
+      genesis_configuration, genesis_value);
+  if (r != DbSchedResult::DbSchedResultOK) {
+    panic("Failed to write genesis configuration");
+  }
+
+  auto create_result = coord_client_->dbsched_create_snapshot(
+      0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
+  if (create_result != DbSchedResult::DbSchedResultOK) {
+    panic("Failed to create snapshot");
+  }
+
+  block_number_++;
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+  open_event_block(block_number_);
+
+  auto runtime_context = make_hog_exec_context();
+  auto run_block = [&](InitializationBlock const &block) {
+    for (auto const &tx : block) {
+      auto handler = make_handler(tx, allocate_txid(), *runtime_context);
+      if (!handler.root_invoke().is_root_success()) {
+        panic("Failed to invoke transaction");
+      }
+      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+        panic("failed to perform commit operation");
+      }
+    }
+    advance_block();
+  };
+
+  run_block(genesis_ceremony_txs);
+  for (auto const &block : initialization_txs) {
+    run_block(block);
   }
 }
 

@@ -39,17 +39,28 @@ protected:
     EXPECT_TRUE(uniquifiers_.insert(uniquifier).second);
   }
 
-  void check_initial_balance()
+  void run_initialization_block(InitializationBlock const &block)
   {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    auto bal =
-        lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-            GenesisConfigurationLoader::kDeployContractAddress));
-    ASSERT_TRUE(bal.has_value());
-    EXPECT_LT(from_xdr(bal.value().nnint()),
-              GenesisConfigurationLoader::initial_hog_token_supply());
-    // TODO(geoff): assert balance = initial_supply - storage_cost(nnint)
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    for (auto const &tx : block) {
+      check_uniquifier(tx.tx.uniquifier);
+      auto handler = make_new_system_call_handler(tx, *runtime_context_);
+      auto invoke_res = handler.root_invoke();
+      ASSERT_TRUE(invoke_res.is_root_success());
+      auto res = handler.try_commit_transaction();
+      ASSERT_TRUE(res == ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                      ProposedTransaction{.signed_tx = tx})());
+    }
+    advance_block();
+  }
+
+  void run_initialization(LoadgenSuccessResult const &result)
+  {
+    run_genesis_initialization(result.genesis_configuration);
+    run_initialization_block(result.genesis_ceremony_txs);
+    for (auto const &init_block : result.initialization_txs) {
+      run_initialization_block(init_block);
+    }
   }
 
   std::unique_ptr<RuntimeContext> runtime_context_;
@@ -66,24 +77,7 @@ protected:
     auto result = state->generate_experiment()();
     ASSERT_TRUE(result.has_value());
 
-    run_genesis_initialization(result.value().genesis_configuration);
-    check_initial_balance();
-
-    for (auto &init_block : result.value().initialization_txs) {
-      for (auto &tx : init_block) {
-        check_uniquifier(tx.tx.uniquifier);
-        auto handler = make_new_system_call_handler(tx, *runtime_context_);
-        auto invoke_res = handler.root_invoke();
-        ASSERT_TRUE(invoke_res.is_root_success());
-        auto res = handler.try_commit_transaction();
-        ASSERT_TRUE(res == ExecResult::ExecResultOK);
-        ASSERT_TRUE(
-            handler.emit_events(ExecResult::ExecResultOK,
-                                ProposedTransaction{.signed_tx = tx})());
-      }
-
-      advance_block();
-    }
+    run_initialization(result.value());
 
     std::optional<GasAmount> gas_used;
 
@@ -128,23 +122,7 @@ TEST_F(ERC20ExperimentTest, BasicAuth)
   auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_configuration);
-  check_initial_balance();
-
-  for (auto &init_block : result.value().initialization_txs) {
-    for (auto &tx : init_block) {
-      check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
-      ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
-      ASSERT_TRUE(res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{.signed_tx = tx})());
-    }
-
-    advance_block();
-  }
+  run_initialization(result.value());
 
   std::optional<GasAmount> gas_used;
 
@@ -185,6 +163,8 @@ TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
   ASSERT_TRUE(result2.has_value());
   EXPECT_EQ(result1.value().genesis_configuration,
             result2.value().genesis_configuration);
+  EXPECT_EQ(result1.value().genesis_ceremony_txs,
+            result2.value().genesis_ceremony_txs);
   EXPECT_EQ(result1.value().initialization_txs,
             result2.value().initialization_txs);
 }
@@ -197,23 +177,7 @@ TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)
   auto result = state->generate_experiment()();
   ASSERT_TRUE(result.has_value());
 
-  run_genesis_initialization(result.value().genesis_configuration);
-  check_initial_balance();
-
-  for (auto &init_block : result.value().initialization_txs) {
-    for (auto &tx : init_block) {
-      check_uniquifier(tx.tx.uniquifier);
-      auto handler = make_new_system_call_handler(tx, *runtime_context_);
-      auto invoke_res = handler.root_invoke();
-      ASSERT_TRUE(invoke_res.is_root_success());
-      auto res = handler.try_commit_transaction();
-      ASSERT_TRUE(res == ExecResult::ExecResultOK);
-      ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
-                                      ProposedTransaction{.signed_tx = tx})());
-    }
-
-    advance_block();
-  }
+  run_initialization(result.value());
 
   std::optional<GasAmount> gas_used;
 

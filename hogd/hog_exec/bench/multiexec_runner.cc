@@ -490,10 +490,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   auto write_genesis_configuration =
-      [&](const GenesisConfiguration &genesis_configuration) {
+      [&](const GenesisConfigurationV2 &genesis_configuration) {
         ConsensusValue genesis_value{};
         genesis_value.proposal_header.block_height = 0;
-        auto res = db_sched_client.dbsched_load_genesis_configuration(
+        auto res = db_sched_client.dbsched_load_genesis_configuration_v2(
             genesis_configuration, genesis_value);
         if (res != DbSchedResult::DbSchedResultOK) {
           panic("Failed to write genesis block");
@@ -506,6 +506,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
   config.erc20_payments() = {
       .num_addresses = num_accounts,
+      .network_hash = {},
   };
 
   LoadgenRpc loadgen;
@@ -524,6 +525,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     coro_exec_clients.push_back(
         connect_to_exec_server(exec_cards[i % exec_cards.size()]));
   }
+
+  run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
+            event_sched_client, coro_exec_clients, n_coros_per_connection,
+            n_connections, batch_size, parent_block_number,
+            current_block_number);
+  parent_block_number = current_block_number;
+  current_block_number++;
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
     run_block(&init_block, db_sched_client, event_sched_client,

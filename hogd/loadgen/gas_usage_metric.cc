@@ -48,8 +48,7 @@ run_gas_usage_metric(uint32_t num_accounts)
   framework.run_genesis_initialization(
       init_result.value().genesis_configuration);
 
-  // Run initialization transactions
-  for (auto const &init_block : init_result.value().initialization_txs) {
+  auto run_initialization_block = [&](auto const &init_block) {
     for (auto const &tx : init_block) {
       // Create a new runtime context for each transaction (it's moved into
       // handler)
@@ -64,6 +63,13 @@ run_gas_usage_metric(uint32_t num_accounts)
       }
     }
     framework.advance_block();
+  };
+
+  // The ceremony deploys the configured contracts before the regular
+  // initialization transactions mint the benchmark balances.
+  run_initialization_block(init_result.value().genesis_ceremony_txs);
+  for (auto const &init_block : init_result.value().initialization_txs) {
+    run_initialization_block(init_block);
   }
 
   // Extend experiment to get one work transaction
