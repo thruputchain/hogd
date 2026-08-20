@@ -841,7 +841,7 @@ TEST_F(ReplayCacheLockTest, AbortedFreshHeightReleasesPendingHeightBudget)
   // Prime meta with (cap - 2) live persisted heights: room for two fresh
   // heights at admission time.
   ReplayCacheLockTestHelper::set_persisted_live_heights(lock, kPersisted,
-                                                       kCurrent);
+                                                        kCurrent);
   // Pre-create the fresh-height entries as if get_base() had just seen a
   // DAO-miss for each: is_new=true, is_charged=false, pending_additions=0.
   constexpr BlockHeight kKept = kCurrent + 100'000;
