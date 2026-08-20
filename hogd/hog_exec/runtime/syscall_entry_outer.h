@@ -641,9 +641,14 @@ wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
   // completed its Async with an exception rethrows at this co_await rather
   // than at the call above, so the same translation the direct call gets has
   // to be repeated here (issue #3400 and siblings).
-  std::optional<SyscallInnerResult> body_result;
+  // Seeded with the translation so the catch arms only report and disarm: a
+  // co_await cannot go inside a lambda without turning it into a second
+  // coroutine, and SyscallInnerResult is not default-constructible, so the
+  // return-from-each-arm shape used above is unavailable here.
+  SyscallInnerResult body_result{HostFnError{HostFnErrorCode::Unrecoverable},
+                                 WrappedGasAmount{0}};
   try {
-    body_result.emplace(co_await body);
+    body_result = co_await body;
   } catch (std::exception const &e) {
     try {
       error("unrecoverable: syscall {} body threw: {}", kSyscall, e.what());
@@ -651,16 +656,12 @@ wrap_after_parse(bool no_aliasing_violation, SystemCallHandler &handler,
       report_dropped_syscall_trace("syscall-body exception diagnostic");
     }
     disarm_outputs(args);
-    body_result.emplace(HostFnError{HostFnErrorCode::Unrecoverable},
-                        WrappedGasAmount{0});
   } catch (...) {
     report_dropped_syscall_trace("non-std exception from syscall body");
     disarm_outputs(args);
-    body_result.emplace(HostFnError{HostFnErrorCode::Unrecoverable},
-                        WrappedGasAmount{0});
   }
 
-  auto [syscall_result, gas_consumed] = std::move(*body_result);
+  auto [syscall_result, gas_consumed] = std::move(body_result);
 
   if (runtime_log_level(LogLevel::kTrace)) {
     // The inner syscall has already run and written its outputs; formatting
