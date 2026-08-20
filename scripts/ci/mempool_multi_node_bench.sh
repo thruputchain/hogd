@@ -154,6 +154,32 @@ copy_remote_file() {
   scp "${COMMON_SCP_OPTS[@]}" "${host}:${remote_path}" "$local_path"
 }
 
+# GitHub rejects any single file over 100 MiB (GH001), and metrics_history is
+# committed to plain git rather than LFS. A verbose chuckd stderr on a busy
+# integration run has been observed at ~440 MiB, which trips that limit and
+# leaves commit_metrics.sh retrying the same rejected push until the workflow
+# times out. Gzip anything over the threshold in place before we hand it off
+# to git; text log files typically compress ~10x, keeping them well under the
+# per-file cap while preserving the debug artifact.
+LOG_GZIP_THRESHOLD_BYTES=$((50 * 1024 * 1024))
+
+gzip_large_log() {
+  local path=$1
+  local size
+
+  if [[ ! -f $path ]]; then
+    return 0
+  fi
+
+  size=$(stat -c '%s' "$path" 2>/dev/null || wc -c <"$path")
+  if [[ ${size:-0} -le $LOG_GZIP_THRESHOLD_BYTES ]]; then
+    return 0
+  fi
+
+  echo "gzip ${path} (${size} bytes) to stay under GitHub's 100 MiB per-file cap"
+  gzip -f -- "$path"
+}
+
 publish_multi_node_logs() {
   local metrics_branch_dir
   local logs_dir
@@ -162,6 +188,8 @@ publish_multi_node_logs() {
   local label
   local stdout_path
   local stderr_path
+  local local_stdout
+  local local_stderr
 
   metrics_branch_dir="$REPO_ROOT/metrics_history/metrics/nightly_integration_mempool_multi_node/$GIT_branch"
   logs_dir="$metrics_branch_dir/${GIT_commit_time}_$GIT_commit"_logs
@@ -170,8 +198,12 @@ publish_multi_node_logs() {
   for record in "${CONTROL_LOG_RECORDS[@]}"; do
     IFS='|' read -r host label stdout_path stderr_path <<<"$record"
     echo "copying ${label} logs from ${host}"
-    copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
-    copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    local_stdout="$logs_dir/${host}_${label}.stdout.log"
+    local_stderr="$logs_dir/${host}_${label}.stderr.log"
+    copy_remote_file "$host" "$stdout_path" "$local_stdout"
+    copy_remote_file "$host" "$stderr_path" "$local_stderr"
+    gzip_large_log "$local_stdout"
+    gzip_large_log "$local_stderr"
   done
 }
 
