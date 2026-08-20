@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 
+#include <exception>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -15,7 +16,6 @@
 #include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
