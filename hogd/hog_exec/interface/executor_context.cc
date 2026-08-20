@@ -229,15 +229,32 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
     // SignedTransaction we executed plus the nondeterministic data this
     // proposal produced (already captured into [out] above, so reuse it rather
     // than calling get_proposal_data() a second time).
-    ProposedTransaction proposed_tx{
-        .signed_tx = signed_tx,
-        .nondeterministic_proposal_data = out.proposal_data(),
-    };
-    syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return;
-        });
+    //
+    // The ProposedTransaction copy below and the emit_events() coroutine-frame
+    // allocation both deep-copy attacker-influenced data; this call site runs
+    // on a detached DispatchPool worker so an escaping std::bad_alloc would
+    // hit std::terminate() after the pending-counter increment. Contain
+    // bad_alloc, balance the counter, and return Unrecoverable; anything else
+    // is a genuine bug and should still terminate.
+    try {
+      ProposedTransaction proposed_tx{
+          .signed_tx = signed_tx,
+          .nondeterministic_proposal_data = out.proposal_data(),
+      };
+      syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
+          [this](SystemStatus<void> res) -> x23::Detached {
+            log_event_return(res);
+            co_return;
+          });
+    } catch (std::bad_alloc const &e) {
+      pending_event_calls_.fetch_sub(1, std::memory_order_release);
+      try {
+        error("Unrecoverable: post-commit event handoff failed: {}", e.what());
+      } catch (...) {
+        report_dropped_log("post-commit event handoff diagnostic");
+      }
+      return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+    }
   }
 
   return out;
@@ -289,11 +306,29 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
     // In validation mode the full body was given to us; forward it as-is.
-    syscall_handler->emit_events(exec_res, tx)(
-        [this](SystemStatus<void> res) -> x23::Detached {
-          log_event_return(res);
-          co_return void();
-        });
+    //
+    // Passing [tx] to a by-value parameter deep-copies attacker-influenced
+    // proposal data, and emit_events()'s coroutine-frame allocation can also
+    // throw; this call site runs on a detached DispatchPool worker so an
+    // escaping std::bad_alloc would hit std::terminate() after the
+    // pending-counter increment. Contain bad_alloc, balance the counter, and
+    // return Unrecoverable (matches the ctor bad_alloc catch above); anything
+    // else is a genuine bug and should still terminate.
+    try {
+      syscall_handler->emit_events(exec_res, tx)(
+          [this](SystemStatus<void> res) -> x23::Detached {
+            log_event_return(res);
+            co_return void();
+          });
+    } catch (std::bad_alloc const &e) {
+      pending_event_calls_.fetch_sub(1, std::memory_order_release);
+      try {
+        error("Unrecoverable: post-commit event handoff failed: {}", e.what());
+      } catch (...) {
+        report_dropped_log("post-commit event handoff diagnostic");
+      }
+      return ExecResult::ExecResultUnrecoverable;
+    }
   }
   return exec_res;
 }
