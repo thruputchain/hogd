@@ -97,19 +97,24 @@ public:
   // Returns the ID of the registered executor.
   size_t register_executor(const ExecCard &card)
   {
-    size_t registered;
+    size_t exec_id;
     {
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.push_back(card);
-      registered = exec_cards_.size();
+      exec_id = exec_cards_.size() - 1;
+      // Publish under the same lock that serializes the pushes, so the count
+      // only ever moves forward. Capturing the size here and storing it after
+      // unlocking would let two concurrent registrations publish out of order
+      // and leave the count behind [exec_cards_], stranding a waiter that
+      // wants the higher count with nothing left to wake it. Publishing after
+      // the push also means a waiter seeing [n] can always read back [n]
+      // cards.
+      registered_executors_.store(exec_cards_.size());
     }
-    // Published after the card is in [exec_cards_], so a waiter that sees a
-    // count of [n] can always read back [n] cards. Broadcast outside
-    // [exec_cards_mutex_]: the waiters resume on the thread pool and the first
-    // thing they do is re-take it.
-    registered_executors_.store(registered);
+    // Broadcast outside [exec_cards_mutex_]: the waiters resume on the thread
+    // pool and the first thing they do is re-take it.
     registered_executors_.broadcast(&default_threadpool());
-    return registered - 1;
+    return exec_id;
   }
   size_t executors_registered(x23::Vec<ExecCard> *cards)
   {
@@ -331,6 +336,13 @@ private:
   // released: the waiters resume on the thread pool and immediately re-take
   // it. Readiness is monotonic until [clear()], so this only ever moves false
   // -> true and a repeat call is harmless.
+  //
+  // Unlike the executor count, this is safe to publish after unlocking even
+  // though [ready] is computed under the lock: the only value ever stored is
+  // true and a not-ready caller stores nothing, so concurrent publishes
+  // converge on true regardless of the order they land in. Whichever state
+  // change completes readiness observes it and publishes, so no wakeup is
+  // lost.
   void publish_event_ready(bool ready)
   {
     if (!ready) {
