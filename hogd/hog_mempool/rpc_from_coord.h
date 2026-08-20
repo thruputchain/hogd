@@ -111,11 +111,15 @@ public:
     if (ready()) {
       co_return;
     }
-    co_await default_threadpool().bg();
-    while (!initialized_.load(std::memory_order_acquire)) {
-      initialized_.wait(false, std::memory_order_acquire);
-    }
-    std::ignore = MempoolEventRpc::wait_for_registration();
+    // Both waits below block until another component registers, and that
+    // registration runs on the thread pool, so neither may occupy a pool
+    // worker. See the comment in [MempoolExecutorRpc::get_clients()].
+    co_await default_threadpool().async([this] {
+      while (!initialized_.load(std::memory_order_acquire)) {
+        initialized_.wait(false, std::memory_order_acquire);
+      }
+      std::ignore = MempoolEventRpc::wait_for_registration();
+    });
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
     for (size_t i = 0; i < kNumClientsPerExecutor; ++i) {

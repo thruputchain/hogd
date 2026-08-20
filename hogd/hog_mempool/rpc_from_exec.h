@@ -41,8 +41,10 @@ public:
          Registration::registration().executors_registered(/*cards=*/nullptr));
     x23::XdrVec<ShardCard> shard_cards;
     CHECK_GT(Registration::registration().shards_registered(&shard_cards), 0UL);
-    co_await default_threadpool().bg();
-    EventCard event_card = MempoolEventRpc::wait_for_registration();
+    // [wait_for_registration()] polls with a blocking sleep, so it has to run
+    // off the pool. See the comment in [get_clients()].
+    EventCard event_card = co_await default_threadpool().async(
+        [] { return MempoolEventRpc::wait_for_registration(); });
     co_return IntroExecResult{.exec_id = exec_id,
                               .shards = shard_cards,
                               .event = event_card};
@@ -51,14 +53,23 @@ public:
   static x23::Async<x23::Vec<exec_sched_client_t>>
   get_clients(size_t expected_executors)
   {
-    co_await default_threadpool().bg();
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (Registration::registration().executors_registered(nullptr) <
-               expected_executors &&
-           std::chrono::steady_clock::now() < deadline) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    // This wait must not run on a thread-pool worker. Executors register from
+    // [schedexec_intro_exec()], which the pool has to run, so blocking a worker
+    // here can starve the very registration we are waiting for: a worker that
+    // is the last one servicing its runqueue cannot migrate away, and the other
+    // workers park permanently on their own empty queues rather than stealing.
+    // The intro handler then sits at the head of that runqueue until the
+    // deadline expires and the CHECK below aborts the process. Run the blocking
+    // poll on a dedicated off-pool thread instead.
+    co_await default_threadpool().async([expected_executors] {
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(30);
+      while (Registration::registration().executors_registered(nullptr) <
+                 expected_executors &&
+             std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    });
     CHECK_GE(Registration::registration().executors_registered(nullptr),
              expected_executors);
     x23::Vec<ExecCard> cards;
