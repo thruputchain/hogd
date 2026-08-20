@@ -334,11 +334,12 @@ public:
 
   std::optional<ContractAddress> get_msg_sender() const;
 
+  // O(1) reentrance check: `active_addresses_` mirrors the set of addresses
+  // in `frame_stack_`. Kept constant time so that attacker-controlled invoke
+  // rejection cannot amplify host CPU work with live-frame depth (#3514).
   bool has_active_frame_for(ContractAddress const &addr) const
   {
-    return std::ranges::any_of(frame_stack_, [&](const InvocationFrame &frame) {
-      return frame.address() == addr;
-    });
+    return active_addresses_.contains(addr);
   }
 
   bool is_active_frame_read_only() const
@@ -442,7 +443,23 @@ public:
   size_t size() const { return frame_stack_.size(); }
 
 private:
+  // Pop the top frame and update `active_addresses_` to preserve the
+  // invariant that it holds exactly the addresses of frames currently in
+  // `frame_stack_`. Reading `address()` off a moved-from InvocationFrame is
+  // safe: `ContractAddress` is a fixed byte array, whose move is a copy that
+  // leaves the source unchanged.
+  void pop_top_frame()
+  {
+    assert(!frame_stack_.empty());
+    active_addresses_.erase(frame_stack_.back().address());
+    frame_stack_.pop_back();
+  }
+
   std::vector<InvocationFrame> frame_stack_;
+  // Mirrors the addresses of live frames in `frame_stack_` so
+  // `has_active_frame_for()` is constant time. The reentrance check ensures
+  // each address appears at most once at any moment, so a set suffices.
+  std::unordered_set<ContractAddress, SipHash24Hasher> active_addresses_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
   AuthTokenRegistry auth_token_registry_;

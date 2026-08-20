@@ -275,13 +275,22 @@ InvocationFrameStack::start_frame(
   // pressure and the noexcept caller can report Unrecoverable instead of
   // terminating (#3058).
   //
-  // emplace_back grows the frame stack and builds the child's owned-token set.
-  // InvocationFrame's move ctor is noexcept, so emplace_back has the strong
-  // guarantee: on throw the stack is unchanged.
+  // Insert the address into `active_addresses_` first: the reentrance check
+  // guarantees it is not already present, unordered_set::insert is the only
+  // throwing operation here, and if it throws we have not touched any other
+  // state. emplace_back then grows the frame stack and builds the child's
+  // owned-token set. InvocationFrame's move ctor is noexcept, so emplace_back
+  // has the strong guarantee: on throw the stack is unchanged.
+  try {
+    active_addresses_.insert(address);
+  } catch (...) {
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
                               event_count, owned_auth_token_ids, parent_depth);
   } catch (...) {
+    active_addresses_.erase(address);
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
@@ -293,7 +302,7 @@ InvocationFrameStack::start_frame(
     try {
       parent.set_child_restore_auth_tokens(owned_auth_token_ids);
     } catch (...) {
-      frame_stack_.pop_back();
+      pop_top_frame();
       return SystemError{SystemErrorCode::Unrecoverable};
     }
     // Non-allocating, so it cannot throw: once here the frame is admitted.
@@ -339,7 +348,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         auto acq_res =
             frame_stack_.back().try_acquire_frame_locks(db_proxy_, no_obs);
         if (!acq_res.has_value()) {
-          frame_stack_.pop_back();
+          pop_top_frame();
           return acq_res.error();
         }
         acq_success = acq_res.value();
@@ -363,7 +372,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         auto res = std::get<ValidationModeData>(execution_mode_data)
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
-          frame_stack_.pop_back();
+          pop_top_frame();
           return SystemError{SystemErrorCode::ValidationFailure};
         }
         acq_success = res.value().get();
@@ -381,7 +390,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
             auto *view = frame_stack_.back().get_item_view(addrkey);
             if (view && !view->get<RetrocausalQueueItem>() &&
                 !view->get<UnmodifiedItem>()) {
-              frame_stack_.pop_back();
+              pop_top_frame();
               return SystemError{SystemErrorCode::ValidationFailure};
             }
           }
@@ -406,7 +415,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   if (frame_result.should_frame_revert() || manually_reverted) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
-      frame_stack_.pop_back();
+      pop_top_frame();
       return st.error();
     }
   }
@@ -415,7 +424,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     assert(try_invoke_failed ||
            frame_stack_.back().get_frame_output().status_code() ==
                InvocationFrameStatusCode::Fault);
-    frame_stack_.pop_back();
+    pop_top_frame();
 
     if (!frame_stack_.empty()) {
       // Contain the auth-token restore allocation at the noexcept
@@ -449,7 +458,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
             std::move(frame_stack_.back()));
       }
     } catch (...) {
-      frame_stack_.pop_back();
+      pop_top_frame();
       return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
@@ -460,7 +469,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     last_frame_action_(std::move(frame_stack_.back()));
   }
 
-  frame_stack_.pop_back();
+  pop_top_frame();
 
   return {{frame_result, manually_reverted}};
 }
