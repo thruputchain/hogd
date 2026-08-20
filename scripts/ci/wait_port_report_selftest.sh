@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Self-test for wait_port_or_report: a wait that succeeds must behave like
 # ci_wait_port, and a wait that times out must name the port, replay the logs of
-# what was launched on that host, and still fail.
+# what was launched on that host, and still fail. Also covers
+# await_mempool_run, which has to report the awaited mempool's own exit status
+# and must not be confused by anything else the host was asked to start.
 set -euo pipefail
 
 HELPERS="$(dirname "$(readlink -f "$0")")/wait_port_report.sh"
@@ -39,8 +41,11 @@ expect_lacks() {
   fi
 }
 
-# Runs a body with the helper sourced and its three dependencies stubbed.
-# [ci_wait_port] fails for $UNREACHABLE_PORT and succeeds otherwise.
+# Runs a body with the helper sourced and its dependencies stubbed.
+# [ci_wait_port] fails for $UNREACHABLE_PORT and succeeds otherwise. A remote
+# command that reads the mempool completion line answers with
+# $MEMPOOL_COMPLETE_LINE when it is set, so a case can hand the helper the line
+# a real mempool would have written.
 run_case() {
   bash -c "
 set -Eeuo pipefail
@@ -50,8 +55,17 @@ hog_ip() { printf '10.100.0.%s\n' \"\${1#hog}\"; }
 ci_wait_port() {
   [ \"\$2\" != \"\${UNREACHABLE_PORT:-}\" ] || { echo \"Timed out: \$1:\$2\"; return 1; }
 }
+ci_describe_exit_status() { printf 'exit status %s' \"\$1\"; }
 remote_run() {
   [ \"\${REMOTE_RUN_FAILS:-0}\" != 1 ] || { echo 'ssh: closed' >&2; return 255; }
+  case \"\$2\" in
+  *MEMPOOL_RUN_COMPLETE*)
+    if [ -n \"\${MEMPOOL_COMPLETE_LINE+x}\" ]; then
+      printf '%s\n' \"\$MEMPOOL_COMPLETE_LINE\"
+      return 0
+    fi
+    ;;
+  esac
   echo \"REMOTE(\$1): \$2\"
 }
 record() { CONTROL_LOG_RECORDS+=(\"\$1|\$2|\$3|\$4\"); }
@@ -155,5 +169,83 @@ expect_contains 'log milestone timeout names the process' \
   'waiting for node0_mempool to report: PORT mempool.executor=8071' "$out"
 expect_contains 'log milestone timeout replays logs' \
   'node0_mempool on hog7' "$out"
+
+# The timeout is overridable, for a milestone that is not a startup milestone
+# and so is not bounded by the readiness budget.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_log_line node0_mempool "PORT mempool.db=8072" 42
+') && status=0 || status=$?
+expect_status 'log milestone honors an explicit timeout' 0 "$status"
+expect_contains 'log milestone honors an explicit timeout' 'timeout 42s' "$out"
+
+# A mempool whose run ended cleanly is awaited without a word about failure.
+out=$(MEMPOOL_COMPLETE_LINE='MEMPOOL_RUN_COMPLETE status=0' run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+await_mempool_run node0_mempool 900
+echo REACHED
+') && status=0 || status=$?
+expect_status 'mempool run completes' 0 "$status"
+expect_contains 'mempool run completes' 'node0_mempool run completed' "$out"
+expect_contains 'completed run continues' 'REACHED' "$out"
+expect_lacks 'completed run replays nothing' 'last 80 lines' "$out"
+
+# The status the mempool reported becomes the wait's own, so the suite fails
+# with the mempool's status rather than a bare 1.
+out=$(MEMPOOL_COMPLETE_LINE='MEMPOOL_RUN_COMPLETE status=134' run_case '
+record hog5 node0_hog_exec_slot_a /tmp/exec.out /tmp/exec.err
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+await_mempool_run node0_mempool 900
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'failed mempool run reports its own status' 134 "$status"
+expect_lacks 'failed mempool run stops the script' 'NOT REACHED' "$out"
+expect_contains 'failed mempool run names the status' \
+  'node0_mempool exit status 134' "$out"
+expect_contains 'failed mempool run replays its log' \
+  'REMOTE(hog7): tail -n 80 /tmp/mempool.out /tmp/mempool.err' "$out"
+expect_lacks 'failed mempool run leaves other labels alone' '/tmp/exec.out' "$out"
+
+# The completion line is read from the awaited mempool's own host and log, not
+# from whatever the host started most recently.
+out=$(MEMPOOL_COMPLETE_LINE='MEMPOOL_RUN_COMPLETE status=0' run_case '
+record hog7 node0_mempool /tmp/mempool.out "/tmp/mempool err.log"
+record hog7 node0_hog_db /tmp/db.out /tmp/db.err
+await_mempool_run node0_mempool 900
+') && status=0 || status=$?
+expect_status 'await reads the mempool record' 0 "$status"
+expect_lacks 'await ignores a later process on the same host' '/tmp/db.err' "$out"
+
+# A run that never reports says so rather than waiting on something else.
+out=$(REMOTE_RUN_FAILS=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+await_mempool_run node0_mempool 900
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'mempool never reports' 1 "$status"
+expect_lacks 'mempool never reports stops the script' 'NOT REACHED' "$out"
+expect_contains 'mempool never reports says so' \
+  'node0_mempool never reported the end of its run' "$out"
+
+# A completion line without a status is a failure to read it, not a status of 0.
+out=$(MEMPOOL_COMPLETE_LINE='' run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+await_mempool_run node0_mempool 900
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unreadable exit status' 1 "$status"
+expect_lacks 'unreadable exit status stops the script' 'NOT REACHED' "$out"
+expect_contains 'unreadable exit status says so' \
+  'could not read node0_mempool exit status from /tmp/mempool.err on hog7' "$out"
+
+# Awaiting a label that was never launched says so rather than hanging.
+out=$(MEMPOOL_COMPLETE_LINE='MEMPOOL_RUN_COMPLETE status=0' run_case '
+await_mempool_run node1_mempool 900
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'await of an unknown label' 1 "$status"
+expect_lacks 'await of an unknown label stops the script' 'NOT REACHED' "$out"
+expect_contains 'await of an unknown label says so' \
+  'no control log record for node1_mempool' "$out"
 
 exit "$fail"

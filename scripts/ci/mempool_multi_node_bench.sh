@@ -4,6 +4,11 @@ set -Eeuo pipefail
 : "${BUILD_DIR:?BUILD_DIR must be set}"
 : "${WORK_DIR:?WORK_DIR must be set}"
 : "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
+# How long each mempool is given to run, and how long we then wait for it to
+# report that it is done. The wrapper caps the run itself, so the second bound
+# only has to clear the first by enough to cover a slow report.
+: "${MEMPOOL_RUN_TIMEOUT_SEC:=360}"
+: "${CI_MEMPOOL_AWAIT_TIMEOUT_SEC:=900}"
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
@@ -375,15 +380,19 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
+# The completion line is what [await_mempool_run] waits for, so it has to be
+# written on the way out of every path the wrapper can take, including the
+# timeout that is this benchmark's normal end.
 node0_mempool_script=$(
   cat <<EOF
 set -euo pipefail
 ulimit -c unlimited || true
 set +e
-$(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
+$(quote_cmd timeout "${MEMPOOL_RUN_TIMEOUT_SEC}s" "${node0_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+echo "${MEMPOOL_RUN_COMPLETE_PREFIX}\$status" >&2
 exit \$status
 EOF
 )
@@ -392,10 +401,11 @@ node1_mempool_script=$(
 set -euo pipefail
 ulimit -c unlimited || true
 set +e
-$(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
+$(quote_cmd timeout "${MEMPOOL_RUN_TIMEOUT_SEC}s" "${node1_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+echo "${MEMPOOL_RUN_COMPLETE_PREFIX}\$status" >&2
 exit \$status
 EOF
 )
@@ -498,11 +508,6 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
-node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
-node1_mempool_pid=$!
-
 echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_hog_exec_slot_a" \
@@ -517,25 +522,10 @@ for node in "${NODE_IDS[@]}"; do
     "starting server on network tcp at address $(hog_ip "${CHUCKD_HOSTS[$node]}"):7888"
 done
 
-# A mempool that dies mid-run takes the suite down with it, and by that point
-# every readiness wait has already passed, so nothing else in this script has
-# anything to say about it. Name the status and replay the mempool's own log
-# before exiting on it.
-await_mempool() {
-  local label=$1
-  local pid=$2
-  local status=0
-
-  wait "$pid" || status=$?
-  if [ "$status" -ne 0 ]; then
-    echo "$label $(ci_describe_exit_status "$status")" >&2
-    replay_control_log_for_label "$label"
-    return "$status"
-  fi
-  echo "$label wait completed"
-}
-
-await_mempool node0_mempool "$node0_mempool_pid"
-await_mempool node1_mempool "$node1_mempool_pid"
+echo 'wait for the mempool runs to finish'
+# Both mempools were launched together and are capped at the same run length, so
+# awaiting them one after the other costs nothing over awaiting them at once.
+await_mempool_run node0_mempool "$CI_MEMPOOL_AWAIT_TIMEOUT_SEC"
+await_mempool_run node1_mempool "$CI_MEMPOOL_AWAIT_TIMEOUT_SEC"
 
 publish_results

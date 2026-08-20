@@ -338,6 +338,9 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
+# This run has no cap of its own, so the completion line is only ever written by
+# a mempool that stopped when it was not supposed to -- which is exactly what
+# [await_mempool_run] is here to notice.
 node0_mempool_script=$(
   cat <<EOF
 set -euo pipefail
@@ -347,6 +350,7 @@ $(quote_cmd "${node0_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+echo "${MEMPOOL_RUN_COMPLETE_PREFIX}\$status" >&2
 exit \$status
 EOF
 )
@@ -359,6 +363,7 @@ $(quote_cmd "${node1_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+echo "${MEMPOOL_RUN_COMPLETE_PREFIX}\$status" >&2
 exit \$status
 EOF
 )
@@ -461,11 +466,6 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
-node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
-node1_mempool_pid=$!
-
 echo 'wait for process readiness'
 for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_hog_exec_slot_a" \
@@ -480,10 +480,10 @@ for node in "${NODE_IDS[@]}"; do
     "starting server on network tcp at address $(hog_ip "${CHUCKD_HOSTS[$node]}"):7888"
 done
 
-wait "$node0_mempool_pid"
-echo 'node0 mempool wait completed'
-wait "$node1_mempool_pid"
-echo 'node1 mempool wait completed'
+# No timeout: nothing here is supposed to finish, so the only thing that ends
+# this wait is a mempool that stopped.
+await_mempool_run node0_mempool 0
+await_mempool_run node1_mempool 0
 
 # We do not save results to the [metrics_history] repo because this CI run
 # should never finish--it should only stop when it is manually cancelled.
