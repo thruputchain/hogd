@@ -126,7 +126,7 @@ ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
 }
 
 HogDbStatus<void>
-ReplayCacheLock::charge_pending_height_(const LockContext &ctx) const
+ReplayCacheLock::charge_pending_height(const LockContext &ctx) const
 {
   // Caller holds bases_lock_ exclusively. The cap counts only unexpired
   // heights (protocol/storage_item.x): heights below the current block are
@@ -182,7 +182,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     // Fresh height: create an empty ActiveHeight. The pending_new_heights_
     // budget is not charged here -- it is charged in try_atomic_change_lock
     // on the pending_additions 0->1 transition and given back symmetrically
-    // by release_pending_addition_ on 1->0, so an aborted-and-released
+    // by release_pending_addition on 1->0, so an aborted-and-released
     // fresh height does not permanently consume its slot (#3510).
     auto [res, inserted] = bases_.try_emplace(block_height);
     CHECK(inserted);
@@ -195,7 +195,7 @@ ReplayCacheLock::get_base(const LockContext &ctx,
 }
 
 void
-ReplayCacheLock::release_pending_addition_(ActiveHeight &base) const
+ReplayCacheLock::release_pending_addition(ActiveHeight &base) const
 {
   if (!base.is_new) {
     base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
@@ -262,7 +262,7 @@ ReplayCacheLock::try_atomic_change_lock(
     }
     auto &base = *r.value();
     conflicts_.erase(UniquifierHelper::to_uint128(u));
-    release_pending_addition_(base);
+    release_pending_addition(base);
     return {};
   }
 
@@ -300,7 +300,7 @@ ReplayCacheLock::try_atomic_change_lock(
   if (base.is_new) {
     std::unique_lock<x23::TestLock> ul(bases_lock_);
     if (!base.is_charged) {
-      auto s = charge_pending_height_(ctx);
+      auto s = charge_pending_height(ctx);
       if (!s.has_value()) {
         return s.error();
       }
@@ -314,7 +314,7 @@ ReplayCacheLock::try_atomic_change_lock(
 
   // Check limit
   if (base.data.nonces.size() + additions + 1 > kReplayCacheNoncesMaxLen) {
-    release_pending_addition_(base);
+    release_pending_addition(base);
     return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
   }
 
@@ -323,7 +323,7 @@ ReplayCacheLock::try_atomic_change_lock(
   // means it packs to a value conflicts_ cannot store -- e.g. the all-zero
   // {expiry=0, nonce=0}, reachable at executing height 0 (#3188).
   if (conflicts_.try_insert(addition_key) != InsertResult::kInserted) {
-    release_pending_addition_(base);
+    release_pending_addition(base);
     return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 

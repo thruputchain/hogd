@@ -75,12 +75,12 @@ private:
   // pending_new_heights_ accordingly. Caller must hold bases_lock_
   // exclusively. Returns kDbConflictCapacityExceeded if the cap would be
   // exceeded.
-  HogDbStatus<void> charge_pending_height_(const LockContext &ctx) const;
+  HogDbStatus<void> charge_pending_height(const LockContext &ctx) const;
   // Decrement pending_additions on a released reservation and, when a
   // fresh height's last outstanding reservation goes away, give the
   // pending_new_heights_ budget back. Serializes with concurrent
   // re-reservations via bases_lock_.
-  void release_pending_addition_(ActiveHeight &base) const;
+  void release_pending_addition(ActiveHeight &base) const;
 
   mutable std::map<BlockHeight, ActiveHeight> bases_;
   mutable x23::SharedLock bases_lock_;
