@@ -111,9 +111,7 @@ public:
     if (ready()) {
       co_return;
     }
-    // Neither of these waits may occupy a thread-pool worker: both block until
-    // another component registers, and that registration runs on the pool. See
-    // the registration signals in [Registration].
+    // Both waits suspend rather than block a pool worker; see [Registration].
     while (!initialized_.load(std::memory_order_acquire)) {
       co_await initialized_waiters_.wait(false);
     }

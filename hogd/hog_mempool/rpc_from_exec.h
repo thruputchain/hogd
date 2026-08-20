@@ -61,10 +61,7 @@ public:
         break;
       }
       if (!logged_wait) {
-        // Startup blocks here until the executors arrive, and there is no
-        // deadline, so say so once: otherwise a wedged startup is just
-        // [/health] stuck reporting "starting" with nothing in the log. Each
-        // executor that does arrive logs itself from [schedexec_intro_exec()].
+        // There is no deadline, so leave a breadcrumb for a wedged startup.
         info("waiting for executors to register with the coordinator: {} of {} "
              "registered",
              registered, expected_executors);

@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <mutex>
 #include <optional>
 
@@ -38,20 +37,15 @@ public:
     return registration;
   }
 
-  // Waiting for a peer to register.
-  //
-  // Components that need another component to show up before they can make
-  // progress suspend on one of the futexes below rather than polling. These
-  // waits must never be done by blocking a thread-pool worker: registrations
-  // arrive on RPC handlers that the pool itself has to run, and a worker that
-  // is the last one servicing its runqueue cannot migrate away, so a blocked
-  // worker can starve the very handler it is waiting for. See the ThreadPool
-  // affinity rules in x23/x23/threadpool.h.
+  // Waiting for a peer to register. Suspend on these rather than polling: a
+  // registration arrives on an RPC handler that the thread pool has to run, so
+  // a wait that blocks a pool worker can starve the handler it is waiting for.
+  // The last worker on a runqueue cannot migrate away, and idle workers park on
+  // their own queues rather than stealing -- see x23/x23/threadpool.h.
 
   // How many executors have registered. Pass the count you read to
-  // [wait_for_executor_count_change()], which then only suspends while the
-  // count is still that value -- so an executor registering between the read
-  // and the wait cannot leave the caller parked on a stale count.
+  // [wait_for_executor_count_change()], which suspends only while the count is
+  // still that value, so a registration in between cannot be missed.
   size_t registered_executor_count() { return registered_executors_.load(); }
   x23::CoroFutex<size_t>::Awaiter
   wait_for_executor_count_change(size_t registered)
@@ -92,15 +86,12 @@ public:
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.push_back(card);
       exec_id = exec_cards_.size() - 1;
-      // Publish under the lock that serializes the pushes, so the count only
-      // moves forward and always trails [exec_cards_]. Capturing the size and
-      // storing it after unlocking lets two concurrent registrations publish
-      // out of order, leaving a waiter for the higher count parked with
-      // nothing left to wake it.
+      // Publish under the lock that serializes the pushes. Storing it after
+      // unlocking lets two concurrent registrations publish out of order and
+      // strand a waiter for the higher count.
       registered_executors_.store(exec_cards_.size());
     }
-    // Broadcast outside the lock: the waiters resume on the pool and the first
-    // thing they do is re-take it.
+    // Broadcast outside the lock; the waiters re-take it immediately.
     registered_executors_.broadcast(&default_threadpool());
     return exec_id;
   }
@@ -319,26 +310,13 @@ private:
 
   // Publish event readiness and wake its waiters. Call with [event_mutex_]
   // released: the waiters resume on the pool and immediately re-take it.
-  //
-  // Only the false -> true edge broadcasts. [publish_event_canonical_tip()]
-  // runs on every commit, so broadcasting unconditionally would put a
-  // [ThreadPool::go()] on the commit hot path forever after startup, with no
-  // waiters left to notify.
   void publish_event_ready(bool ready)
   {
     if (!ready) {
       return;
     }
-    const bool became_ready = event_ready_.rmw([](bool &current) {
-      if (current) {
-        return false;
-      }
-      current = true;
-      return true;
-    });
-    if (became_ready) {
-      event_ready_.broadcast(&default_threadpool());
-    }
+    event_ready_.store(true);
+    event_ready_.broadcast(&default_threadpool());
   }
 
   // No one should construct a [Registration] instance directly. Instead, use
@@ -347,9 +325,8 @@ private:
   Registration() = default;
   ~Registration() = default;
 
-  // Registration signals waiters suspend on. See [registered_executor_count()]
-  // and [event_ready()]. Each is written and broadcast by the registration
-  // that changes it, so a waiter only wakes for the thing it is waiting for.
+  // Each is written and broadcast only by the registration that changes it, so
+  // a waiter wakes only for the thing it is waiting for.
   x23::CoroFutex<size_t> registered_executors_{0};
   x23::CoroFutex<bool> event_ready_{false};
 
