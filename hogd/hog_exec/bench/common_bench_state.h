@@ -35,6 +35,7 @@
 #include "hogd/hog_exec/shared.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/xdr/proposal_hash.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -266,9 +267,9 @@ private:
       panic("Failed to close executor event handle");
     }
     // We use [block_number] as the height as well.
-    auto r =
-        event_sched_client_->eventsched_close_block(block_number, block_number,
-                                                    event_proposal_txs_);
+    auto r = event_sched_client_->eventsched_close_block(
+        block_number, block_number,
+        proposal_txs_compatibility_hash(event_proposal_txs_));
     if (r.error() != RPCError::kRPCNone) {
       panic("Failed to close event block");
     }

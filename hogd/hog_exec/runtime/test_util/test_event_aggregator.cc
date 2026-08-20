@@ -66,12 +66,12 @@ TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
 
 x23::Async<EventBlockResult>
 TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height,
-                                 ProposalTxs proposal_txs)
+                                 ProposalTxsHash proposal_txs_hash)
 {
   {
     x23::CoroGuard guard;
     co_await guard(lock_);
-    closed_proposal_txs_[block_id] = std::move(proposal_txs);
+    closed_proposal_txs_hashes_[block_id] = std::move(proposal_txs_hash);
   }
   co_return co_await close_block(block_id, block_height);
 }
@@ -86,15 +86,15 @@ TestEventAggregator::commit_block(BlockID block_id,
   co_return RPCError::kRPCNone;
 }
 
-x23::Async<std::optional<ProposalTxs>>
-TestEventAggregator::get_closed_proposal_txs(BlockID block_id)
+x23::Async<std::optional<ProposalTxsHash>>
+TestEventAggregator::get_closed_proposal_txs_hash(BlockID block_id)
 {
   x23::CoroGuard guard;
   co_await guard(lock_);
-  auto it = closed_proposal_txs_.find(block_id);
-  co_return it == closed_proposal_txs_.end()
+  auto it = closed_proposal_txs_hashes_.find(block_id);
+  co_return it == closed_proposal_txs_hashes_.end()
       ? std::nullopt
-      : std::optional<ProposalTxs>(it->second);
+      : std::optional<ProposalTxsHash>(it->second);
 }
 
 x23::Async<std::optional<ConsensusValue>>

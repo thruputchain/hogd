@@ -127,7 +127,6 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
   IndexerCommittedBlockPayload payload{
       .format_version = kIndexerOutboxFormatVersion,
       .consensus_value = std::move(value),
-      .proposal_txs = std::move(proposal),
       .event_logs = std::move(logs),
       .tx_bodies = std::move(bodies),
   };
@@ -455,7 +454,7 @@ TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
 }
 
-TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
+TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
 {
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
@@ -479,11 +478,6 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   negative.payload.consensus_value.proposal_header.block_height = -1;
   refresh_identity(negative);
   expect_conflict(negative);
-
-  IndexerCommittedBlock proposal = valid;
-  proposal.payload.consensus_value.proposal_txs_hash[0] ^= 1;
-  refresh_identity(proposal);
-  expect_conflict(proposal);
 
   IndexerCommittedBlock body_conflict = valid;
   body_conflict.payload.tx_bodies[0].signed_tx.tx.uniquifier.nonce++;
@@ -510,13 +504,6 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   IndexerCommittedBlock digest = valid;
   digest.identity.payload_digest[0] ^= 1;
   expect_conflict(digest);
-
-  IndexerCommittedBlock missing_proposal = valid;
-  missing_proposal.payload.proposal_txs = {};
-  missing_proposal.payload.consensus_value.proposal_txs_hash =
-      proposal_txs_compatibility_hash(missing_proposal.payload.proposal_txs);
-  refresh_identity(missing_proposal);
-  expect_conflict(missing_proposal);
 }
 
 TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)

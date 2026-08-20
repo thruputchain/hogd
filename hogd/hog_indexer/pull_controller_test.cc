@@ -143,15 +143,13 @@ commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
     bodies.push_back(*body);
   }
   ProposalTxs proposal_txs = make_proposal_txs(bodies);
-  EventBlockResult closed =
-      mempool_rpc.eventsched_close_block(block_id, height, proposal_txs)();
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(
+      block_id, height, proposal_txs_compatibility_hash(proposal_txs))();
   CHECK_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
       make_consensus_value(height, closed.root_hash(), proposal_txs);
   value.prev_hash = std::move(prev_hash);
   CHECK_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
-           RPCError::kRPCNone);
-  CHECK_EQ(mempool_rpc.eventsched_confirm_committed_block(value)(),
            RPCError::kRPCNone);
   return value;
 }
@@ -262,7 +260,6 @@ public:
     IndexerCommittedBlockPayload payload{
         .format_version = kIndexerOutboxFormatVersion,
         .consensus_value = std::move(value),
-        .proposal_txs = std::move(proposal),
     };
     auto block = make_indexer_committed_block(payload)();
     CHECK(block.has_value());

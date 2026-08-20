@@ -122,7 +122,7 @@ public:
   x23::Async<IndexerOutboxCandidatePayload>
   snapshot_indexer_outbox_candidate(BlockHeight block_height,
                                     SHA256Hash event_root,
-                                    ProposalTxs proposal_txs);
+                                    ProposalTxsHash proposal_txs_hash);
 
   x23::Async<void> wait_file_done();
   void delete_events_file();

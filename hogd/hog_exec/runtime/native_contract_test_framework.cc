@@ -18,6 +18,7 @@
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/xdr/proposal_hash.h"
 #include "proposal.hh"
 #include "rpc_types.hh"
 #include "types.hh"
@@ -289,9 +290,8 @@ void
 NativeContractTestFramework::close_event_block(BlockID block_id)
 {
   // We use [block_id] as the height as well.
-  auto r =
-      event_sched_wrapper_->client().eventsched_close_block(block_id, block_id,
-                                                            ProposalTxs{});
+  auto r = event_sched_wrapper_->client().eventsched_close_block(
+      block_id, block_id, proposal_txs_compatibility_hash(ProposalTxs{}));
   if (r.error() != RPCError::kRPCNone) {
     panic("close_event_block: eventsched_close_block failed: {}", r.error());
   }

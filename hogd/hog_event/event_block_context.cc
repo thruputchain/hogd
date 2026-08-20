@@ -1,6 +1,7 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "event_outbox_internal.hh"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -16,7 +17,6 @@
 #include <sys/fcntl.h>
 #include <type_traits>
 #include <unistd.h>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <version>
@@ -347,16 +347,16 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
 }
 
 x23::Async<IndexerOutboxCandidatePayload>
-EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
-                                                     SHA256Hash event_root,
-                                                     ProposalTxs proposal_txs)
+EventBlockContext::snapshot_indexer_outbox_candidate(
+    BlockHeight block_height, SHA256Hash event_root,
+    ProposalTxsHash proposal_txs_hash)
 {
   IndexerOutboxCandidatePayload payload{
       .format_version = kIndexerOutboxFormatVersion,
       .block_id = block_id_,
       .block_height = block_height,
       .event_root = event_root,
-      .proposal_txs = std::move(proposal_txs),
+      .proposal_txs_hash = std::move(proposal_txs_hash),
   };
 
   EventWithBodyBatch pairs;
@@ -370,30 +370,31 @@ EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
     });
   }
 
-  x23::XdrVec<TransactionHash> canonical_hashes;
-  CHECK(co_await parallel_batch_to_t(payload.proposal_txs.hash,
-                                     canonical_hashes));
-  CHECK_EQ(canonical_hashes.size(), pairs.size());
-
-  std::unordered_map<TransactionHash, size_t, SipHash24Hasher> by_hash;
-  by_hash.reserve(pairs.size());
+  // Per-thread event RPCs can complete in any order. Sort compact keys rather
+  // than the much larger event/body objects, then move each pair exactly once.
+  // Transaction-hash order gives equivalent candidates identical durable bytes
+  // without retransmitting ProposalTxs.
+  struct PairOrderKey {
+    TransactionHash tx_hash;
+    size_t pair_index;
+  };
+  std::vector<PairOrderKey> order;
+  order.reserve(pairs.size());
   for (size_t i = 0; i < pairs.size(); ++i) {
-    const TransactionHash body_hash = sha256(pairs[i].body.signed_tx.tx);
-    CHECK_EQ(body_hash, pairs[i].event.tx_hash);
-    CHECK(by_hash.emplace(body_hash, i).second);
+    order.push_back({.tx_hash = pairs[i].event.tx_hash, .pair_index = i});
   }
+  std::ranges::sort(order, {}, &PairOrderKey::tx_hash);
 
   payload.event_logs.reserve(pairs.size());
   payload.tx_bodies.reserve(pairs.size());
-  for (const TransactionHash &hash : canonical_hashes) {
-    auto it = by_hash.find(hash);
-    CHECK(it != by_hash.end());
-    detail::EventWithBody &pair = pairs[it->second];
+  for (size_t i = 0; i < order.size(); ++i) {
+    if (i != 0) {
+      CHECK_LT(order[i - 1].tx_hash, order[i].tx_hash);
+    }
+    detail::EventWithBody &pair = pairs[order[i].pair_index];
     payload.event_logs.push_back(std::move(pair.event));
     payload.tx_bodies.push_back(std::move(pair.body));
-    by_hash.erase(it);
   }
-  CHECK(by_hash.empty());
   co_return payload;
 }
 

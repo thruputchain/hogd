@@ -4,7 +4,6 @@
 #include <expected>
 #include <format>
 #include <span>
-#include <unordered_set>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -14,7 +13,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/xdr/proposal_hash.h"
 #include "indexer.hh"
 #include "proposal.hh"
 #include "transaction.hh"
@@ -26,65 +24,56 @@
 namespace hogd {
 namespace {
 
-bool
-nondeterministic_data_equal(const NondeterministicProposalData &lhs,
-                            const NondeterministicProposalData &rhs)
+template<typename HashConsumer>
+IndexerPayloadStatus<void>
+validate_event_body_mapping(const TxEventLogBatch &event_logs,
+                            const ProposedTransactionBatch &tx_bodies,
+                            HashConsumer &&consume_hash)
 {
-  return x23::serialize(lhs) == x23::serialize(rhs);
-}
-
-} // namespace
-
-x23::Async<IndexerPayloadStatus<ProposalTxsHash>>
-validate_indexer_canonical_proposal_mapping(
-    const ProposalTxs &proposal_txs, const TxEventLogBatch &event_logs,
-    const ProposedTransactionBatch &tx_bodies)
-{
-  x23::XdrVec<TransactionHash> canonical_hashes;
-  x23::XdrVec<NondeterministicProposalData> canonical_nondeterministic_data;
-  if (!(co_await parallel_batch_to_t(proposal_txs.hash, canonical_hashes)) ||
-      !(co_await parallel_batch_to_t(proposal_txs.nondeterministic_data,
-                                     canonical_nondeterministic_data))) {
-    co_return std::unexpected("malformed canonical ProposalTxs parallel batch");
-  }
-  if (canonical_hashes.size() != canonical_nondeterministic_data.size()) {
-    co_return std::unexpected(
-        "canonical ProposalTxs batch cardinalities differ");
-  }
-  if (canonical_hashes.size() != event_logs.size() ||
-      canonical_hashes.size() != tx_bodies.size()) {
-    co_return std::unexpected(
-        "canonical proposal and event/body batch cardinalities differ");
-  }
-
-  std::unordered_set<TransactionHash, SipHash24Hasher> canonical;
-  canonical.reserve(canonical_hashes.size());
-  for (const TransactionHash &hash : canonical_hashes) {
-    if (!canonical.insert(hash).second) {
-      co_return std::unexpected(
-          "canonical ProposalTxs contains duplicate hashes");
-    }
+  if (event_logs.size() != tx_bodies.size()) {
+    return std::unexpected("event/body batch cardinalities differ");
   }
 
   for (size_t i = 0; i < tx_bodies.size(); ++i) {
     const TransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
     if (body_hash != event_logs[i].tx_hash) {
-      co_return std::unexpected(std::format(
+      return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
-    if (body_hash != canonical_hashes[i]) {
-      co_return std::unexpected(
-          "event/body order differs from canonical ProposalTxs");
-    }
-    if (!nondeterministic_data_equal(
-            tx_bodies[i].nondeterministic_proposal_data,
-            canonical_nondeterministic_data[i])) {
-      co_return std::unexpected(
-          "transaction body nondeterministic data differs from canonical "
-          "ProposalTxs");
+    if (!consume_hash(body_hash)) {
+      return std::unexpected("event/body batch contains duplicate hashes");
     }
   }
-  co_return proposal_txs_compatibility_hash(proposal_txs);
+  return {};
+}
+
+IndexerPayloadStatus<TxsHash>
+validate_event_body_mapping_and_compute_root(
+    const TxEventLogBatch &event_logs,
+    const ProposedTransactionBatch &tx_bodies)
+{
+  MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+  auto valid = validate_event_body_mapping(
+      event_logs, tx_bodies, [&trie](const TransactionHash &body_hash) {
+        return trie.insert(HexArray(body_hash), std::span<const std::byte>());
+      });
+  if (!valid) {
+    return std::unexpected(valid.error());
+  }
+  trie.generate_all_hashes(/*num_threads=*/1);
+  return trie.get_root_hash();
+}
+
+} // namespace
+
+IndexerPayloadStatus<void>
+validate_indexer_event_body_mapping(const TxEventLogBatch &event_logs,
+                                    const ProposedTransactionBatch &tx_bodies)
+{
+  return validate_event_body_mapping(event_logs, tx_bodies,
+                                     [](const TransactionHash &) {
+                                       return true;
+                                     });
 }
 
 SHA256Hash
@@ -133,19 +122,16 @@ validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload)
       payload.consensus_value.proposal_header.events_hash) {
     co_return std::unexpected("event root differs from payload identity");
   }
-  auto proposal_hash =
-      co_await validate_indexer_canonical_proposal_mapping(payload.proposal_txs,
-                                                           payload.event_logs,
-                                                           payload.tx_bodies);
-  if (!proposal_hash) {
-    co_return std::unexpected(proposal_hash.error());
-  }
-  if (*proposal_hash != payload.consensus_value.proposal_txs_hash) {
-    co_return std::unexpected(
-        "canonical ProposalTxs commitment differs from ConsensusValue");
-  }
+  // ProposalTxsHash intentionally preserves ParallelBatch segmentation, so it
+  // cannot be reconstructed from tx_bodies without retaining the duplicate
+  // ProposalTxs preimage. The finalized scheduler/executor path is trusted for
+  // nondeterministic proposal data; the payload digest detects durable
+  // corruption. We still independently bind every inner Transaction to the
+  // consensus transaction-set root below; signatures share the trusted
+  // internal-data boundary because TransactionHash excludes them.
   auto txs_root =
-      co_await compute_indexer_proposal_txs_root(payload.proposal_txs);
+      validate_event_body_mapping_and_compute_root(payload.event_logs,
+                                                   payload.tx_bodies);
   if (!txs_root) {
     co_return std::unexpected(txs_root.error());
   }
