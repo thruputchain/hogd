@@ -783,21 +783,27 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 // Creates wrap_after_parse_async()'s coroutine and translates a failure to do
 // so into a structured result.
 //
-// The frame is allocated in this noexcept context before any of the body runs,
-// and x23's promises do not define get_return_object_on_allocation_failure, so
-// an exhausted heap throws right here. All three callers of the syscall ABI --
-// the RV32 ecall loop, the native precompiles, and test_ffi's extern "C" mock
-// entrypoint -- need that translated rather than terminating the executor, and
-// two of them do not go through wrap_outer(), so the guard belongs here rather
-// than at any one call site.
+// x23's promises do not define get_return_object_on_allocation_failure, so an
+// exhausted heap throws out of the frame allocation. All three callers of the
+// syscall ABI -- the RV32 ecall loop, the native precompiles, and test_ffi's
+// extern "C" mock entrypoint -- need that translated rather than terminating
+// the executor, and two of them do not go through wrap_outer(), so the guard
+// belongs here rather than at any one call site.
 //
-// The staged outputs are deliberately not disarmed on this path. args is moved
-// into the coroutine's by-value parameter before the ramp allocates, so by the
-// time the throw arrives the outputs this frame owned live in that parameter,
-// which unwinding destroys -- flushing them. What is left here is already
-// disarmed by WritableOutput's move constructor, so disarming it again would
-// be a no-op dressed up as a safeguard. The result is Unrecoverable, which
-// fails the whole transaction, so the flushed bytes are discarded with it.
+// x23::Async's initial_suspend() is suspend_never, so this try also covers the
+// coroutine's synchronous prologue, up to the first real suspension point. The
+// body itself cannot throw through it (it runs inside its own noexcept lambda);
+// what is left is the frame allocation and the trace/gate work around it.
+//
+// The staged outputs are deliberately not disarmed here. args is moved into the
+// coroutine's by-value parameter before the ramp allocates, so by the time an
+// allocation failure arrives the outputs belong to that parameter, and
+// unwinding destroys it -- flushing each WritableOutput's still-zero staged
+// value into guest memory for a syscall that never ran. What is left here was
+// disarmed by WritableOutput's move constructor, so disarming it again would be
+// a no-op dressed up as a safeguard. The write is survivable only because the
+// result is Unrecoverable, which fails the whole transaction and discards the
+// bytes with it; that is a property of the caller, not of this function.
 template<is_syscall_meta SyscallMeta, typename Args>
 MaybeAsyncSyscallResult
 wrap_after_parse(bool alias_check_passed, SystemCallHandler &handler,

@@ -110,6 +110,16 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
+  // The staged delta batch below is per-object state now; it used to be a
+  // shared thread_local, which made copying this harmless. It no longer is: a
+  // copy forks the batch, so deltas added through one are invisible to the
+  // other and whichever gets pushed silently wins. Several signatures take
+  // this by value, so let the compiler hold the move rather than a convention.
+  PerTransactionDatabaseProxy(PerTransactionDatabaseProxy &&) = default;
+  PerTransactionDatabaseProxy(const PerTransactionDatabaseProxy &) = delete;
+  PerTransactionDatabaseProxy &
+  operator=(const PerTransactionDatabaseProxy &) = delete;
+
   void reserve(size_t delta_count)
   {
     current_subtransaction_batch_.reserve(delta_count);
