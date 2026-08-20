@@ -1,7 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
+#include <cstddef>
 
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
@@ -52,14 +52,14 @@ public:
     // Executors register from [schedexec_intro_exec()], which the thread pool
     // has to run, so this wait must not occupy a pool worker -- a blocked
     // worker can starve the very handler we are waiting for. Suspend on the
-    // registration epoch instead. See [Registration::registration_epoch()].
+    // executor count instead. See [Registration::registered_executor_count()].
     Registration &reg = Registration::registration();
     while (true) {
-      const uint64_t seen = reg.registration_epoch();
-      if (reg.executors_registered(nullptr) >= expected_executors) {
+      const size_t registered = reg.registered_executor_count();
+      if (registered >= expected_executors) {
         break;
       }
-      co_await reg.wait_for_registration_change(seen);
+      co_await reg.wait_for_executor_count_change(registered);
     }
     x23::Vec<ExecCard> cards;
     reg.executors_registered(&cards);

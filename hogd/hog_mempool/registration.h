@@ -41,32 +41,41 @@ public:
   // Waiting for a peer to register.
   //
   // Components that need another component to show up before they can make
-  // progress wait on this epoch rather than polling. Every registration a
-  // waiter might care about bumps it and wakes the waiters, who re-test their
-  // own condition. Callers must sample the epoch *before* testing their
-  // condition:
+  // progress suspend on one of the futexes below rather than polling. These
+  // waits must never be done by blocking a thread-pool worker: registrations
+  // arrive on RPC handlers that the pool itself has to run, and a worker that
+  // is the last one servicing its runqueue cannot migrate away, so a blocked
+  // worker can starve the very handler it is waiting for. See the ThreadPool
+  // affinity rules in x23/x23/threadpool.h.
+
+  // How many executors have registered. Waiters wanting [n] executors read
+  // the count, and if it is short, suspend until it moves:
   //
   //     for (;;) {
-  //       const uint64_t seen = reg.registration_epoch();
-  //       if (my_condition_holds())
+  //       const size_t registered = reg.registered_executor_count();
+  //       if (registered >= n)
   //         break;
-  //       co_await reg.wait_for_registration_change(seen);
+  //       co_await reg.wait_for_executor_count_change(registered);
   //     }
   //
-  // Sampling first is what makes the wakeup impossible to lose: if a
-  // registration lands between the test and the wait, the epoch has already
-  // moved past [seen] and [wait_for_registration_change()] returns without
-  // suspending, sending the caller back around to re-test.
-  //
-  // These waits must never be done by blocking a thread-pool worker.
-  // Registrations arrive on RPC handlers that the pool itself has to run, and
-  // a worker that is the last one servicing its runqueue cannot migrate away,
-  // so a blocked worker can starve the very handler it is waiting for. See the
-  // ThreadPool affinity rules in x23/x23/threadpool.h.
-  uint64_t registration_epoch() { return registration_epoch_.load(); }
-  x23::CoroFutex<uint64_t>::Awaiter wait_for_registration_change(uint64_t seen)
+  // Reading the count *before* suspending is what makes the wakeup impossible
+  // to lose: if an executor registers in between, the count no longer matches
+  // [registered], so [wait_for_executor_count_change()] returns without
+  // suspending and sends the caller back around to re-read.
+  size_t registered_executor_count() { return registered_executors_.load(); }
+  x23::CoroFutex<size_t>::Awaiter
+  wait_for_executor_count_change(size_t registered)
   {
-    return registration_epoch_.wait(seen);
+    return registered_executors_.wait(registered);
+  }
+
+  // Whether the event has both activated and published a canonical tip at a
+  // real height -- the condition the mempool's startup path waits on. Suspend
+  // with [while (!event_ready()) co_await wait_for_event_ready();].
+  bool event_ready() { return event_ready_.load(); }
+  x23::CoroFutex<bool>::Awaiter wait_for_event_ready()
+  {
+    return event_ready_.wait(false);
   }
 
   // Coordinator.
@@ -88,14 +97,19 @@ public:
   // Returns the ID of the registered executor.
   size_t register_executor(const ExecCard &card)
   {
-    size_t exec_id;
+    size_t registered;
     {
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.push_back(card);
-      exec_id = exec_cards_.size() - 1;
+      registered = exec_cards_.size();
     }
-    bump_registration_epoch();
-    return exec_id;
+    // Published after the card is in [exec_cards_], so a waiter that sees a
+    // count of [n] can always read back [n] cards. Broadcast outside
+    // [exec_cards_mutex_]: the waiters resume on the thread pool and the first
+    // thing they do is re-take it.
+    registered_executors_.store(registered);
+    registered_executors_.broadcast(&default_threadpool());
+    return registered - 1;
   }
   size_t executors_registered(x23::Vec<ExecCard> *cards)
   {
@@ -203,8 +217,9 @@ public:
     pending_event_tip_.reset();
     pending_event_token_ = 0;
     event_registered_.store(true, std::memory_order_release);
+    const bool ready = event_ready_locked();
     lk.unlock();
-    bump_registration_epoch();
+    publish_event_ready(ready);
     return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
   bool event_registered(EventCard *card) const
@@ -218,13 +233,15 @@ public:
   }
   void publish_event_canonical_tip(EventCanonicalTip tip)
   {
+    bool ready;
     {
       std::unique_lock lk(event_mutex_);
       event_canonical_tip_ = std::move(tip);
+      // Readiness gates on the tip's height as well as activation, so a new
+      // tip can be what completes it.
+      ready = event_ready_locked();
     }
-    // [MempoolEventRpc::wait_for_registration()] gates on the tip's height as
-    // well as activation, so a new tip can be what unblocks it.
-    bump_registration_epoch();
+    publish_event_ready(ready);
   }
   std::optional<EventCanonicalTip> event_canonical_tip() const
   {
@@ -292,20 +309,35 @@ public:
     }
     auth_registered_ = false;
     auth_card_ = AuthCard{};
-    // Release anyone parked on a condition this reset just invalidated, so a
-    // test that clears the registration cannot leave a waiter stranded.
-    bump_registration_epoch();
+    // Retract both signals, so a waiter that arrives after this reset parks
+    // rather than reading a readiness this cleared away. Any waiter already
+    // parked stays parked, which is what the pre-reset state would have done.
+    registered_executors_.store(0);
+    event_ready_.store(false);
   }
 
 private:
-  // Wake every waiter so each can re-test its own condition. Call this with no
-  // Registration mutex held: broadcast() resumes the waiters on the thread
-  // pool, and the first thing they do is re-test conditions that take these
-  // mutexes.
-  void bump_registration_epoch()
+  // Whether the event is fully usable: activated, and advertising a canonical
+  // tip at a real height. Caller must hold [event_mutex_].
+  bool event_ready_locked() const
   {
-    registration_epoch_.rmw([](uint64_t &epoch) { ++epoch; });
-    registration_epoch_.broadcast(&default_threadpool());
+    return event_registered_.load(std::memory_order_acquire) &&
+           event_canonical_tip_.has_value() &&
+           event_canonical_tip_->consensus_value.proposal_header.block_height >=
+               0;
+  }
+
+  // Publish event readiness and wake its waiters. Call with [event_mutex_]
+  // released: the waiters resume on the thread pool and immediately re-take
+  // it. Readiness is monotonic until [clear()], so this only ever moves false
+  // -> true and a repeat call is harmless.
+  void publish_event_ready(bool ready)
+  {
+    if (!ready) {
+      return;
+    }
+    event_ready_.store(true);
+    event_ready_.broadcast(&default_threadpool());
   }
 
   // No one should construct a [Registration] instance directly. Instead, use
@@ -314,9 +346,11 @@ private:
   Registration() = default;
   ~Registration() = default;
 
-  // Bumped and broadcast by [bump_registration_epoch()] on every registration
-  // change a waiter might be gated on. See [registration_epoch()].
-  x23::CoroFutex<uint64_t> registration_epoch_{0};
+  // Registration signals waiters suspend on. See [registered_executor_count()]
+  // and [event_ready()]. Each is written and broadcast by the registration
+  // that changes it, so a waiter only wakes for the thing it is waiting for.
+  x23::CoroFutex<size_t> registered_executors_{0};
+  x23::CoroFutex<bool> event_ready_{false};
 
   std::atomic<bool> coordinator_registered_ = false;
   CoordCard coord_card_;

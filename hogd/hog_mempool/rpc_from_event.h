@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <cstdint>
 #include <thread>
 
 #include "event_rpc.hh"
@@ -60,22 +59,16 @@ public:
     co_return std::move(*ret);
   }
 
-  // Suspends (without occupying a thread-pool worker) until the event has
-  // activated and published a canonical tip. See [Registration::
-  // registration_epoch()] for why the epoch is sampled before the test.
+  // Suspends -- without occupying a thread-pool worker -- until the event has
+  // activated and published a canonical tip. See [Registration::event_ready()].
   static x23::Async<EventCard> wait_for_registration()
   {
     Registration &reg = Registration::registration();
     EventCard card;
-    while (true) {
-      const uint64_t seen = reg.registration_epoch();
-      const auto tip = reg.event_canonical_tip();
-      if (tip && tip->consensus_value.proposal_header.block_height >= 0 &&
-          reg.event_registered(&card)) {
-        co_return card;
-      }
-      co_await reg.wait_for_registration_change(seen);
+    while (!(reg.event_ready() && reg.event_registered(&card))) {
+      co_await reg.wait_for_event_ready();
     }
+    co_return card;
   }
 
   static EventCard wait_for_registration_for(std::chrono::milliseconds timeout)

@@ -113,7 +113,7 @@ public:
     }
     // Neither of these waits may occupy a thread-pool worker: both block until
     // another component registers, and that registration runs on the pool. See
-    // [Registration::registration_epoch()].
+    // the registration signals in [Registration].
     while (!initialized_.load(std::memory_order_acquire)) {
       co_await initialized_waiters_.wait(false);
     }
