@@ -111,11 +111,11 @@ public:
     if (ready()) {
       co_return;
     }
-    co_await default_threadpool().bg();
+    // Both waits suspend rather than block a pool worker; see [Registration].
     while (!initialized_.load(std::memory_order_acquire)) {
-      initialized_.wait(false, std::memory_order_acquire);
+      co_await initialized_waiters_.wait(false);
     }
-    std::ignore = MempoolEventRpc::wait_for_registration();
+    std::ignore = co_await MempoolEventRpc::wait_for_registration();
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
     for (size_t i = 0; i < kNumClientsPerExecutor; ++i) {
@@ -502,7 +502,8 @@ private:
         co_await MempoolAuthRpc::get_client());
 
     initialized_.store(true, std::memory_order_release);
-    initialized_.notify_all();
+    initialized_waiters_.store(true);
+    initialized_waiters_.broadcast(&default_threadpool());
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
@@ -785,6 +786,7 @@ private:
   std::atomic<bool> ready_ = false;
   x23::CoroFutex<bool> ready_waiters_{false};
   std::atomic<bool> initialized_ = false;
+  x23::CoroFutex<bool> initialized_waiters_{false};
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();

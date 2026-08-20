@@ -59,35 +59,32 @@ public:
     co_return std::move(*ret);
   }
 
-  static EventCard wait_for_registration()
+  // Suspends -- without occupying a thread-pool worker -- until the event has
+  // activated and published a canonical tip. See [Registration::event_ready()].
+  static x23::Async<EventCard> wait_for_registration()
   {
+    Registration &reg = Registration::registration();
+    co_await reg.wait_for_event_ready();
+    // Readiness is only published while the event is registered, so the card
+    // is set by the time we get here.
     EventCard card;
-    while (true) {
-      const auto tip = Registration::registration().event_canonical_tip();
-      if (tip && tip->consensus_value.proposal_header.block_height >= 0 &&
-          Registration::registration().event_registered(&card)) {
-        return card;
-      }
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    reg.event_registered(&card);
+    co_return card;
   }
 
   static EventCard wait_for_registration_for(std::chrono::milliseconds timeout)
   {
+    Registration &reg = Registration::registration();
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-    bool saw_canonical_tip = false;
     EventCard card;
     while (std::chrono::steady_clock::now() < deadline) {
-      const auto tip = Registration::registration().event_canonical_tip();
-      saw_canonical_tip =
-          tip && tip->consensus_value.proposal_header.block_height >= 0;
-      if (saw_canonical_tip &&
-          Registration::registration().event_registered(&card)) {
+      if (reg.event_ready() && reg.event_registered(&card)) {
         return card;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if (!saw_canonical_tip) {
+    const auto tip = reg.event_canonical_tip();
+    if (!tip || tip->consensus_value.proposal_header.block_height < 0) {
       panic("event startup timed out waiting for canonical tip");
     }
     panic("event startup timed out waiting for activation");
