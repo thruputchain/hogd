@@ -3,6 +3,7 @@
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <utility>
 
 #include "exec_result.hh"
 #include "exec_sched.hh"
@@ -58,8 +59,8 @@ ExecutorMempoolRpc::executorsched_propose_transaction(
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
-  auto r =
-      co_await ctx->get().propose_transaction(signed_tx, allocate_tx_ids(1));
+  auto r = co_await ctx->get().propose_transaction(std::move(signed_tx),
+                                                   allocate_tx_ids(1));
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
     co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
@@ -81,8 +82,8 @@ ExecutorMempoolRpc::executorsched_validate_transaction(
     co_return ExecResult::ExecResultSystemError;
   }
 
-  auto r =
-      co_await ctx->get().validate_transaction(proposed_tx, allocate_tx_ids(1));
+  auto r = co_await ctx->get().validate_transaction(std::move(proposed_tx),
+                                                    allocate_tx_ids(1));
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
       [[unlikely]] {
     co_return ExecResult::ExecResultUnrecoverable;

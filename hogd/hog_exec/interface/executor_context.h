@@ -52,10 +52,9 @@ public:
                              TransactionID first_tx_id);
 
   x23::Async<ExecProposeResult>
-  propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id);
+  propose_transaction(SignedTransaction signed_tx, TransactionID tx_id);
   x23::Async<ExecResult>
-  validate_transaction(ProposedTransaction const &proposed_tx,
-                       TransactionID tx_id);
+  validate_transaction(ProposedTransaction proposed_tx, TransactionID tx_id);
 
   x23::Async<ExpectedViewResult>
   view_transaction(TransactionViewQuery const &query);
@@ -75,9 +74,9 @@ private:
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
-  ExecProposeResult run_propose_transaction(SignedTransaction const &signed_tx,
+  ExecProposeResult run_propose_transaction(SignedTransaction signed_tx,
                                             TransactionID tx_id);
-  ExecResult run_validate_transaction(ProposedTransaction const &tx,
+  ExecResult run_validate_transaction(ProposedTransaction tx,
                                       TransactionID tx_id);
 
   ExpectedViewResult run_view_transaction(TransactionViewQuery const &query);
