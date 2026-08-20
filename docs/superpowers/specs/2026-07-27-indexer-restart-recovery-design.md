@@ -194,8 +194,8 @@ separate work.
 
 1. A committed block is recoverable after the event service has acknowledged
    commit, even if no indexer was connected.
-2. Event logs and transaction bodies retain their positional association and
-   are serialized in deterministic transaction-hash order.
+2. Event logs and transaction bodies retain their positional association;
+   transaction order is not significant to indexer application.
 3. Empty blocks advance the same contiguous sequence as non-empty blocks.
 4. One indexer pull loop applies records serially in exact height order.
 5. The indexer watermark advances only in strict height order.
@@ -223,7 +223,7 @@ event, indexer, and devnode suites.
 | A dropped event connection clears readiness, is retried, and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
 | A blocked pull is bounded by its RPC deadline and reconnects | `IndexerPullController.RpcTimeoutReconnectsAfterBlockedPull` |
 | Initial catch-up has no wall-clock deadline, and shutdown cancels an in-flight pull before joining | `IndexerPullController.DestructionCancelsBlockedPull` |
-| Event/body candidate bytes are deterministic without retransmitting `ProposalTxs` | `EventBlockContextTest.CandidateOrdersEventBodiesByTransactionHash`; `IndexerOutboxTest.BatchAndBodyMismatchesAreRejected` |
+| Event/body association is checked once against finalized consensus before publication | `IndexerOutboxTest.CandidateCardinalityAndCommittedBodyMismatchAreRejected` |
 | Lost activation replies and same-card restart reconciliation are idempotent | `Mempool.EventActivationRetryAfterLostSuccessReplyIsIdempotent`; `Mempool.RegisteredEventSameCardRepreparesAtAdvancedCanonicalTip` |
 | Origin, identity, corruption, and gap conflicts fail closed | `EventRpcTest.ForgedAndUnknownProgressConflict`; `EventRpcTest.ReconciliationRejectsDisconnectedArchivalPrefix`; `StrictIndexerTest.RejectsPrevBodyEventRootAndDigestConflicts` |
 

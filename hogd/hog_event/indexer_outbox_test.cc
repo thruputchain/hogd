@@ -137,7 +137,7 @@ sort_event_body_batches(ProposedTransactionBatch &bodies,
 
 IndexerOutboxCandidatePayload
 make_candidate_with_proposal(BlockID block_id, BlockHeight height,
-                             ProposalTxs proposal_txs,
+                             const ProposalTxs &proposal_txs,
                              ProposedTransactionBatch bodies,
                              TxEventLogBatch events)
 {
@@ -158,12 +158,13 @@ make_candidate(BlockID block_id, BlockHeight height,
                ProposedTransactionBatch bodies, TxEventLogBatch events)
 {
   ProposalTxs proposal_txs = make_canonical_proposal_txs(bodies);
-  return make_candidate_with_proposal(block_id, height, std::move(proposal_txs),
+  return make_candidate_with_proposal(block_id, height, proposal_txs,
                                       std::move(bodies), std::move(events));
 }
 
 IndexerOutboxCommittedPayload
-make_committed_with_proposal(BlockHeight height, ProposalTxs proposal_txs,
+make_committed_with_proposal(BlockHeight height,
+                             const ProposalTxs &proposal_txs,
                              ProposedTransactionBatch bodies,
                              TxEventLogBatch events)
 {
@@ -1243,24 +1244,16 @@ TEST_F(IndexerOutboxTest, EnumerationRejectsSparseRecordWithInvalidDigest)
   EXPECT_NE(records.error().find("digest mismatch"), std::string::npos);
 }
 
-TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
+TEST_F(IndexerOutboxTest,
+       CandidateCardinalityAndCommittedBodyMismatchAreRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body = make_body(5);
   auto candidate = make_candidate(48, 15, {body}, {make_event(body, 0x55)});
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
-  const std::string filename = IndexerOutboxStore::candidate_filename(48);
-  mutate_payload<IndexerOutboxCandidatePayload>(dir_, filename,
-                                                [](auto &payload) {
-                                                  payload.tx_bodies[0] =
-                                                      make_body(6);
-                                                });
-
-  auto body_mismatch = store.load_candidate(48)();
-  ASSERT_FALSE(body_mismatch.has_value());
-  EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
-
-  mutate_payload<IndexerOutboxCandidatePayload>(dir_, filename,
+  const std::string candidate_filename =
+      IndexerOutboxStore::candidate_filename(48);
+  mutate_payload<IndexerOutboxCandidatePayload>(dir_, candidate_filename,
                                                 [](auto &payload) {
                                                   payload.tx_bodies.clear();
                                                 });
@@ -1268,6 +1261,22 @@ TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
   ASSERT_FALSE(batch_mismatch.has_value());
   EXPECT_NE(batch_mismatch.error().find("cardinalities differ"),
             std::string::npos);
+
+  auto committed =
+      make_committed(16, {body}, {make_event(body, /*marker=*/0x66)});
+  initialize_test_origin(store, committed);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  const std::string committed_filename =
+      IndexerOutboxStore::committed_filename(16);
+  mutate_payload<IndexerOutboxCommittedPayload>(dir_, committed_filename,
+                                                [](auto &payload) {
+                                                  payload.tx_bodies[0] =
+                                                      make_body(6);
+                                                });
+
+  auto body_mismatch = store.load_committed(16)();
+  ASSERT_FALSE(body_mismatch.has_value());
+  EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
 }
 
 TEST_F(IndexerOutboxTest, CandidateProposalHashMutationIsRejected)

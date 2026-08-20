@@ -20,9 +20,6 @@ template<typename T> using IndexerPayloadStatus = std::expected<T, std::string>;
 SHA256Hash compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs);
 x23::Async<IndexerPayloadStatus<TxsHash>>
 compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs);
-IndexerPayloadStatus<void>
-validate_indexer_event_body_mapping(const TxEventLogBatch &event_logs,
-                                    const ProposedTransactionBatch &tx_bodies);
 x23::Async<IndexerPayloadStatus<void>>
 validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload);
 x23::Async<IndexerPayloadStatus<IndexerCommittedBlock>>

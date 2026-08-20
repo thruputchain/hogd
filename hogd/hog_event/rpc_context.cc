@@ -307,13 +307,6 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
   x23::CoroGuard outbox_guard;
   co_await outbox_guard(outbox_commit_lock_);
-  auto promotion = co_await find_canonical_candidate(consensus_value);
-  if (!promotion) {
-    error("failed to identify canonical candidate for height {}: {}",
-          block_height, promotion.error());
-    co_await finish_block_operation(block_id, context_ptr, false);
-    co_return EventError{EventErrorCode::kInternal};
-  }
   auto committed_exists = indexer_outbox_store_.has_committed(block_height);
   if (!committed_exists) {
     error("failed to inspect committed indexer outbox record at height {}: {}",
@@ -334,16 +327,16 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kBadBlockID};
     }
-    if (*promotion && !xdr_equal((*promotion)->committed, *loaded)) {
-      error("candidate full payload conflicts with committed record at height "
-            "{}",
-            block_height);
-      co_await finish_block_operation(block_id, context_ptr, false);
-      co_return EventError{EventErrorCode::kInternal};
-    }
     committed = std::move(*loaded);
   }
   else {
+    auto promotion = co_await find_canonical_candidate(consensus_value);
+    if (!promotion) {
+      error("failed to identify canonical candidate for height {}: {}",
+            block_height, promotion.error());
+      co_await finish_block_operation(block_id, context_ptr, false);
+      co_return EventError{EventErrorCode::kInternal};
+    }
     if (!*promotion) {
       error("no canonical candidate exists for committed height {}",
             block_height);
@@ -1135,6 +1128,9 @@ EventRPCContext::find_canonical_candidate(
         record.proposal_txs_hash != consensus_value.proposal_txs_hash) {
       continue;
     }
+    // Candidate enumeration is deterministic. One matching candidate is
+    // sufficient; full committed-payload validation below binds its events and
+    // transactions to the finalized consensus value.
     auto candidate =
         co_await indexer_outbox_store_.load_candidate(record.block_id);
     if (!candidate) {
@@ -1148,16 +1144,8 @@ EventRPCContext::find_canonical_candidate(
         .event_logs = std::move(candidate->event_logs),
         .tx_bodies = std::move(candidate->tx_bodies),
     };
-    // Publication performs full committed-payload validation. Only compare
-    // bytes when there is a competing matching candidate; the common
-    // single-candidate path should not serialize the whole block twice.
-    if (selected && !xdr_equal(selected->committed, committed)) {
-      co_return std::unexpected(
-          "multiple distinct candidates match the canonical consensus value");
-    }
-    if (!selected) {
-      selected = CandidatePromotion{.committed = std::move(committed)};
-    }
+    selected = CandidatePromotion{.committed = std::move(committed)};
+    break;
   }
   co_return selected;
 }
