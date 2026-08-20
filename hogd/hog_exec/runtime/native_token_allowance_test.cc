@@ -12,6 +12,7 @@
 
 #include "built_contracts/genesis_root.h"
 #include "built_contracts/itc_erc20.h"
+#include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
