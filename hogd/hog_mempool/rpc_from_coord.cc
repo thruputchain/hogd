@@ -2907,7 +2907,17 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   });
 
   CHECK(initialized_.load(std::memory_order_acquire));
-  CHECK_EQ(height, auth_data_height_.load() + 1);
+  const BlockHeight current_height = auth_data_height_.load();
+  if (height <= current_height) {
+    // An auth server that subscribes after the database has committed its
+    // current tip sends an empty synchronization callback for that tip.  A
+    // restarted mempool may already have initialized its watermark from the
+    // same database tip, so this notification is intentionally idempotent.
+    warn("Ignoring stale auth-data update for height {} at current height {}",
+         height, current_height);
+    co_return;
+  }
+  CHECK_EQ(height, current_height + 1);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
