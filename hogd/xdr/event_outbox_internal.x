@@ -58,7 +58,7 @@ struct IndexerOutboxCandidatePayload {
   BlockID block_id;
   BlockHeight block_height;
   EventsHash event_root;
-  ProposalTxs proposal_txs;
+  ProposalTxsHash proposal_txs_hash;
   TxEventLogBatch event_logs;
   ProposedTransactionBatch tx_bodies;
 };

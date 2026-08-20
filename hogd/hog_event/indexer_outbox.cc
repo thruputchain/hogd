@@ -174,8 +174,8 @@ validate_payload_sizes(const Payload &payload)
     consensus_value_size = x23::detail::xdr_size_bounds<ConsensusValue>().max_;
   }
   auto response_size = indexer_event_pull_rpc_record_size_for_parts(
-      consensus_value_size, x23::xdr_size(payload.proposal_txs),
-      x23::xdr_size(payload.event_logs), x23::xdr_size(payload.tx_bodies));
+      consensus_value_size, x23::xdr_size(payload.event_logs),
+      x23::xdr_size(payload.tx_bodies));
   if (!response_size) {
     return std::unexpected(response_size.error());
   }
@@ -204,10 +204,16 @@ validate_candidate(const IndexerOutboxCandidatePayload &payload)
       payload.event_root) {
     co_return std::unexpected("event root differs from payload identity");
   }
-  if (auto mapping = co_await validate_indexer_canonical_proposal_mapping(
-          payload.proposal_txs, payload.event_logs, payload.tx_bodies);
+  if (auto mapping = validate_indexer_event_body_mapping(payload.event_logs,
+                                                         payload.tx_bodies);
       !mapping) {
     co_return std::unexpected(mapping.error());
+  }
+  for (size_t i = 1; i < payload.event_logs.size(); ++i) {
+    if (payload.event_logs[i].tx_hash <= payload.event_logs[i - 1].tx_hash) {
+      co_return std::unexpected(
+          "candidate event/body hashes are not strictly increasing");
+    }
   }
   co_return IndexerOutboxStatus<void>{};
 }
@@ -242,8 +248,7 @@ make_header(const IndexerOutboxCandidatePayload &payload, size_t payload_size,
       .payload_byte_length = payload_size,
       .payload_digest = digest,
       .event_root = payload.event_root,
-      .proposal_txs_hash =
-          proposal_txs_compatibility_hash(payload.proposal_txs),
+      .proposal_txs_hash = payload.proposal_txs_hash,
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCandidate);
   header.record_identity.candidate_block_id() = payload.block_id;
@@ -392,7 +397,6 @@ validate_indexer_outbox_file_size(size_t file_size)
 
 IndexerOutboxStatus<size_t>
 indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
-                                             size_t proposal_txs_xdr_size,
                                              size_t event_logs_xdr_size,
                                              size_t tx_bodies_xdr_size)
 {
@@ -409,8 +413,6 @@ indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
   size = size.and_then([&](size_t value) {
     return checked_add(value, consensus_value_xdr_size);
   });
-  size = size.and_then(
-      [&](size_t value) { return checked_add(value, proposal_txs_xdr_size); });
   size = size.and_then(
       [&](size_t value) { return checked_add(value, event_logs_xdr_size); });
   size = size.and_then(
@@ -589,8 +591,7 @@ IndexerOutboxStore::load_candidate(BlockID block_id) const
   if (payload->block_id != header->record_identity.candidate_block_id() ||
       payload->block_height != header->block_height ||
       payload->event_root != header->event_root ||
-      proposal_txs_compatibility_hash(payload->proposal_txs) !=
-          header->proposal_txs_hash) {
+      payload->proposal_txs_hash != header->proposal_txs_hash) {
     co_return std::unexpected(
         "candidate outbox header/payload metadata mismatch");
   }

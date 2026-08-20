@@ -31,6 +31,7 @@
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
+#include "hogd/xdr/proposal_hash.h"
 #include "integration.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
@@ -496,12 +497,16 @@ TEST_F(RpcNegativeTest,
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
   EXPECT_EQ(event_client_
-                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .eventsched_close_block(block_id, block_id,
+                                        proposal_txs_compatibility_hash(
+                                            ProposalTxs{}))
                 .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id, ProposalTxs{})
+                                        recycle_probe_block_id,
+                                        proposal_txs_compatibility_hash(
+                                            ProposalTxs{}))
                 .error(),
             RPCError::kRPCNone);
   validate_thread.join();
@@ -557,12 +562,16 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
   EXPECT_EQ(event_client_
-                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .eventsched_close_block(block_id, block_id,
+                                        proposal_txs_compatibility_hash(
+                                            ProposalTxs{}))
                 .error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id, ProposalTxs{})
+                                        recycle_probe_block_id,
+                                        proposal_txs_compatibility_hash(
+                                            ProposalTxs{}))
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();
@@ -734,7 +743,9 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
   EXPECT_EQ(event_client_
-                .eventsched_close_block(block_id, block_id, ProposalTxs{})
+                .eventsched_close_block(block_id, block_id,
+                                        proposal_txs_compatibility_hash(
+                                            ProposalTxs{}))
                 .error(),
             RPCError::kRPCNone);
 }

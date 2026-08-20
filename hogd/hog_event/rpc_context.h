@@ -44,19 +44,14 @@ public:
   // Closes a block.
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
-  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
-                                                  BlockHeight block_height,
-                                                  ProposalTxs proposal_txs);
+  x23::Async<EventStatus<SHA256Hash>>
+  close_block(BlockID block_id, BlockHeight block_height,
+              ProposalTxsHash proposal_txs_hash);
 
   // Durably publishes a closed block and GCs the block context.
   // Returns the block height on success.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
-
-  // Makes a durably published block pullable only after the scheduler has also
-  // completed its durable commit.
-  x23::Async<EventStatus<BlockHeight>>
-  confirm_committed_block(ConsensusValue consensus_value);
 
   x23::Async<EventStatus<void>>
   reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
@@ -137,9 +132,9 @@ private:
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
   std::unordered_map<BlockID, BlockOperation> block_operations_;
-  // Guarded by outbox_commit_lock_. Records above this scheduler-confirmed
-  // height may be durable after crash reconciliation but are not pullable.
-  std::optional<BlockHeight> admissible_indexer_tail_;
+  // Guarded by outbox_commit_lock_. Every record through this finalized
+  // height is pullable, including a crash-window record one ahead of HogDB.
+  std::optional<BlockHeight> finalized_indexer_tail_;
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
 

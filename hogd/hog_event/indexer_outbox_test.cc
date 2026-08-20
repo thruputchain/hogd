@@ -109,18 +109,45 @@ make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
   return proposal_txs;
 }
 
+void
+sort_event_body_batches(ProposedTransactionBatch &bodies,
+                        TxEventLogBatch &events)
+{
+  if (bodies.size() != events.size()) {
+    return;
+  }
+  EventWithBodyBatch pairs;
+  pairs.reserve(bodies.size());
+  for (size_t i = 0; i < bodies.size(); ++i) {
+    pairs.push_back(
+        {.event = std::move(events[i]), .body = std::move(bodies[i])});
+  }
+  std::ranges::sort(pairs, [](const auto &lhs, const auto &rhs) {
+    return lhs.event.tx_hash < rhs.event.tx_hash;
+  });
+  events.clear();
+  bodies.clear();
+  events.reserve(pairs.size());
+  bodies.reserve(pairs.size());
+  for (auto &pair : pairs) {
+    events.push_back(std::move(pair.event));
+    bodies.push_back(std::move(pair.body));
+  }
+}
+
 IndexerOutboxCandidatePayload
 make_candidate_with_proposal(BlockID block_id, BlockHeight height,
                              ProposalTxs proposal_txs,
                              ProposedTransactionBatch bodies,
                              TxEventLogBatch events)
 {
+  sort_event_body_batches(bodies, events);
   return IndexerOutboxCandidatePayload{
       .format_version = kIndexerOutboxFormatVersion,
       .block_id = block_id,
       .block_height = height,
       .event_root = compute_indexer_outbox_event_root(events),
-      .proposal_txs = std::move(proposal_txs),
+      .proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs),
       .event_logs = std::move(events),
       .tx_bodies = std::move(bodies),
   };
@@ -140,6 +167,7 @@ make_committed_with_proposal(BlockHeight height, ProposalTxs proposal_txs,
                              ProposedTransactionBatch bodies,
                              TxEventLogBatch events)
 {
+  sort_event_body_batches(bodies, events);
   ConsensusValue value;
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = compute_indexer_outbox_event_root(events);
@@ -151,7 +179,6 @@ make_committed_with_proposal(BlockHeight height, ProposalTxs proposal_txs,
   return IndexerOutboxCommittedPayload{
       .format_version = kIndexerOutboxFormatVersion,
       .consensus_value = std::move(value),
-      .proposal_txs = std::move(proposal_txs),
       .event_logs = std::move(events),
       .tx_bodies = std::move(bodies),
   };
@@ -231,14 +258,13 @@ make_committed_payload_golden_fixture()
   payload.tx_bodies.push_back(std::move(body));
 
   payload.event_logs[0].tx_hash = sha256(payload.tx_bodies[0].signed_tx.tx);
-  payload.proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
+  ProposalTxs proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs);
-  auto txs_root = compute_indexer_proposal_txs_root(payload.proposal_txs)();
+  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
-  value.proposal_txs_hash =
-      proposal_txs_compatibility_hash(payload.proposal_txs);
+  value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
   return payload;
 }
 
@@ -372,24 +398,6 @@ write_payload(const TmpDir &dir, std::string_view filename,
   TestOutboxFile envelope = read_envelope(dir, filename);
   set_envelope_payload(envelope, x23::serialize(payload));
   write_envelope(dir, filename, envelope);
-}
-
-void
-merge_first_two_segments(ParallelBatch &batch)
-{
-  ASSERT_GE(batch.segment_tokens.size(), 2);
-  ASSERT_EQ(batch.segment_tokens.size(), batch.segment_bytes.size());
-  ParallelBatch merged;
-  merged.segment_tokens.push_back(batch.segment_tokens[0] +
-                                  batch.segment_tokens[1]);
-  merged.segment_bytes.push_back(batch.segment_bytes[0] +
-                                 batch.segment_bytes[1]);
-  for (size_t i = 2; i < batch.segment_tokens.size(); ++i) {
-    merged.segment_tokens.push_back(batch.segment_tokens[i]);
-    merged.segment_bytes.push_back(batch.segment_bytes[i]);
-  }
-  merged.xdr = batch.xdr;
-  batch = std::move(merged);
 }
 
 template<typename T>
@@ -939,26 +947,6 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
                    .has_value());
 }
 
-TEST_F(IndexerOutboxTest, NoncanonicalEventBodyOrderIsRejected)
-{
-  IndexerOutboxStore store = open_store(dir_);
-  ProposedTransaction body_a = make_body(31);
-  ProposedTransaction body_b = make_body(32);
-  ProposedTransactionBatch canonical_bodies{body_a, body_b};
-  ProposalTxs proposal_txs = make_canonical_proposal_txs(canonical_bodies);
-  ProposedTransactionBatch reversed_bodies{body_b, body_a};
-  TxEventLogBatch reversed_events{make_event(body_b, 0x32),
-                                  make_event(body_a, 0x31)};
-  auto candidate =
-      make_candidate_with_proposal(43, 8, proposal_txs, reversed_bodies,
-                                   reversed_events);
-
-  auto result = store.publish_candidate(candidate)();
-
-  ASSERT_FALSE(result.has_value());
-  EXPECT_NE(result.error().find("order"), std::string::npos);
-}
-
 TEST_F(IndexerOutboxTest, DurableSemanticValidationAwaitsOnPoolWorker)
 {
   IndexerOutboxStore store = open_store(dir_);
@@ -1282,52 +1270,7 @@ TEST_F(IndexerOutboxTest, BatchAndBodyMismatchesAreRejected)
             std::string::npos);
 }
 
-TEST_F(IndexerOutboxTest, NondeterministicDataMutationIsRejected)
-{
-  IndexerOutboxStore store = open_store(dir_);
-  ProposedTransaction body = make_body(7);
-  auto committed = make_committed(16, {body}, {make_event(body, 0x66)});
-  initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  const std::string filename = IndexerOutboxStore::committed_filename(16);
-  mutate_payload<IndexerOutboxCommittedPayload>(
-      dir_, filename, [](auto &payload) {
-        payload.tx_bodies[0]
-            .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0x01;
-      });
-
-  auto result = store.load_committed(16)();
-
-  ASSERT_FALSE(result.has_value());
-  EXPECT_NE(result.error().find("nondeterministic data"), std::string::npos);
-}
-
-TEST_F(IndexerOutboxTest, CanonicalProposalSegmentationChangeIsRejected)
-{
-  IndexerOutboxStore store = open_store(dir_);
-  ProposedTransaction body_a = make_body(71);
-  ProposedTransaction body_b = make_body(72);
-  ProposedTransaction body_c = make_body(73);
-  auto committed =
-      make_committed(161, {body_a, body_b, body_c},
-                     {make_event(body_a, 0x71), make_event(body_b, 0x72),
-                      make_event(body_c, 0x73)});
-  ASSERT_GE(committed.proposal_txs.hash.segment_tokens.size(), 2);
-  initialize_test_origin(store, committed);
-  ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  const std::string filename = IndexerOutboxStore::committed_filename(161);
-
-  IndexerOutboxCommittedPayload resegmented = committed;
-  merge_first_two_segments(resegmented.proposal_txs.hash);
-  write_payload(dir_, filename, resegmented);
-  auto result = store.load_committed(161)();
-
-  ASSERT_FALSE(result.has_value());
-  EXPECT_NE(result.error().find("commitment"), std::string::npos);
-}
-
-TEST_F(IndexerOutboxTest,
-       MissingDuplicateAndMalformedCanonicalHashesAreRejected)
+TEST_F(IndexerOutboxTest, CandidateProposalHashMutationIsRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body_a = make_body(81);
@@ -1340,38 +1283,12 @@ TEST_F(IndexerOutboxTest,
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(481);
 
-  x23::XdrVec<TransactionHash> hashes;
-  ASSERT_TRUE(parallel_batch_to_t(candidate.proposal_txs.hash, hashes)());
-  ASSERT_EQ(hashes.size(), 3);
-
-  IndexerOutboxCandidatePayload missing = candidate;
-  x23::XdrVec<TransactionHash> missing_hashes = hashes;
-  missing_hashes.pop_back();
-  missing.proposal_txs.hash = t_to_parallel_batch(missing_hashes)();
-  write_payload(dir_, filename, missing);
-  auto missing_result = store.load_candidate(481)();
-  ASSERT_FALSE(missing_result.has_value());
-  EXPECT_NE(missing_result.error().find("metadata mismatch"),
-            std::string::npos);
-
-  IndexerOutboxCandidatePayload duplicate = candidate;
-  x23::XdrVec<TransactionHash> duplicate_hashes = hashes;
-  duplicate_hashes[1] = duplicate_hashes[0];
-  duplicate.proposal_txs.hash = t_to_parallel_batch(duplicate_hashes)();
-  write_payload(dir_, filename, duplicate);
-  auto duplicate_result = store.load_candidate(481)();
-  ASSERT_FALSE(duplicate_result.has_value());
-  EXPECT_NE(duplicate_result.error().find("metadata mismatch"),
-            std::string::npos);
-
-  IndexerOutboxCandidatePayload malformed = candidate;
-  ASSERT_FALSE(malformed.proposal_txs.hash.segment_tokens.empty());
-  malformed.proposal_txs.hash.segment_tokens[0]++;
-  write_payload(dir_, filename, malformed);
-  auto malformed_result = store.load_candidate(481)();
-  ASSERT_FALSE(malformed_result.has_value());
-  EXPECT_NE(malformed_result.error().find("metadata mismatch"),
-            std::string::npos);
+  IndexerOutboxCandidatePayload mutated = candidate;
+  mutated.proposal_txs_hash[0] ^= 1;
+  write_payload(dir_, filename, mutated);
+  auto result = store.load_candidate(481)();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("metadata mismatch"), std::string::npos);
 }
 
 TEST_F(IndexerOutboxTest, MalformedAndTrailingXdrAreRejected)
@@ -1454,25 +1371,19 @@ TEST_F(IndexerOutboxTest,
   x23::msg_set_reply_stat(&reply, x23::accept_stat::SUCCESS);
   const x23::Buf actual_record = x23::make_record(reply, result);
   auto measured = indexer_event_pull_rpc_record_size_for_parts(
-      x23::xdr_size(payload.consensus_value),
-      x23::xdr_size(payload.proposal_txs), x23::xdr_size(payload.event_logs),
+      x23::xdr_size(payload.consensus_value), x23::xdr_size(payload.event_logs),
       x23::xdr_size(payload.tx_bodies));
   ASSERT_TRUE(measured.has_value()) << measured.error();
   EXPECT_EQ(*measured, actual_record.size());
 
-  const size_t fixed =
-      *indexer_event_pull_rpc_record_size_for_parts(0, 0, 0, 0);
-  const size_t large_proposal_bytes =
-      kMaxIndexerEventPullRpcRecordBytes - fixed;
+  const size_t fixed = *indexer_event_pull_rpc_record_size_for_parts(0, 0, 0);
+  const size_t large_event_bytes = kMaxIndexerEventPullRpcRecordBytes - fixed;
   auto max_minus_one =
-      indexer_event_pull_rpc_record_size_for_parts(0, large_proposal_bytes - 1,
-                                                   0, 0);
+      indexer_event_pull_rpc_record_size_for_parts(0, large_event_bytes - 1, 0);
   auto at_max =
-      indexer_event_pull_rpc_record_size_for_parts(0, large_proposal_bytes, 0,
-                                                   0);
+      indexer_event_pull_rpc_record_size_for_parts(0, large_event_bytes, 0);
   auto overflow =
-      indexer_event_pull_rpc_record_size_for_parts(0, large_proposal_bytes + 1,
-                                                   0, 0);
+      indexer_event_pull_rpc_record_size_for_parts(0, large_event_bytes + 1, 0);
   ASSERT_TRUE(max_minus_one.has_value()) << max_minus_one.error();
   ASSERT_TRUE(at_max.has_value()) << at_max.error();
   EXPECT_EQ(*max_minus_one, kMaxIndexerEventPullRpcRecordBytes - 1);

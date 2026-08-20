@@ -475,7 +475,6 @@ private:
   struct JointCommitResult {
     DbBlockResult db;
     RPCError event_commit = RPCError::kRPCUnrecoverable;
-    RPCError event_confirmation = RPCError::kRPCUnrecoverable;
   };
 
   struct NominationTelemetry {
@@ -572,13 +571,11 @@ private:
   x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
   x23::Async<RPCError> eventsched_commit_block(BlockID block_id,
                                                const ConsensusValue &value);
-  x23::Async<RPCError>
-  eventsched_confirm_committed_block(const ConsensusValue &value);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
-  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
-                                                      BlockHeight block_height,
-                                                      const ProposalTxs &txs);
+  x23::Async<EventBlockResult>
+  eventsched_close_block(BlockID block_id, BlockHeight block_height,
+                         ProposalTxsHash proposal_txs_hash);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
                                             ConsensusValue value);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
@@ -626,6 +623,7 @@ private:
   struct FinishNominationNodes {
     x23::Vec<x23::DagNode<void>> finish_executors;
     x23::DagNode<DbBlockResult> close_snapshot;
+    x23::DagNode<ProposalTxsHash> proposal_txs_hash;
     x23::DagNode<EventBlockResult> close_event;
     x23::DagNode<SHA256Hash> txset_hash;
     x23::DagNode<void> build_header;

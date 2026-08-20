@@ -111,9 +111,10 @@ void fail_next_indexer_outbox_operation_for_test(IndexerOutboxFaultPoint point);
 IndexerOutboxStatus<size_t>
 indexer_outbox_file_size_for_payload(size_t payload_size);
 IndexerOutboxStatus<void> validate_indexer_outbox_file_size(size_t file_size);
-IndexerOutboxStatus<size_t> indexer_event_pull_rpc_record_size_for_parts(
-    size_t consensus_value_xdr_size, size_t proposal_txs_xdr_size,
-    size_t event_logs_xdr_size, size_t tx_bodies_xdr_size);
+IndexerOutboxStatus<size_t>
+indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
+                                             size_t event_logs_xdr_size,
+                                             size_t tx_bodies_xdr_size);
 
 // The outbox directory is private, operator-owned state. open() requires an
 // existing 0700 directory. open_or_create_in() creates indexer-outbox beneath

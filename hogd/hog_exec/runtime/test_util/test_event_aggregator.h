@@ -37,11 +37,11 @@ public:
                                            BlockHeight block_height);
   x23::Async<EventBlockResult> close_block(BlockID block_id,
                                            BlockHeight block_height,
-                                           ProposalTxs proposal_txs);
+                                           ProposalTxsHash proposal_txs_hash);
   x23::Async<RPCError> commit_block(BlockID block_id,
                                     ConsensusValue consensus_value);
-  x23::Async<std::optional<ProposalTxs>>
-  get_closed_proposal_txs(BlockID block_id);
+  x23::Async<std::optional<ProposalTxsHash>>
+  get_closed_proposal_txs_hash(BlockID block_id);
   x23::Async<std::optional<ConsensusValue>>
   get_committed_consensus_value(BlockID block_id);
   x23::Async<RPCError> abandon_block(BlockID block_id);
@@ -101,7 +101,7 @@ private:
   std::map<BlockID, BlockState> block_states_;
   // Track executor handles per block (from exec side)
   std::map<BlockID, int32_t> executor_handle_refcounts_;
-  std::map<BlockID, ProposalTxs> closed_proposal_txs_;
+  std::map<BlockID, ProposalTxsHash> closed_proposal_txs_hashes_;
   std::map<BlockID, ConsensusValue> committed_consensus_values_;
 
   x23::Async<RPCError> do_emit_event(BlockID block_id, TransactionID tx_id,
@@ -180,12 +180,12 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.open_block(block_id);
   }
 
-  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
-                                                      BlockHeight block_height,
-                                                      ProposalTxs txs)
+  x23::Async<EventBlockResult>
+  eventsched_close_block(BlockID block_id, BlockHeight block_height,
+                         ProposalTxsHash proposal_txs_hash)
   {
     return event_aggregator_.close_block(block_id, block_height,
-                                         std::move(txs));
+                                         std::move(proposal_txs_hash));
   }
 
   x23::Async<RPCError> eventsched_commit_block(BlockID block_id,
@@ -194,22 +194,15 @@ struct TestEventAggregatorSchedRpc {
     return event_aggregator_.commit_block(block_id, std::move(value));
   }
 
-  // Keep the by-value parameter required by the generated EventSched1 service.
-  static RPCError eventsched_confirm_committed_block(
-      ConsensusValue /*value*/) // NOLINT(performance-unnecessary-value-param)
-  {
-    return RPCError::kRPCNone;
-  }
-
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id)
   {
     return event_aggregator_.abandon_block(block_id);
   }
 
-  x23::Async<std::optional<ProposalTxs>>
-  get_closed_proposal_txs(BlockID block_id)
+  x23::Async<std::optional<ProposalTxsHash>>
+  get_closed_proposal_txs_hash(BlockID block_id)
   {
-    return event_aggregator_.get_closed_proposal_txs(block_id);
+    return event_aggregator_.get_closed_proposal_txs_hash(block_id);
   }
 
   x23::Async<std::optional<ConsensusValue>>

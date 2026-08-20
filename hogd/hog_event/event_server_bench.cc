@@ -27,6 +27,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/init.h"
+#include "hogd/xdr/proposal_hash.h"
 #include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
@@ -262,7 +263,8 @@ run_event_bench(const std::string &exec_server_addr,
   };
   auto close_res =
       event_sched_client.eventsched_close_block(block_number, block_number,
-                                                proposal_txs)();
+                                                proposal_txs_compatibility_hash(
+                                                    proposal_txs))();
   if (close_res.error() != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close block");
   }
