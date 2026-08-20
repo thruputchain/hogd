@@ -169,7 +169,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
   // anything else is a genuine bug and should still terminate.
   std::optional<SystemCallHandler> syscall_handler;
   try {
-    syscall_handler.emplace(signed_tx.tx, *snapshot_cache_, proxy,
+    syscall_handler.emplace(signed_tx.tx, *snapshot_cache_, std::move(proxy),
                             make_per_tx_event_server_proxy(tx_id),
                             ProposalModeCtor{}, *context);
   } catch (std::bad_alloc const &e) {
@@ -262,7 +262,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
   // anything else is a genuine bug and should still terminate.
   std::optional<SystemCallHandler> syscall_handler;
   try {
-    syscall_handler.emplace(tx.signed_tx.tx, *snapshot_cache_, proxy,
+    syscall_handler.emplace(tx.signed_tx.tx, *snapshot_cache_, std::move(proxy),
                             make_per_tx_event_server_proxy(tx_id),
                             ValidationModeCtor{
                                 tx.nondeterministic_proposal_data},
