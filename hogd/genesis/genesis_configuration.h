@@ -63,9 +63,8 @@ public:
                                   StorageCostModel const &cost_model,
                                   Contract const &root_contract) const;
 
-  // Build the stock distributor root's height-1 invocations. Each transaction
-  // mints exactly its own incremental replay-cache cost to the root and mints
-  // its configured allocation directly to the deployed address.
+  // Build the stock distributor root's single height-1 invocation. The
+  // transaction creates and funds all economic state and deploys every entry.
   std::vector<SignedTransaction>
   make_genesis_ceremony_transactions(StorageCostModel const &cost_model) const;
 
@@ -143,29 +142,18 @@ private:
   GenesisConfiguration genesis_configuration_;
 };
 
-class GenesisConfigurationV2Loader {
-public:
-  explicit GenesisConfigurationV2Loader(GenesisConfigurationV2 config)
-    : config_(std::move(config))
-  {}
+[[nodiscard]] bool
+valid_genesis_configuration_v2(GenesisConfigurationV2 const &config);
 
-  [[nodiscard]] bool valid() const
-  {
-    return config_.root_contract.contract_type() == ContractType::kRv32 &&
-           !config_.root_contract.rv32_contract().data.empty();
-  }
-
-  void load_genesis_configuration(
-      std::function<void(std::shared_ptr<const Contract>)> const
-          &write_contract,
-      std::function<void(ContractAddress const &,
-                         DeployedContractHash const &)> const &write_deployment,
-      std::function<void(ContractAddress const &,
-                         AddressAuthData const &)> const &write_auth_data)
-      const;
-
-private:
-  GenesisConfigurationV2 config_;
-};
+// Visit only the records required to execute the height-1 root ceremony.
+// Economic state (supply, balances, and replay metadata) is created lazily by
+// ordinary transaction execution.
+void visit_genesis_execution_prerequisites(
+    GenesisConfigurationV2 const &config,
+    std::function<void(std::shared_ptr<const Contract>)> const &visit_contract,
+    std::function<void(ContractAddress const &,
+                       DeployedContractHash const &)> const &visit_deployment,
+    std::function<void(ContractAddress const &, AddressAuthData const &)> const
+        &visit_auth_data);
 
 } // namespace hogd

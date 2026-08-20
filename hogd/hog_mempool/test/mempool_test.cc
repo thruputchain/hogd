@@ -2292,12 +2292,18 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   GenesisConfigurationBuilder builder;
   auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
   const SHA256Hash deployment_nonce = make_test_nonce(9001);
+  const SHA256Hash second_deployment_nonce = make_test_nonce(9002);
   const int128_t allocation = 1'000'000'000;
   using fibonacci_meta = ContractTraitMeta<fibonacci::Fibonacci>;
   builder.add_initial_config(fibonacci_contract, deployment_nonce,
                              fibonacci_meta::entrypoint<u8"fibonacci">(),
                              fibonacci_meta::make_calldata<u8"fibonacci">(
                                  uint32_t{0}),
+                             allocation);
+  builder.add_initial_config(fibonacci_contract, second_deployment_nonce,
+                             fibonacci_meta::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta::make_calldata<u8"fibonacci">(
+                                 uint32_t{1}),
                              allocation);
 
   auto root_contract = load_stock_genesis_root_contract();
@@ -2307,6 +2313,19 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
+
+  auto root_balance = server.read_address_balance(kGenesisRootContractAddress);
+  ASSERT_FALSE(root_balance.has_value());
+  EXPECT_EQ(root_balance.error(), HogDbCode::kNotFound);
+  auto replay_meta =
+      server.read_address_replay_cache_meta(kGenesisRootContractAddress);
+  ASSERT_FALSE(replay_meta.has_value());
+  EXPECT_EQ(replay_meta.error(), HogDbCode::kNotFound);
+  auto total_supply = server.read_nnint128(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  ASSERT_FALSE(total_supply.has_value());
+  EXPECT_EQ(total_supply.error(), HogDbCode::kNotFound);
+
   server.register_runtime_after_genesis();
 
   const SchedulerGetTipResult parent =
@@ -2317,6 +2336,7 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
       builder.make_genesis_ceremony_transactions(cost_model));
+  ASSERT_EQ(ceremony_txs.size(), 1);
 
   SignedTransactionBatch unauthorized_txs = ceremony_txs;
   unauthorized_txs[0].tx.auth_claim.source_address_claim().required_weight = 1;
@@ -2352,6 +2372,12 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   ASSERT_TRUE(server.read_address_metadata(deployed).has_value());
   ASSERT_TRUE(server.read_address_balance(deployed).has_value());
   EXPECT_GT(*server.read_address_balance(deployed), 0);
+  const ContractAddress second_deployed =
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), second_deployment_nonce);
+  ASSERT_TRUE(server.read_address_metadata(second_deployed).has_value());
+  ASSERT_TRUE(server.read_address_balance(second_deployed).has_value());
+  EXPECT_GT(*server.read_address_balance(second_deployed), 0);
   ASSERT_TRUE(
       server.read_address_balance(kGenesisRootContractAddress).has_value());
   EXPECT_EQ(*server.read_address_balance(kGenesisRootContractAddress), 0);

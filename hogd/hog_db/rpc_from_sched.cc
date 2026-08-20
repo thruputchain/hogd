@@ -503,8 +503,7 @@ HogDbSchedRpc::dbsched_load_genesis_configuration_v2(
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  GenesisConfigurationV2Loader loader(genesis_configuration);
-  if (!loader.valid()) {
+  if (!valid_genesis_configuration_v2(genesis_configuration)) {
     error("V2 genesis root contract must be a non-empty RV32 artifact");
     co_return DbSchedResult::DbSchedResultError;
   }
@@ -518,34 +517,12 @@ HogDbSchedRpc::dbsched_load_genesis_configuration_v2(
     co_return DbSchedResult::DbSchedResultError;
   }
 
-  // These fixed rows are protocol-created state. The empty replay metadata is
-  // essential for concurrent ceremony transactions: each one then reserves
-  // only its incremental nonce-entry cost and can mint that amount in-body.
-  if (auto write =
-          ctx_.get_db().write_address_balance(kGenesisRootContractAddress, 0);
-      !write) {
-    error("failed to write V2 genesis root balance: {}", write.error());
-    co_return DbSchedResult::DbSchedResultError;
-  }
-  if (auto write = ctx_.get_db().write_address_replay_cache_meta(
-          kGenesisRootContractAddress, ReplayCacheMetadata{});
-      !write) {
-    error("failed to write V2 genesis root replay metadata: {}", write.error());
-    co_return DbSchedResult::DbSchedResultError;
-  }
-  if (auto write = ctx_.get_db().write_nnint128(
-          ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey), 0);
-      !write) {
-    error("failed to write V2 genesis native supply: {}", write.error());
-    co_return DbSchedResult::DbSchedResultError;
-  }
-
-  // Height-0 rows are protocol-created state, not economically funded
-  // transaction writes. Install them directly before opening the empty
-  // genesis BlockTX; otherwise deployment/auth storage costs would be charged
-  // to the deliberately zero-balance root.
+  // Install only the execution prerequisites that cannot be created by the
+  // ceremony itself: the root and native contracts, their deployments, and
+  // the root auth record required by normal auth-server verification.
   bool failure = false;
-  loader.load_genesis_configuration(
+  visit_genesis_execution_prerequisites(
+      genesis_configuration,
       [&](auto const &contract) {
         const auto bytes = x23::serialize(*contract);
         if (auto r =

@@ -231,6 +231,7 @@ add_riscv_builds(
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types
 add_types_xdr(default_wallet)
+add_types_xdr(genesis_root)
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
 add_types_xdr(simple_wallet)
@@ -240,6 +241,7 @@ add_types_xdr(payment_channel)
 
 # XDR .x -> .hh via x23c
 add_xdr(default_wallet_hh ./default_wallet.x)
+add_xdr(genesis_root_hh ./genesis_root.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
 add_xdr(simple_wallet_hh ./simple_wallet.x)
@@ -249,6 +251,7 @@ add_xdr(payment_channel_hh ./payment_channel.x)
 
 # Ensure XDR generation waits for spec JSONs (produced by rv32 build)
 add_dependencies(build_default_wallet_hh all_riscvs_built)
+add_dependencies(build_genesis_root_hh all_riscvs_built)
 add_dependencies(build_itc_erc20_hh all_riscvs_built)
 add_dependencies(build_manual_revert_test_hh all_riscvs_built)
 add_dependencies(build_simple_wallet_hh all_riscvs_built)
@@ -267,7 +270,7 @@ add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.
 add_contract_header(default_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/default_wallet.hh")
 add_contract_header(dev_wallet)
 add_contract_header(deploy_and_transfer)
-add_contract_header(genesis_root)
+add_contract_header(genesis_root "${CURRENT_RELATIVE_SOURCE_DIR}/genesis_root.hh")
 add_contract_header(read_only_test)
 add_contract_header(manual_revert_test "${CURRENT_RELATIVE_SOURCE_DIR}/manual_revert_test.hh")
 add_contract_header(manual_revert_caller)
@@ -291,6 +294,7 @@ add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
+add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)

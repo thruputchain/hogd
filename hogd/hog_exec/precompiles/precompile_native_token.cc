@@ -228,8 +228,16 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   if (!get) {
     return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
-  if (*get != SyscallErrorCode::kSyscallErrorCodeNone || !supply_base_present ||
-      integer_add_overflow(supply_add, signed_amount) ||
+  if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    supply_base = 0;
+    supply_base_present = true;
+    supply_add = 0;
+  }
+  if (*get != SyscallErrorCode::kSyscallErrorCodeNone &&
+      *get != SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (!supply_base_present || integer_add_overflow(supply_add, signed_amount) ||
       integer_add_overflow(supply_base, supply_add + signed_amount)) {
     return InvokeError{InvokeErrorCode::Deterministic};
   }

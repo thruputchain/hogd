@@ -1803,8 +1803,8 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
       kGenesisRootContractAddress);
   auto tx = Transaction{
       .invocation = root_client.make_invocation<u8"distribute">(
-          UINT64_MAX, SHA256Hash{}, SHA256Hash{}, ContractEntrypointID{},
-          Calldata{}, make_amount(0), make_amount(0)),
+          UINT64_MAX, x23::Vec<genesis_root::Distribution, UINT32_MAX>{},
+          make_amount(0), make_amount(0)),
       .uniquifier = make_new_uniquifier(),
   };
   auto runtime_context = make_hog_exec_context();

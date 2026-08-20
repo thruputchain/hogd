@@ -204,6 +204,17 @@ public:
     return get_db().read_address_metadata(address);
   }
 
+  HogDbStatus<ReplayCacheMetadata>
+  read_address_replay_cache_meta(const ContractAddress &address)
+  {
+    return get_db().read_address_replay_cache_meta(address);
+  }
+
+  HogDbStatus<int128_t> read_nnint128(const ItemKey &key)
+  {
+    return get_db().read_nnint128(key);
+  }
+
   // This getter is used by [auth_test.cc].
   MempoolCoordinatorRpc &mempool_coord_rpc()
   {
