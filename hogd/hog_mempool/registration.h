@@ -2,16 +2,19 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 
 #include "auth_card.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
+#include "x23/corosync.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -35,6 +38,37 @@ public:
     return registration;
   }
 
+  // Waiting for a peer to register.
+  //
+  // Components that need another component to show up before they can make
+  // progress wait on this epoch rather than polling. Every registration a
+  // waiter might care about bumps it and wakes the waiters, who re-test their
+  // own condition. Callers must sample the epoch *before* testing their
+  // condition:
+  //
+  //     for (;;) {
+  //       const uint64_t seen = reg.registration_epoch();
+  //       if (my_condition_holds())
+  //         break;
+  //       co_await reg.wait_for_registration_change(seen);
+  //     }
+  //
+  // Sampling first is what makes the wakeup impossible to lose: if a
+  // registration lands between the test and the wait, the epoch has already
+  // moved past [seen] and [wait_for_registration_change()] returns without
+  // suspending, sending the caller back around to re-test.
+  //
+  // These waits must never be done by blocking a thread-pool worker.
+  // Registrations arrive on RPC handlers that the pool itself has to run, and
+  // a worker that is the last one servicing its runqueue cannot migrate away,
+  // so a blocked worker can starve the very handler it is waiting for. See the
+  // ThreadPool affinity rules in x23/x23/threadpool.h.
+  uint64_t registration_epoch() { return registration_epoch_.load(); }
+  x23::CoroFutex<uint64_t>::Awaiter wait_for_registration_change(uint64_t seen)
+  {
+    return registration_epoch_.wait(seen);
+  }
+
   // Coordinator.
   void register_coordinator(const CoordCard &card)
   {
@@ -54,9 +88,14 @@ public:
   // Returns the ID of the registered executor.
   size_t register_executor(const ExecCard &card)
   {
-    std::unique_lock lk(exec_cards_mutex_);
-    exec_cards_.push_back(card);
-    return exec_cards_.size() - 1;
+    size_t exec_id;
+    {
+      std::unique_lock lk(exec_cards_mutex_);
+      exec_cards_.push_back(card);
+      exec_id = exec_cards_.size() - 1;
+    }
+    bump_registration_epoch();
+    return exec_id;
   }
   size_t executors_registered(x23::Vec<ExecCard> *cards)
   {
@@ -164,6 +203,8 @@ public:
     pending_event_tip_.reset();
     pending_event_token_ = 0;
     event_registered_.store(true, std::memory_order_release);
+    lk.unlock();
+    bump_registration_epoch();
     return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
   bool event_registered(EventCard *card) const
@@ -177,8 +218,13 @@ public:
   }
   void publish_event_canonical_tip(EventCanonicalTip tip)
   {
-    std::unique_lock lk(event_mutex_);
-    event_canonical_tip_ = std::move(tip);
+    {
+      std::unique_lock lk(event_mutex_);
+      event_canonical_tip_ = std::move(tip);
+    }
+    // [MempoolEventRpc::wait_for_registration()] gates on the tip's height as
+    // well as activation, so a new tip can be what unblocks it.
+    bump_registration_epoch();
   }
   std::optional<EventCanonicalTip> event_canonical_tip() const
   {
@@ -246,14 +292,31 @@ public:
     }
     auth_registered_ = false;
     auth_card_ = AuthCard{};
+    // Release anyone parked on a condition this reset just invalidated, so a
+    // test that clears the registration cannot leave a waiter stranded.
+    bump_registration_epoch();
   }
 
 private:
+  // Wake every waiter so each can re-test its own condition. Call this with no
+  // Registration mutex held: broadcast() resumes the waiters on the thread
+  // pool, and the first thing they do is re-test conditions that take these
+  // mutexes.
+  void bump_registration_epoch()
+  {
+    registration_epoch_.rmw([](uint64_t &epoch) { ++epoch; });
+    registration_epoch_.broadcast(&default_threadpool());
+  }
+
   // No one should construct a [Registration] instance directly. Instead, use
   // the shared instance returned by [registration()]. There is a single shared
   // registration instance for the entire process.
   Registration() = default;
   ~Registration() = default;
+
+  // Bumped and broadcast by [bump_registration_epoch()] on every registration
+  // change a waiter might be gated on. See [registration_epoch()].
+  x23::CoroFutex<uint64_t> registration_epoch_{0};
 
   std::atomic<bool> coordinator_registered_ = false;
   CoordCard coord_card_;

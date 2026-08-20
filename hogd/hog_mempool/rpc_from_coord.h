@@ -111,15 +111,13 @@ public:
     if (ready()) {
       co_return;
     }
-    // Both waits below block until another component registers, and that
-    // registration runs on the thread pool, so neither may occupy a pool
-    // worker. See the comment in [MempoolExecutorRpc::get_clients()].
-    co_await default_threadpool().async([this] {
-      while (!initialized_.load(std::memory_order_acquire)) {
-        initialized_.wait(false, std::memory_order_acquire);
-      }
-      std::ignore = MempoolEventRpc::wait_for_registration();
-    });
+    // Neither of these waits may occupy a thread-pool worker: both block until
+    // another component registers, and that registration runs on the pool. See
+    // [Registration::registration_epoch()].
+    while (!initialized_.load(std::memory_order_acquire)) {
+      co_await initialized_waiters_.wait(false);
+    }
+    std::ignore = co_await MempoolEventRpc::wait_for_registration();
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
     for (size_t i = 0; i < kNumClientsPerExecutor; ++i) {
@@ -507,6 +505,8 @@ private:
 
     initialized_.store(true, std::memory_order_release);
     initialized_.notify_all();
+    initialized_waiters_.store(true);
+    initialized_waiters_.broadcast(&default_threadpool());
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
@@ -789,6 +789,9 @@ private:
   std::atomic<bool> ready_ = false;
   x23::CoroFutex<bool> ready_waiters_{false};
   std::atomic<bool> initialized_ = false;
+  // Coroutine-visible mirror of [initialized_], so [finish_runtime_init()] can
+  // wait for initialization without blocking a thread-pool worker.
+  x23::CoroFutex<bool> initialized_waiters_{false};
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();
