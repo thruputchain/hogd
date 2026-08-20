@@ -20,6 +20,7 @@
 #include "address_auth.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/genesis_root.h"
+#include "built_contracts/genesis_root.hh"
 #include "built_contracts/initial_token_claim.h"
 #include "contract.hh"
 #include "genesis.hh"
@@ -30,9 +31,9 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 

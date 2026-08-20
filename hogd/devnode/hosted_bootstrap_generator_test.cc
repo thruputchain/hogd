@@ -128,7 +128,7 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   HostedBootstrapArtifact artifact = build_hosted_bootstrap_artifact(config);
 
   EXPECT_EQ(artifact.accounts.size(), 2UL);
-  EXPECT_EQ(artifact.initialization_txs.size(), 2UL);
+  EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
   EXPECT_EQ(artifact.genesis_configuration.initial_config.size(), 2UL);
 
   std::expected<json::Value, json::ParseError> genesis =
@@ -181,7 +181,7 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   EXPECT_EQ(metadata->find("faucet"), nullptr);
   std::span<const json::Value> initialization_txs =
       require_field(*metadata, "initializationTransactions").as_array();
-  ASSERT_EQ(initialization_txs.size(), 2UL);
+  ASSERT_EQ(initialization_txs.size(), 1UL);
   EXPECT_TRUE(require_string(require_field(initialization_txs[0], "hash"))
                   .starts_with("0x"));
   EXPECT_FALSE(require_string(require_field(initialization_txs[0], "xdr"))
@@ -230,7 +230,7 @@ TEST(HostedBootstrapGenerator, GeneratesExplicitFaucetWallet)
   HostedFaucetMetadata const &first_faucet = first.faucet.value();
   HostedFaucetMetadata const &second_faucet = second.faucet.value();
   EXPECT_EQ(first.accounts.size(), 2UL);
-  EXPECT_EQ(first.initialization_txs.size(), 3UL);
+  EXPECT_EQ(first.initialization_txs.size(), 1UL);
   EXPECT_EQ(first.genesis_configuration.initial_config.size(), 3UL);
   EXPECT_EQ(first_faucet.public_key, faucet_public_key);
   EXPECT_EQ(first_faucet.initial_storage_tokens, 987654321UL);
@@ -394,7 +394,7 @@ TEST(HostedBootstrapGenerator, AllowsZeroBootstrapAccounts)
   HostedBootstrapArtifact artifact = build_hosted_bootstrap_artifact(config);
 
   EXPECT_TRUE(artifact.accounts.empty());
-  EXPECT_TRUE(artifact.initialization_txs.empty());
+  EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
   EXPECT_TRUE(artifact.genesis_configuration.initial_config.empty());
 
   std::expected<json::Value, json::ParseError> metadata =

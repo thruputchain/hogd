@@ -11,8 +11,8 @@
 #include <utility>
 
 #include "built_contracts/genesis_root.h"
+#include "built_contracts/genesis_root.hh"
 #include "built_contracts/itc_erc20.h"
-#include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -41,6 +41,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)

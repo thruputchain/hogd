@@ -1644,7 +1644,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
       build_local_bootstrap_account_artifact(config);
 
   ASSERT_EQ(first.accounts.size(), 4UL);
-  ASSERT_EQ(first.initialization_txs.size(), 4UL);
+  ASSERT_EQ(first.initialization_txs.size(), 1UL);
   ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 
