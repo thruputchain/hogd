@@ -24,6 +24,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -51,7 +52,9 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/corosync.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -557,6 +560,63 @@ TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
   EXPECT_EQ(started.load(std::memory_order_relaxed),
             MempoolCoordinatorRpc::kNumClientsPerExecutor);
   server.mempool_coord_rpc().set_finish_executor_started_test_hook({});
+}
+
+// Regression test for issue #3518: overlapping commit RPCs must not abort the
+// mempool. [schedulercoord_commit_block] closes the validation gate before it
+// acquires the block-cache locks, and the gate uses -1 as its "closed"
+// sentinel. When a second commit reaches [close_validation_gate] while a first
+// commit already holds the gate closed, the second commit must wait for the
+// gate to reopen -- it must not trip the CHECK on the internal sentinel.
+TEST(Mempool, OverlappingCommitsSerializeInsteadOfAborting)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+  ASSERT_TRUE(rpc.ready());
+
+  // Hold the nominated-block cache lock so the first commit parks *after* it
+  // has closed the validation gate but *before* it can reopen it. This pins the
+  // gate in its closed (-1) state for the rest of the test.
+  x23::CoroGuard cache_guard;
+  [&]() -> x23::Async<void> {
+    co_await cache_guard(rpc.nominated_block_cache_lock_for_test());
+  }()();
+
+  // First commit: closes the gate, then blocks acquiring the cache lock.
+  std::jthread first_commit([&] {
+    EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/1,
+                                              ConsensusValue{})(),
+              SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  });
+  while (rpc.validation_gate_value_for_test() != -1) {
+    std::this_thread::yield();
+  }
+
+  // Signal deterministically once the second commit has observed the closed
+  // gate and is about to block on it, so we release the cache lock only after
+  // the -1 sentinel has actually been exercised (no timing assumptions).
+  std::latch second_at_gate(1);
+  std::atomic<bool> signaled{false};
+  rpc.set_validation_gate_wait_test_hook([&] {
+    if (!signaled.exchange(true)) {
+      second_at_gate.count_down();
+    }
+  });
+
+  // Second overlapping commit observes the closed gate. Before the fix this
+  // tripped CHECK_GE(current_validations, 0) and aborted the process; now it
+  // must wait for the gate to reopen and then commit safely.
+  std::jthread second_commit([&] {
+    EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/2,
+                                              ConsensusValue{})(),
+              SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  });
+  second_at_gate.wait();
+
+  // The second commit is now parked on the closed gate. Release the cache lock
+  // so the first commit finishes and reopens the gate; both commits then drain
+  // and return normally.
+  cache_guard.reset_no_yield(&default_threadpool());
 }
 
 // TODO(jhumphri): Update this test once we implement authentication and

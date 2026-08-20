@@ -394,6 +394,24 @@ public:
     co_await finish_all_executors(block_id);
   }
 
+  x23::CoroLock &nominated_block_cache_lock_for_test()
+  {
+    return nominated_block_cache_lock_;
+  }
+
+  int64_t validation_gate_value_for_test()
+  {
+    return num_validations_in_progress_.load();
+  }
+
+  // Fired by [close_validation_gate()] when a caller finds the gate already
+  // busy and is about to block on it. Lets tests observe the overlapping-closer
+  // state deterministically instead of racing on a timeout.
+  void set_validation_gate_wait_test_hook(std::function<void()> hook)
+  {
+    validation_gate_wait_test_hook_ = std::move(hook);
+  }
+
 private:
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
@@ -663,7 +681,11 @@ private:
   {
     while (true) {
       int64_t current_validations = num_validations_in_progress_.load();
-      CHECK_GE(current_validations, 0L);
+      // A value of -1 means another commit has already closed the gate. That
+      // is a legal state (see [wait_for_validation_gate_open]), not an
+      // invariant violation, so overlapping closers must wait for the gate to
+      // reopen rather than abort.
+      CHECK_GE(current_validations, -1L);
 
       bool closed = false;
       num_validations_in_progress_.rmw([&closed](int64_t &count) {
@@ -675,6 +697,9 @@ private:
       if (closed) {
         MempoolMetrics::instance().validation_in_progress_count.record(0);
         co_return;
+      }
+      if (validation_gate_wait_test_hook_) {
+        validation_gate_wait_test_hook_();
       }
       co_await num_validations_in_progress_.wait(current_validations);
     }
@@ -750,6 +775,7 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
+  std::function<void()> validation_gate_wait_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
