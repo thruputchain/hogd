@@ -472,15 +472,8 @@ disarm_outputs(std::tuple<Args...> &args)
   }(std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
 }
 
-// Translates the exception currently being handled into the Unrecoverable
-// result a syscall body's failure produces, disarming the staged outputs on
-// the way out.
-//
-// Call this only from inside a catch handler: the operand-less throw rethrows
-// the in-flight exception so it can be classified here instead of at each
-// site. That keeps this a plain function rather than a coroutine, so calling
-// it from a handler inside wrap_after_parse_async() costs no second frame --
-// which a lambda containing the co_await would.
+// Translates the in-flight exception into an Unrecoverable result. Call only
+// from inside a catch handler; the bare throw rethrows to classify.
 template<typename... Args>
 SyscallInnerResult
 translate_syscall_body_exception(SyscallNo syscall_no,
@@ -564,6 +557,9 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 
     // Check whether any inputs/outputs were aliased
     if (!alias_check_passed) {
+      if (auto *stats = handler.get_transaction_stats()) {
+        stats->syscall_fault_count++;
+      }
       try {
         trace("Syscall {} faulted due to aliased memory regions", kSyscall);
       } catch (std::exception const &e) {
@@ -664,8 +660,7 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
   // completed its Async with an exception rethrows at this co_await rather
   // than at the call above, so the same translation the direct call gets has
   // to be repeated here (issue #3400 and siblings).
-  // Seeded only because SyscallInnerResult is not default-constructible; every
-  // path below overwrites it.
+  // Seeded only because SyscallInnerResult is not default-constructible.
   SyscallInnerResult body_result{HostFnError{HostFnErrorCode::Unrecoverable},
                                  WrappedGasAmount{0}};
   try {
@@ -780,30 +775,13 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
                                               gas_remaining)};
 }
 
-// Creates wrap_after_parse_async()'s coroutine and translates a failure to do
-// so into a structured result.
+// Creates the coroutine and translates a failed frame allocation, which x23's
+// promises turn into a throw. Two of the three callers do not go through
+// wrap_outer(), so this cannot live at a call site.
 //
-// x23's promises do not define get_return_object_on_allocation_failure, so an
-// exhausted heap throws out of the frame allocation. All three callers of the
-// syscall ABI -- the RV32 ecall loop, the native precompiles, and test_ffi's
-// extern "C" mock entrypoint -- need that translated rather than terminating
-// the executor, and two of them do not go through wrap_outer(), so the guard
-// belongs here rather than at any one call site.
-//
-// x23::Async's initial_suspend() is suspend_never, so this try also covers the
-// coroutine's synchronous prologue, up to the first real suspension point. The
-// body itself cannot throw through it (it runs inside its own noexcept lambda);
-// what is left is the frame allocation and the trace/gate work around it.
-//
-// The staged outputs are deliberately not disarmed here. args is moved into the
-// coroutine's by-value parameter before the ramp allocates, so by the time an
-// allocation failure arrives the outputs belong to that parameter, and
-// unwinding destroys it -- flushing each WritableOutput's still-zero staged
-// value into guest memory for a syscall that never ran. What is left here was
-// disarmed by WritableOutput's move constructor, so disarming it again would be
-// a no-op dressed up as a safeguard. The write is survivable only because the
-// result is Unrecoverable, which fails the whole transaction and discards the
-// bytes with it; that is a property of the caller, not of this function.
+// No disarm_outputs() here: args has already moved into the coroutine's
+// parameter, whose destructor flushes it during unwinding. Survivable only
+// because Unrecoverable discards the transaction.
 template<is_syscall_meta SyscallMeta, typename Args>
 MaybeAsyncSyscallResult
 wrap_after_parse(bool alias_check_passed, SystemCallHandler &handler,

@@ -61,7 +61,13 @@ TEST_F(OutputAliasTestRv32Test, NnintExactOverlap)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
+  handler.enable_transaction_stats();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  // An alias fault is a fault: it bumps the same counter a parse fault does.
+  auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->syscall_fault_count, 1);
 }
 
 // Two i128 output pointers with partial overlap must fault.
