@@ -61,11 +61,26 @@ private:
     ReplayCacheData data;
     std::atomic<int32_t> pending_additions{0};
     bool is_new{false};
+    // Whether this fresh (is_new) height is currently counted in
+    // pending_new_heights_. Only meaningful when is_new is true; only
+    // mutated under bases_lock_ held exclusively.
+    bool is_charged{false};
   };
 
   HogDbStatus<ActiveHeight *> get_base(const LockContext &ctx,
                                        BlockHeight block_height) const;
   HogDbStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
+
+  // Verifies that room remains for one more fresh height and, if so, bumps
+  // pending_new_heights_ accordingly. Caller must hold bases_lock_
+  // exclusively. Returns kDbConflictCapacityExceeded if the cap would be
+  // exceeded.
+  HogDbStatus<void> charge_pending_height_(const LockContext &ctx) const;
+  // Decrement pending_additions on a released reservation and, when a
+  // fresh height's last outstanding reservation goes away, give the
+  // pending_new_heights_ budget back. Serializes with concurrent
+  // re-reservations via bases_lock_.
+  void release_pending_addition_(ActiveHeight &base) const;
 
   mutable std::map<BlockHeight, ActiveHeight> bases_;
   mutable x23::SharedLock bases_lock_;

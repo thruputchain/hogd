@@ -125,6 +125,31 @@ ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
   return result;
 }
 
+HogDbStatus<void>
+ReplayCacheLock::charge_pending_height_(const LockContext &ctx) const
+{
+  // Caller holds bases_lock_ exclusively. The cap counts only unexpired
+  // heights (protocol/storage_item.x): heights below the current block are
+  // pruned by stage_committed_changes(), so they must not consume the budget
+  // here -- otherwise a snapshot full of expired heights would reject the
+  // fresh change that triggers their close-time GC (#2581).
+  auto meta = get_meta(&ctx);
+  if (!meta) {
+    return meta.error();
+  }
+  const auto &heights = meta.value()->heights;
+  auto live_begin = std::ranges::lower_bound(heights, ctx.block_height, {},
+                                             &ReplayCacheHeightCount::height);
+  auto live_height_count =
+      static_cast<size_t>(std::distance(live_begin, heights.end()));
+  auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
+  if (live_height_count + pending + 1 > kReplayCacheHeightsMaxLen) {
+    pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
+    return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
+  }
+  return {};
+}
+
 HogDbStatus<ReplayCacheLock::ActiveHeight *>
 ReplayCacheLock::get_base(const LockContext &ctx,
                           BlockHeight block_height) const
@@ -154,25 +179,11 @@ ReplayCacheLock::get_base(const LockContext &ctx,
     if (base.error() != HogDbCode::kNotFound) {
       return base.error();
     }
-    // New height. Check global active height limit. The cap counts only
-    // unexpired heights (protocol/storage_item.x): heights below the current
-    // block are pruned by stage_committed_changes(), so they must not consume
-    // the budget here -- otherwise a snapshot full of expired heights would
-    // reject the fresh change that triggers their close-time GC (#2581).
-    auto meta = get_meta(&ctx);
-    if (!meta) {
-      return meta.error();
-    }
-    const auto &heights = meta.value()->heights;
-    auto live_begin = std::ranges::lower_bound(heights, ctx.block_height, {},
-                                               &ReplayCacheHeightCount::height);
-    auto live_height_count =
-        static_cast<size_t>(std::distance(live_begin, heights.end()));
-    auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
-    if (live_height_count + pending + 1 > kReplayCacheHeightsMaxLen) {
-      pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
-      return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
-    }
+    // Fresh height: create an empty ActiveHeight. The pending_new_heights_
+    // budget is not charged here -- it is charged in try_atomic_change_lock
+    // on the pending_additions 0->1 transition and given back symmetrically
+    // by release_pending_addition_ on 1->0, so an aborted-and-released
+    // fresh height does not permanently consume its slot (#3510).
     auto [res, inserted] = bases_.try_emplace(block_height);
     CHECK(inserted);
     return &res->second;
@@ -181,6 +192,25 @@ ReplayCacheLock::get_base(const LockContext &ctx,
   auto [res, inserted] = bases_.try_emplace(block_height, std::move(*base));
   CHECK(inserted);
   return &res->second;
+}
+
+void
+ReplayCacheLock::release_pending_addition_(ActiveHeight &base) const
+{
+  if (!base.is_new) {
+    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+    return;
+  }
+  // Serialize the decrement with concurrent reservations on the same fresh
+  // height, so the 1->0 transition (and any consequent uncharge) sees a
+  // consistent view of pending_additions and is_charged.
+  std::unique_lock<x23::TestLock> ul(bases_lock_);
+  int32_t remaining =
+      base.pending_additions.fetch_sub(1, std::memory_order_relaxed) - 1;
+  if (remaining == 0 && base.is_charged) {
+    base.is_charged = false;
+    pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
+  }
 }
 
 namespace {
@@ -232,7 +262,7 @@ ReplayCacheLock::try_atomic_change_lock(
     }
     auto &base = *r.value();
     conflicts_.erase(UniquifierHelper::to_uint128(u));
-    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+    release_pending_addition_(base);
     return {};
   }
 
@@ -261,13 +291,30 @@ ReplayCacheLock::try_atomic_change_lock(
     return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 
-  // Reserve slot
-  auto additions =
-      base.pending_additions.fetch_add(1, std::memory_order_relaxed);
+  // Reserve slot. On a fresh (is_new) height, serialize the fetch_add with
+  // concurrent release/uncharge via bases_lock_: between get_base returning
+  // and here, a concurrent release could have uncharged this fresh height,
+  // and the reservation would then slip through without a matching
+  // pending_new_heights_ charge (#3510).
+  int32_t additions;
+  if (base.is_new) {
+    std::unique_lock<x23::TestLock> ul(bases_lock_);
+    if (!base.is_charged) {
+      auto s = charge_pending_height_(ctx);
+      if (!s.has_value()) {
+        return s.error();
+      }
+      base.is_charged = true;
+    }
+    additions = base.pending_additions.fetch_add(1, std::memory_order_relaxed);
+  }
+  else {
+    additions = base.pending_additions.fetch_add(1, std::memory_order_relaxed);
+  }
 
   // Check limit
   if (base.data.nonces.size() + additions + 1 > kReplayCacheNoncesMaxLen) {
-    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+    release_pending_addition_(base);
     return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
   }
 
@@ -276,7 +323,7 @@ ReplayCacheLock::try_atomic_change_lock(
   // means it packs to a value conflicts_ cannot store -- e.g. the all-zero
   // {expiry=0, nonce=0}, reachable at executing height 0 (#3188).
   if (conflicts_.try_insert(addition_key) != InsertResult::kInserted) {
-    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+    release_pending_addition_(base);
     return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 

@@ -92,6 +92,36 @@ public:
     }
   }
 
+  // Prime meta_ with a persisted-heights record (with heights above
+  // `above_height`, so charge_pending_height_() counts them all as live).
+  static void set_persisted_live_heights(ReplayCacheLock &lock,
+                                         std::int64_t count,
+                                         BlockHeight above_height)
+  {
+    x23::Vec<ReplayCacheHeightCount> heights;
+    heights.reserve(count);
+    for (std::int64_t i = 0; i < count; ++i) {
+      heights.push_back({
+          .height = above_height + static_cast<BlockHeight>(i + 1),
+          .nonce_count = 1,
+      });
+    }
+    lock.meta_cell_.emplace(
+        ReplayCacheMetadata{.size = count, .heights = std::move(heights)});
+    lock.meta_.store(&lock.meta_cell_.value());
+  }
+
+  // Insert an empty is_new base at `height`, matching the state get_base()
+  // produces on a DAO-miss for a fresh height (pending_additions == 0,
+  // is_charged == false). Lets tests exercise the fresh-height branches
+  // without seeding per-height DAO data.
+  static void ensure_fresh_base(ReplayCacheLock &lock, BlockHeight height)
+  {
+    auto [it, inserted] = lock.bases_.try_emplace(height);
+    ASSERT_TRUE(inserted);
+    ASSERT_TRUE(it->second.is_new);
+  }
+
   static Uniquifier u_from_uint128(__uint128_t v)
   {
     return Uniquifier(v >> 64, v & 0xFFFFFFFFFFFFFFFF);
@@ -796,6 +826,55 @@ TEST(ReplayCacheLockHeightCap, AdmitsNewHeightWhenMetadataIsAllExpiredAtCap)
   ASSERT_TRUE(r.has_value())
       << "expired snapshot heights must not consume the active-height budget; "
          "the fresh height was wrongly rejected (#2581)";
+}
+
+// Regression for #3510 (was tolerated as #2356): a fresh replay-cache
+// height whose only reservation was aborted must give the per-block
+// pending_new_heights_ budget back, so a distinct third fresh height can
+// still fit when persisted + kept fresh heights leave one slot free.
+TEST_F(ReplayCacheLockTest, AbortedFreshHeightReleasesPendingHeightBudget)
+{
+  constexpr BlockHeight kCurrent = 50;
+  constexpr std::int64_t kPersisted = kReplayCacheHeightsMaxLen - 2;
+
+  ReplayCacheLock lock;
+  // Prime meta with (cap - 2) live persisted heights: room for two fresh
+  // heights at admission time.
+  ReplayCacheLockTestHelper::set_persisted_live_heights(lock, kPersisted,
+                                                       kCurrent);
+  // Pre-create the fresh-height entries as if get_base() had just seen a
+  // DAO-miss for each: is_new=true, is_charged=false, pending_additions=0.
+  constexpr BlockHeight kKept = kCurrent + 100'000;
+  constexpr BlockHeight kDropped = kKept + 1;
+  constexpr BlockHeight kFinal = kKept + 2;
+  ReplayCacheLockTestHelper::ensure_fresh_base(lock, kKept);
+  ReplayCacheLockTestHelper::ensure_fresh_base(lock, kDropped);
+  ReplayCacheLockTestHelper::ensure_fresh_base(lock, kFinal);
+
+  auto ctx = make_dummy_context(kCurrent);
+
+  PointerItem<ReplayCacheIt> kept(u(kKept, 1));
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &kept, ctx).has_value());
+
+  PointerItem<ReplayCacheIt> dropped(u(kDropped, 2));
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &dropped, ctx).has_value());
+  ASSERT_TRUE(lock.try_atomic_change_lock(&dropped, nullptr, ctx).has_value());
+
+  // With the leak fixed, the aborted dropped-height reservation has
+  // returned its budget, and the third distinct fresh height fits.
+  PointerItem<ReplayCacheIt> final_item(u(kFinal, 3));
+  auto r = lock.try_atomic_change_lock(nullptr, &final_item, ctx);
+  ASSERT_TRUE(r.has_value())
+      << "aborted fresh height should not consume per-block admission budget";
+
+  // A fourth distinct fresh height must still be capped: cap - 2 persisted
+  // + 2 outstanding fresh reservations == cap, so no room remains.
+  ReplayCacheLockTestHelper::ensure_fresh_base(lock, kFinal + 1);
+  PointerItem<ReplayCacheIt> overflow(u(kFinal + 1, 4));
+  auto r_overflow = lock.try_atomic_change_lock(nullptr, &overflow, ctx);
+  ASSERT_FALSE(r_overflow.has_value())
+      << "released budget must not lift the per-block height cap";
+  EXPECT_EQ(HogDbError(HogDbCode::kConflict), r_overflow.error());
 }
 
 TEST_F(ReplayCacheLockTest, MaxExpiryHeightBuildResult)
