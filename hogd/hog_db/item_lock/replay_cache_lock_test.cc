@@ -113,8 +113,8 @@ public:
 
   // Insert an empty is_new base at `height`, matching the state get_base()
   // produces on a DAO-miss for a fresh height (pending_additions == 0,
-  // is_charged == false). Lets tests exercise the fresh-height branches
-  // without seeding per-height DAO data.
+  // uncharged). Lets tests exercise the fresh-height branches without seeding
+  // per-height DAO data.
   static void ensure_fresh_base(ReplayCacheLock &lock, BlockHeight height)
   {
     auto [it, inserted] = lock.bases_.try_emplace(height);
@@ -843,7 +843,7 @@ TEST_F(ReplayCacheLockTest, AbortedFreshHeightReleasesPendingHeightBudget)
   ReplayCacheLockTestHelper::set_persisted_live_heights(lock, kPersisted,
                                                         kCurrent);
   // Pre-create the fresh-height entries as if get_base() had just seen a
-  // DAO-miss for each: is_new=true, is_charged=false, pending_additions=0.
+  // DAO-miss for each: is_new=true, uncharged, pending_additions=0.
   constexpr BlockHeight kKept = kCurrent + 100'000;
   constexpr BlockHeight kDropped = kKept + 1;
   constexpr BlockHeight kFinal = kKept + 2;

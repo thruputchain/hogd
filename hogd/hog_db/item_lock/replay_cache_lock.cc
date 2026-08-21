@@ -128,11 +128,11 @@ ReplayCacheLock::build_result(const LockContext &ctx, BlockHeight block_height,
 HogDbStatus<void>
 ReplayCacheLock::charge_pending_height(const LockContext &ctx) const
 {
-  // Caller holds bases_lock_ exclusively. The cap counts only unexpired
-  // heights (protocol/storage_item.x): heights below the current block are
-  // pruned by stage_committed_changes(), so they must not consume the budget
-  // here -- otherwise a snapshot full of expired heights would reject the
-  // fresh change that triggers their close-time GC (#2581).
+  // The cap counts only unexpired heights (protocol/storage_item.x): heights
+  // below the current block are pruned by stage_committed_changes(), so they
+  // must not consume the budget here -- otherwise a snapshot full of expired
+  // heights would reject the fresh change that triggers their close-time GC
+  // (#2581).
   auto meta = get_meta(&ctx);
   if (!meta) {
     return meta.error();
@@ -197,18 +197,13 @@ ReplayCacheLock::get_base(const LockContext &ctx,
 void
 ReplayCacheLock::release_pending_addition(ActiveHeight &base) const
 {
-  if (!base.is_new) {
-    base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
-    return;
-  }
-  // Serialize the decrement with concurrent reservations on the same fresh
-  // height, so the 1->0 transition (and any consequent uncharge) sees a
-  // consistent view of pending_additions and is_charged.
-  std::unique_lock<x23::TestLock> ul(bases_lock_);
   int32_t remaining =
       base.pending_additions.fetch_sub(1, std::memory_order_relaxed) - 1;
-  if (remaining == 0 && base.is_charged) {
-    base.is_charged = false;
+  // On the 1->0 transition of a fresh (is_new) height, hand back the
+  // pending_new_heights_ budget its 0->1 transition charged. fetch_sub makes
+  // the transition observable to exactly one thread, mirroring the charge in
+  // try_atomic_change_lock, so no lock is needed on this hot path (#3510).
+  if (base.is_new && remaining == 0) {
     pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
   }
 }
@@ -291,25 +286,26 @@ ReplayCacheLock::try_atomic_change_lock(
     return ctx.conflict(DbConflictCode::kDbConflictReplayProtection);
   }
 
-  // Reserve slot. On a fresh (is_new) height, serialize the fetch_add with
-  // concurrent release/uncharge via bases_lock_: between get_base returning
-  // and here, a concurrent release could have uncharged this fresh height,
-  // and the reservation would then slip through without a matching
-  // pending_new_heights_ charge (#3510).
-  int32_t additions;
-  if (base.is_new) {
-    std::unique_lock<x23::TestLock> ul(bases_lock_);
-    if (!base.is_charged) {
-      auto s = charge_pending_height(ctx);
-      if (!s.has_value()) {
-        return s.error();
-      }
-      base.is_charged = true;
+  // Reserve slot.
+  auto additions =
+      base.pending_additions.fetch_add(1, std::memory_order_relaxed);
+
+  // On the 0->1 transition of a fresh (is_new) height, (re)charge the
+  // lock-wide pending_new_heights_ budget and re-verify the height cap.
+  // fetch_add makes the transition observable to exactly one thread, so the
+  // charge happens once per live reservation span -- covering both first
+  // admission and re-reservation after a full release -- without taking
+  // bases_lock_ on the hot path. release_pending_addition undoes it on the
+  // matching 1->0 transition (#3510).
+  if (base.is_new && additions == 0) {
+    auto s = charge_pending_height(ctx);
+    if (!s.has_value()) {
+      // charge_pending_height already rolled its own bump back; just undo the
+      // reservation. Not release_pending_addition: nothing was charged, so a
+      // 1->0 uncharge here would drop the budget below zero.
+      base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+      return s.error();
     }
-    additions = base.pending_additions.fetch_add(1, std::memory_order_relaxed);
-  }
-  else {
-    additions = base.pending_additions.fetch_add(1, std::memory_order_relaxed);
   }
 
   // Check limit

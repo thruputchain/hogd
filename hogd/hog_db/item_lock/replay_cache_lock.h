@@ -61,10 +61,6 @@ private:
     ReplayCacheData data;
     std::atomic<int32_t> pending_additions{0};
     bool is_new{false};
-    // Whether this fresh (is_new) height is currently counted in
-    // pending_new_heights_. Only meaningful when is_new is true; only
-    // mutated under bases_lock_ held exclusively.
-    bool is_charged{false};
   };
 
   HogDbStatus<ActiveHeight *> get_base(const LockContext &ctx,
@@ -72,14 +68,12 @@ private:
   HogDbStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
 
   // Verifies that room remains for one more fresh height and, if so, bumps
-  // pending_new_heights_ accordingly. Caller must hold bases_lock_
-  // exclusively. Returns kDbConflictCapacityExceeded if the cap would be
-  // exceeded.
+  // pending_new_heights_ accordingly. Returns kDbConflictCapacityExceeded if
+  // the cap would be exceeded (rolling the bump back).
   HogDbStatus<void> charge_pending_height(const LockContext &ctx) const;
-  // Decrement pending_additions on a released reservation and, when a
-  // fresh height's last outstanding reservation goes away, give the
-  // pending_new_heights_ budget back. Serializes with concurrent
-  // re-reservations via bases_lock_.
+  // Decrement pending_additions on a released reservation and, when a fresh
+  // height's last outstanding reservation goes away (its 1->0 transition),
+  // give the pending_new_heights_ budget back.
   void release_pending_addition(ActiveHeight &base) const;
 
   mutable std::map<BlockHeight, ActiveHeight> bases_;
