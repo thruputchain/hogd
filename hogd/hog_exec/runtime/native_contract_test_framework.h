@@ -587,10 +587,6 @@ public:
       GenesisConfiguration const &genesis_configuration,
       BlockExecutionMode mode =
           BlockExecutionMode::kBlockExecutionModeProposal);
-  void run_genesis_initialization(
-      GenesisConfigurationV2 const &genesis_configuration,
-      BlockExecutionMode mode =
-          BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto &get_coord_client() { return coord_wrapper_->client(); }
 
@@ -721,11 +717,13 @@ private:
     }
 
     {
+      auto root_contract = load_stock_genesis_root_contract();
       GenesisConfiguration genesis_configuration{
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
+          .root_contract = *root_contract,
           .default_wallet =
-              GenesisConfigurationLoader::native_default_wallet_hash(),
+              native_default_wallet_hash(),
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;

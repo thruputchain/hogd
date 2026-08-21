@@ -169,20 +169,20 @@ metadata_path(std::filesystem::path const &data_dir)
   return data_dir / kDataDirMetadataFile;
 }
 
-GenesisConfigurationV2
+GenesisConfiguration
 build_genesis_configuration(LocalBootstrapConfig const &config,
                             NetworkHash const &network_hash,
                             StorageCostModel const &cost_model)
 {
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact(config, network_hash, cost_model);
-  return std::move(artifact.genesis_configuration_v2);
+  return std::move(artifact.genesis_configuration);
 }
 
 std::string
 build_data_dir_metadata_json(
     LocalBootstrapConfig const &config,
-    GenesisConfigurationV2 const &genesis_configuration)
+    GenesisConfiguration const &genesis_configuration)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -392,7 +392,7 @@ parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
   resolve_dev_wallet_profile(config.dev_wallet_profile);
 
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
-  const GenesisConfigurationV2 genesis =
+  const GenesisConfiguration genesis =
       build_genesis_configuration(config, network_hash, cost_model);
   const std::string expected_genesis_hash = hex_string(sha256(genesis));
   require_string_value(require_string_field(*parsed, "genesisHash", "root"),
@@ -950,9 +950,6 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
                                              ctx_->get_cost_model());
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
-  genesis_configuration_v2_ = std::move(artifact.genesis_configuration_v2);
-  genesis_configuration_v2_.storage_cost_model =
-      ctx_->get_cost_model().to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
   if (ctx_->get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
@@ -977,9 +974,8 @@ HogDevnodeNode::materialize_bootstrap_accounts(
       build_local_bootstrap_account_artifact(config, network_hash_,
                                              ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  genesis_configuration_v2_ = artifact.genesis_configuration_v2;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
-               std::move(artifact.genesis_configuration_v2))(),
+  CHECK_EQ(client.schedcoord_load_genesis_configuration(
+               std::move(artifact.genesis_configuration))(),
            DbSchedResult::DbSchedResultOK);
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
@@ -1110,30 +1106,12 @@ HogDevnodeNode::open_db_backend() const
   }
   if (RPCContext::has_committed_tip(*recovered_tip) &&
       recovered_tip->value.proposal_header.network_hash != network_hash_) {
-    ProposalHeader &header = recovered_tip->value.proposal_header;
-    HogDbStatus<DeployedContractHash> root =
-        db.read_address_metadata(kGenesisRootContractAddress);
-    const bool is_legacy_genesis =
-        root && root->contract_type == ContractType::kNative;
-    if (header.block_height <= 1 && header.network_hash == NetworkHash{} &&
-        is_legacy_genesis) {
-      header.network_hash = network_hash_;
-      if (HogDbStatus<void> status = db.write_dbtip(*recovered_tip); !status) {
-        status.error().raise("failed to migrate genesis network hash");
-      }
-      if (HogDbStatus<std::uint64_t> status = db.commit(); !status) {
-        status.error().raise("failed to persist genesis network hash");
-      }
-      info("migrated legacy genesis network hash to {}",
-           format_network_hash(network_hash_));
-    }
-    else {
-      throw std::runtime_error(std::format(
-          "recovered chain network hash {} does not match requested network "
-          "hash {}",
-          format_network_hash(header.network_hash),
-          format_network_hash(network_hash_)));
-    }
+    throw std::runtime_error(std::format(
+        "unsupported hog-devnode data directory: recovered chain network "
+        "hash {} does not match requested network hash {}",
+        format_network_hash(
+            recovered_tip->value.proposal_header.network_hash),
+        format_network_hash(network_hash_)));
   }
   return db;
 }

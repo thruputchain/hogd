@@ -19,14 +19,11 @@ genesis_contract_address(GenesisContractAddresses value)
 
 inline constexpr ContractAddress kNativeTokenContractAddress =
     genesis_contract_address(
-        GenesisContractAddresses::kAddressPrecompiledHogToken);
+        GenesisContractAddresses::kAddressNativeToken);
 
-// Address 2 is the legacy InitialTokenClaim address in V1 and the root
-// contract address in V2. Keeping the numeric value stable lets the two
-// configuration formats coexist during migration.
 inline constexpr ContractAddress kGenesisRootContractAddress =
     genesis_contract_address(
-        GenesisContractAddresses::kAddressInitialTokenClaim);
+        GenesisContractAddresses::kAddressGenesisRoot);
 
 // Contract-data key reserved to the native token implementation. Ordinary
 // contracts cannot write storage owned by the native token address.

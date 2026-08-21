@@ -53,13 +53,13 @@ struct BenchmarkState : public CommonBenchState {
     auto fibonacci_contract = std::make_shared<Contract>(ContractType::kRv32);
     fibonacci_contract->rv32_contract() = load_contract_blob("fibonacci.rv32a");
     using client_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
-    genesis_builder.add_initial_config(
+    genesis_builder.add_distribution(
         fibonacci_contract, SHA256Hash{},
         client_meta_t::entrypoint<u8"fibonacci">(),
         client_meta_t::make_calldata<u8"fibonacci">(uint32_t{5}),
         1'000'000'000);
 
-    contract_addr_ = GenesisConfigurationLoader::calculate_deployed_address(
+    contract_addr_ = calculate_genesis_deployment_address(
         sha256(*fibonacci_contract), SHA256Hash{});
 
     run_genesis_configuration(genesis_builder);

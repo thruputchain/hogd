@@ -74,7 +74,7 @@ ERC20ExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
         .secret_key = keys.second,
-        .address = GenesisConfigurationLoader::calculate_deployed_address(
+        .address = calculate_genesis_deployment_address(
             wallet_contract_hash, make_nonce(i)),
         .initial_nonce = make_nonce(i),
     });
@@ -104,17 +104,17 @@ ERC20ExperimentState::generate_experiment()
   const auto num_initial_allocations =
       static_cast<int128_t>(wallets_.size()) + 1;
   const int128_t wallet_initial_hogs =
-      (GenesisConfigurationLoader::initial_hog_token_supply() /
+      ((int128_t{kTotalHogSupply} * int128_t{kHogDivisibility}) /
        num_initial_allocations) -
       kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
-  builder.add_initial_config(erc20_contract, make_nonce(0),
+  builder.add_distribution(erc20_contract, make_nonce(0),
                              erc20_meta::entrypoint<u8"initialize">(),
                              erc20_meta::make_calldata<u8"initialize">(
                                  owner_address),
                              // The number of hogs each wallet starts with.
                              wallet_initial_hogs);
-  erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
+  erc20_address_ = calculate_genesis_deployment_address(
       sha256(*erc20_contract), make_nonce(0));
 
   // initialize wallets
@@ -123,7 +123,7 @@ ERC20ExperimentState::generate_experiment()
     // storage available to support their token balances. This will be changed
     // in the future, with whatever initialization procedures we use, but it
     // works for now.
-    builder.add_initial_config(wallet_contract, wallet.initial_nonce,
+    builder.add_distribution(wallet_contract, wallet.initial_nonce,
                                wallet_meta::entrypoint<u8"initialize">(),
                                wallet_meta::make_calldata<u8"initialize">(
                                    wallet.public_key),
@@ -180,7 +180,7 @@ ERC20ExperimentState::generate_experiment()
       builder.make_genesis_ceremony_transactions(cost_model));
   LoadgenSuccessResult result;
   result.genesis_configuration =
-      builder.build_v2(config_.network_hash, cost_model, *root_contract);
+      builder.build(config_.network_hash, cost_model, *root_contract);
   result.genesis_ceremony_txs = std::move(genesis_ceremony_txs);
   result.initialization_txs = std::move(initialization_txs);
   co_return result;

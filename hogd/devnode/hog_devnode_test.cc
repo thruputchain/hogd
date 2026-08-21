@@ -1053,14 +1053,14 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfigurationV2
+GenesisConfiguration
 build_test_data_dir_genesis(LocalBootstrapConfig const &config)
 {
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration_v2.storage_cost_model =
+  artifact.genesis_configuration.storage_cost_model =
       StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration_v2);
+  return std::move(artifact.genesis_configuration);
 }
 
 void
@@ -1068,7 +1068,7 @@ write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              LocalBootstrapConfig const &config,
                              std::int64_t schema_version = 2)
 {
-  const GenesisConfigurationV2 genesis = build_test_data_dir_genesis(config);
+  const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", schema_version);
@@ -1156,7 +1156,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact({});
-  GenesisConfigurationV2 genesis = std::move(artifact.genesis_configuration_v2);
+  GenesisConfiguration genesis = std::move(artifact.genesis_configuration);
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 
@@ -1645,7 +1645,6 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 
   ASSERT_EQ(first.accounts.size(), 4UL);
   ASSERT_EQ(first.initialization_txs.size(), 1UL);
-  ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 
   for (std::uint32_t i = 0; i < first.accounts.size(); ++i) {
@@ -3100,7 +3099,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+        x23::serialize(kNativeTokenContractAddress,
                        erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{10'000'000},
                        erc20_meta::make_calldata<u8"transfer">(

@@ -53,11 +53,7 @@ struct BootstrapAccountMetadata {
 };
 
 struct BootstrapAccountArtifact {
-  // Retained while consumers transition their persisted metadata from the V1
-  // JSON shape. New chains must load genesis_configuration_v2 and execute
-  // initialization_txs through the controlled height-1 ceremony.
   GenesisConfiguration genesis_configuration;
-  GenesisConfigurationV2 genesis_configuration_v2;
   std::vector<SignedTransaction> initialization_txs;
   std::vector<BootstrapAccountMetadata> accounts;
 };

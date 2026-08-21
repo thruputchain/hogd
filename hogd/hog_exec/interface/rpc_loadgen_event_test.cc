@@ -158,7 +158,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
@@ -259,7 +259,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
