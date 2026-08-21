@@ -134,7 +134,9 @@ FAKE_PS
 # [killall -q -SIG names...] records the signal it was asked for and clears
 # $ALIVE_FILE only for the signals in $DIES_ON, standing in for a process that
 # ignores SIGTERM. $KILLALL_FAILS makes it fail the way a host with a broken
-# killall does: nonzero, with a complaint on stderr.
+# killall does: nonzero, with a complaint on stderr. $KILLALL_DENIES names a
+# process it is not permitted to signal, which real killall reports per process
+# before signalling the rest and then exits nonzero over.
 # A signal that matches nothing exits 1 silently, which is what [killall -q]
 # does and must not be read as a failure.
 cat >"$reap_bin/killall" <<'FAKE_KILLALL'
@@ -150,7 +152,19 @@ if [[ -n ${KILLALL_FAILS:-} ]]; then
   echo "killall: operation not permitted" >&2
   exit 1
 fi
+denied=""
+kept=""
+if [[ -n ${KILLALL_DENIES:-} ]]; then
+  echo "$KILLALL_DENIES(3463907): Operation not permitted" >&2
+  denied=1
+  # A process killall may not signal outlives every signal sent to it.
+  kept=$(grep -xF "$KILLALL_DENIES" "$ALIVE_FILE" || :)
+fi
 [[ " $DIES_ON " != *" $signal "* ]] || : >"$ALIVE_FILE"
+if [[ -n $denied ]]; then
+  [[ -z $kept ]] || grep -qxF "$kept" "$ALIVE_FILE" || echo "$kept" >>"$ALIVE_FILE"
+  exit 1
+fi
 [[ -s "$ALIVE_FILE" ]] || exit 1
 FAKE_KILLALL
 chmod +x "$reap_bin/ps" "$reap_bin/killall"
@@ -171,6 +185,7 @@ run_reap() {
     PATH="$reap_bin:$PATH" ALIVE_FILE="$alive_file" \
       SIGNAL_FILE="$signal_file" DIES_ON="$dies_on" \
       KILLALL_FAILS="${KILLALL_FAILS:-}" \
+      KILLALL_DENIES="${KILLALL_DENIES:-}" \
       bash -c "$(ci_reap_program "${3:-hog-mempool hog-exec}" 1 1)" 2>&1
   ) || reap_status=$?
 }
@@ -223,6 +238,33 @@ if [[ "$reap_output" == *"alive after SIGKILL"* ]]; then
 else
   echo "ok   unsendable signal makes no SIGKILL claim"
 fi
+
+# A process killall was not permitted to signal is the other reading of the
+# same nonzero status, and the opposite case: killall ran, so the reap has been
+# shown a process that will not go. Reading it as a broken killall abandoned
+# the reap after the SIGTERM and left the port holder for the next bind to
+# discover -- which is how a stale loadgen_server on hog7 turned into an
+# unexplained "exit code 134" from the loadgen that could not bind after it.
+KILLALL_DENIES=loadgen_server run_reap "loadgen_server" "TERM KILL" \
+  "loadgen_server hog-mempool"
+check_eq "denied process fails the reap as a survivor" "2" "$reap_status"
+check_contains "denied process is named as unsignallable" \
+  "cannot signal processes: loadgen_server(3463907): Operation not permitted" \
+  "$reap_output"
+check_contains "denied process is escalated to SIGKILL" \
+  "alive after SIGTERM, escalating to SIGKILL: loadgen_server" "$reap_output"
+check_contains "denied process is reported as surviving SIGKILL" \
+  "alive after SIGKILL: loadgen_server" "$reap_output"
+
+# Somebody else's process wearing one of our names is reported, but it is not
+# ours to reap: what fails a reap is a process still there at the end of it.
+KILLALL_DENIES=scpd.dev run_reap "hog-mempool" "TERM" \
+  "hog-mempool hog-exec"
+check_eq "a denial over a process that is not ours reaps cleanly" "0" \
+  "$reap_status"
+check_contains "the denial is still reported" \
+  "cannot signal processes: scpd.dev(3463907): Operation not permitted" \
+  "$reap_output"
 
 if ((fail)); then
   echo "bench_harness selftest FAILED"

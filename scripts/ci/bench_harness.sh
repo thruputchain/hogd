@@ -291,9 +291,10 @@ CI_REAP_KILL_TIMEOUT_SEC=${CI_REAP_KILL_TIMEOUT_SEC:-10}
 # The program [ci_remote_reap] runs on one host to reap [$1] (a space-separated
 # list of process names), waiting up to [$2] seconds for SIGTERM to work and
 # [$3] more for SIGKILL. Exits 2, naming the survivors, if anything outlives
-# both, and 3 if the signals could not be sent at all -- a host whose [killall]
-# is broken has not been shown to have a process refusing to die, and
-# must not be reported as though it had.
+# both, and 3 if [killall] itself could not run -- a host whose [killall] is
+# broken has not been shown to have a process refusing to die, and must not be
+# reported as though it had. A process [killall] ran but was not permitted to
+# signal is not that case: it is a survivor, and exits 2 like any other.
 #
 # [killall] returns as soon as it has delivered the signal, so reaping with a
 # bare [killall <names>] hands the caller back a host where the processes have
@@ -350,11 +351,27 @@ wait_gone() {
 # die: [-q] silences killall's own "no process found", so a nonzero exit that
 # still says something is killall failing rather than an absence of
 # processes to kill.
+#
+# One nonzero status covers two unlike failures, and only one of them means
+# nothing was signalled. [killall] reports a process it was not permitted to
+# signal per process, as "hog-exec(3061025): Operation not permitted", and goes
+# on to signal the rest; on a shared cluster that is somebody else's process
+# wearing one of our names, and it is a process still holding our ports. Its
+# own failures -- a missing [killall], an unusable one -- it prefixes with
+# "killall:", and those really did signal nothing. Reading the first as the
+# second abandons the reap after the SIGTERM: the processes that were signalled
+# are never waited for, the survivor is never escalated to nor reported, and
+# the benchmark walks into the bind it reaps to avoid.
 signal_all() {
   err=\$(killall -q "-\$1" \$procs 2>&1)
   status=\$?
-  if [ "\$status" -ne 0 ] && [ -n "\$err" ]; then
-    echo "cannot signal processes: \$err" >&2
+  if [ "\$status" -eq 0 ] || [ -z "\$err" ]; then
+    return 0
+  fi
+  echo "cannot signal processes: \$err" >&2
+  # Every line naming a process and pid is a per-process refusal; anything else
+  # is killall itself, so the reap has been told nothing about our processes.
+  if printf '%s\n' "\$err" | grep -qvE '^[^ (]+\([0-9]+\): '; then
     return 1
   fi
   return 0
