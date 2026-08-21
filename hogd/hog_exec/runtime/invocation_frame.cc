@@ -55,19 +55,20 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
   // mark_frame_as_failed() has already popped the HogDb subtransactions it
   // pushed for its own successful TryInvoke children. We therefore deliberately
   // do NOT propagate the child's try_invoke_frame_count_ /
-  // total_try_invoke_depth_ into the parent (unlike commit_successful_child_frame
-  // for a committing child): those savepoints no longer exist, so the depth they
-  // represented has been freed and is available for reuse.
+  // total_try_invoke_depth_ into the parent (unlike
+  // commit_successful_child_frame for a committing child): those savepoints no
+  // longer exist, so the depth they represented has been freed and is available
+  // for reuse.
   //
   // The TryInvoke depth cap (kMaxSavepointDepth) bounds the *live* HogDb
   // savepoint stack -- it is hard-enforced at the HogDb layer as well (see
   // HogDbExecutorRpc::try_push_new_subtransaction's get_savepoint_head() guard)
   // -- not the cumulative per-transaction count. Cumulative savepoint push/pop
   // work across sequential manual-revert cycles is bounded instead by VM
-  // instruction gas: every successful TryInvoke requires executing a child frame
-  // whose gas is charged to the caller even when that frame is manually reverted
-  // (gas is not refunded on revert), so repeated cycles cannot amplify host work
-  // relative to the gas spent.
+  // instruction gas: every successful TryInvoke requires executing a child
+  // frame whose gas is charged to the caller even when that frame is manually
+  // reverted (gas is not refunded on revert), so repeated cycles cannot amplify
+  // host work relative to the gas spent.
   child_return_output_ = std::move(frame.to_return_output_);
   child_returned_auth_token_ids_.clear();
 
