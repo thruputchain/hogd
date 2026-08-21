@@ -132,13 +132,13 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
       << x23::show(handler.get_trace()->system_calls);
 }
 
-TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
+TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
   ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client(addr);
   const SignedTransaction tx{
       .tx = Transaction{.invocation = client.make_invocation<
-                            u8"test_invoke_unowned_token_beats_reentrance">(
+                            u8"test_invoke_unowned_token_loses_to_reentrance">(
                             kGasLimit),
                         .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
@@ -157,8 +157,9 @@ TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
-    // Self-invoke forwarding a fabricated token id 0xDEAD: the ownership
-    // check wins over the reentrance check, and no child frame runs.
+    // Self-invoke forwarding a fabricated token id 0xDEAD: the reentrance
+    // check wins -- it runs before the token list is read -- and no child
+    // frame runs. The losing input is still traced (#2973).
     SyscallTraceBody body(SyscallNo::kInvoke);
     body.invoke().inputs.address = addr;
     body.invoke().inputs.owned_auth_token_ids_list.append_range(
@@ -170,7 +171,7 @@ TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
     };
     expected.push_back(make_entry(
         99'302, 99'302, std::move(body),
-        status_with(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
+        status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
   expected.push_back(empty_return_entry(99'264));
 

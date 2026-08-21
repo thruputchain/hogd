@@ -139,11 +139,20 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
-  // Admission checks a new invocation frame must pass: valid flags, auth
-  // tokens owned by the caller, and no reentrance. invoke() runs these before
-  // creating a child frame; the test FFI mock frame path enters at
+  // The half of the admission checks below that needs nothing parsed out of
+  // guest memory: valid flags, then no reentrance. Split out so the Invoke
+  // syscall body can reject a reentrant call before it copies either
+  // contract-supplied span (#2973); the order here is what makes kReentrance
+  // beat an unowned auth token.
+  [[nodiscard]] SyscallStatus<void>
+  validate_new_invocation_frame(ContractAddress const &address,
+                                InvokeFlagSet flags) const;
+
+  // Admission checks a new invocation frame must pass: valid flags, no
+  // reentrance, and auth tokens owned by the caller. invoke() runs these
+  // before creating a child frame; the test FFI mock frame path enters at
   // start_frame(), below invoke(), so it runs them itself (#3301). The Invoke
-  // syscall body also runs them before it copies the caller's calldata, so a
+  // syscall body runs them before it copies the caller's calldata, so a
   // rejected invoke does no length-dependent host work (#2973). Failing is
   // a no-op -- nothing here mutates the handler, so any of those callers may
   // ask more than once.

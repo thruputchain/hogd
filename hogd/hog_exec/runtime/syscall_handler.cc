@@ -790,19 +790,33 @@ SystemCallHandler::get_msg_sender() const
 }
 
 SyscallStatus<void>
-SystemCallHandler::validate_new_invocation(
-    ContractAddress const &address, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) const
+SystemCallHandler::validate_new_invocation_frame(ContractAddress const &address,
+                                                 InvokeFlagSet flags) const
 {
   if (!validate_invoke_flags(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
+  return {};
+}
+
+SyscallStatus<void>
+SystemCallHandler::validate_new_invocation(
+    ContractAddress const &address, InvokeFlagSet flags,
+    std::span<uint32_t const> owned_auth_token_ids) const
+{
+  // Reentrance is decided first, so a reentrant invoke is rejected without
+  // reading the caller's auth-token list at all -- see the ordering note in
+  // syscall_Invoke_inner (#2973).
+  if (auto admitted = validate_new_invocation_frame(address, flags);
+      !admitted.has_value()) {
+    return admitted;
+  }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
   return {};
 }
