@@ -53,6 +53,13 @@ InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
   child_return_output_ = std::move(frame.to_return_output_);
   child_returned_auth_token_ids_.clear();
 
+  // Propagate the child's event count even though its emitted events are
+  // discarded: event_count_ tracks transaction-wide event-admission work,
+  // and a manual revert does not undo the host materialization already done.
+  // Otherwise sequential reverting children each restart from the parent's
+  // unchanged count and can each admit kMaxEventsPerTransaction copies (#3520).
+  event_count_ = frame.event_count_;
+
   // reclaim the auth tokens from a reverted frame
   for (auto token_id : most_recent_child_frame_forwarded_auth_tokens_) {
     owned_auth_token_ids_.insert(token_id);

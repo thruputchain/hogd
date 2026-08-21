@@ -1013,6 +1013,131 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_TRUE(tx_event_log_2.value().events.empty());
 }
 
+// A child can fill the per-transaction event-admission limit and then manually
+// revert; the reverted events are correctly not emitted, but the event-work
+// admission the host already performed must still count against the
+// transaction-wide limit. Otherwise sequential reverting children each restart
+// from the parent's unchanged count and can each admit
+// kMaxEventsPerTransaction copies (#3520).
+TEST_F(EventTest, ManualRevertPropagatesEventAdmissionCount)
+{
+  constexpr uint32_t kRevertingChildCalls = 2;
+
+  ContractAddress addr_child = make_contract_address(0xFF);
+  ContractAddress addr_parent = make_contract_address(0xFE);
+  const std::string event_data = "revert-admission";
+  uint32_t accepted_event_materializations = 0;
+  InvocationFrameStatusCode frame_statuses[kRevertingChildCalls]{};
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0,
+      [&accepted_event_materializations,
+       &event_data](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(event_data)));
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            // Admission cap reached; stop emitting but still revert below.
+            break;
+          }
+          ++accepted_event_materializations;
+        }
+        // Manually revert: emitted events are discarded, but the event-work
+        // admission must remain charged transaction-wide.
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        return {};
+      });
+  auto native_contract_child =
+      std::make_unique<NativeContract>(std::move(fns_child));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
+  fns_parent.emplace(
+      0,
+      [addr_child, &frame_statuses](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        for (auto &frame_status : frame_statuses) {
+          CopyableInvokeOutputs outputs{};
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto status =
+              ctx.syscall<SyscallNo::kInvoke>(addr_child,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t>{}, inputs,
+                                              outputs);
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          frame_status = outputs.frame_status;
+        }
+        return {};
+      });
+  auto native_contract_parent =
+      std::make_unique<NativeContract>(std::move(fns_parent));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_child));
+  contract_map.emplace(1, std::move(native_contract_parent));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto child_contract = make_native_contract(0);
+  auto parent_contract = make_native_contract(1);
+  write_contract(child_contract);
+  write_contract(parent_contract);
+  write_deployment(addr_child, child_contract);
+  write_deployment(addr_parent, parent_contract);
+  setup_grant_storage_token(addr_child, 1'000'000'000);
+  setup_grant_storage_token(addr_parent, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = addr_parent,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  // Both children manually reverted, so both frames report Abort.
+  for (auto frame_status : frame_statuses) {
+    ASSERT_EQ(frame_status, InvocationFrameStatusCode::Abort);
+  }
+
+  // The first child exhausts the transaction-wide admission limit; the reverted
+  // count propagates to the parent, so subsequent children admit nothing more.
+  ASSERT_EQ(accepted_event_materializations, kMaxEventsPerTransaction);
+
+  auto r = handler.try_commit_transaction();
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+
+  advance_block();
+  auto tx_event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_TRUE(tx_event_log->events.empty());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // Regression test for #2857: a validation-mode tx with enough consumed
