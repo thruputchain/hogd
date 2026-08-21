@@ -1714,9 +1714,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     proposed.proposal.header = ProposalHeader{
         .ext = {},
         .network_hash = network_hash_,
-        .genesis_configuration_hash = last_committed_block_
-                                          .value.proposal_header
-                                          .genesis_configuration_hash,
+        .genesis_configuration_hash =
+            last_committed_block_.value.proposal_header
+                .genesis_configuration_hash,
         .proposer = request.context.proposer,
         .block_timepoint = request.context.block_timepoint,
         .block_height = 1,

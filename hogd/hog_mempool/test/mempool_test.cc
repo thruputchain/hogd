@@ -2385,9 +2385,9 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
-  EXPECT_EQ(result.commit()
-                .db_tip.value.proposal_header.genesis_configuration_hash,
-            genesis_configuration_hash);
+  EXPECT_EQ(
+      result.commit().db_tip.value.proposal_header.genesis_configuration_hash,
+      genesis_configuration_hash);
 
   const ContractAddress deployed =
       GenesisConfigurationLoader::calculate_deployed_address(
