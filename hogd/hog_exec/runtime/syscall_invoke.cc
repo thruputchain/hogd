@@ -161,16 +161,6 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
             WrappedGasAmount{0}};
   }
 
-  Calldata calldata;
-  calldata.resize_uninitialized(input_calldata.size());
-  if (!input_calldata.empty()) {
-    assert(calldata.data() != nullptr);
-    assert(input_calldata.data() != nullptr);
-    std::memcpy(calldata.data(),
-                reinterpret_cast<const uint8_t *>(input_calldata.data()),
-                input_calldata.size());
-  }
-
   if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
@@ -193,6 +183,35 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
+  }
+
+  // Admission is decided before the calldata is materialized: a rejected
+  // invoke never makes the host allocate and copy a contract-sized span it is
+  // about to throw away, and rejections report gas 0, so that copy would be
+  // unpriced host work a contract could repeat at will (issue #2973).
+  //
+  // invoke() re-runs this check below -- it is also entered directly from the
+  // test FFI mock frame path (#3301) -- and it is a pure query on the handler,
+  // so running it twice is free of side effects. The flags it validates there
+  // may have ReadOnly added by an enclosing read-only frame; ReadOnly is an
+  // allowed flag and neither the auth-token nor the reentrance check looks at
+  // flags, so the verdict is the same either way.
+  if (auto admitted =
+          syscall_handler.validate_new_invocation(input_address,
+                                                  input_inputs.flags,
+                                                  owned_auth_token_ids_vec);
+      !admitted.has_value()) {
+    return {admitted.error().code(), WrappedGasAmount{0}};
+  }
+
+  Calldata calldata;
+  calldata.resize_uninitialized(input_calldata.size());
+  if (!input_calldata.empty()) {
+    assert(calldata.data() != nullptr);
+    assert(input_calldata.data() != nullptr);
+    std::memcpy(calldata.data(),
+                reinterpret_cast<const uint8_t *>(input_calldata.data()),
+                input_calldata.size());
   }
 
   auto [invoke_res, gas_amount] =
