@@ -1113,6 +1113,13 @@ EventRPCContext::find_canonical_candidate(
     co_return std::unexpected(records.error());
   }
   const BlockHeight height = consensus_value.proposal_header.block_height;
+  // BlockID is process-local and may be regenerated after restart. Match
+  // retained candidates by height and finalized events root: the root commits
+  // each TxEventLog with its nondeterministic proposal data, independent of
+  // candidate pair order and signature wrappers. Committed publication
+  // validates the event and transaction roots against ConsensusValue, so
+  // recovery does not match on BlockID and needs no ProposalTxsHash in
+  // candidate state.
   std::optional<CandidatePromotion> selected;
   for (const auto &record : *records) {
     if (record.protocol != std::string_view(version::kHogdProtocol()) ||
