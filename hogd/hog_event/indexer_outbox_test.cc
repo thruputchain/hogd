@@ -1273,6 +1273,28 @@ TEST_F(IndexerOutboxTest,
   EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
 }
 
+TEST_F(IndexerOutboxTest,
+       CommittedNondeterministicDataMutationIsRejectedByEventRoot)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  ProposedTransaction body = make_body(7);
+  auto committed =
+      make_committed(161, {body}, {make_event(body, /*marker=*/0x77)});
+  initialize_test_origin(store, committed);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  const std::string filename = IndexerOutboxStore::committed_filename(161);
+  mutate_payload<IndexerOutboxCommittedPayload>(
+      dir_, filename, [](auto &payload) {
+        payload.tx_bodies[0]
+            .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
+      });
+
+  auto result = store.load_committed(161)();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("event root"), std::string::npos);
+}
+
 TEST_F(IndexerOutboxTest, CandidateHeaderPayloadEventRootMismatchIsRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
