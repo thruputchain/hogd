@@ -22,6 +22,7 @@
 #include "consensus.hh"
 #include "db_conflict.hh"
 #include "event_outbox_internal.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/time.h"
@@ -38,6 +39,7 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/serialize.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -245,8 +247,41 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
   SHA256Hash out_hash;
   try {
-    co_await context->get().finish_file_write();
-    out_hash = context->get().get_root_hash();
+    // Overlap the events-file drain with root-hash computation. Neither
+    // depends on the other: await_all_executors_closed() has already returned
+    // and add_event() refuses once the last executor handle is gone, so no
+    // further events can arrive and the trie is already final.
+    // finish_file_write() is I/O bound (it flushes the residual per-thread
+    // buffers and fsyncs the events file) while get_root_hash() is CPU-bound
+    // parallel Merkle hashing.
+    //
+    // The bg() hop is what makes the overlap real. x23::Async is eager, so
+    // without it finish_file_write() would run inline on this thread through
+    // its fsync before get_root_hash() ever started -- which is what the
+    // straight-line version did.
+    auto file_write = [](EventBlockContext &ctx) -> x23::Async<void> {
+      auto *pool = x23::ThreadPool::get_thread_pool();
+      if (pool == nullptr) {
+        pool = &default_threadpool();
+      }
+      co_await pool->bg();
+      co_await ctx.finish_file_write();
+    }(context->get());
+
+    // Always drain file_write before leaving this scope: an in-flight
+    // x23::Async must not be destroyed un-awaited, and letting that assert
+    // fire during unwinding would mask the real hashing failure.
+    std::exception_ptr hash_ex;
+    try {
+      out_hash = context->get().get_root_hash();
+    } catch (...) {
+      hash_ex = std::current_exception();
+    }
+    co_await file_write;
+    if (hash_ex) {
+      std::rethrow_exception(hash_ex);
+    }
+
     IndexerOutboxCandidatePayload candidate =
         co_await context->get().snapshot_indexer_outbox_candidate(block_height,
                                                                   out_hash);
