@@ -180,6 +180,7 @@ make_committed_payload_golden_fixture()
   value.proposal_header.network_hash.fill(0);
   value.proposal_header.network_hash[0] = 0x30;
   value.proposal_header.network_hash[31] = 0x4f;
+  value.proposal_header.genesis_configuration_hash.fill(0);
   value.proposal_header.proposer.fill(0);
   value.proposal_header.proposer[0] = 0x50;
   value.proposal_header.proposer[31] = 0x6f;
@@ -1051,12 +1052,12 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
       make_committed_payload_golden_fixture();
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
-  constexpr size_t kExpectedByteLength = 652;
-  const SHA256Hash kExpectedDigest{0x7c, 0xe4, 0xd8, 0x50, 0xc2, 0xe9, 0xbc,
-                                   0x35, 0x00, 0x2f, 0x39, 0x7a, 0x2c, 0xbf,
-                                   0x16, 0x5b, 0x2d, 0x92, 0x71, 0x21, 0xbc,
-                                   0xf2, 0xbd, 0x3d, 0x51, 0xdd, 0xfa, 0xac,
-                                   0x24, 0x88, 0x8e, 0xa0};
+  constexpr size_t kExpectedByteLength = 684;
+  const SHA256Hash kExpectedDigest{0x92, 0xa0, 0x63, 0xe0, 0x64, 0xba, 0x85,
+                                   0xef, 0xce, 0xd9, 0xb0, 0x0c, 0x1d, 0xf4,
+                                   0x61, 0xc0, 0x10, 0x84, 0x5e, 0x83, 0xda,
+                                   0xc9, 0x82, 0xa9, 0x54, 0x8c, 0x9b, 0x28,
+                                   0xb5, 0xed, 0xd9, 0x52};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
