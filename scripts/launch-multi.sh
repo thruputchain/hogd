@@ -300,6 +300,10 @@ echo "Start event..."
 if $delete_db; then
   ssh "${COMMON_SSH_OPTS[@]}" "$event_server" "rm -rf $logdir/event"
 fi
+# hog-event does not create its work dir, it only opens the indexer outbox inside
+# it, so the delete above has to be followed by a fresh one or the event server
+# dies at startup on "indexer outbox parent directory: No such file or directory".
+ssh "${COMMON_SSH_OPTS[@]}" "$event_server" mkdir -p "$logdir/event"
 remote_launch "$event_server" "$EVENT_BINARY" \
   --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip "$event_server")" --work-dir "$logdir/event" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
