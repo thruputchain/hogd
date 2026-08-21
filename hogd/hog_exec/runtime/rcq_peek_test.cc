@@ -645,18 +645,23 @@ TEST_F(SyscallRcqPeekTest,
   EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
-// #3531: peeking kMaxConcurrentRcqReadsPerTx + 1 distinct keys whose entries
-// live in committed (past) blocks must return
-// kSyscallErrorCodeRetrocausalQueueReadLimitReached at the cap, rather than
-// pinning an unbounded number of full decoded blocks in the snapshot cache with
-// zero direct host gas. Past-block reads previously bypassed the per-tx cap.
+// #3531: peeking more than kMaxConcurrentRcqReadsPerTx distinct keys whose
+// entries live in committed (past) blocks must return
+// kSyscallErrorCodeRetrocausalQueueReadLimitReached once the cap is reached,
+// rather than pinning an unbounded number of full decoded blocks in the
+// snapshot cache with zero direct host gas. Past-block reads previously
+// bypassed the per-tx cap.
 TEST_F(SyscallRcqPeekTest, PastBlockReadCapReturnsSyscallErrorAtLimit)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
                                                int128_t{kTotalHogSupply});
 
-  constexpr uint32_t kReadCount = kMaxConcurrentRcqReadsPerTx + 1;
+  // A couple of reads past the cap, so the contract keeps issuing distinct-key
+  // past-block reads after the limit is reached -- exercising that those reads
+  // short-circuit (no further block is loaded into the snapshot cache) and
+  // still return the handleable error rather than growing the cache.
+  constexpr uint32_t kReadCount = kMaxConcurrentRcqReadsPerTx + 2;
 
   NativeContractBuilder builder;
   // method 8: insert one entry into each of `count` distinct queue keys.
@@ -674,8 +679,8 @@ TEST_F(SyscallRcqPeekTest, PastBlockReadCapReturnsSyscallErrorAtLimit)
         return {};
       });
   // method 9: peek-len `count` keys. The first kMaxConcurrentRcqReadsPerTx read
-  // one past-block entry each (len == 1); the cap-plus-one peek returns
-  // RetrocausalQueueReadLimitReached.
+  // one past-block entry each (len == 1); every read at or beyond the cap
+  // returns RetrocausalQueueReadLimitReached.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       9, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
         for (uint32_t i = 0; i < count; ++i) {

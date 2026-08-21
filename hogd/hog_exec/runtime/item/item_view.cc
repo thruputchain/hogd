@@ -265,6 +265,20 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     }
   }
 
+  // Bound past-block reads per transaction. Each past-block read pins a full
+  // decoded block (up to ~64 KiB) in the shared, block-lifetime snapshot cache
+  // while charging zero direct host gas, and this path runs before the
+  // concurrent-observation cap; without a bound a transaction could turn many
+  // cheap distinct-key reads into unbounded host memory (#3531). Check the cap
+  // *before* get_next_block so a read past the cap does not load or retain a
+  // new block in the shared cache; the crossing read (below) is the last one
+  // that resolves a block. load_next_queue_entry surfaces the handleable
+  // RetrocausalQueueReadLimitReached error either way, keeping proposal and
+  // validation in lockstep.
+  if (past_block_rcq_read_cap_exceeded(execution_mode_data)) {
+    return nullptr;
+  }
+
   auto next_block_status = get_next_block(block_index);
   if (!next_block_status.has_value()) {
     return next_block_status.error();
@@ -272,15 +286,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   auto const *next_block = next_block_status.value();
 
   if (next_block) {
-    // Bound past-block reads per transaction. Each past-block read pins a full
-    // decoded block (up to ~64 KiB) in the shared, block-lifetime snapshot
-    // cache while charging zero direct host gas, and this branch runs before
-    // the concurrent-observation cap; without a bound a transaction could turn
-    // many cheap distinct-key reads into unbounded host memory (#3531). Over
-    // the cap, consume nothing and leave the cursor unchanged --
-    // load_next_queue_entry then surfaces the handleable
-    // RetrocausalQueueReadLimitReached error, keeping proposal and validation
-    // in lockstep.
+    // Count this past-block read. The read that crosses the cap consumes
+    // nothing and leaves the cursor unchanged; every subsequent read
+    // short-circuits above before loading another block.
     if (!record_past_block_rcq_read(execution_mode_data)) {
       return nullptr;
     }
