@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <memory>
-#include <print>
 #include <optional>
+#include <print>
 #include <set>
 
 #include "exec_result.hh"
@@ -113,8 +113,8 @@ protected:
 // question is how many writes fit in one invocation's gas budget.
 //
 // One case per item count, because the fixture's database keeps its blocks and
-// genesis may only load into an empty one -- a loop inside a single test dies on
-// the second iteration.
+// genesis may only load into an empty one -- a loop inside a single test dies
+// on the second iteration.
 class StorageFillerTest : public ERC20ExperimentTest {
 protected:
   // Executes one filler transaction writing [items] x 1 KiB and returns the gas
@@ -168,12 +168,13 @@ protected:
 
 // DISABLED since the rebase onto main that dropped wasm (#3465).  These numbers
 // were all measured against the wasm artifact -- the 8,243 / 15,335 gas figures
-// quoted in [filler_gas_limit] are exactly what this fixture used to print.  wasm
-// is gone, so the filler now loads its rv32 artifact, and on rv32 the invocation
-// does not succeed at all: [measure] returns nullopt before it ever reports gas.
-// It is *not* the gas budget -- raising [filler_gas_limit] to 100,000,000 fails
-// identically.  Porting storage_filler to rv32 is the open work; see ISSUES.md
-// #12.  Re-enable these by dropping the DISABLED_ prefixes once it invokes.
+// quoted in [filler_gas_limit] are exactly what this fixture used to print.
+// wasm is gone, so the filler now loads its rv32 artifact, and on rv32 the
+// invocation does not succeed at all: [measure] returns nullopt before it ever
+// reports gas. It is *not* the gas budget -- raising [filler_gas_limit] to
+// 100,000,000 fails identically.  Porting storage_filler to rv32 is the open
+// work; see ISSUES.md #12.  Re-enable these by dropping the DISABLED_ prefixes
+// once it invokes.
 TEST_F(StorageFillerTest, DISABLED_OneItem)
 {
   auto gas = measure(1);

@@ -30,8 +30,7 @@ public:
   // one shard. Zero instances disables it, which is the normal path.
   ERC20ExperimentState(const ERC20PaymentsConfig &config, bool use_rv32 = false,
                        uint64_t num_virtual_addresses = 0,
-                       uint32_t filler_instances = 0,
-                       uint32_t filler_items = 0,
+                       uint32_t filler_instances = 0, uint32_t filler_items = 0,
                        uint32_t filler_item_bytes = 0,
                        uint32_t filler_period = 1)
     : config_(config), use_rv32_(use_rv32),

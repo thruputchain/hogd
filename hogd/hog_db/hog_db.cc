@@ -30,8 +30,6 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"             // IWYU pragma: keep
-#include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/db_shard_routing/sharding.h"
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -97,8 +95,8 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 // every shard, breaking the sum-of-partials invariant, so 1 shard it is.
 //
 // This runs before genesis, which recomputes its base db hash over whatever is
-// already in the db (see [dbsched_load_genesis_configuration]), so the preloaded
-// items are accounted for rather than corrupting the hash.
+// already in the db (see [dbsched_load_genesis_configuration]), so the
+// preloaded items are accounted for rather than corrupting the hash.
 void
 preload_synthetic_items(HogDbDAO &db, const ShardIdentity &identity,
                         size_t num_items, size_t bytes_per_item)
@@ -124,8 +122,7 @@ preload_synthetic_items(HogDbDAO &db, const ShardIdentity &identity,
       break;
     }
     if (++written % 10'000'000 == 0) {
-      info("preload: {} items written in {:.1f} s", written,
-           timer.elapsed());
+      info("preload: {} items written in {:.1f} s", written, timer.elapsed());
     }
   }
   info("preload complete: {} items on shard {} of {} in {:.1f} s", written,
@@ -134,12 +131,11 @@ preload_synthetic_items(HogDbDAO &db, const ShardIdentity &identity,
 
 int
 hog_db_init(std::string_view path, size_t ram_bytes, size_t preload_items,
-           size_t preload_bytes_per_item,
-           const std::string *coordinator_addr, std::string_view bind_ip,
-           uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
-           uint16_t gateway_port, uint16_t metrics_port,
-           std::optional<uint32_t> flag_shard_id,
-           std::optional<uint32_t> flag_total_shards)
+            size_t preload_bytes_per_item, const std::string *coordinator_addr,
+            std::string_view bind_ip, uint16_t exec_port, uint16_t mempool_port,
+            uint16_t auth_port, uint16_t gateway_port, uint16_t metrics_port,
+            std::optional<uint32_t> flag_shard_id,
+            std::optional<uint32_t> flag_total_shards)
 {
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
@@ -382,8 +378,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       continue;
     }
     if (arg == "--preload-bytes-per-item" && i + 1 < argc) {
-      preload_bytes_per_item = hogd::parse_integer_arg<size_t>(
-          "--preload-bytes-per-item", argv[++i], argv, usage);
+      preload_bytes_per_item =
+          hogd::parse_integer_arg<size_t>("--preload-bytes-per-item", argv[++i],
+                                          argv, usage);
       continue;
     }
     if (arg == "--ram-bytes" && i + 1 < argc) {
@@ -425,7 +422,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       coordinator_addr_raw.empty() ? nullptr : &coordinator_addr_raw;
 
   return hogd::hog_db_init(path, *ram_bytes, preload_items,
-                          preload_bytes_per_item, coordinator_addr, bind_ip,
-                          exec_port, mempool_port, auth_port, gateway_port,
-                          metrics_port, shard_id, total_shards);
+                           preload_bytes_per_item, coordinator_addr, bind_ip,
+                           exec_port, mempool_port, auth_port, gateway_port,
+                           metrics_port, shard_id, total_shards);
 };

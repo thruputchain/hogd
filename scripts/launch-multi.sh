@@ -368,7 +368,7 @@ if [[ $preload_items -gt 0 ]]; then
   # only the addresses it owns. Measured fill rate starts near 0.5 GB/s and
   # decays past 0.2 GB/s as the ramdb grows, so budget at 120 MB/s and add slack
   # for scanning the addresses this shard does not own.
-  db_wait_timeout=$((300 + preload_items * preload_bytes_per_item /
+  db_wait_timeout=$((300 + preload_items * preload_bytes_per_item / \
     ${#hog_db_servers[@]} / 60000000))
   # Everything downstream waits on the preload too: chuckd only opens its port
   # once the mempool is ready, and the mempool is ready only once genesis has

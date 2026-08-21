@@ -20,8 +20,8 @@
 #include "hogd/crypto/lthash16.h"
 #include "hogd/db_shard_routing/sharding.h" // kShardFunctionId
 #include "hogd/hog_db/db_hash.h"
-#include "hogd/hog_db/hog_types.h" // BlockTXID
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h" // BlockTXID
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/ramdb/db.h"

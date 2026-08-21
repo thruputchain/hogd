@@ -30,8 +30,8 @@ class HogDbGatewayRpc {
 public:
   using rpc_service = DbGateway1;
 
-  // One shard: the whole batch is served from it, which is what a hog_db process
-  // holding a single shard wants.
+  // One shard: the whole batch is served from it, which is what a hog_db
+  // process holding a single shard wants.
   explicit HogDbGatewayRpc(RPCContext &ctx) : shards_{&ctx} {}
 
   // Every shard, in shard-id order (see order_shards_by_id), for a process that

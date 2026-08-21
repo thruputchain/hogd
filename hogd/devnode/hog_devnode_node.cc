@@ -1033,9 +1033,8 @@ HogDevnodeNode::materialize_bootstrap_accounts(
     panic("devnode materialize_bootstrap_accounts connect failed: {}",
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(
-          config, network_hash_, default_shard_db().get_cost_model());
+  BootstrapAccountArtifact artifact = build_local_bootstrap_account_artifact(
+      config, network_hash_, default_shard_db().get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
   genesis_configuration_v2_ = artifact.genesis_configuration_v2;
   CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(

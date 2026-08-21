@@ -51,12 +51,13 @@ private:
   uint32_t filler_item_bytes_ = 0;
   uint32_t filler_period_ = 1;
   // Distinct key groups the filler cycles through. Zero means every transaction
-  // writes fresh keys, so writes are always inserts and live state grows without
-  // bound. A nonzero value makes transactions revisit keys, so writes become
-  // overwrites and live state is capped at keyspace x items x item_bytes. The
-  // difference tells us whether the hogdb data directory grows with distinct
-  // keys or with the number of writes -- i.e. whether a 105 GB directory means
-  // 105 GB of state or ~10 GB of state plus write amplification.
+  // writes fresh keys, so writes are always inserts and live state grows
+  // without bound. A nonzero value makes transactions revisit keys, so writes
+  // become overwrites and live state is capped at keyspace x items x
+  // item_bytes. The difference tells us whether the hogdb data directory grows
+  // with distinct keys or with the number of writes -- i.e. whether a 105 GB
+  // directory means 105 GB of state or ~10 GB of state plus write
+  // amplification.
   uint64_t filler_keyspace_ = 0;
 
   // Outer gas for a filler transaction: measured on wasm at 8,243 gas for one
@@ -64,8 +65,7 @@ private:
   // 20,000 a transfer gets.
   GasAmount filler_gas_limit() const
   {
-    return GasAmount{20'000 +
-                     2'500ULL * (filler_items_ ? filler_items_ : 1)};
+    return GasAmount{20'000 + 2'500ULL * (filler_items_ ? filler_items_ : 1)};
   }
 
   bool check_config_valid() const { return config_.num_addresses >= 2; }

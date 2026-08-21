@@ -35,22 +35,23 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
                kDefaultLoadgenPort);
   std::println(stderr, "  --metrics-port <port>  Health/metrics HTTP port "
                        "(default: 0)");
-  std::println(stderr,
-               "  --filler-instances <n>   Deploy <n> storage_filler "
-               "contracts at genesis and send every --filler-period'th work\n"
-               "                           transaction to one of them, writing "
-               "--filler-items items of\n"
-               "                           --filler-item-bytes each. Grows state "
-               "with the workload rather\n"
-               "                           than with the transaction count; "
-               "many instances so the state\n"
-               "                           spreads over shards instead of "
-               "pinning to one.\n"
-               "  --num-virtual-accts <n>  Pay work transfers to one of <n> "
-               "synthetic recipients rather than to another account. Nothing "
-               "is deployed at them, so the first payment to each inserts a "
-               "new db item, and the state grows with the tx count up to <n> "
-               "extra items (default: 0, pay other accounts)");
+  std::println(
+      stderr,
+      "  --filler-instances <n>   Deploy <n> storage_filler "
+      "contracts at genesis and send every --filler-period'th work\n"
+      "                           transaction to one of them, writing "
+      "--filler-items items of\n"
+      "                           --filler-item-bytes each. Grows state "
+      "with the workload rather\n"
+      "                           than with the transaction count; "
+      "many instances so the state\n"
+      "                           spreads over shards instead of "
+      "pinning to one.\n"
+      "  --num-virtual-accts <n>  Pay work transfers to one of <n> "
+      "synthetic recipients rather than to another account. Nothing "
+      "is deployed at them, so the first payment to each inserts a "
+      "new db item, and the state grows with the tx count up to <n> "
+      "extra items (default: 0, pay other accounts)");
   std::println(stderr, "  --help         Show this help message");
   std::println(stderr, "  -h, --help     Show this help message");
   std::println(stderr, "  --version      Show version information");

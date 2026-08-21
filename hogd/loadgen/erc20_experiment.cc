@@ -105,9 +105,9 @@ ERC20ExperimentState::generate_experiment()
   constexpr int128_t kWalletInitialHogsEpsilon = 100'000;
   // Every allocation draws from the same fixed supply and build() rejects an
   // over-allocation, so the filler instances have to be counted here too.
-  const auto num_initial_allocations =
-      static_cast<int128_t>(wallets_.size()) + 1 +
-      static_cast<int128_t>(filler_instances_);
+  const auto num_initial_allocations = static_cast<int128_t>(wallets_.size()) +
+                                       1 +
+                                       static_cast<int128_t>(filler_instances_);
   const int128_t wallet_initial_hogs =
       (GenesisConfigurationLoader::initial_hog_token_supply() /
        num_initial_allocations) -
@@ -128,17 +128,16 @@ ERC20ExperimentState::generate_experiment()
   // sequence under a different contract hash cannot collide with them.
   if (filler_instances_ > 0) {
     using filler_meta = ContractTraitMeta<storage_filler::StorageFiller>;
-    auto filler_contract =
-        filler_meta::load_rv32();
+    auto filler_contract = filler_meta::load_rv32();
     assert(filler_contract);
     const SHA256Hash filler_hash = sha256(*filler_contract);
     filler_addresses_.reserve(filler_instances_);
     for (uint32_t i = 0; i < filler_instances_; ++i) {
-      builder.add_initial_config(
-          filler_contract, make_nonce(i), filler_meta::entrypoint<u8"fill">(),
-          filler_meta::make_calldata<u8"fill">(uint64_t{0}, uint32_t{0},
-                                             uint32_t{0}),
-          wallet_initial_hogs);
+      builder.add_initial_config(filler_contract, make_nonce(i),
+                                 filler_meta::entrypoint<u8"fill">(),
+                                 filler_meta::make_calldata<u8"fill">(
+                                     uint64_t{0}, uint32_t{0}, uint32_t{0}),
+                                 wallet_initial_hogs);
       filler_addresses_.push_back(
           GenesisConfigurationLoader::calculate_deployed_address(
               filler_hash, make_nonce(i)));
@@ -290,8 +289,8 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
             static auto entrypoint_fill = filler_meta::entrypoint<u8"fill">();
             // Every filler_period'th transaction writes state instead of moving
             // tokens, spread round-robin over the instances so the state it
-            // creates lands on every shard rather than one. The nonce makes each
-            // call's keys fresh, so these are inserts, not overwrites.
+            // creates lands on every shard rather than one. The nonce makes
+            // each call's keys fresh, so these are inserts, not overwrites.
             const bool do_fill =
                 !filler_addresses_.empty() && (j % filler_period_) == 0;
             Calldata internal_calldata =
@@ -302,11 +301,11 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
                           filler_meta::make_calldata<u8"fill">(
                               static_cast<uint64_t>(base_nonce + j),
                               filler_items_, filler_item_bytes_))
-                    : x23::serialize(
-                          erc20_address_, entrypoint_transfer,
-                          GasAmount{1'000'000},
-                          erc20_meta::make_calldata<u8"transfer">(
-                              receiver_address, make_amount(amount)));
+                    : x23::serialize(erc20_address_, entrypoint_transfer,
+                                     GasAmount{1'000'000},
+                                     erc20_meta::make_calldata<u8"transfer">(
+                                         receiver_address,
+                                         make_amount(amount)));
 
             static auto entrypoint_do_action =
                 wallet_meta::entrypoint<u8"do_action">();
