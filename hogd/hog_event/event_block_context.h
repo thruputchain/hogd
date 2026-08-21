@@ -37,6 +37,19 @@ namespace detail {
 struct EventContext {
   std::vector<uint8_t> buf;
   uint32_t event_count = 0;
+
+  // Canonical XDR of this thread's TxEventLogs and of their ProposedTransaction
+  // bodies, accumulated on the ingest path so that closing the block does not
+  // have to serialize the whole payload a second time.
+  //
+  // Both live in this one PerThread struct, and add_event() appends to both with
+  // no suspend in between, so the two are always flattened in one shared
+  // traversal order and stay index-aligned. Two separate PerThread containers
+  // would not: PerThread<T> registers threads in a type-local order that can
+  // differ between T's, which let the body/event association cross (#2826).
+  x23::Buf candidate_event_bytes;
+  x23::Buf candidate_body_bytes;
+  uint32_t candidate_pair_count = 0;
 };
 
 // An event log paired with the transaction body that produced it.  The two are
@@ -55,16 +68,12 @@ struct EventWithBody {
 using EventWithBodyBatch = std::vector<detail::EventWithBody>;
 
 struct ReusableEventBlockContextData {
-  ReusableEventBlockContextData(
-      std::unique_ptr<MerkleTriePrefix> trie,
-      PerThread<EventWithBodyBatch> events_with_bodies,
-      PerThread<detail::EventContext> buffers)
-    : trie(std::move(trie)), events_with_bodies(std::move(events_with_bodies)),
-      buffers(std::move(buffers))
+  ReusableEventBlockContextData(std::unique_ptr<MerkleTriePrefix> trie,
+                                PerThread<detail::EventContext> buffers)
+    : trie(std::move(trie)), buffers(std::move(buffers))
   {}
 
   std::unique_ptr<MerkleTriePrefix> trie;
-  PerThread<EventWithBodyBatch> events_with_bodies;
   PerThread<detail::EventContext> buffers;
 
   ReusableEventBlockContextData(
@@ -119,9 +128,24 @@ public:
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
-  x23::Async<IndexerOutboxCandidatePayload>
-  snapshot_indexer_outbox_candidate(BlockHeight block_height,
-                                    SHA256Hash event_root);
+  // The block's already-encoded candidate payload vectors, moved out of the
+  // per-thread ingest buffers.
+  //
+  // The buffers are moved (a pointer swap each, not a copy of the bytes) while
+  // the PerThread lock is held, so the caller can do I/O without holding it --
+  // a pointer into per-thread storage must not outlive lock_threads(), because
+  // a departing thread's slot can be reclaimed.
+  //
+  // event_bufs and body_bufs are in the same per-thread order, so concatenating
+  // each list yields two index-aligned XDR vectors (#2826).
+  struct CandidatePayloadBuffers {
+    std::vector<x23::Buf> event_bufs;
+    std::vector<x23::Buf> body_bufs;
+    uint32_t pair_count = 0;
+    size_t event_bytes = 0;
+    size_t body_bytes = 0;
+  };
+  CandidatePayloadBuffers take_candidate_payload_buffers();
 
   x23::Async<void> wait_file_done();
   void delete_events_file();
@@ -197,9 +221,6 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  // Keep event logs and transaction bodies paired while per-thread batches are
-  // flattened into the durable candidate snapshot (#2826).
-  PerThread<EventWithBodyBatch> events_with_bodies_;
   PerThread<detail::EventContext> buffers_;
 
   // State transitions:

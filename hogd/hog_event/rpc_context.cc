@@ -282,11 +282,13 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
       std::rethrow_exception(hash_ex);
     }
 
-    IndexerOutboxCandidatePayload candidate =
-        co_await context->get().snapshot_indexer_outbox_candidate(block_height,
-                                                                  out_hash);
-    if (auto published =
-            co_await indexer_outbox_store_.publish_candidate(candidate);
+    // add_event() encoded the candidate payload as it ingested each event, so
+    // closing takes ownership of those buffers and writes them. It does not
+    // walk the block's event logs or transaction bodies again.
+    auto payload = context->get().take_candidate_payload_buffers();
+    if (auto published = indexer_outbox_store_.publish_candidate_encoded(
+            block_id, block_height, out_hash, payload.pair_count,
+            payload.event_bufs, payload.body_bufs);
         !published) {
       panic("failed to publish candidate indexer outbox record: {}",
             published.error());

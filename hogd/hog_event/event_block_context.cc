@@ -39,6 +39,7 @@
 #include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -66,9 +67,7 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
                                      BlockID block_id,
                                      ReusableEventBlockContextData data)
   : trie_(std::move(data.trie)), work_directory_(work_directory),
-    block_id_(block_id),
-    events_with_bodies_(std::move(data.events_with_bodies)),
-    buffers_(std::move(data.buffers))
+    block_id_(block_id), buffers_(std::move(data.buffers))
 {
   trie_->clear();
   {
@@ -76,12 +75,9 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
     buffers_.for_each(ul, [](detail::EventContext &ctx) {
       ctx.buf.clear();
       ctx.event_count = 0;
-    });
-  }
-  {
-    auto ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(ul, [](EventWithBodyBatch &batch) {
-      batch.clear();
+      ctx.candidate_event_bytes.clear();
+      ctx.candidate_body_bytes.clear();
+      ctx.candidate_pair_count = 0;
     });
   }
   open_events_file();
@@ -90,9 +86,7 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
 ReusableEventBlockContextData
 EventBlockContext::extract_data()
 {
-  return ReusableEventBlockContextData(std::move(trie_),
-                                       std::move(events_with_bodies_),
-                                       std::move(buffers_));
+  return ReusableEventBlockContextData(std::move(trie_), std::move(buffers_));
 }
 
 x23::Async<bool>
@@ -121,6 +115,22 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
   // could overwrite serialize_buf, leaving key/value pointing at stale or freed
   // memory.
   CHECK(trie_->insert(key, value));
+
+  // Accumulate this block's candidate payload as canonical XDR here, on the
+  // ingest path, instead of re-serializing the whole batch at close. The event
+  // half is free: serialize_buf already holds exactly its canonical encoding.
+  // The body is encoded once here rather than once here and again at close.
+  //
+  // This must precede write_event(), for the same reason the trie insert does:
+  // write_event() co_awaits, and after a resume buffers_-> may resolve to a
+  // different thread's slot while serialize_buf is this thread's static
+  // scratch. Appending to both buffers with no suspend in between is also what
+  // keeps the two vectors index-aligned (#2826).
+  buffers_->candidate_event_bytes.append_range(
+      std::span(*serialize_buf).first(event_xdr_size));
+  x23::serialize_to(&buffers_->candidate_body_bytes, body);
+  buffers_->candidate_pair_count++;
+
   using write_event_result_t =
       decltype(std::declval<EventBlockContext &>().write_event(
           std::declval<std::span<const uint8_t>>()));
@@ -129,13 +139,6 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
                                 .initial_suspend()),
                    std::suspend_never>);
   co_await write_event(std::span(*serialize_buf).first(event_xdr_size));
-
-  // Preserve each event/body pair when the durable candidate is snapshotted at
-  // close. The event trie commits to the body's nondeterministic data but not
-  // its signature wrapper.
-  events_with_bodies_->emplace_back(
-      detail::EventWithBody{.event = std::move(event),
-                            .body = std::move(body)});
   co_return true;
 }
 
@@ -341,34 +344,31 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   file_done_.broadcast(pool);
 }
 
-x23::Async<IndexerOutboxCandidatePayload>
-EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
-                                                     SHA256Hash event_root)
+EventBlockContext::CandidatePayloadBuffers
+EventBlockContext::take_candidate_payload_buffers()
 {
-  IndexerOutboxCandidatePayload payload{
-      .format_version = kIndexerOutboxFormatVersion,
-      .block_id = block_id_,
-      .block_height = block_height,
-      .event_root = event_root,
-  };
-
-  // Each EventWithBody was created as one pair by add_event. Flatten the
-  // per-thread batches in lockstep; the indexer is insensitive to pair order.
-  std::unique_lock ul = events_with_bodies_.lock_threads();
-  size_t pair_count = 0;
-  events_with_bodies_.for_each(ul,
-                               [&pair_count](const EventWithBodyBatch &batch) {
-                                 pair_count += batch.size();
-                               });
-  payload.event_logs.reserve(pair_count);
-  payload.tx_bodies.reserve(pair_count);
-  events_with_bodies_.for_each(ul, [&payload](EventWithBodyBatch &batch) {
-    for (detail::EventWithBody &pair : batch) {
-      payload.event_logs.push_back(std::move(pair.event));
-      payload.tx_bodies.push_back(std::move(pair.body));
-    }
+  // add_event() already encoded every event log and body, so there is nothing
+  // to serialize here: just hand the per-thread buffers over. Moving each one
+  // is a pointer swap, so this stays O(threads) rather than O(events) even
+  // though the buffers hold the whole block.
+  //
+  // The move happens under lock_threads() because a pointer into per-thread
+  // storage must not outlive the lock -- a departing thread's slot can be
+  // reclaimed -- and taking ownership here is what lets the caller write
+  // without holding it.
+  CandidatePayloadBuffers out;
+  std::unique_lock ul = buffers_.lock_threads();
+  buffers_.for_each(ul, [&out](detail::EventContext &ctx) {
+    out.pair_count += ctx.candidate_pair_count;
+    out.event_bytes += ctx.candidate_event_bytes.size();
+    out.body_bytes += ctx.candidate_body_bytes.size();
+    out.event_bufs.push_back(std::move(ctx.candidate_event_bytes));
+    out.body_bufs.push_back(std::move(ctx.candidate_body_bytes));
+    ctx.candidate_event_bytes.clear();
+    ctx.candidate_body_bytes.clear();
+    ctx.candidate_pair_count = 0;
   });
-  co_return payload;
+  return out;
 }
 
 x23::Async<void>

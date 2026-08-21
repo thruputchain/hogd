@@ -573,6 +573,103 @@ IndexerOutboxStore::publish_candidate(
                           std::as_bytes(std::span(*bytes)));
 }
 
+IndexerOutboxStatus<void>
+IndexerOutboxStore::publish_candidate_encoded(
+    BlockID block_id, BlockHeight block_height, SHA256Hash event_root,
+    uint32_t pair_count, std::span<const x23::Buf> event_bufs,
+    std::span<const x23::Buf> body_bufs) const
+{
+  // Publishes byte-for-byte the record publish_candidate() would write for the
+  // equivalent structured payload. The difference is only in how it gets there:
+  // the element bytes were already encoded on the ingest path, so nothing here
+  // re-serializes them, and the scatter-list publish means nothing concatenates
+  // them either. For a full block that is the difference between touching every
+  // event log and transaction body again at close and not touching them at all.
+  //
+  // The payload's fixed prefix comes from encoding the same struct with empty
+  // vectors. XDR lays a variable-length vector down as a u32 count followed by
+  // its elements, and event_logs/tx_bodies are the struct's last two fields, so
+  // that encoding is exactly [prefix][0u32][0u32]. Dropping those two counts and
+  // emitting the real ones keeps this tied to the generated XDR rather than to a
+  // hand-rolled field layout.
+  IndexerOutboxCandidatePayload shape{
+      .format_version = kIndexerOutboxFormatVersion,
+      .block_id = block_id,
+      .block_height = block_height,
+      .event_root = event_root,
+  };
+  x23::Buf head = x23::serialize(shape);
+  CHECK_GE(head.size(), 2 * sizeof(uint32_t));
+  head.resize(head.size() - (2 * sizeof(uint32_t)));
+
+  size_t event_bytes = 0;
+  for (const x23::Buf &buf : event_bufs) {
+    event_bytes += buf.size();
+  }
+  size_t body_bytes = 0;
+  for (const x23::Buf &buf : body_bufs) {
+    body_bytes += buf.size();
+  }
+
+  // The checks validate_candidate() would have run. Batch cardinalities cannot
+  // differ here: both vectors are emitted with the same count by construction.
+  if (block_height < 0) {
+    return std::unexpected("candidate outbox height is negative");
+  }
+  auto response_size = indexer_event_pull_rpc_record_size_for_parts(
+      x23::detail::xdr_size_bounds<ConsensusValue>().max_,
+      sizeof(uint32_t) + event_bytes, sizeof(uint32_t) + body_bytes);
+  if (!response_size) {
+    return std::unexpected(response_size.error());
+  }
+
+  // [prefix][event count][event elements][body count][body elements]
+  x23::serialize_to(&head, pair_count);
+  const x23::Buf body_count = x23::serialize(pair_count);
+  const size_t payload_size =
+      head.size() + event_bytes + body_count.size() + body_bytes;
+  if (auto size = indexer_outbox_file_size_for_payload(payload_size); !size) {
+    return std::unexpected(size.error());
+  }
+
+  std::vector<std::span<const std::byte>> payload_pieces;
+  payload_pieces.reserve(2 + event_bufs.size() + body_bufs.size());
+  payload_pieces.push_back(std::as_bytes(std::span(head)));
+  for (const x23::Buf &buf : event_bufs) {
+    payload_pieces.push_back(std::as_bytes(std::span(buf)));
+  }
+  payload_pieces.push_back(std::as_bytes(std::span(body_count)));
+  for (const x23::Buf &buf : body_bufs) {
+    payload_pieces.push_back(std::as_bytes(std::span(buf)));
+  }
+
+  // Hashing walks the payload but never copies it, so the digest costs one
+  // memory-bandwidth pass rather than another encode.
+  SHA256Hasher hasher;
+  for (const auto &piece : payload_pieces) {
+    hasher.update(piece);
+  }
+  // make_header reads only the scalar identity fields, so the empty-vector
+  // shape yields the same header the structured path would produce.
+  IndexerOutboxRecordHeader header =
+      make_header(shape, payload_size, hasher.finalize());
+  x23::Buf header_bytes = x23::serialize(header);
+  if (header_bytes.size() > kMaxIndexerOutboxHeaderBytes) {
+    return std::unexpected("indexer outbox header exceeds bounded limit");
+  }
+  const x23::Buf length_prefix =
+      x23::serialize(static_cast<uint32_t>(header_bytes.size()));
+
+  std::vector<std::span<const std::byte>> file_pieces;
+  file_pieces.reserve(2 + payload_pieces.size());
+  file_pieces.push_back(std::as_bytes(std::span(length_prefix)));
+  file_pieces.push_back(std::as_bytes(std::span(header_bytes)));
+  file_pieces.insert(file_pieces.end(), payload_pieces.begin(),
+                     payload_pieces.end());
+
+  return publish_bytes(candidate_filename(block_id), file_pieces);
+}
+
 x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
 IndexerOutboxStore::load_candidate(BlockID block_id) const
 {
@@ -1499,7 +1596,24 @@ IndexerOutboxStatus<void>
 IndexerOutboxStore::publish_bytes(std::string_view filename,
                                   std::span<const std::byte> bytes) const
 {
-  if (auto valid = validate_indexer_outbox_file_size(bytes.size()); !valid) {
+  const std::array<std::span<const std::byte>, 1> pieces{bytes};
+  return publish_bytes(filename, pieces);
+}
+
+// Scatter-list form. Callers whose record is already laid out across several
+// buffers publish it without first concatenating them, which for a candidate
+// record means not copying a whole block's event logs and transaction bodies
+// just to hand them to write().
+IndexerOutboxStatus<void>
+IndexerOutboxStore::publish_bytes(
+    std::string_view filename,
+    std::span<const std::span<const std::byte>> pieces) const
+{
+  size_t total_bytes = 0;
+  for (const auto &piece : pieces) {
+    total_bytes += piece.size();
+  }
+  if (auto valid = validate_indexer_outbox_file_size(total_bytes); !valid) {
     return valid;
   }
 
@@ -1529,9 +1643,11 @@ IndexerOutboxStore::publish_bytes(std::string_view filename,
   });
 
   File temp_file(temp_fd.release());
-  if (auto written = write_full(temp_file, bytes); !written) {
-    return std::unexpected(
-        std::format("write indexer outbox temp file: {}", written.error()));
+  for (const auto &piece : pieces) {
+    if (auto written = write_full(temp_file, piece); !written) {
+      return std::unexpected(
+          std::format("write indexer outbox temp file: {}", written.error()));
+    }
   }
   if (auto synced = temp_file.sync(); !synced) {
     return std::unexpected(
@@ -1563,7 +1679,16 @@ IndexerOutboxStore::publish_bytes(std::string_view filename,
     if (!existing) {
       return std::unexpected(existing.error());
     }
-    if (!std::ranges::equal(std::as_bytes(std::span(*existing)), bytes)) {
+    std::span<const std::byte> remaining = std::as_bytes(std::span(*existing));
+    bool identical = remaining.size() == total_bytes;
+    for (const auto &piece : pieces) {
+      if (!identical) {
+        break;
+      }
+      identical = std::ranges::equal(remaining.first(piece.size()), piece);
+      remaining = remaining.subspan(piece.size());
+    }
+    if (!identical) {
       return std::unexpected(
           "refusing to replace mismatched indexer outbox file");
     }

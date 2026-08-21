@@ -1106,6 +1106,63 @@ TEST_F(IndexerOutboxTest, ConflictingRepublishIsRejected)
   EXPECT_NE(result.error().find("mismatched"), std::string::npos);
 }
 
+TEST_F(IndexerOutboxTest, EncodedCandidateMatchesStructuredByteForByte)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  ProposedTransaction body_a = make_body(1);
+  ProposedTransaction body_b = make_body(2);
+  ProposedTransaction body_c = make_body(3);
+  ProposedTransactionBatch bodies{body_a, body_b, body_c};
+  TxEventLogBatch events{make_event(body_a, 0x21), make_event(body_b, 0x22),
+                         make_event(body_c, 0x23)};
+  const auto candidate = make_candidate(42, 7, bodies, events);
+
+  // Encode the payload's two vectors the way add_event() does: one buffer per
+  // ingest thread, appended in lockstep. Splitting contiguously keeps each
+  // concatenation in the payload's own element order.
+  std::vector<x23::Buf> event_bufs(2);
+  std::vector<x23::Buf> body_bufs(2);
+  const size_t split = candidate.event_logs.size() / 2;
+  for (size_t i = 0; i < candidate.event_logs.size(); ++i) {
+    const size_t slot = i < split ? 0 : 1;
+    x23::serialize_to(&event_bufs[slot], candidate.event_logs[i]);
+    x23::serialize_to(&body_bufs[slot], candidate.tx_bodies[i]);
+  }
+
+  auto encoded = store.publish_candidate_encoded(
+      42, 7, candidate.event_root,
+      static_cast<uint32_t>(candidate.event_logs.size()), event_bufs,
+      body_bufs);
+  ASSERT_TRUE(encoded.has_value()) << encoded.error();
+
+  // publish_bytes() replaces an existing record only when it is byte-identical,
+  // so a structured publish succeeding on top of the encoded one is the
+  // equivalence assertion: closing a block may skip re-encoding the payload
+  // only for as long as these two agree exactly.
+  auto structured = store.publish_candidate(candidate)();
+  ASSERT_TRUE(structured.has_value()) << structured.error();
+
+  auto loaded = store.load_candidate(42)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  expect_xdr_equal(*loaded, candidate);
+}
+
+TEST_F(IndexerOutboxTest, EncodedEmptyCandidateMatchesStructuredByteForByte)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  const auto candidate = make_candidate(43, 9, {}, {});
+
+  auto encoded =
+      store.publish_candidate_encoded(43, 9, candidate.event_root, 0, {}, {});
+  ASSERT_TRUE(encoded.has_value()) << encoded.error();
+  auto structured = store.publish_candidate(candidate)();
+  ASSERT_TRUE(structured.has_value()) << structured.error();
+
+  auto loaded = store.load_candidate(43)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  expect_xdr_equal(*loaded, candidate);
+}
+
 TEST_F(IndexerOutboxTest, RemoveCandidateIsDurableAndIdempotent)
 {
   IndexerOutboxStore store = open_store(dir_);

@@ -140,6 +140,16 @@ public:
   static std::string current_epoch_origin_filename();
   x23::Async<IndexerOutboxStatus<void>>
   publish_candidate(const IndexerOutboxCandidatePayload &payload) const;
+  // publish_candidate() for a payload whose two vectors are already encoded,
+  // as they are on the event ingest path. Writes the identical record without
+  // re-serializing or concatenating the element bytes. event_bufs and body_bufs
+  // must be index-aligned when each list is concatenated, and both vectors are
+  // emitted with pair_count entries.
+  IndexerOutboxStatus<void>
+  publish_candidate_encoded(BlockID block_id, BlockHeight block_height,
+                            SHA256Hash event_root, uint32_t pair_count,
+                            std::span<const x23::Buf> event_bufs,
+                            std::span<const x23::Buf> body_bufs) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
   load_candidate(BlockID block_id) const;
   IndexerOutboxStatus<bool> has_candidate(BlockID block_id) const;
@@ -227,6 +237,9 @@ private:
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
                 std::span<const std::byte> bytes) const;
+  IndexerOutboxStatus<void>
+  publish_bytes(std::string_view filename,
+                std::span<const std::span<const std::byte>> pieces) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
