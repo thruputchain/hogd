@@ -85,6 +85,13 @@ public:
   load_genesis(GenesisConfiguration genesis_configuration,
                ConsensusValue value);
 
+  // The v2 ceremony's genesis, fanned out the same way and for the same reason:
+  // every shard needs the cost model and block 0 so that later
+  // create_snapshot(prev=...) calls agree on block history.
+  x23::Async<DbSchedResult>
+  load_genesis_v2(GenesisConfigurationV2 genesis_configuration,
+                  ConsensusValue value);
+
   // Read every shard's tip and fail-stop on divergence. Returns the replicated
   // tip with storage_long_hash replaced by the sum of the shards' partials --
   // so DbTip.storage_long_hash means "this shard's items" inside hogdb and

@@ -328,13 +328,20 @@ public:
       genesis_value.proposal_header.network_hash = network_hash_;
       genesis_value.proposal_header.genesis_configuration_hash =
           sha256(genesis_configuration);
-      ret = co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
+      // Same fan-out and same barrier discipline as the v1 path above: every
+      // shard needs genesis, and a failure has to open the readiness barrier or
+      // a waiting [handle_transfer] hangs instead of dropping its transfer.
+      ret = co_await sharded_db_sched_client_->load_genesis_v2(
           genesis_configuration, genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
+        error("genesis load failed on a db shard ({}); aborting genesis", ret);
+        scheduler_->genesis_load_failed_.store(true, std::memory_order_release);
+        scheduler_->all_shards_genesis_ready_.store(true);
+        scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
         co_return ret;
       }
 
-      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      DbTipResult db_res = co_await sharded_db_sched_client_->get_tip();
       CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
       last_committed_block_ = db_res.db_tip();
       CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
@@ -349,6 +356,10 @@ public:
           scheduler_->size());
       MempoolMetrics::instance().scheduler_tx_cache_size.record(
           scheduler_->tx_cache_size());
+      // Every shard loaded genesis OK: open the barrier so hog transfer deltas
+      // can be processed.
+      scheduler_->all_shards_genesis_ready_.store(true);
+      scheduler_->all_shards_genesis_ready_.broadcast(&default_threadpool());
       scheduler_->transfer_finished_.store(0);
     }
 

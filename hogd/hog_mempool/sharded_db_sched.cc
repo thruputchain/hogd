@@ -170,6 +170,21 @@ ShardedDbSched::load_genesis(GenesisConfiguration genesis_configuration,
   co_return DbSchedResult::DbSchedResultOK;
 }
 
+x23::Async<DbSchedResult>
+ShardedDbSched::load_genesis_v2(GenesisConfigurationV2 genesis_configuration,
+                                ConsensusValue value)
+{
+  for (size_t s = 0; s < shards_.shard_count(); ++s) {
+    DbSchedResult ret =
+        co_await shards_.shard(s)->dbsched_load_genesis_configuration_v2(
+            genesis_configuration, value);
+    if (ret != DbSchedResult::DbSchedResultOK) {
+      co_return ret;
+    }
+  }
+  co_return DbSchedResult::DbSchedResultOK;
+}
+
 x23::Async<DbTipResult>
 ShardedDbSched::get_tip()
 {
