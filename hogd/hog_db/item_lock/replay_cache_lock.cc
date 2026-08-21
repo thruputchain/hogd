@@ -142,9 +142,14 @@ ReplayCacheLock::charge_pending_height(const LockContext &ctx) const
                                              &ReplayCacheHeightCount::height);
   auto live_height_count =
       static_cast<size_t>(std::distance(live_begin, heights.end()));
+  // The charge is unconditional: it pairs with the uncharge in
+  // release_pending_addition on the matching 1->0 transition, so the two
+  // never drift regardless of interleaving. A rejected reservation unwinds
+  // that charge through the normal release path, not a bare fetch_sub here,
+  // so the cap check below is advisory -- it only decides whether this
+  // reservation is admitted.
   auto pending = pending_new_heights_.fetch_add(1, std::memory_order_relaxed);
   if (live_height_count + pending + 1 > kReplayCacheHeightsMaxLen) {
-    pending_new_heights_.fetch_sub(1, std::memory_order_relaxed);
     return ctx.conflict(DbConflictCode::kDbConflictCapacityExceeded);
   }
   return {};
@@ -290,20 +295,18 @@ ReplayCacheLock::try_atomic_change_lock(
   auto additions =
       base.pending_additions.fetch_add(1, std::memory_order_relaxed);
 
-  // On the 0->1 transition of a fresh (is_new) height, (re)charge the
-  // lock-wide pending_new_heights_ budget and re-verify the height cap.
-  // fetch_add makes the transition observable to exactly one thread, so the
-  // charge happens once per live reservation span -- covering both first
-  // admission and re-reservation after a full release -- without taking
-  // bases_lock_ on the hot path. release_pending_addition undoes it on the
-  // matching 1->0 transition (#3510).
+  // On the 0->1 transition of a fresh (is_new) height, charge the lock-wide
+  // pending_new_heights_ budget and check the height cap. fetch_add makes the
+  // transition observable to exactly one thread, so the charge happens once
+  // per live reservation span -- covering both first admission and
+  // re-reservation after a full release -- without taking bases_lock_ on the
+  // hot path. The charge is unconditional; every failure path below unwinds
+  // it through release_pending_addition's matching 1->0 uncharge, so the two
+  // counters cannot drift out of step (#3510).
   if (base.is_new && additions == 0) {
     auto s = charge_pending_height(ctx);
     if (!s.has_value()) {
-      // charge_pending_height already rolled its own bump back; just undo the
-      // reservation. Not release_pending_addition: nothing was charged, so a
-      // 1->0 uncharge here would drop the budget below zero.
-      base.pending_additions.fetch_sub(1, std::memory_order_relaxed);
+      release_pending_addition(base);
       return s.error();
     }
   }

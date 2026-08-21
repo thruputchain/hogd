@@ -67,13 +67,17 @@ private:
                                        BlockHeight block_height) const;
   HogDbStatus<ReplayCacheMetadata *> get_meta(const LockContext *ctx) const;
 
-  // Verifies that room remains for one more fresh height and, if so, bumps
-  // pending_new_heights_ accordingly. Returns kDbConflictCapacityExceeded if
-  // the cap would be exceeded (rolling the bump back).
+  // Unconditionally charges pending_new_heights_ for a fresh height (called on
+  // the pending_additions 0->1 transition) and returns
+  // kDbConflictCapacityExceeded if that leaves the live+pending count over the
+  // cap. The charge is never rolled back here -- the caller unwinds a rejected
+  // reservation through release_pending_addition so the charge always pairs
+  // with a matching uncharge.
   HogDbStatus<void> charge_pending_height(const LockContext &ctx) const;
   // Decrement pending_additions on a released reservation and, when a fresh
   // height's last outstanding reservation goes away (its 1->0 transition),
-  // give the pending_new_heights_ budget back.
+  // give the pending_new_heights_ budget back. Every 0->1 charge is matched by
+  // exactly one 1->0 uncharge, so the counters never drift.
   void release_pending_addition(ActiveHeight &base) const;
 
   mutable std::map<BlockHeight, ActiveHeight> bases_;
