@@ -32,7 +32,6 @@
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -54,12 +53,10 @@ xdr_equal(const T &lhs, const T &rhs)
 
 bool
 candidate_matches(const IndexerOutboxCandidatePayload &candidate,
-                  BlockID block_id, BlockHeight block_height,
-                  const ProposalTxsHash &proposal_txs_hash)
+                  BlockID block_id, BlockHeight block_height)
 {
   return candidate.block_id == block_id &&
-         candidate.block_height == block_height &&
-         candidate.proposal_txs_hash == proposal_txs_hash;
+         candidate.block_height == block_height;
 }
 
 IndexerOutboxStore
@@ -173,8 +170,7 @@ EventRPCContext::open_block(BlockID block_id)
 }
 
 x23::Async<EventStatus<SHA256Hash>>
-EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
-                             ProposalTxsHash proposal_txs_hash)
+EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 {
   if (!co_await reserve_block_operation(block_id, BlockOperation::kClosing)) {
     co_return EventError{EventErrorCode::kBadBlockID};
@@ -198,8 +194,7 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
       co_await finish_block_operation(block_id, nullptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
-    if (!candidate_matches(*candidate, block_id, block_height,
-                           proposal_txs_hash)) {
+    if (!candidate_matches(*candidate, block_id, block_height)) {
       co_await finish_block_operation(block_id, nullptr, false);
       co_return EventError{EventErrorCode::kBadBlockID};
     }
@@ -253,8 +248,8 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height,
     co_await context->get().finish_file_write();
     out_hash = context->get().get_root_hash();
     IndexerOutboxCandidatePayload candidate =
-        co_await context->get().snapshot_indexer_outbox_candidate(
-            block_height, out_hash, std::move(proposal_txs_hash));
+        co_await context->get().snapshot_indexer_outbox_candidate(block_height,
+                                                                  out_hash);
     if (auto published =
             co_await indexer_outbox_store_.publish_candidate(candidate);
         !published) {
@@ -425,9 +420,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   }
   const auto is_canonical_candidate = [&](const auto &candidate) {
     return candidate.block_height == tip_height &&
-           candidate.event_root ==
-               consensus_value.proposal_header.events_hash &&
-           candidate.proposal_txs_hash == consensus_value.proposal_txs_hash;
+           candidate.event_root == consensus_value.proposal_header.events_hash;
   };
   bool committed_tip_present =
       std::ranges::any_of(*records, [&](const auto &record) {
@@ -1124,12 +1117,11 @@ EventRPCContext::find_canonical_candidate(
   for (const auto &record : *records) {
     if (record.protocol != std::string_view(version::kHogdProtocol()) ||
         record.block_height != height ||
-        record.event_root != consensus_value.proposal_header.events_hash ||
-        record.proposal_txs_hash != consensus_value.proposal_txs_hash) {
+        record.event_root != consensus_value.proposal_header.events_hash) {
       continue;
     }
     // Candidate enumeration is deterministic. One matching candidate is
-    // sufficient; full committed-payload validation below binds its events and
+    // sufficient; validation during committed publication binds its events and
     // transactions to the finalized consensus value.
     auto candidate =
         co_await indexer_outbox_store_.load_candidate(record.block_id);

@@ -119,7 +119,8 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
   value.prev_hash = prev_hash;
   value.proposal_header.block_height = height;
   value.proposal_header.block_timepoint = 1000 + height;
-  value.proposal_header.events_hash = compute_indexer_outbox_event_root(logs);
+  value.proposal_header.events_hash =
+      compute_indexer_outbox_event_root(logs, bodies);
   auto txs_root = compute_indexer_proposal_txs_root(proposal)();
   EXPECT_TRUE(txs_root.has_value()) << txs_root.error();
   value.proposal_header.txs_hash = *txs_root;
@@ -487,7 +488,8 @@ TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
   IndexerCommittedBlock event_conflict = valid;
   event_conflict.payload.event_logs[0].tx_hash[0] ^= 1;
   event_conflict.payload.consensus_value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_conflict.payload.event_logs);
+      compute_indexer_outbox_event_root(event_conflict.payload.event_logs,
+                                        event_conflict.payload.tx_bodies);
   refresh_identity(event_conflict);
   expect_conflict(event_conflict);
 

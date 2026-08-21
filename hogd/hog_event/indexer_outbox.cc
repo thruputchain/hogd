@@ -199,10 +199,6 @@ validate_candidate(const IndexerOutboxCandidatePayload &payload)
   if (auto sizes = validate_payload_sizes(payload); !sizes) {
     co_return sizes;
   }
-  if (compute_indexer_outbox_event_root(payload.event_logs) !=
-      payload.event_root) {
-    co_return std::unexpected("event root differs from payload identity");
-  }
   if (payload.event_logs.size() != payload.tx_bodies.size()) {
     co_return std::unexpected("event/body batch cardinalities differ");
   }
@@ -239,7 +235,6 @@ make_header(const IndexerOutboxCandidatePayload &payload, size_t payload_size,
       .payload_byte_length = payload_size,
       .payload_digest = digest,
       .event_root = payload.event_root,
-      .proposal_txs_hash = payload.proposal_txs_hash,
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCandidate);
   header.record_identity.candidate_block_id() = payload.block_id;
@@ -259,7 +254,6 @@ make_header(const IndexerOutboxCommittedPayload &payload, size_t payload_size,
       .consensus_hash = sha256(payload.consensus_value),
       .prev_hash = payload.consensus_value.prev_hash,
       .event_root = payload.consensus_value.proposal_header.events_hash,
-      .proposal_txs_hash = payload.consensus_value.proposal_txs_hash,
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCommitted);
   return header;
@@ -581,8 +575,7 @@ IndexerOutboxStore::load_candidate(BlockID block_id) const
   }
   if (payload->block_id != header->record_identity.candidate_block_id() ||
       payload->block_height != header->block_height ||
-      payload->event_root != header->event_root ||
-      payload->proposal_txs_hash != header->proposal_txs_hash) {
+      payload->event_root != header->event_root) {
     co_return std::unexpected(
         "candidate outbox header/payload metadata mismatch");
   }
@@ -628,8 +621,7 @@ IndexerOutboxStore::enumerate_candidate_records_raw() const
                        .protocol = std::string(header->protocol),
                        .payload_byte_length = header->payload_byte_length,
                        .payload_digest = header->payload_digest,
-                       .event_root = header->event_root,
-                       .proposal_txs_hash = header->proposal_txs_hash});
+                       .event_root = header->event_root});
   }
   std::ranges::sort(records, [](const auto &lhs, const auto &rhs) {
     return lhs.block_id < rhs.block_id;
@@ -830,8 +822,7 @@ IndexerOutboxStore::load_committed_record(
   if (sha256(payload->consensus_value) != header->consensus_hash ||
       payload->consensus_value.prev_hash != header->prev_hash ||
       payload->consensus_value.proposal_header.events_hash !=
-          header->event_root ||
-      payload->consensus_value.proposal_txs_hash != header->proposal_txs_hash) {
+          header->event_root) {
     co_return std::unexpected(
         "committed outbox header/payload metadata mismatch");
   }

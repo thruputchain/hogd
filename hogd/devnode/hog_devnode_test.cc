@@ -971,7 +971,7 @@ make_empty_outbox_append(BlockHeight height, ConsensusValueHash prev_hash)
   value.prev_hash = std::move(prev_hash);
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_logs);
+      compute_indexer_outbox_event_root(event_logs, {});
   auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
@@ -2485,7 +2485,7 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
         .format_version = kIndexerOutboxFormatVersion,
         .block_id = 91,
         .block_height = 1,
-        .event_root = compute_indexer_outbox_event_root({}),
+        .event_root = compute_indexer_outbox_event_root({}, {}),
     };
     ASSERT_TRUE(store->publish_candidate(candidate)().has_value());
   }
@@ -2574,6 +2574,81 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
   expect_clean_exit(process);
+}
+
+TEST(HogDevnode, DataDirPromotesFinalizedCandidateAfterRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::path finalized_data_dir = make_test_data_dir();
+  Defer cleanup_finalized_data_dir(
+      [&] { std::filesystem::remove_all(finalized_data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::filesystem::copy(data_dir, finalized_data_dir,
+                        std::filesystem::copy_options::recursive);
+  advance_persistent_data_dir(finalized_data_dir);
+
+  // Model a stop after HogDB finalized height two but before event promoted
+  // its already-durable closed candidate or indexer observed that height.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "ramdb"), 0UL);
+  std::filesystem::copy(finalized_data_dir / "ramdb", data_dir / "ramdb",
+                        std::filesystem::copy_options::recursive);
+
+  constexpr BlockID kClosedCandidate = 900;
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value()) << tip.error();
+    ASSERT_EQ(tip->value.proposal_header.block_height, 2);
+    ASSERT_NE(tip->id, kClosedCandidate);
+  }
+  ConsensusValue finalized;
+  {
+    auto finalized_store = IndexerOutboxStore::open(
+        (finalized_data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(finalized_store.has_value()) << finalized_store.error();
+    auto committed = finalized_store->load_committed(2)();
+    ASSERT_TRUE(committed.has_value()) << committed.error();
+    finalized = committed->consensus_value;
+
+    auto recovering_store = IndexerOutboxStore::open(
+        (data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(recovering_store.has_value()) << recovering_store.error();
+    IndexerOutboxCandidatePayload candidate{
+        .format_version = kIndexerOutboxFormatVersion,
+        .block_id = kClosedCandidate,
+        .block_height = finalized.proposal_header.block_height,
+        .event_root = finalized.proposal_header.events_hash,
+        .event_logs = committed->event_logs,
+        .tx_bodies = committed->tx_bodies,
+    };
+    ASSERT_TRUE(recovering_store->publish_candidate(candidate)().has_value());
+    EXPECT_FALSE(recovering_store->has_committed(2).value());
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  expect_clean_exit(process);
+
+  auto recovered_store = IndexerOutboxStore::open(
+      (data_dir / "events" / "indexer-outbox").string());
+  ASSERT_TRUE(recovered_store.has_value()) << recovered_store.error();
+  auto committed = recovered_store->load_committed(2)();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(committed->consensus_value, finalized);
+  EXPECT_FALSE(recovered_store->has_candidate(kClosedCandidate).value());
 }
 
 TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)

@@ -30,7 +30,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -40,7 +39,6 @@
 #include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
-#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -105,25 +103,24 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
   }
 
   static PerThread<x23::Buf> serialize_buf;
-  serialize_buf->resize_uninitialized(0);
-  x23::serialize_to(&*serialize_buf, event);
-  assert(serialize_buf->size() >= 32);
+  const size_t event_xdr_size =
+      serialize_event_commitment_leaf(*serialize_buf, event,
+                                      body.nondeterministic_proposal_data);
 
   auto data = std::as_bytes(std::span(*serialize_buf));
-  // Serialization of TxEventLog is key || value
-
+  // The commitment leaf is key || value.
   assert(data.size() >= 32);
 
   auto key = data.subspan(0, 32);
   auto value = data.subspan(32);
 
-  // WARNING: insert_or_update must happen BEFORE write_event.  write_event may
+  // WARNING: insert must happen BEFORE write_event.  write_event may
   // co_await internally, which can resume the coroutine on a different thread.
   // key and value are spans into the static PerThread serialize_buf for this
   // thread — if we co_await first, another coroutine on the original thread
   // could overwrite serialize_buf, leaving key/value pointing at stale or freed
   // memory.
-  CHECK(trie_->insert_or_update(key, value));
+  CHECK(trie_->insert(key, value));
   using write_event_result_t =
       decltype(std::declval<EventBlockContext &>().write_event(
           std::declval<std::span<const uint8_t>>()));
@@ -131,10 +128,11 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
       std::same_as<decltype(std::declval<write_event_result_t::promise_type &>()
                                 .initial_suspend()),
                    std::suspend_never>);
-  co_await write_event(std::span(*serialize_buf));
+  co_await write_event(std::span(*serialize_buf).first(event_xdr_size));
 
   // Preserve each event/body pair when the durable candidate is snapshotted at
-  // close. Bodies are not part of the consensus event commitment.
+  // close. The event trie commits to the body's nondeterministic data but not
+  // its signature wrapper.
   events_with_bodies_->emplace_back(
       detail::EventWithBody{.event = std::move(event),
                             .body = std::move(body)});
@@ -344,24 +342,27 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
 }
 
 x23::Async<IndexerOutboxCandidatePayload>
-EventBlockContext::snapshot_indexer_outbox_candidate(
-    BlockHeight block_height, SHA256Hash event_root,
-    ProposalTxsHash proposal_txs_hash)
+EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
+                                                     SHA256Hash event_root)
 {
   IndexerOutboxCandidatePayload payload{
       .format_version = kIndexerOutboxFormatVersion,
       .block_id = block_id_,
       .block_height = block_height,
       .event_root = event_root,
-      .proposal_txs_hash = std::move(proposal_txs_hash),
   };
 
   // Each EventWithBody was created as one pair by add_event. Flatten the
   // per-thread batches in lockstep; the indexer is insensitive to pair order.
   std::unique_lock ul = events_with_bodies_.lock_threads();
+  size_t pair_count = 0;
+  events_with_bodies_.for_each(ul,
+                               [&pair_count](const EventWithBodyBatch &batch) {
+                                 pair_count += batch.size();
+                               });
+  payload.event_logs.reserve(pair_count);
+  payload.tx_bodies.reserve(pair_count);
   events_with_bodies_.for_each(ul, [&payload](EventWithBodyBatch &batch) {
-    payload.event_logs.reserve(payload.event_logs.size() + batch.size());
-    payload.tx_bodies.reserve(payload.tx_bodies.size() + batch.size());
     for (detail::EventWithBody &pair : batch) {
       payload.event_logs.push_back(std::move(pair.event));
       payload.tx_bodies.push_back(std::move(pair.body));

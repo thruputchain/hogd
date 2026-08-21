@@ -3,7 +3,6 @@
 %#include "consensus.hh"
 %#include "indexer.hh"
 %#include "network.hh"
-%#include "proposal.hh"
 %#include "rpc_types.hh"
 %#include "transaction.hh"
 %#include "types.hh"
@@ -50,7 +49,9 @@ struct IndexerOutboxRecordHeader {
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
   EventsHash event_root;
-  ProposalTxsHash proposal_txs_hash;
+  // Reserved to preserve the stable envelope's wire shape. Older format-1
+  // files stored ProposalTxsHash here; current readers ignore this slot.
+  SHA256Hash reserved_hash;
 };
 
 struct IndexerOutboxCandidatePayload {
@@ -58,7 +59,6 @@ struct IndexerOutboxCandidatePayload {
   BlockID block_id;
   BlockHeight block_height;
   EventsHash event_root;
-  ProposalTxsHash proposal_txs_hash;
   TxEventLogBatch event_logs;
   ProposedTransactionBatch tx_bodies;
 };

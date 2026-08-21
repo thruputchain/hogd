@@ -573,9 +573,8 @@ private:
                                                const ConsensusValue &value);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
-  x23::Async<EventBlockResult>
-  eventsched_close_block(BlockID block_id, BlockHeight block_height,
-                         ProposalTxsHash proposal_txs_hash);
+  x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
+                                                      BlockHeight block_height);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
                                             ConsensusValue value);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);

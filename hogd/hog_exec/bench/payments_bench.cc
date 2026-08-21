@@ -173,7 +173,6 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
              std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
                                                                    start_time)
                  .count());
-    bs.set_event_proposal_transactions(work_txs);
     // Expire this rep's uniquifiers so the reused txs can be re-committed with
     // fresh uniquifiers next rep/config. Outside the timed region.
     bs.clear_uniquifiers(num_txs_per_rep);
