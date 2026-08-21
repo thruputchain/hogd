@@ -556,7 +556,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
   // NOLINTEND(misc-include-cleaner)
   if (!control_port) {
-    control_port = hogd::kControlServerPort;
+    control_port = hogd::control_server_port();
   }
 
   if (work_dir.empty()) {

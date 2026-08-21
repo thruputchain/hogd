@@ -81,8 +81,8 @@ EXPORT_REGEX='^(X23|MEMPOOL_DAG_DOT_DIR)='
 
 # The parameters below here are NOT CONFIGURABLE.
 # -------------------------------
-export LOADGEN_PORT=11222
-export LOADGEN_HTTP_PORT=11223
+export LOADGEN_PORT=11322
+export LOADGEN_HTTP_PORT=11323
 
 export EXECUTOR_MEMPOOL_PORT=8640
 export EXECUTOR_HTTP_PORT=8641

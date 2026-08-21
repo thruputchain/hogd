@@ -207,8 +207,13 @@ using exec_client_t =
 using event_sched_client_t = decltype(connect_to_event_sched_server("address"));
 using db_sched_client_t = decltype(connect_to_db_server(ShardCard{}));
 
+// Every db call below fans out over all shards, the way the mempool's
+// ShardedDbSched does: each shard runs the whole block lifecycle over the items
+// it owns. This bench does not check the per-shard db hashes (close_snapshot's
+// hash is ignored here, as it was for one shard), so the fan-out only has to
+// confirm each shard succeeded.
 void
-open_block(db_sched_client_t &db_sched_client,
+open_block(std::vector<db_sched_client_t> &db_clients,
            event_sched_client_t &event_sched_client,
            std::vector<exec_client_t> &exec_clients,
            uint64_t parent_block_number, uint64_t block_number)
@@ -231,11 +236,13 @@ open_block(db_sched_client_t &db_sched_client,
 
   auto event_async = event_sched_client.eventsched_open_block(block_number);
   auto issue_time = x23::fastclock::get_ns();
-  auto res = db_sched_client.dbsched_create_snapshot(
-      parent_block_number, block_number,
-      BlockExecutionMode::kBlockExecutionModeProposal);
-  if (res != DbSchedResult::DbSchedResultOK) {
-    panic("Failed to create snapshot");
+  for (auto &db_sched_client : db_clients) {
+    auto res = db_sched_client.dbsched_create_snapshot(
+        parent_block_number, block_number,
+        BlockExecutionMode::kBlockExecutionModeProposal);
+    if (res != DbSchedResult::DbSchedResultOK) {
+      panic("Failed to create snapshot");
+    }
   }
   auto create_time = x23::fastclock::get_ns();
   async();
@@ -248,7 +255,7 @@ open_block(db_sched_client_t &db_sched_client,
 };
 
 void
-close_block(db_sched_client_t &db_sched_client,
+close_block(std::vector<db_sched_client_t> &db_clients,
             event_sched_client_t &event_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number,
             const ProposalTxs &proposal_txs)
@@ -272,18 +279,22 @@ close_block(db_sched_client_t &db_sched_client,
       event_sched_client.eventsched_close_block(block_number, block_number,
                                                 proposal_txs);
   auto issue_time = x23::fastclock::get_ns();
-  auto res = db_sched_client.dbsched_close_snapshot(block_number);
-  if (res.result() != DbSchedResult::DbSchedResultOK) {
-    panic("Failed to close snapshot");
+  for (auto &db_sched_client : db_clients) {
+    auto res = db_sched_client.dbsched_close_snapshot(block_number);
+    if (res.result() != DbSchedResult::DbSchedResultOK) {
+      panic("Failed to close snapshot");
+    }
   }
   auto close_time = x23::fastclock::get_ns();
   ConsensusValue value{};
   value.proposal_header.block_height = block_number;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
-  auto commit_res =
-      db_sched_client.dbsched_commit_snapshot(block_number, value);
-  if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
-    panic("Failed to commit snapshot");
+  for (auto &db_sched_client : db_clients) {
+    auto commit_res =
+        db_sched_client.dbsched_commit_snapshot(block_number, value);
+    if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
+      panic("Failed to commit snapshot");
+    }
   }
   auto commit_time = x23::fastclock::get_ns();
   // It's ok for finish_block to overlap with db.close_block, because we already
@@ -339,7 +350,7 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
 
 void
 run_block(x23::XdrVec<SignedTransaction> const *txs,
-          db_sched_client_t &db_sched_client,
+          std::vector<db_sched_client_t> &db_clients,
           event_sched_client_t &event_sched_client,
           std::vector<exec_client_t> &exec_clients,
           size_t n_coros_per_connection, size_t n_connections,
@@ -350,7 +361,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto start_time = x23::fastclock::get_ns();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
-  open_block(db_sched_client, event_sched_client, exec_clients,
+  open_block(db_clients, event_sched_client, exec_clients,
              parent_block_number, current_block_number);
 
   BlockValidationQueue block_validation_queue(txs, batch_size);
@@ -381,7 +392,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
       .hash = t_to_parallel_batch(hashes)(),
       .nondeterministic_data = t_to_parallel_batch(nominations)(),
   };
-  close_block(db_sched_client, event_sched_client, exec_clients,
+  close_block(db_clients, event_sched_client, exec_clients,
               current_block_number, proposal_txs);
 
   auto end_block_time = x23::fastclock::get_ns();
@@ -395,7 +406,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts,
                     unsigned int n_connections_per_executor,
                     unsigned int n_coros_per_connection,
-                    unsigned int batch_size, unsigned int num_txs_per_block)
+                    unsigned int batch_size, unsigned int num_txs_per_block,
+                    unsigned int num_db_shards)
 {
   std::vector<ControlServerHandle> control_server_handles;
   control_server_handles.reserve(server_addrs.size());
@@ -403,9 +415,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     control_server_handles.emplace_back(server_addr);
   }
 
-  if (server_addrs.size() < 3) {
-    // 1 db, 1 event server, and the rest executors
-    panic("At least 3 servers are required");
+  if (server_addrs.size() < num_db_shards + 2) {
+    // 1 event server, num_db_shards dbs, and the rest executors
+    panic("At least {} servers are required for {} db shard(s)",
+          num_db_shards + 2, num_db_shards);
   }
 
   RpcServer<SchedExecTest> sched_exec_test;
@@ -449,12 +462,22 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   EventCard event_card = sched_event_test->impl()->await_event_card();
   sched_exec_test->impl()->register_event_card(event_card);
 
-  control_server_handles[server_idx].ci_client.start_server(
-      "hogd/hog_db/hog-db",
-      {"--db-path", work_dir_str, "--ram-bytes", "10000000000", "--bind-ip",
-       hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-       std::format("{}:{}", mempool_ip, sched_db_port)});
-  server_idx++;
+  for (auto &control_server_handle : control_server_handles) {
+    control_server_handle.ci_client.clear_work_dir();
+  }
+
+  // One hogdb per shard, each on its own host and each told which slice of the
+  // key space it owns; shard_of_address routes items between them.
+  for (unsigned int shard_id = 0; shard_id < num_db_shards; shard_id++) {
+    control_server_handles[server_idx].ci_client.start_server(
+        "hogd/hog_db/hog-db",
+        {"--db-path", work_dir_str, "--ram-bytes", "10000000000", "--bind-ip",
+         hog_ip(server_addrs[server_idx]), "--coordinator-addr",
+         std::format("{}:{}", mempool_ip, sched_db_port), "--shard-id",
+         std::to_string(shard_id), "--total-shards",
+         std::to_string(num_db_shards)});
+    server_idx++;
+  }
 
   for (; server_idx < server_addrs.size(); server_idx++) {
     control_server_handles[server_idx].ci_client.start_server(
@@ -463,15 +486,19 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
          std::format("{}:{}", mempool_ip, sched_exec_port), "-n", "1024"});
   }
 
-  auto db_cards = sched_db_test->impl()->await_shard_cards(1);
+  auto db_cards = sched_db_test->impl()->await_shard_cards(num_db_shards);
   sched_exec_test->impl()->register_shard_cards(db_cards);
-  auto exec_cards =
-      sched_exec_test->impl()->await_executor_cards(server_addrs.size() - 2);
+  auto exec_cards = sched_exec_test->impl()->await_executor_cards(
+      server_addrs.size() - 1 - num_db_shards);
 
   auto event_sched_client =
       connect_to_event_sched_server(event_card.address_for_sched);
-  assert(db_cards.size() == 1);
-  auto db_sched_client = connect_to_db_server(db_cards[0]);
+  assert(db_cards.size() == num_db_shards);
+  std::vector<db_sched_client_t> db_clients;
+  db_clients.reserve(db_cards.size());
+  for (const auto &db_card : db_cards) {
+    db_clients.emplace_back(connect_to_db_server(db_card));
+  }
 
   auto await_ready = [&](const ExecCard &exec_card) {
     auto exec_client = connect_to_exec_server(exec_card);
@@ -493,10 +520,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       [&](const GenesisConfigurationV2 &genesis_configuration) {
         ConsensusValue genesis_value{};
         genesis_value.proposal_header.block_height = 0;
-        auto res = db_sched_client.dbsched_load_genesis_configuration_v2(
-            genesis_configuration, genesis_value);
-        if (res != DbSchedResult::DbSchedResultOK) {
-          panic("Failed to write genesis block");
+        for (auto &db_sched_client : db_clients) {
+          auto res = db_sched_client.dbsched_load_genesis_configuration_v2(
+              genesis_configuration, genesis_value);
+          if (res != DbSchedResult::DbSchedResultOK) {
+            panic("Failed to write genesis block");
+          }
         }
       };
 
@@ -526,7 +555,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
         connect_to_exec_server(exec_cards[i % exec_cards.size()]));
   }
 
-  run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
+  run_block(&loadgen_result.success().genesis_ceremony_txs, db_clients,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
             current_block_number);
@@ -534,7 +563,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   current_block_number++;
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
-    run_block(&init_block, db_sched_client, event_sched_client,
+    run_block(&init_block, db_clients, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number);
     parent_block_number = current_block_number;
@@ -578,7 +607,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  i, num_txs_per_block, exec_cards.size(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
     auto ts = x23::fastclock::get_ns();
-    run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
+    run_block(&work_txs, db_clients, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number);
     auto end_time = x23::fastclock::get_ns();
@@ -609,7 +638,7 @@ namespace {
 usage(char *argv[])
 {
   std::println("Usage: {} -s <server_addr, repeated> -a "
-               "<num_accounts>",
+               "<num_accounts> [-d <num_db_shards>]",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -623,16 +652,20 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::vector<std::string> server_addrs;
   std::optional<int> num_accounts;
+  unsigned int num_db_shards = 1;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "s:a:")) != -1) {
+  while ((opt = getopt(argc, argv, "s:a:d:")) != -1) {
     switch (opt) {
     case 's':
       server_addrs.emplace_back(optarg);
       break;
     case 'a':
       num_accounts = std::stoi(optarg);
+      break;
+    case 'd':
+      num_db_shards = std::stoi(optarg);
       break;
     default:
       usage(argv);
@@ -644,10 +677,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const int account_count = num_accounts.value();
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
-                            1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000,
+                            num_db_shards);
+  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000,
+                            num_db_shards);
+  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10, 1'000'000,
+                            num_db_shards);
 
   std::fflush(stdout);
   return 0;

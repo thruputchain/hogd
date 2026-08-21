@@ -105,7 +105,7 @@ class ControlServerHandle {
 public:
   ControlServerHandle(std::string const &server_addr)
     : ci_client(connect_to_control_server(server_addr,
-                                          std::to_string(kControlServerPort)))
+                                          std::to_string(control_server_port())))
   {}
 
   ControlClientWrapper ci_client;

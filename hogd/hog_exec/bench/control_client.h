@@ -11,12 +11,28 @@
 #include "hogd/version.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
+#include <cstdlib>
+
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
 constexpr static uint16_t kControlServerPort = 11111;
+
+// The bench hosts are shared, and a control server from another user's CI run
+// already owns 11111 on most of them. HOGD_CONTROL_PORT lets a private run pick
+// its own port; unset, everything behaves exactly as before.
+inline uint16_t
+control_server_port()
+{
+  if (const char *env = std::getenv("HOGD_CONTROL_PORT")) {
+    if (const int port = std::atoi(env); port > 0 && port < 65536) {
+      return static_cast<uint16_t>(port);
+    }
+  }
+  return kControlServerPort;
+}
 
 class ControlClientWrapper {
 public:
