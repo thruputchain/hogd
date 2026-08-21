@@ -44,16 +44,17 @@ ExecutorContext::make_per_tx_event_server_proxy(TransactionID tx_id)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
+ExecutorContext::propose_transaction(SignedTransaction signed_tx,
                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   x23::Awaitable<ExecProposeResult> awaitable;
   x23::CoroCB<ExecProposeResult> cb(awaitable);
-  worker_pool_.submit([this, &signed_tx, tx_id, cb]() {
-    auto res = run_propose_transaction(signed_tx, tx_id);
-    cb(res);
-  });
+  worker_pool_.submit(
+      [this, signed_tx = std::move(signed_tx), tx_id, cb]() mutable {
+        auto res = run_propose_transaction(std::move(signed_tx), tx_id);
+        cb(res);
+      });
   co_return co_await awaitable;
 }
 
@@ -114,7 +115,7 @@ ExecutorContext::validate_transaction_batch(
 }
 
 x23::Async<ExecResult>
-ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
+ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
                                       TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
@@ -122,10 +123,11 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   x23::Awaitable<ExecResult> awaitable;
   x23::CoroCB<ExecResult> cb(awaitable);
 
-  worker_pool_.submit([this, &proposed_tx, tx_id, cb]() {
-    auto res = run_validate_transaction(proposed_tx, tx_id);
-    cb(res);
-  });
+  worker_pool_.submit(
+      [this, proposed_tx = std::move(proposed_tx), tx_id, cb]() mutable {
+        auto res = run_validate_transaction(std::move(proposed_tx), tx_id);
+        cb(res);
+      });
 
   co_return co_await awaitable;
 }
@@ -149,7 +151,7 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 // public RPCs and must not return arbitrarily old data.  See
 // ViewGatewayRpc::request_refresh() for the view-side mitigation.
 ExecProposeResult
-ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
+ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
                                          TransactionID tx_id)
 {
   static thread_local auto context = make_hog_exec_context();
@@ -208,6 +210,18 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
       exec_res == ExecResult::ExecResultTxRootFrameReverted) {
+    // Assemble the full transaction body forwarded to the event server: the
+    // SignedTransaction we executed plus the nondeterministic data this
+    // proposal produced (already captured into [out] above). Move signed_tx
+    // in — it is not used again — so the event coroutine, which owns the body
+    // by value, never has to deep-copy the attacker-influenced signed_tx; only
+    // proposal_data is copied, and it is bounded and also needed in [out].
+    // Building this before the pending-counter increment keeps any allocation
+    // failure here from leaving the counter unbalanced.
+    ProposedTransaction proposed_tx{
+        .signed_tx = std::move(signed_tx),
+        .nondeterministic_proposal_data = out.proposal_data(),
+    };
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
@@ -224,15 +238,6 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
     //
     // Hence, once shutdown has started, the final cleanup owner can drain
     // pending_event_calls_ before this ExecutorContext is destroyed.
-    //
-    // Assemble the full transaction body forwarded to the event server: the
-    // SignedTransaction we executed plus the nondeterministic data this
-    // proposal produced (already captured into [out] above, so reuse it rather
-    // than calling get_proposal_data() a second time).
-    ProposedTransaction proposed_tx{
-        .signed_tx = signed_tx,
-        .nondeterministic_proposal_data = out.proposal_data(),
-    };
     syscall_handler->emit_events(exec_res, std::move(proposed_tx))(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
@@ -244,7 +249,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction const &signed_tx,
 }
 
 ExecResult
-ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
+ExecutorContext::run_validate_transaction(ProposedTransaction tx,
                                           TransactionID tx_id)
 {
   static thread_local auto context = make_hog_exec_context();
@@ -288,8 +293,11 @@ ExecutorContext::run_validate_transaction(ProposedTransaction const &tx,
     // Use release ordering to ensure the event RPC spawn is visible to
     // other threads before they see the incremented counter.
     pending_event_calls_.fetch_add(1, std::memory_order_release);
-    // In validation mode the full body was given to us; forward it as-is.
-    syscall_handler->emit_events(exec_res, tx)(
+    // In validation mode the full body was given to us; move it into the event
+    // coroutine (which owns it by value) rather than copying — [tx] is not
+    // used again, so the attacker-influenced proposal body is never deep-copied
+    // on this post-commit path.
+    syscall_handler->emit_events(exec_res, std::move(tx))(
         [this](SystemStatus<void> res) -> x23::Detached {
           log_event_return(res);
           co_return void();
