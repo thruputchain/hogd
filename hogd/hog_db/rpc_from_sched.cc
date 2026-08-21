@@ -327,9 +327,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("invalid genesis height or network hash");
     co_return DbSchedResult::DbSchedResultError;
   }
-  value.proposal_header.genesis_configuration_hash =
-      sha256(genesis_configuration);
-
   if (!valid_genesis_configuration(genesis_configuration)) {
     error("genesis root contract must be a non-empty RV32 artifact");
     co_return DbSchedResult::DbSchedResultError;

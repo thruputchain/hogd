@@ -131,7 +131,6 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
       node.genesis_configuration().storage_cost_model);
-  const SHA256Hash genesis_hash = sha256(node.genesis_configuration());
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -141,7 +140,6 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
             node.recovered_existing_chain() ? "recovered" : "fresh");
     w.field("networkHash", format_network_hash(network_hash));
     w.field("protocol", version::kHogdProtocol());
-    w.field("genesisHash", hex_string(genesis_hash));
     w.object_field("producer", [&](json::Writer &w) {
       w.field("binary", "hog-devnode");
       w.field("version", version::kHogdVersion);

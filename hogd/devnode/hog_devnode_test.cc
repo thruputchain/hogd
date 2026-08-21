@@ -1053,27 +1053,15 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfiguration
-build_test_data_dir_genesis(LocalBootstrapConfig const &config)
-{
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration.storage_cost_model =
-      StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration);
-}
-
 void
 write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              LocalBootstrapConfig const &config,
                              std::int64_t schema_version = 2)
 {
-  const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", schema_version);
     w.field("kind", "hog-devnode-data");
-    w.field("genesisHash", hex_string(sha256(genesis)));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
       w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
@@ -1153,12 +1141,6 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   if (!git_hash.empty() && git_hash != "unknown") {
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
   }
-
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact({});
-  GenesisConfiguration genesis = std::move(artifact.genesis_configuration);
-  EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
-            hex_string(sha256(genesis)));
 
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
   ASSERT_NE(bootstrap, nullptr);
@@ -1578,7 +1560,6 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
   std::string manifest =
       R"({"schemaVersion":2,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
-      R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"

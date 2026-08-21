@@ -167,8 +167,6 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
             "hog-hosted-bootstrap");
   EXPECT_EQ(require_string(require_field(*metadata, "networkHash")),
             "0000000000000000000000000000000000000000000000000000000000000001");
-  EXPECT_EQ(require_string(require_field(*metadata, "genesisHash")),
-            hex_string(artifact.genesis_hash));
   EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
             2UL);
   for (const json::Value &account :

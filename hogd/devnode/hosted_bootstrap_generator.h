@@ -43,7 +43,6 @@ struct HostedBootstrapArtifact {
   std::vector<SignedTransaction> initialization_txs;
   std::vector<BootstrapAccountMetadata> accounts;
   std::optional<HostedFaucetMetadata> faucet;
-  SHA256Hash genesis_hash;
   std::string genesis_json;
   std::string metadata_json;
 };

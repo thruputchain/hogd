@@ -226,7 +226,6 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
     w.field("kind", "hog-hosted-bootstrap");
     w.field("networkHash", format_network_hash(config.network_hash));
     w.field("protocol", version::kHogdProtocol());
-    w.field("genesisHash", hex_string(artifact.genesis_hash));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.bootstrap_config.dev_wallet_profile);
       w.field("devAccounts",
@@ -473,7 +472,6 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),
   };
-  artifact.genesis_hash = sha256(artifact.genesis_configuration);
   artifact.genesis_json = build_genesis_json(artifact.genesis_configuration);
   artifact.metadata_json = build_metadata_json(config, artifact);
   return artifact;
