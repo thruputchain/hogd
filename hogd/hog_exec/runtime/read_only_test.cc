@@ -382,7 +382,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   setup_grant_storage_token(kObserverAddr, 12345);
 
   auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress);
+      kNativeTokenContractAddress);
 
   // Method 0: invoke get_balance_of in read-only mode (should succeed)
   // Method 1: invoke transfer in read-only mode (should fail)
@@ -529,7 +529,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
   auto token_contract_xdr = make_native_contract(std::to_underlying(
       HogexecPrecompiledNativeContracts::kNativeContractHogToken));
   write_contract(token_contract_xdr);
-  write_deployment(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+  write_deployment(kNativeTokenContractAddress,
                    token_contract_xdr);
 
   setup_grant_storage_token(kObserverAddr, 12345);

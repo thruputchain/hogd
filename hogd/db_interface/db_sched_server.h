@@ -60,13 +60,6 @@ public:
   dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
                                      ConsensusValue value);
 
-  static x23::Async<DbSchedResult>
-  dbsched_load_genesis_configuration_v2(GenesisConfigurationV2 /*unused*/,
-                                        ConsensusValue /*unused*/)
-  {
-    co_return DbSchedResult::DbSchedResultError;
-  }
-
   static x23::Async<DbTipResult> dbsched_get_tip()
   {
     co_return DbTipResult(DbSchedResult::DbSchedResultError);

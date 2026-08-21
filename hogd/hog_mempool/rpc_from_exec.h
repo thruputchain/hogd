@@ -1,8 +1,7 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
-#include <thread>
+#include <cstddef>
 
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
@@ -41,8 +40,7 @@ public:
          Registration::registration().executors_registered(/*cards=*/nullptr));
     x23::XdrVec<ShardCard> shard_cards;
     CHECK_GT(Registration::registration().shards_registered(&shard_cards), 0UL);
-    co_await default_threadpool().bg();
-    EventCard event_card = MempoolEventRpc::wait_for_registration();
+    EventCard event_card = co_await MempoolEventRpc::wait_for_registration();
     co_return IntroExecResult{.exec_id = exec_id,
                               .shards = shard_cards,
                               .event = event_card};
@@ -51,18 +49,19 @@ public:
   static x23::Async<x23::Vec<exec_sched_client_t>>
   get_clients(size_t expected_executors)
   {
-    co_await default_threadpool().bg();
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (Registration::registration().executors_registered(nullptr) <
-               expected_executors &&
-           std::chrono::steady_clock::now() < deadline) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // Suspending, not blocking, matters here: executors register from
+    // [schedexec_intro_exec()], which the pool has to run. See [Registration].
+    Registration &reg = Registration::registration();
+    const size_t registered = reg.executors_registered(/*cards=*/nullptr);
+    if (registered < expected_executors) {
+      // There is no deadline, so leave a breadcrumb for a wedged startup.
+      info("waiting for executors to register with the coordinator: {} of {} "
+           "registered",
+           registered, expected_executors);
+      co_await reg.wait_for_executors(expected_executors);
     }
-    CHECK_GE(Registration::registration().executors_registered(nullptr),
-             expected_executors);
     x23::Vec<ExecCard> cards;
-    Registration::registration().executors_registered(&cards);
+    reg.executors_registered(&cards);
 
     x23::Vec<exec_sched_client_t> ret;
     ret.reserve(cards.size());

@@ -111,11 +111,11 @@ public:
     if (ready()) {
       co_return;
     }
-    co_await default_threadpool().bg();
+    // Both waits suspend rather than block a pool worker; see [Registration].
     while (!initialized_.load(std::memory_order_acquire)) {
-      initialized_.wait(false, std::memory_order_acquire);
+      co_await initialized_waiters_.wait(false);
     }
-    std::ignore = MempoolEventRpc::wait_for_registration();
+    std::ignore = co_await MempoolEventRpc::wait_for_registration();
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
     for (size_t i = 0; i < kNumClientsPerExecutor; ++i) {
@@ -233,59 +233,6 @@ public:
   {
     CHECK(initialized_.load(std::memory_order_acquire));
 
-    x23::CoroGuard commit_cg;
-    co_await commit_cg(commit_lock_);
-
-    CHECK_GE(last_committed_block_.value.proposal_header.block_height, -1);
-    if (last_committed_block_.value.proposal_header.block_height != -1) {
-      // The genesis block has already been loaded.
-      co_return DbSchedResult::DbSchedResultError;
-    }
-    CHECK_EQ(last_committed_block_.value.proposal_header.block_height, -1);
-    CHECK_EQ(auth_data_height(), -1);
-    CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
-
-    ConsensusValue genesis_value{};
-    genesis_value.proposal_header.block_height = 0;
-    genesis_value.proposal_header.network_hash = network_hash_;
-    genesis_value.proposal_header.genesis_configuration_hash =
-        sha256(genesis_configuration);
-    DbSchedResult ret =
-        co_await db_sched_client_->dbsched_load_genesis_configuration(
-            genesis_configuration, genesis_value);
-    if (ret != DbSchedResult::DbSchedResultOK) {
-      co_return ret;
-    }
-
-    DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
-    CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
-    last_committed_block_ = db_res.db_tip();
-    CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
-    CHECK_EQ(last_committed_block_.id, 0UL);
-    Registration::registration().publish_event_canonical_tip(
-        EventCanonicalTip{.block_id = last_committed_block_.id,
-                          .consensus_value = last_committed_block_.value});
-    scheduler_->set_current_block(
-        last_committed_block_.value.proposal_header.block_height);
-    co_await Health::instance().set_current_block_height(
-        last_committed_block_.value.proposal_header.block_height);
-    MempoolMetrics::instance().current_block_height.record(
-        last_committed_block_.value.proposal_header.block_height);
-    MempoolMetrics::instance().scheduler_pending_tx_count.record(
-        scheduler_->size());
-    MempoolMetrics::instance().scheduler_tx_cache_size.record(
-        scheduler_->tx_cache_size());
-    scheduler_->transfer_finished_.store(
-        last_committed_block_.value.proposal_header.block_height);
-
-    co_return ret;
-  }
-
-  x23::Async<DbSchedResult> schedcoord_load_genesis_configuration_v2(
-      GenesisConfigurationV2 genesis_configuration)
-  {
-    CHECK(initialized_.load(std::memory_order_acquire));
-
     DbSchedResult ret;
     {
       x23::CoroGuard commit_cg;
@@ -303,7 +250,7 @@ public:
       genesis_value.proposal_header.network_hash = network_hash_;
       genesis_value.proposal_header.genesis_configuration_hash =
           sha256(genesis_configuration);
-      ret = co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
+      ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
         co_return ret;
@@ -561,7 +508,8 @@ private:
         co_await MempoolAuthRpc::get_client());
 
     initialized_.store(true, std::memory_order_release);
-    initialized_.notify_all();
+    initialized_waiters_.store(true);
+    initialized_waiters_.broadcast(&default_threadpool());
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
@@ -847,6 +795,7 @@ private:
   std::atomic<bool> ready_ = false;
   x23::CoroFutex<bool> ready_waiters_{false};
   std::atomic<bool> initialized_ = false;
+  x23::CoroFutex<bool> initialized_waiters_{false};
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();

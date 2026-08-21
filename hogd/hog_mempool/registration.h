@@ -6,12 +6,15 @@
 #include <optional>
 
 #include "auth_card.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_exec.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -35,6 +38,31 @@ public:
     return registration;
   }
 
+  // Waiting for a peer to register. Suspend on these rather than polling: a
+  // registration arrives on an RPC handler that the thread pool has to run, so
+  // a wait that blocks a pool worker can starve the handler it is waiting for
+  // -- see the affinity rules in x23/x23/threadpool.h.
+  x23::Async<void> wait_for_executors(size_t count)
+  {
+    size_t registered;
+    while ((registered = registered_executors_.load()) < count) {
+      co_await registered_executors_.wait(registered);
+    }
+    co_return;
+  }
+
+  x23::Async<void> wait_for_event_ready()
+  {
+    while (!event_ready_.load()) {
+      co_await event_ready_.wait(false);
+    }
+    co_return;
+  }
+
+  // Whether the event has both activated and published a canonical tip at a
+  // real height.
+  bool event_ready() { return event_ready_.load(); }
+
   // Coordinator.
   void register_coordinator(const CoordCard &card)
   {
@@ -54,9 +82,18 @@ public:
   // Returns the ID of the registered executor.
   size_t register_executor(const ExecCard &card)
   {
-    std::unique_lock lk(exec_cards_mutex_);
-    exec_cards_.push_back(card);
-    return exec_cards_.size() - 1;
+    size_t exec_id;
+    {
+      std::unique_lock lk(exec_cards_mutex_);
+      exec_cards_.push_back(card);
+      exec_id = exec_cards_.size() - 1;
+      // Publish under the lock that serializes the pushes. Storing it after
+      // unlocking lets two concurrent registrations publish out of order and
+      // strand a waiter for the higher count.
+      registered_executors_.store(exec_cards_.size());
+    }
+    registered_executors_.broadcast(&default_threadpool());
+    return exec_id;
   }
   size_t executors_registered(x23::Vec<ExecCard> *cards)
   {
@@ -164,6 +201,9 @@ public:
     pending_event_tip_.reset();
     pending_event_token_ = 0;
     event_registered_.store(true, std::memory_order_release);
+    const bool ready = event_ready_locked();
+    lk.unlock();
+    publish_event_ready(ready);
     return EventActivationResult{EventActivationOutcome::EventActivationOK};
   }
   bool event_registered(EventCard *card) const
@@ -177,8 +217,13 @@ public:
   }
   void publish_event_canonical_tip(EventCanonicalTip tip)
   {
-    std::unique_lock lk(event_mutex_);
-    event_canonical_tip_ = std::move(tip);
+    bool ready;
+    {
+      std::unique_lock lk(event_mutex_);
+      event_canonical_tip_ = std::move(tip);
+      ready = event_ready_locked();
+    }
+    publish_event_ready(ready);
   }
   std::optional<EventCanonicalTip> event_canonical_tip() const
   {
@@ -228,9 +273,11 @@ public:
     {
       std::unique_lock lk(exec_cards_mutex_);
       exec_cards_.clear();
+      registered_executors_.store(0);
     }
     {
       std::unique_lock lk(event_mutex_);
+      event_ready_.store(false);
       event_registered_ = false;
       event_card_ = EventCard{};
       active_event_snapshot_.reset();
@@ -249,11 +296,35 @@ public:
   }
 
 private:
+  // Whether the event is fully usable: activated, and advertising a canonical
+  // tip at a real height. Caller must hold [event_mutex_].
+  bool event_ready_locked() const
+  {
+    return event_registered_.load(std::memory_order_acquire) &&
+           event_canonical_tip_.has_value() &&
+           event_canonical_tip_->consensus_value.proposal_header.block_height >=
+               0;
+  }
+
+  // Publish event readiness and wake its waiters. Call with [event_mutex_]
+  // released: the waiters resume on the pool and immediately re-take it.
+  void publish_event_ready(bool ready)
+  {
+    if (!ready) {
+      return;
+    }
+    event_ready_.store(true);
+    event_ready_.broadcast(&default_threadpool());
+  }
+
   // No one should construct a [Registration] instance directly. Instead, use
   // the shared instance returned by [registration()]. There is a single shared
   // registration instance for the entire process.
   Registration() = default;
   ~Registration() = default;
+
+  x23::CoroFutex<size_t> registered_executors_{0};
+  x23::CoroFutex<bool> event_ready_{false};
 
   std::atomic<bool> coordinator_registered_ = false;
   CoordCard coord_card_;

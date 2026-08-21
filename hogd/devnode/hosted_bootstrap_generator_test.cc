@@ -129,7 +129,6 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
 
   EXPECT_EQ(artifact.accounts.size(), 2UL);
   EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
-  EXPECT_EQ(artifact.genesis_configuration.initial_config.size(), 2UL);
 
   std::expected<json::Value, json::ParseError> genesis =
       json::parse(artifact.genesis_json);
@@ -146,7 +145,7 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   EXPECT_EQ(std::format("0x{}",
                         require_string(require_field(default_wallet, "hash"))),
             hex_string(
-                GenesisConfigurationLoader::native_default_wallet_hash().hash));
+                native_default_wallet_hash().hash));
   EXPECT_EQ(require_field(default_wallet, "contract_size").as_integer(),
             std::optional<std::int64_t>{0});
   EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),
@@ -231,7 +230,6 @@ TEST(HostedBootstrapGenerator, GeneratesExplicitFaucetWallet)
   HostedFaucetMetadata const &second_faucet = second.faucet.value();
   EXPECT_EQ(first.accounts.size(), 2UL);
   EXPECT_EQ(first.initialization_txs.size(), 1UL);
-  EXPECT_EQ(first.genesis_configuration.initial_config.size(), 3UL);
   EXPECT_EQ(first_faucet.public_key, faucet_public_key);
   EXPECT_EQ(first_faucet.initial_storage_tokens, 987654321UL);
   EXPECT_EQ(second_faucet.wallet_address, first_faucet.wallet_address);
@@ -395,7 +393,6 @@ TEST(HostedBootstrapGenerator, AllowsZeroBootstrapAccounts)
 
   EXPECT_TRUE(artifact.accounts.empty());
   EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
-  EXPECT_TRUE(artifact.genesis_configuration.initial_config.empty());
 
   std::expected<json::Value, json::ParseError> metadata =
       json::parse(artifact.metadata_json);

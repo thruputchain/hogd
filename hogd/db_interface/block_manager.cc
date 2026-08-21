@@ -220,19 +220,8 @@ BlockManager::initialize_genesis_configuration(
 
   cost_model_.emplace(config.storage_cost_model);
 
-  GenesisConfigurationLoader loader(config);
-
-  loader.load_genesis_configuration(
-      [&](StorageKey const &key, int128_t value) -> int128_t {
-        auto item =
-            std::make_shared<StorageItemWrapper>(value, &cost_model_.value());
-        base_database_->write_item(
-            AddressAndKey{
-                .address = GenesisConfigurationLoader::kDeployContractAddress,
-                .key = key},
-            item);
-        return item->storage_cost();
-      },
+  visit_genesis_execution_prerequisites(
+      config,
       [&](std::shared_ptr<const Contract> const &contract) {
         assert(contract);
         auto hash = sha256(*contract);
@@ -247,8 +236,7 @@ BlockManager::initialize_genesis_configuration(
                                                      StorageKeyType::Metadata)},
                                    item);
       },
-      [&](ContractAddress const &addr,
-          AddressAuthData const &auth_data) -> int128_t {
+      [&](ContractAddress const &addr, AddressAuthData const &auth_data) {
         auto item =
             std::make_shared<const StorageItemWrapper>(auth_data,
                                                        &cost_model_.value());
@@ -256,7 +244,6 @@ BlockManager::initialize_genesis_configuration(
                                                  .key = StorageKey(
                                                      StorageKeyType::AuthData)},
                                    item);
-        return item->storage_cost();
       });
 
   return true;

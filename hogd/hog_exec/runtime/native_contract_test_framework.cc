@@ -260,25 +260,6 @@ NativeContractTestFramework::run_genesis_initialization(
 }
 
 void
-NativeContractTestFramework::run_genesis_initialization(
-    GenesisConfigurationV2 const &genesis_configuration,
-    BlockExecutionMode mode)
-{
-  assert(!storage_snapshot_cache_);
-  assert(block_number_ == 0);
-
-  ConsensusValue genesis_value{};
-  genesis_value.proposal_header.block_height = 0;
-  auto r = coord_wrapper_->client().dbsched_load_genesis_configuration_v2(
-      genesis_configuration, genesis_value);
-  if (r != DbSchedResult::DbSchedResultOK) {
-    panic("run_genesis_initialization: dbsched_load_genesis_block failed: {}",
-          r);
-  }
-  open_block(mode);
-}
-
-void
 NativeContractTestFramework::open_event_block(BlockID block_id)
 {
   // rpc is infallible

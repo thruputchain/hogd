@@ -68,7 +68,7 @@ protected:
     genesis_value.proposal_header.block_height = 0;
     GenesisConfiguration genesis_configuration{
         .default_wallet =
-            GenesisConfigurationLoader::native_default_wallet_hash()};
+            native_default_wallet_hash()};
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
@@ -788,7 +788,7 @@ TEST(RpcGenesisTest, RejectsNonGenesisHeight)
   genesis_value.proposal_header.block_height = -1;
   GenesisConfiguration genesis_configuration{
       .default_wallet =
-          GenesisConfigurationLoader::native_default_wallet_hash()};
+          native_default_wallet_hash()};
 
   EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,
                                                          genesis_value),

@@ -23,9 +23,6 @@ BUILD_DIR=$1
 ./scripts/make_metric_file.sh erc20-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 >metrics_history/metrics/erc20-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## initial_token_claim.rv32a
-./scripts/make_metric_file.sh initial_token_claim-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR initial_token_claim >metrics_history/metrics/initial_token_claim-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
 # Performance metrics
 ## hog_db_bench (roundrobin_payments)

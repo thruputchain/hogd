@@ -7,7 +7,6 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
-#include "hogd/hog_exec/precompiles/precompile_initial_token_claim.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -25,10 +24,6 @@ make_hog_exec_precompiles_context()
       std::to_underlying(
           HogexecPrecompiledNativeContracts::kNativeContractHogToken),
       make_native_token_contract());
-  contract_map.emplace(
-      std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim),
-      make_native_initial_token_claim_contract());
   contract_map.emplace(
       std::to_underlying(
           HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet),

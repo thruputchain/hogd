@@ -92,7 +92,7 @@ public:
               // No genesis runs against this server; serve the production
               // native wallet so root-fallback behavior matches a real chain.
               .default_wallet =
-                  GenesisConfigurationLoader::native_default_wallet_hash()};
+                  native_default_wallet_hash()};
     return out;
   }
 
