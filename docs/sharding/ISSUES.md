@@ -1,6 +1,90 @@
 # Issues
 
-A running log of known issues. Newest first. Each entry: status, where, what, why, repro, artifacts.
+A running log of known issues found while building and benchmarking hogdb
+sharding. Newest first. Each entry: status, where, what, why, repro, artifacts.
+
+**Numbering is stable and has gaps.** Issues 1, 4 and 5 were fixed and verified
+on-cluster, and were removed from this log on 2026-08-21 rather than renumbered,
+so that the cross-references in the entries below keep pointing at the right
+thing. Their full write-ups are in this file's git history (before the
+"sharding: prune the fixed issues" commit) if the forensic detail is ever wanted
+again:
+
+| removed | what it was | outcome |
+|---|---|---|
+| 1 | mempool SIGSEGV in `Scheduler::process_transfers`; 2-shard runs stalled at block 0 | FIXED + verified on-cluster 2026-07-21 (genesis-readiness barrier + genesis dedup) |
+| 4 | auth server not sharded; 2-shard runs auth-failed 100% of the load | FIXED + verified on-cluster 2026-08-04 (`3001b393`); a full 2-shard run committed 79.5M txs with 0 auth failures |
+| 5 | genesis reported complete before its hog accounting landed | FIXED 2026-08-04 |
+
+Issues 6 and 2 are kept in compressed form: their crashes are fixed, but each
+left an open defect behind, and later entries reference them.
+
+---
+
+## 0. standing hazard: a failed `CHECK` in a Release build is undefined behaviour
+
+- **Status:** OPEN, repo-wide, and the highest-value fix in this whole log. Not
+  sharding-related. Recorded separately because it is the *mechanism* by which
+  three different defects in this log reached the process as unreadable crashes
+  rather than one-line diagnostics.
+- **Where:** [`x23::panic`](x23/x23/debug.h#L191) — under `-DNDEBUG`, `CHECK`
+  failure goes to `std::unreachable()`.
+
+Under `-O3` that is UB, so the observable "crash" is whatever the optimiser left
+behind. It has already presented as a `free(): invalid pointer` on a code
+address, a `SIGSEGV` in `__cxa_begin_catch` with a nonsense
+`_Unwind_Exception*`, and a silent death with no log line at all — three
+signatures, one cause, roughly four days of forensic work between them.
+
+**Every `CHECK` in a Release build is a latent UB SIGSEGV.** The three
+occurrences so far are issue 6 (a db `DbSchedResultError` from ENOSPC), issue 7
+(the per-shard conservation invariant) and removed-issue 1. Two of the three
+were db results reaching a `CHECK` in the mempool's `commit_block`.
+
+**Two fixes, and they are independent:**
+
+1. **`CHECK` must abort with a diagnostic under `NDEBUG`.** This is a deliberate
+   repo-wide behaviour change and should be decided as one, not smuggled in with
+   a bug fix — which is why this entry flags it rather than doing it.
+2. **A db error must not be a `CHECK` in the mempool.** `commit_block` should log
+   the `DbSchedResult` and fail the block. Two unrelated defects have now reached
+   the process through that one line, and issue 10 adds a third path (an
+   unguarded `co_await` in a detached coroutine) to the same call site.
+
+---
+
+## 12. the storage filler worked on wasm only, and wasm is gone
+
+- **Status:** OPEN, found 2026-08-21 while rebasing onto `main`. Blocks the
+  capacity experiments that need to grow state faster than erc20 transfers can.
+  Its four tests are `DISABLED_` on the sharding branch with this diagnosis
+  inline (`hogd/loadgen/erc20_experiment_tests.cc`).
+- **Where:** `StorageFiller` in `built_contracts/integration_test_contracts`
+  (branch `vp/storage-filler-on-main`), driven from
+  [`erc20_experiment.cc`](hogd/loadgen/erc20_experiment.cc) via
+  `filler_gas_limit()`.
+
+**What.** Every filler number ever recorded was measured against the **wasm**
+artifact — the 8,243 gas for one 1 KiB write and 15,335 for four that
+`filler_gas_limit()`'s comment quotes are literally what the fixture printed.
+Upstream deleted wasm (#3465), so the filler now loads its rv32 artifact, and on
+rv32 the invocation **does not succeed at all**: `measure()` returns `nullopt`
+before it ever reports gas.
+
+**It is not the gas budget.** Raising `filler_gas_limit()` from 107,500 to
+100,000,000 fails identically, so the transaction is not running out of gas — the
+rv32 invocation itself is failing. Confirmed by running the pre-rebase Aug-18
+binary side by side: it prints `filler 1 x 1KiB: gas=8243` and passes, because
+that tree still built wasm.
+
+**Why it matters.** This is the only reason the sharding PR pins the
+`integration_test_contracts` submodule at a branch commit. Porting the contract
+to rv32 removes an unmerged dependency from that PR; abandoning the filler
+removes it too. Either resolution is progress — leaving it as-is is the only bad
+option.
+
+**Repro:** `./build/hogd/loadgen/loadgen_tests
+--gtest_filter='StorageFillerTest.*' --gtest_also_run_disabled_tests`
 
 ---
 
@@ -143,7 +227,7 @@ chuckd   panic: e.g. memory allocation failure
 
 ## 7. hogdb's hog-conservation invariant is per-shard, so any assertion-enabled multi-shard run dies at genesis
 
-- **Status:** OPEN (found 2026-08-10 @ `97c4f6cc`, while setting up the sharded-vs-unsharded benchmark). **Not sharding-correctness** — the data is fine and the shards agree; the *check* is wrong. Only bites builds with assertions live, which is why the Release campaigns in #4 never saw it.
+- **Status:** OPEN (found 2026-08-10 @ `97c4f6cc`, while setting up the sharded-vs-unsharded benchmark). **Not sharding-correctness** — the data is fine and the shards agree; the *check* is wrong. Only bites builds with assertions live, which is why the Release campaigns of the (removed) auth-sharding issue 4 never saw it.
 - **Where:** [`HogConservationInvariant::check`](hogd/hogdb/invariant_hog_conservation.cc#L27-L34) accumulates `total_supply_change_` from that shard's own item changes only; [`dbsched_commit_snapshot`](hogd/hogdb/rpc_from_sched.cc#L229) arms it under `if constexpr (is_debug_build())`, and [`commit_block`](hogd/hogdb/rpc_from_sched.cc#L177) turns a failure into `HogDBCode::kInternal`.
 
 **What:** a 2-shard `launch-multi.sh` run reaches block 0, both shards commit it, and both then fail the hog-conservation invariant — **with exactly equal and opposite sums**:
@@ -167,7 +251,7 @@ mempool_exec:PANIC: rpc_from_coord.cc:1296 (TID 2072177) CHECK FAILED:
 
 Byte-identical to the panic in #6, and it lands in the same `commit_block`. #6's cause was ENOSPC; this one is the invariant. **Both arrive as `DbSchedResultError`, and the mempool cannot tell them apart** — which is the real lesson: `commit_block`'s `CHECK_EQ` treats every db-side failure as impossible. The hogdb then dies too, on `scheddb_hogs_transferred: RPC connection closed before reply`, because the mempool it was answering is gone.
 
-**Why no earlier campaign hit it.** The check is `if constexpr (is_debug_build())` ([compiler.h:84](hogd/base/compiler.h#L84)), so a true Release build never arms it — #4's clean 2-shard run of 79M txs was Release. It fires now because this tree's Release builds had **assertions live by accident**; see the build note below.
+**Why no earlier campaign hit it.** The check is `if constexpr (is_debug_build())` ([compiler.h:84](hogd/base/compiler.h#L84)), so a true Release build never arms it — the clean 2-shard run of 79M txs recorded in removed-issue 4 was Release. It fires now because this tree's Release builds had **assertions live by accident**; see the build note below.
 
 ### Build note: Release builds in this tree were not `NDEBUG`
 
@@ -182,7 +266,7 @@ So `assert`, `x23assert` and `is_debug_build()` were all live in "Release". Work
 ### Fix options
 
 1. **Make the invariant shard-aware.** It needs the cross-shard flows to net out — either exclude changes whose counterparty is not shard-local, or sum the per-shard `total_supply_change_` values and check the total once, which is what the block hash already does (`3e2d2597` sums shard partial hashes into the whole-db hash). The second mirrors existing precedent and is the only version that still catches real supply corruption.
-2. **Do not let a db error be a `CHECK` in the mempool** (issue #1 rec 3, again). `commit_block` should log the `DbSchedResult` and fail the block, not assert. Two unrelated defects have now reached the process through this one line.
+2. **Do not let a db error be a `CHECK` in the mempool** (issue 0, again). `commit_block` should log the `DbSchedResult` and fail the block, not assert. Two unrelated defects have now reached the process through this one line.
 
 **Repro:** any build with assertions live; `hog.conf` → `hogdb_servers=("hog11" "hog2")`; `./scripts/launch-multi.sh`. Dies at block 0, within ~10 s of the mempool reporting initialization complete.
 
@@ -190,211 +274,70 @@ So `assert`, `x23assert` and `is_debug_build()` were all live in "Release". Work
 
 ---
 
-## 6. mempool `free(): invalid pointer` in `commit_block`'s unwind path — heap corruption at 200k-tx blocks
+## 6. hogdb fills its disk, and the mempool's `CHECK` on the error turns that into a heap-corruption mirage
 
-- **Status:** **ROOT-CAUSED 2026-08-07. Not a heap-corruption bug at all — hogdb ran out of disk and the mempool's `CHECK` on the error result is UB in Release.** See "Actual root cause" immediately below; everything after it is the two-day chase that got there, kept for the lessons. **The `commit_block` drain fix below did NOT fix it** — verification run 1 (2026-08-07 17:55, post-fix) crashed at work batch **728**, same band, with a *different* signature: **SIGSEGV in `__cxa_begin_catch`**, same `commit_block.actor.cold` frame, same RPC reader thread, no log line and no `free()` message. The fix is still correct as far as it goes (it removes a real UAF and a real stale-cleanup hazard) but the defect is **upstream of `commit_block`** — see "Run 1 post-fix" below. **Pre-existing, NOT from the rebase** — reproduced on `b5b88e1f` (pre-rebase, flat `ShardCard`, without `b748e78e`) with a byte-identical stack. Intermittent: **3 crashes in 5 runs**. Not sharding-specific (every occurrence was `--num-db-shards 1`).
-- **Where:** [`MempoolCoordinatorRpc::commit_block`](hogd/mempool/rpc_from_coord.cc#L1258-L1299), the `[clone .cold]` (exception-unwind) path, on the RPC reader thread.
+- **Status:** **ROOT-CAUSED 2026-08-07; the operational trigger is fixed and the
+  code defect is OPEN.** Presented for two days as intermittent heap corruption
+  (`free(): invalid pointer` in `commit_block`'s unwind path at 200k-tx blocks,
+  3 crashes in 5 runs). There was never an exception and never any heap
+  corruption. Pre-existing on `main`, not from the sharding work, and not
+  sharding-specific — every occurrence was `--num-db-shards 1`.
+- **Where:** [`MempoolCoordinatorRpc::commit_block`](hogd/mempool/rpc_from_coord.cc#L1258-L1299)
+  `CHECK`s the db result; [`DiskWriter`](hogd/ramdb/disk_writer.cc#L171) is where
+  the real failure originates.
 
-### Actual root cause (confirmed 2026-08-07, assert-enabled build)
-
-Rebuilding with `NDEBUG` off turned two days of unreadable garbage into one line:
+**The chain.** `launch-multi.sh` pointed `--db-path` at `/tmp/vinita/hogdb.data`,
+a 189 GB tmpfs. A 1-shard run at `--txs-per-block 100000` writes ~141 GB of
+retained WAL, fills it, and hogdb hits ENOSPC. `DiskWriter` warns without the
+errno, calls `signal_ioerror()`, and `dbsched_commit_snapshot` starts returning
+`DbSchedResultError`. The mempool `CHECK`s that result, and under `NDEBUG` the
+`CHECK` is `std::unreachable()` — see issue 0. Rebuilding with assertions on
+turned two days of garbage into one line:
 
 ```
-mempool_exec:PANIC: rpc_from_coord.cc:1296 (TID 8074) CHECK FAILED:
+mempool_exec:PANIC: rpc_from_coord.cc:1296 CHECK FAILED:
   db_result->result() == DbSchedResult::DbSchedResultOK
   [DbSchedResultError != DbSchedResultOK]
-  function hogd::MempoolCoordinatorRpc::commit_block(const PendingBlock&)
 ```
 
-**There was never an exception and never any heap corruption.** The db returned `DbSchedResultError`, the `CHECK_EQ` on it failed, and under `-DNDEBUG` `CHECK` → `x23::panic` → **`std::unreachable()`** ([debug.h:191-196](x23/x23/debug.h#L191)) — undefined behaviour at `-O3`. The "crashes" were whatever the optimiser left behind: a `free()` of `commit_block.actor`'s own code address in one run, a jump into a catch handler with a nonsense `_Unwind_Exception*` (`0x195a`) in the next. This is precisely the latent hazard recorded as recommendation 3 of issue #1 ("every `CHECK` in a Release build is a latent UB SIGSEGV; this one was just the first to fire") — now demonstrated.
-
-**Why the db failed: the hogdb data directory is on tmpfs and it filled up.** `launch-multi.sh` passes `--db-path /tmp/vinita/hogdb.data`, and `/tmp` on hog11 is a 189 GB tmpfs. At the crash, hogdb had written **141 GB** into it:
-
-```
-hogdb.log:  W disk_writer.cc:171  couldn't sync buffer to disk
-            disk stats: bytes enqueued 141GiB, bytes written 140.5GiB, write bw 113.7MiB/s -> 0B/s
-hog11:      tmpfs 189G 189G 0 100% /tmp        141G /tmp/vinita/hogdb.data
-```
-
-ENOSPC → [`DiskWriter`](hogd/ramdb/disk_writer.cc#L171) warns and calls `signal_ioerror()`, the db enters its I/O-error state, and `dbsched_commit_snapshot` starts returning `DbSchedResultError`.
-
-**This retires every anomaly in the entry below:**
-
-| observation | explanation |
-|---|---|
-| only `--num-db-shards 1` | one hogdb absorbs every byte; 2 shards split the writes and never reach the ceiling. Nothing to do with sharding correctness. |
-| only `--txs-per-block 100000` | the 200k-tx blocks this config packs produce far more retained WAL (`file N.log needed for recovery; retaining`) than the 1M-txs/block runs. |
-| narrow batch band (734-758, 728, 787) | the batch at which cumulative writes hit the tmpfs ceiling. |
-| intermittent ~60% | depends on free space at start — leftover cores (10 GB each!) and old logs in the same tmpfs move the ceiling. |
-| no log line at all | `panic` is `std::unreachable()` under NDEBUG, so the `CHECK` printed nothing; hogdb's one-line warning omits the errno (see fix 2) and was buried in 9.9 MB of debug output. |
-| ASan run clean to 999 | different throughput and retention, so it did not reach the ceiling — not a sanitizer-visible bug in the first place. |
-
-### Fixes this calls for
-
-1. **`CHECK` must abort with a diagnostic under `NDEBUG`, not `std::unreachable()`** (issue #1, rec 3). This is the single change that would have turned a two-day forensic exercise into a one-line log. It is a repo-wide behaviour change to [`x23::panic`](x23/x23/debug.h#L191) and should be a deliberate decision, not smuggled in with a bug fix — flagging it rather than doing it.
-2. **[`disk_writer.cc:132,171`](hogd/ramdb/disk_writer.cc#L171) should log the errno.** The sibling calls at :157 and :163 print `f.error()`; these two do not, which is why "couldn't sync buffer to disk" never said `ENOSPC`. One-line fix, large diagnostic value.
-3. **Operational: do not put a long benchmark's hogdb data on tmpfs.** 1-shard @ 100k txs/block writes ~141 GB. Either point `--db-path` at real disk, cap the run, or budget the tmpfs (and stop leaving 10 GB cores in it).
-4. **Not a fix for this issue, but keep it:** the `commit_block` drain change below fixes a *different*, real defect that this investigation reproduced deterministically — see "Bare-shape reproduction" below.
-
-### Bare-shape reproduction (the one real bug this chase did find)
-
-[`x23/tests/two_call_await_race.cc`](x23/tests/two_call_await_race.cc) recreates `commit_block`'s shape — two RPCs launched on two connections, awaited in sequence, with the first-awaited connection poisoned mid-call — and it settles the `commit_block` question in seconds rather than a 25-minute cluster run:
-
-| shape | result |
-|---|---|
-| bare (pre-fix: `co_await a; co_await b;`) | **PANIC within 1-12 s**: `Premature destruction of a running Awaitable or Async [flags = 0x14]` |
-| drained (the fix) | 640k rounds, 1,228 injected exceptions, 50 s, zero panics |
-
-The panic's stack is the production stack — `~Awaitable<Vec<unsigned char>>` ← `RpcStream::send_call.actor` ← `<coroutine>.actor.cold` ← `RpcStreamImpl::reader.actor` ← `ThreadPool::Worker::work` — and `flags = 0x14` matches the value in `commit_block`'s frame in the core. So abandoning a sibling Async on the unwind path is real and reachable; it simply was not what killed the mempool here. Run with `-b` for the bare shape; not registered as a ctest, matching x23's other race soak tests.
-
-
-**What:** the mempool aborts mid-run with glibc's heap-corruption message. Not OOM — the host had >300 GB free.
-
-```
-Program terminated with signal SIGABRT — free(): invalid pointer
-#6  x23::Vec<unsigned char, 128>::realloc(unsigned long)
-#7  hogd::MempoolCoordinatorRpc::commit_block(...) [clone .actor] [clone .cold]
-#8  x23::detail::RpcStreamImpl::reader(...)
-#9  x23::ThreadPool::Worker::work()
-```
-
-**Reading the frames.** `Vec`'s second template parameter is `MaxSize`, not an inline capacity, so `Vec<unsigned char, 128>` is **`Upgrade`** ([`typedef opaque Upgrade<128>`](protocol/consensus.x#L10)), carried as `Upgrade upgrades<6>` inside `ConsensusValue` — it is *not* `x23::Buf` (`Buf = Vec<uint8_t>` uses the default MaxSize). And `realloc(0)` is the **destructor** ([vec.h:366](x23/x23/vec.h#L366) `~Vec() { realloc(0); }`), which skips allocation and goes straight to `a_.deallocate(b_.begin, ...)`. So this is an `Upgrade` being **destroyed with a `b_.begin` the allocator rejects**, during exception unwinding — not a buffer outgrowing itself.
-
-Neither side ever populates the field: the mempool sets `.upgrades = {}` at both construction sites ([rpc_from_coord.cc:1466, :2113](hogd/mempool/rpc_from_coord.cc#L1466)), and chuckd only *compares* upgrades (`upgradesEqual`, `chuckd/util/protoutil/value.go`). So the corrupt `Upgrade` reaches the destructor via a `ConsensusValue` that is itself already damaged, or is destroyed twice. **Resolved 2026-08-07: neither.** No `Upgrade` was ever really destroyed — the cleanup ran over garbage. See below.
-
-**Root cause: `commit_block` was the one place in this file that let an exception unwind out of a `co_await`.** It launches two RPCs and then awaits them bare:
-
-```cpp
-auto commit_snapshot_handle = commit_snapshot(cache.block_id, cache.db_tip.value);
-auto event_commit_handle    = eventsched_commit_block(cache.block_id);
-DbBlockResult result = co_await commit_snapshot_handle;   // throws -> unwind
-```
-
-Two defects fire together on that unwind, and both are cheap to remove:
-
-1. **A still-running `Async` is destroyed.** `~Async` calls `callee_.destroy()` unconditionally ([async.h:555](x23/x23/async.h#L555)); the header states you must get an Async's result before destroying it, and `~Awaitable` even panics on it — but only `#ifndef NDEBUG` ([async.h:255-265](x23/x23/async.h#L255-L265)), so Release destroys the live frame silently and the in-flight RPC completes into freed memory. Every *other* multi-Async site in this file already drains first (`finish_all_executors`, `propose_batch`, `prepare_validation_chunk`, the validate decode pair, both abandon nodes) — `commit_block` was the lone holdout, and `ShardedClient::drain_awaits` exists for exactly this reason.
-2. **The `ConsensusValue` argument copy is destroyed by a stack-relative cleanup after a suspension.** `commit_snapshot` took `ConsensusValue` **by value**, so `commit_block` materialized the copy as a temporary on its own *CPU stack* (`rsp+0x1e0`), not in the coroutine frame. An actor re-entered after a suspension has a fresh stack frame, so running that cleanup post-resume frees whatever the stale pointer register happens to hold.
-
-**How the core proves (2).** The freed pointer was `0x55c77e5fcf90` = **`commit_block.actor` itself**, read as `Vec::b_.begin` from offset 0 of a live coroutine frame: `%r12` (the cleanup's object pointer) equalled `%rbx` (the actor's frame pointer, `0x7f1f48222500` — a live `0x8b0` malloc chunk whose first two words are commit_block's `.actor`/`.destroy`). The two landing pads in `.actor.cold` destroy exactly a `Vec<Upgrade,6>` at `rsp+0x1e0` and one `Upgrade` at `%r12` — i.e. `x23::Vec`'s `Vec(from_range)` `catch { realloc(0); throw; }` ([vec.h:344-353](x23/x23/vec.h#L344-L353)) around the inlined `ConsensusValue` copy. Frame `+0x40`/`+0x48` held both live `Async` handles and the promise flags were `kRunning|kAwaiting` (0x14), so the body was well past launching both RPCs; frame #8 is `RpcStreamImpl::reader`, so the exception arrived with an RPC completion.
-
-**Fix (uncommitted, on `vp/sharding-v2-db-abstraction`):**
-- `commit_block` drains both handles into `std::optional`s, keeps the first exception, logs it (the crash left *no* log line), rethrows once, then `CHECK_EQ`s the results — the same shape as the abandon nodes a few hundred lines below.
-- `MempoolCoordinatorRpc::commit_snapshot` and `ShardedDbSched::commit_snapshot` now take `ConsensusValue const &`, so no by-value temporary exists in a coroutine that suspends. The one copy the wire needs is made by the generated RPC stub, in that stub's own coroutine frame (frame-resident params are destroyed by the frame's `.destroy`, not by a stack-relative landing pad).
-- Builds clean; `mempool_test` 72/72. **No unit test:** the mempool suite has no way to make a db/event RPC throw mid-commit, and the `ShardedDbSched` tests only cover `combine_block_results`. An injectable-failure harness for the commit path is the missing coverage.
-- **Still open:** *what* threw. The exception object was not recoverable from the core, and nothing logged.
-
-### Run 1 post-fix (2026-08-07 17:31–17:55, batch 728) — the defect is above `commit_block`
-
-Same function, same reader thread, new signature: `SIGSEGV in __cxa_begin_catch` called from `commit_block.actor.cold` (core `mempool_exec.6451.core` on hog10, matching binary preserved at `/home/hog12/vinita/issue6-verify/mempool_exec.run1-binary`, sha256 verified against the crashed process). Evidence from that core:
-
-- **The catch handler is entered with a garbage exception pointer.** `si_addr == 0x195a` and the faulting instruction is `add (%rbx),%rcx` at `__cxa_begin_catch+0x24`, where glibc++ keeps the `_Unwind_Exception*` argument in `%rbx` (`mov %rdi,%rbx` in the prologue) and reads its `exception_class` field. So the value handed to the catch handler is **`0x195a`** — a small integer, not a pointer. (An earlier reading of `%rdi == 3` was unreliable: `%rdi` is caller-saved and the intervening `call __cxa_get_globals` clobbers it. `si_addr`/`%rbx` is the trustworthy datum.) Suggestively, `0x195a == 6490` is both the crashing thread's LWP **and** the size class of an RPC record — i.e. a leftover byte count in the register the unwinder would have used for the exception object.
-- **Both child Asyncs are finished and already consumed.** `commit_block`'s frame (`0x7ff49f4a8c80`) holds `commit_snapshot_handle` at `+0x40` and `event_commit_handle` at `+0x48`; both child frames have `__resume == nullptr` (GCC's "coroutine done") and promise `flags == 0`, i.e. `await_resume`'s `flags_.exchange(0)` already ran on both. Both still hold `caller_ == commit_block`'s frame.
-- **`commit_block` itself still thinks it is suspended**: its own promise flags are `0x14` (`kRunning|kAwaiting`) and `resume_at == 6`, yet it has consumed both results and has nothing left to await.
-- A heap scan for references to `commit_block`'s frame finds exactly **3**: the two children's `caller_` and the parent dag-node's `Async` handle. No stale fourth party, which argues against "an older frame was freed and its address reused".
-
-**Hypothesis tested and rejected: a stale coroutine resume index.** If the actor were re-entered with an unwritten `resume_at`, the jump table could land in a landing pad, which would explain a garbage exception pointer. It does not hold: disassembling the second await in the crashing binary shows GCC stores the index **before** authorizing the callee to resume —
-
-```
-25e3da:  movw  $0x6,0x38(%rbx)     ; resume_at = 6, written FIRST
-25e3eb:  mov   0x18(%rax),%eax     ; then read the child's flags (await_ready)
-25e3fd:  mov   %rbx,(%rdx)         ; then caller_ = our frame
-25e40a:  lock cmpxchg %esi,0x8(%rdx) ; then publish kAwaiting
-```
-
-So `resume_at == 6` in the core is simply the last value written — `commit_block` had resumed from its second await and consumed the result (which is why child2's `flags == 0`) and had not yet reached its final suspend (which writes index 8). The frame state is *self-consistent*; what is inconsistent is the exception being delivered to it.
-
-**Leading hypothesis (not proven):** `commit_block`'s frame is resumed **once too many** — after both awaits have completed and cleared their flags — so `await_resume` runs with `f == 0`, falls past `x23assert(f & kException)` (**compiled out under `NDEBUG`**) into the exception branch, and rethrows an `exception_ptr` whose bytes are a stale result. Everything downstream (garbage landing pad, `__cxa_begin_catch(3)`, and the earlier `free()` of a code pointer) follows from that. `commit_block` is simply the coroutine most exposed to it: it is the only place that keeps **two RPCs in flight on two different connections** (hogdb and event), so two independent reader threads can drive its completions.
-
-**Next step: stop inferring, make it assert.** x23 already has the two checks that would name the culprit at the moment it happens, and both are disabled in this build:
-- `~Awaitable` panics with a trace of the destroying site on premature destruction — `#ifndef NDEBUG` only ([async.h:255-265](x23/x23/async.h#L255-L265)).
-- `await_resume`'s `x23assert(f & kException)` is exactly the condition hypothesised above ([async.h:349](x23/x23/async.h#L349)).
-
-So the run to do next is the same repro against a build **without `-DNDEBUG`** (keep `-O2/-O3`, since the bug is timing-dependent). Caveat: like ASan, it perturbs timing and may not reproduce — but unlike ASan it fails *at the bad operation* rather than downstream, so a single hit is conclusive.
-
-**Artifacts:** `/home/hog12/vinita/issue6-verify/run1-postfix-release/` on NFS — mempool log, metrics, chuckd tail, silent-failure scan (clean: zero conservation/invariant/CHECK/PANIC hits on all eight hosts), and `summary.txt`. Core `mempool_exec.6451.core` on hog10 tmpfs; backtrace at `/tmp/vinita/gdb_bt_6451.txt`.
-
-**Why it surfaced now — a new workload shape, not new code.** Only the **1-shard, `--txs-per-block 100000`** configuration triggers it, which is the only one that packs **200k-tx blocks** (chuckd merges two work batches per block when it keeps up). Every prior campaign ran `--txs-per-block 1000000` and never hit it. The crash always lands in a narrow band, work batch **734–758**, right where blocks start alternating 100k/200k.
-
-| run | code | build | outcome |
-|---|---|---|---|
-| 1 | post-rebase | Release | crash @ batch 756 |
-| 2 | post-rebase | Release | crash @ batch 758 |
-| 3 | post-rebase | **ASan** | clean to 999 |
-| 4 | post-rebase | Release | clean to 999 |
-| 5 | **pre-rebase `b5b88e1f`** | Release | **crash @ batch 734** |
-
-**ASan (clang Release + `-fsanitize=address`) reported nothing at all** on any of the 8 hosts. ASan detects double-free and use-after-free deterministically *when they execute*, so silence means the bad path was not taken that run — not that ASan missed it. Run 4 (plain Release, clean) shows the non-repro is not ASan's doing either; the thing is simply intermittent. The root cause above explains the silence: the bad free is neither a double-free nor a UAF *write* that ASan poisons — it is `operator delete` on a `.text` address, reached only when a commit RPC throws.
-
-**Consequences for benchmarking:** 1-shard @ 100k txs/block is unusable as a benchmark config (dies ~60% of the time before finishing). Everything measured at 1M txs/block is unaffected — all of those runs completed cleanly.
-
-**Repro:** worktree or checkout at any of `b5b88e1f`/`97c4f6cc`; `hog.conf` → `hogdb_servers=("hog11")`; `scripts/launch-multi.sh` → `--txs-per-block 100000`; idle cluster; `./scripts/launch-multi.sh`; watch for the mempool dying around work batch ~750. Expect ~60% incidence.
-
-**Artifacts (hog10, `/tmp/vinita`, tmpfs — will not survive a reboot):** cores `mempool_exec.255709.core`, `mempool_exec.256585.core` (post-rebase), `mempool_exec.5177.core` (pre-rebase, matching binary at `/home/hog12/vinita/hogd-prerebase/build/hogd/mempool/mempool_exec`); logs `preserved_crash2_mempool.log`, `preserved_prerebase_mempool.log`; all-thread backtrace of the pre-rebase core at `gdb_bt_5177.txt`.
-
----
-
-## 5. genesis reports complete before its hog accounting lands — the first submitted batch is discarded for "0 hogs"
-
-- **Status:** FIXED 2026-08-04 on `vp/sharding-v2-db-abstraction` (uncommitted). Found while bringing up `hog-devnode --num-db-shards 2`. **Pre-existing on `main` and not shard-specific** — 1 shard wins the race by luck, N shards lose it reliably.
-- **Where:** [`schedcoord_load_genesis_configuration`](hogd/mempool/rpc_from_coord.h#L250-L268) force-stored `transfer_finished_ = 0`, opened the `all_shards_genesis_ready_` barrier, and returned immediately; the block-0 deltas that barrier unblocks are applied asynchronously in [`MempoolDbRpc::handle_transfer`](hogd/mempool/rpc_from_db.h#L62-L114).
-
-**What:** genesis writes the initial hog supply to the db, and the db then *sends* the mempool a `HogsTransferred` so the scheduler can build its in-memory per-account hog state. The RPC returned between those two steps. A caller that submits as soon as it returns — hog-devnode's initialization batch, chuckd's init batch — hits a scheduler that has no hogs for any genesis account yet, and every tx is discarded:
-
-```
-scheduler: discarding tx … for account [0,…,0,2]:
-  gas_limit 1e+09 exceeds all hogs available 0
-  (to_schedule 0, already_scheduled 0, received 0, spent_this_block 0)
-```
-
-All three groups zero is the tell: this is *missing accounting*, not hogs sitting in the wrong group (the scheduler cycles between groups on demand). The db was always correct — instrumenting the genesis write and the hog-age read showed `genesis WROTE supply hog age on shard 1/2: 625000000000000000` while the scheduler's read returned `to_schedule=0`.
-
-**Why the shard count decides it:** `handle_transfer` runs once per shard, serially under `scheduler_lock_`, each doing a sharded hog-age read plus a fan-out write, and [`record_shard_transfer_finished`](hogd/mempool/scheduler.h#L181-L192) only advances `transfer_finished_` once *every* shard reports. One shard completes in microseconds and beats the submit; two shards do not.
-
-**Fix:** drop the force-store and `co_await wait_for_transfer_data(...)` after opening the barrier, so the RPC's success actually means "genesis is accounted for". Cannot hang on a shard that owns none of genesis — `BackgroundCommitWorker::commit_job` dispatches a `HogsTransferred` for every committed block even with zero deltas. Cannot deadlock — the wait holds `commit_lock_`, which `handle_transfer` never takes.
-
-**Repro (before the fix):** `hog-devnode --dev-accounts 4 --num-db-shards 2`; fails before readiness with `bootstrap account metadata does not match recovered chain: missing auth data`, because the discarded batch never created the dev wallets. Inserting a 3 s sleep between genesis and the init batch made it pass — that was the confirmation.
-
-**After:** ready at 1, 2 and 4 shards; 6/6 consecutive 2-shard runs clean; `--data-dir` recovery works at 2 shards; devnode 102/102, mempool 72/72, hogdb 218/218, db_shard_routing 20/20.
-
-**Worth checking on-cluster:** chuckd submits its init batch right after genesis too, so this may account for some of what #4 attributed to auth.
-
----
-
-## 4. auth server is not sharded — 2-shard runs auth-fail 100% of the load and nominate empty blocks forever
-
-- **Status:** FIXED and **verified on-cluster 2026-08-04** (fix committed as `3001b393`). A 2-shard `launch-multi.sh` run reached its natural end (work batch 999) with `mempool_auth_failed_tx_count` **0** for the whole run, 79,490,644 txs committed across 343 non-empty blocks, shards balanced 49%/50%, and zero cores or invariant/conservation failures on any of the nine hosts. Auth logged `auth server bound 2 db shard(s)` and held connections to *both* hogdbs (vs 2-to-one/0-to-the-other before). All three gaps below are closed: [`auth_init`](hogd/auth/auth.cc#L85-L100) now orders the cards with `order_shards_by_id` and builds one `dbauth_client` per shard; [`DBAuthClient`](hogd/auth/dbauth_client.h#L38-L67) holds a `ShardedClient` and routes `lookup_auth_data` by address; `register_auth_data_updates` merges the per-shard slices via `merge_shard_key_changes` before advancing the height. Originally found 2026-07-29 @ `d6a6fc13`. **Hard liveness stall, no crash.** The latent defect was **pre-existing on `main`**; commit `97ee1d80` on this branch is what exposed it.
-- **Where:** [`auth_init`](hogd/auth/auth.cc#L80-L87) binds `intro.shards()[0]`; [`DBAuthClient`](hogd/auth/dbauth_client.h#L41-L42) holds one `dbauth_client_t` (its own comment says *"Sharded DB is not yet implemented."*); [`AuthServer::register_auth_data_updates`](hogd/auth/auth_server.cc#L83-L86) carries a `TODO(geoff)` saying the height sequencing "will break if there's a sharded db".
-
-**What:** the auth server reads **all** account auth/key state from a **single** hogdb. `auth.cc` takes `ShardCard &shard = intro.shards()[0]` and builds one `dbauth_client`, and `subscribe_to_auth_data_changes` subscribes to that one shard only. The mempool's intro already returns *every* shard card ([rpc_from_auth.h:43-46](hogd/mempool/rpc_from_auth.h#L43-L46)) — auth just ignores all but the first. Note `shards()[0]` is **connection-arrival order, not shard id**: in the observed run auth bound to shard **1**. Confirmed on-cluster: auth host hog8 held **2 TCP connections to hog2 (shard 1) and 0 to hog11 (shard 0)**.
-
-**Why it is only now fatal:** that `shards()[0]` line predates this branch (last touched on `main` 2026-07-13, `771f0657`, a mechanical refactor). It was harmless while genesis was loaded **replicated in full on every shard**, so any single shard held all genesis-seeded auth data. `97ee1d80` ("sharding: load genesis shard-owner-only with a global block hash", 2026-07-28) removed that accidental safety net. This is why the 2026-07-27 run reached 436 blocks / 39.9M txs and this one produces no throughput number at all.
-
-**Symptom — looks like healthy consensus, is a stall.** chuckd commits init tx batch 0 (10002 txs) at height 1, then submits init batch 1 (10000 txs), which is **100% rejected at authentication**, so nothing is ever nominatable. chuckd then nominates **empty** blocks forever: `NOMINATED/COMMITTED: height N; tx_count 0` plus `commit hook: continue nominating (10000 uncommitted)` — **16,945 empty blocks in ~28 min**, height climbing fast, both hogdb shards committing with distinct `db_hash`es, mempool alive, and **zero** crash/CHECK/invariant/conservation/`Not Found` lines on any of the nine hosts. The run never reaches the *work* phase, so `work batch` never appears in the chuckd log.
-
-**Detection:** no log line reveals this — the mempool metrics endpoint does. `curl hog10:8075/metrics`:
-
-```
-mempool_submitted_unvetted_tx_count  20002   # both batches arrived
-mempool_accepted_unvetted_tx_count   10002   # only batch 0 accepted
-mempool_auth_failed_tx_count         10000   # ALL of batch 1 rejected by auth
-mempool_nomination_nominated_tx_count 10002
-```
-
-A fast-climbing block height with `tx_count 0` means an auth/vetting reject loop, not progress. **Check `mempool_auth_failed_tx_count` before believing a sharded run is healthy.**
-
-**Not yet explained:** why 100% and not the ~50% address routing would suggest. Consistent with a single signer/authority address owned by the unconnected shard; unverified.
-
-### Three distinct gaps in the auth→db path
-
-1. **Read routing (the stall).** `lookup_auth_data(height, address)` must go to `shard_of_address(address, total_shards)`, not to one fixed shard.
-2. **Subscription fan-out.** `dbauth_intro` must go to *every* shard; each returns its own `current_height`, and per [sharding.h](hogd/db_shard_routing/sharding.h#L48-L50) shard tips must agree — so divergent/partial heights are fail-stop (mirroring `5c584c43`).
-3. **Key-change aggregation (the `TODO(geoff)`).** With N shards, each block delivers **N** `authdb_forward_key_changes(height, …)` calls. `register_auth_data_updates` advances the height on the first and discards the rest as `"Received stale update for block height … ignoring"` — so **N-1 shards' key changes are silently dropped**, and the `mempoolauth_auth_data_changed` forward fires N times per height. Needs a per-height barrier that merges all N batches before applying and advancing once (mirroring `34330f31`).
-
-**Repro:** `hog.conf` → `hogdb_servers=("hog11" "hog2")`; idle cluster; `./scripts/launch-multi.sh`; within ~1 min `curl $(hog_ip hog10):8075/metrics | grep auth_failed`.
-
-**Artifacts:** `mempool_metrics_stall.txt` (scratchpad); per-host logs in `/tmp/vinita/` (chuckd 2.2 GB at `-l debug`; mempool only 3 MB — two lines per block, nothing else).
-
-**Teardown gotcha:** `launch-multi.sh` ends in `sleep infinity` and its `EXIT/INT/TERM` trap did **not** fire on `SIGTERM` from `timeout`; the script had to be `kill -9`ed and the per-host `killall` run by hand. `pgrep -cf '<pattern>'` over ssh **self-matches** the ssh command line — use `pgrep -a -x` on exact binary names to verify teardown.
+**Why every anomaly was a red herring.** Only 1 shard, because one hogdb absorbs
+every byte (2 shards split the writes and never reach the ceiling). Only
+`--txs-per-block 100000`, because 200k-tx blocks retain far more WAL. A narrow
+batch band (728-758), because that is where cumulative writes hit the ceiling.
+Intermittent ~60%, because leftover cores (10 GB each) in the same tmpfs move the
+ceiling. Clean under ASan, because different throughput never reached it.
+
+**Fixed operationally:** `hogdb_data_dir=/var/tmp/$(whoami)/hogdb.data` in
+`scripts/launch-multi.sh`. Multiple 1-shard runs at the exact repro config now
+pass through the crash band having written the same ~139 GB, with no cores.
+
+**Still open:**
+
+1. **The `CHECK` itself** — see issue 0. The mechanism is untouched; any future db
+   error still kills the mempool with no diagnostic under `NDEBUG`. Three
+   different causes have now produced that same fatal `DbSchedResultError`:
+   ENOSPC (here), the per-shard invariant (issue 7), and a too-small
+   `--ram-bytes`.
+2. **[`disk_writer.cc:132,171`](hogd/ramdb/disk_writer.cc#L171) should log the
+   errno.** The sibling calls at :157 and :163 print `f.error()`; these two do
+   not, which is why "couldn't sync buffer to disk" never said `ENOSPC`. One-line
+   fix, large diagnostic value.
+3. **Nobody budgets disk for a long run.** Every service writes into `$logdir`
+   without bound; only hogdb's data dir has been moved off tmpfs. Same shape as
+   issue 8.
+
+**A real, separate bug this chase did find (fixed).** `commit_block` destroyed a
+still-running `Async` — `~Async` calls `callee_.destroy()` unconditionally
+([async.h:555](x23/x23/async.h#L555)) and the debug-only panic is `#ifndef
+NDEBUG`, so Release destroyed the live frame and the in-flight RPC completed into
+freed memory. It was the lone multi-`Async` site in the file that did not drain
+first. Also `commit_snapshot` took `ConsensusValue` **by value**, so the copy
+lived on the CPU stack rather than the coroutine frame and its cleanup ran
+against a stale pointer after a suspension. Both are fixed; neither was the cause
+of this issue's crashes.
+
+**Artifacts:** `/home/hog12/vinita/shard-bench/assert-build-runs/` and
+`issue6-verify/`.
 
 ---
 
@@ -413,110 +356,59 @@ A fast-climbing block height with `tx_count 0` means an auth/vetting reject loop
 
 ---
 
-## 2. mempool `terminate()` via `XdrBadInput` on coordinator RPC — 2-shard runs crash mid-load (~block 396)
+## 2. the coordinator connection drops mid-run and an unguarded `co_await` used to kill the mempool
 
-- **Status:** Bug 1 (crash) FIXED + **VALIDATED ON-CLUSTER 2026-07-24** (with the sharding refactor). The guard **fired and worked**: `E rpc_from_coord.cc:338 coordscheduler_notify_vetted failed: … x23::Deserializer: input too short. Dropping vetted-tx notification.` at block 393, immediately followed by `RpcStreamImpl: read(fd 20, n 252000212) returned 9006556 bytes` and then a normal `schedulercoord_nominate ret` — the exact short-read + in-flight-`notify_vetted` condition that previously `terminate()`d the mempool and dumped a 37 GB core was caught, and the mempool **survived**. Full experiment then completed (1000/1000 work batches, 393 blocks, ~39.9M txs @ ~18,058 tx/s); 0 conservation/invariant/CHECK/NotFound/hog-age failures across mempool/hogdb×2/hogexec/auth/event; both shards non-empty (shard0 64%, shard1 5% mem-items). Bug 2 (why the coord short-read happens) still open but now non-fatal; the block-393 drop was shutdown-induced (chuckd closing mid-`notify_vetted`), so a purely *spontaneous* mid-run drop still hasn't been isolated — the guard handled the identical fatal condition regardless. Distinct from #1 (genesis crash) — happens deep into a healthy run, not block 0.
+- **Status:** **crash FIXED and validated on-cluster 2026-07-24; the underlying
+  connection drop is OPEN and now non-fatal.** Found on 2-shard runs crashing
+  mid-load around block 396. Distinct from the (removed) issue 1 genesis crash —
+  this happens deep into a healthy run, not at block 0.
+- **Where:** the detached "launch vetted notify" coroutine at
+  [rpc_from_coord.cc:310-331](hogd/mempool/rpc_from_coord.cc#L310-L331).
 
-**Re-confirmed 2026-07-27:** clean rerun on a hogci-free cluster reached **work batch 1000** with the mempool **ALIVE the whole time** — guard fired again near the end (`Dropping vetted-tx notification` + `read(fd 23, n 252000212) returned 13046476 bytes` → normal `nominate ret`), **zero cores dated today**, no crash signatures. So: the mempool no longer crashes before completing the 1000 work batches. (Bug 3 did not recur this run — it's a race.)
+**The fixed crash.** An unguarded `co_await
+coord.coord_client_->coordscheduler_notify_vetted(response)` in an
+`x23::Detached` coroutine. When the stream fails, `RpcStreamImpl::fail()`
+([rpc.cc:38-50](x23/x23/rpc.cc#L38-L50)) hands every in-flight call an empty
+buffer, deserializing it throws `XdrBadInput`, and an exception escaping a
+detached coroutine `terminate()`s the process. `git blame` puts it at `ad9e1d32`,
+which is on `main`; it never fires there because the coordinator connection does
+not break. A 37 GB core confirmed the mechanism exactly: one faulting thread,
+`reader()` → `fail()` → the detached lambda → `__cxa_call_terminate`, and no
+shard-path frame anywhere.
 
-**Also observed:** the CI-collision hazard is real — an earlier attempt was SIGKILLed at block 68 by a concurrent `hogci` benchmark's `killall` (no core, no crash text, "input too short" cascade). Verify hosts are hogci-free before running; `killall` as vinita only touches vinita's procs.
+**The guard fired and worked.** Post-fix run: `E rpc_from_coord.cc:338
+coordscheduler_notify_vetted failed: … input too short. Dropping vetted-tx
+notification.` at block 393, then a normal `schedulercoord_nominate ret`. The
+run completed 1000/1000 work batches, 393 blocks, ~39.9M txs at ~18,058 tx/s,
+with no conservation/invariant/CHECK failures and both shards non-empty.
 
-**[SUPERSEDED by the 2026-07-24 validated run above — kept for history.]** **On-cluster result 2026-07-23 (post-fix rerun) — full experiment ran to its natural end, but the fatal path was NOT re-tested and the exit was NOT clean:**
-- The run reached its **natural end**: chuckd's loadgen served all **1000 configured work batches** (`WaitWorkTxs` → `ok=false` at batch 1000), across **436 consensus blocks**, ~39.9M txs @ ~16,957 tx/s. The previous crash was at ~block **395 — before** this natural end — i.e. a *spontaneous mid-run* coordinator drop (Bug 2). **This run had no spontaneous mid-run drop, so Bug 2 did not reproduce and the guard was not exercised against it** (`guard_fired=0`; the `catch`'s `error("Dropping vetted-tx…")` never logged).
-- The block-436 `RpcStreamImpl: read(fd 25, n 252000212) returned 12264556 bytes` was **caused by the shutdown itself** (chuckd closing the scheduler connection mid-`submit_unvetted`), NOT the spontaneous Bug-2 trigger. The mempool handled it without a core, but this is a different (shutdown) scenario. **Do not claim the guard is on-cluster-validated** — it still rests only on unit tests + the [`publish_auth_changes`](hogd/hogdb/auth_change_subscription_manager.cc#L50-L69) precedent.
-- **Exit was a crash, not graceful (see #3):** chuckd terminated via `panic: context canceled` at teardown. The C++ mempool exited without a core (no C++ crash), but chuckd itself panicked.
-- Silent-failure scan was clean: 0 conservation/invariant/CHECK across mempool/hogdb/auth/event/indexer; both shards committing (shard 1 / hog2 at 5% memory-items — non-empty, so #1's regression is absent). The `433× no scp providers among known validators` is benign single-validator backfeed noise on early slots.
-- **Still needed:** a rerun long enough / repeated enough to actually hit the spontaneous Bug-2 mid-run drop and confirm the mempool guard catches it (and to root-cause why the drop happens under 2 shards).
+**What is still open: why the connection drops.** The 252 MB record length is
+*legitimate*, not corruption — `ParallelBatch` concatenates every serialized
+object into one byte-vector ([xdr_util.h:203](hogd/base/xdr_util.h#L203)), so
+~500k txs is ~250 MB, and `read(..., full=true)` returning 11 MB means the fd was
+closed mid-transfer rather than a short socket read. The mempool was not falling
+behind (steady nominate/commit pairs to the last block) and did not cause it, so
+it originates on the chuckd side or in mempool↔chuckd backpressure. The one
+correlated event is a chuckd single-validator SCP stall (`no scp providers among
+known validators`) in the same 1-2 s window. **The block-393 drop was
+shutdown-induced** (chuckd closing mid-`notify_vetted`), so a purely spontaneous
+mid-run drop still has not been isolated.
 
-**Bug 1 fix landed 2026-07-23 (branch `vp/sharding-v2-db-abstraction`, not committed):** guarded the detached `co_await coord.coord_client_->coordscheduler_notify_vetted(response)` in [rpc_from_coord.cc:326](hogd/mempool/rpc_from_coord.cc#L326) with `try { … } catch (const x23::XdrException &e) { error(…); }`, mirroring [`AuthChangeSubscriptionManager::publish_auth_changes`](hogd/hogdb/auth_change_subscription_manager.cc#L50-L69). Also moved `pending_detached_coroutines_.fetch_sub` after the try/catch so it runs on both paths (the pre-fix code only decremented on success → a throw would also leak the counter and hang the destructor drain at [rpc_from_coord.h:88](hogd/mempool/rpc_from_coord.h#L88)). Builds clean; `Mempool.*` unit tests 34/34 pass. **Next: rerun 2-shard to confirm the transient is now survivable and to expose any deeper Bug-2 liveness stall.**
-- **Found:** 2026-07-23, branch `vp/sharding-v2-db-abstraction` @ `6bd815fb`.
-- **Does NOT repro on the non-sharded (single-shard) build** — per user, single-shard load runs are healthy. So the trigger is sharding-specific.
+**The lesson generalised, and it is now load-bearing.** Issue 10 is this same
+defect at a third call site: `handle_transfer` is a detached coroutine whose
+`co_await`s on the db throw when that connection dies, and it never got the
+guard. **Audit every detached `co_await` on a peer connection**, rather than
+fixing them one crash at a time.
 
-**Symptom:** 2-shard `launch-multi.sh` (hog11+hog2) comes up clean, runs healthily for ~37 min to **height ~395** (both shards taking writes — genesis fix #1 holds), then the **mempool dies** and block production freezes. chuckd exits a few seconds later as a consequence.
+**Repro:** `hog.conf` → `hogdb_servers=("hog11" "hog2")`; idle cluster;
+`./scripts/launch-multi.sh`; wait ~35-40 min / ~block 395.
 
-### Timeline (~19:45 local; hog10 mempool + hog4 chuckd logs)
-1. `19:45:02` — chuckd single-validator SCP falls behind: `scpbroker.go:144 tried to repair missing scp envelopes for slot 395: no scp providers among known validators`. **Self-recovers**; slot 395 externalizes `19:45:05`.
-2. `19:45:05–06` — block 395 commits; two `coordscheduler_notify_vetted` calls (xid 999/1000) succeed (chuckd side: io≈40ms, serde≈6ms). mempool's last `schedulercoord_commit_block ret` at `02:45:06` UTC.
-3. `~19:45:06–08` — **mempool dies**: `RpcStreamImpl: read(fd 22, n 252000212) returned 11287156 bytes` → short read → RPC stream `fail()` → in-flight `coordscheduler_notify_vetted` resolved with an **empty `Buf{}`** → `terminate called after throwing 'x23::XdrBadInput'  what(): coordscheduler_notify_vetted: x23::Deserializer: input too short`.
-4. `19:45:08` — chuckd tries to enter slot 396, needs backfeed, `no scp providers` again — no recovery (mempool gone).
-5. `19:45:10` — chuckd RPC servers exit (`use of closed network connection`) — consequence of the dead mempool.
+**Artifacts: LOST 2026-08-06** — hog10 rebooted and `/tmp` is tmpfs, taking the
+37 GB core and its log. Preserve future artifacts on NFS
+(`/home/hog12/vinita/...`), not `/tmp/vinita`.
 
-**Mempool died first; chuckd's exit is downstream.**
-
-### Two bugs
-
-**Bug 1 — the fatal handling (mempool robustness; PRE-EXISTING ON `main`).** The detached "launch vetted notify" coroutine at [rpc_from_coord.cc:310-331](hogd/mempool/rpc_from_coord.cc#L310-L331) does an **unguarded** `co_await coord.coord_client_->coordscheduler_notify_vetted(response)` — no try/catch. On stream failure, `RpcStreamImpl::fail()` ([rpc.cc:38-50](x23/x23/rpc.cc#L38-L50)) hands every in-flight call an empty buffer; deserializing the empty reply throws `XdrBadInput`, and since this is a `x23::Detached` coroutine with no handler, the exception is unhandled → `terminate()` kills the whole process. `git blame` → `ad9e1d32` ("mempool: add dag to submit_unvetted()"), which **is in `main`**. It never fires on `main` because the coordinator connection doesn't break there. Fix: guard the `co_await` (try/catch + check result); a dropped/degraded coordinator connection must not be fatal. **This alone would demote the crash to a recoverable blip.**
-
-**Bug 2 — the sharding-specific trigger (data-plane; ROOT CAUSE, under investigation (b)).** The proximate trigger is the **252 MB** record length with an 11 MB short read on the coordinator connection. `default_max_message_size` is only **16 MB** ([rpc_common.cc:18](x23/x23/rpc_common.cc#L18)) yet this 252 MB length passed the size guard ([rpc.cc:82](x23/x23/rpc.cc#L82)) — so either this stream's `max_message_size_` is set very high and `notify_vetted` genuinely ships ~250 MB batches (500k+ txs), or the **stream desynced** and read a garbage length prefix from a mis-framed preceding message. Strong corroborating clue: issue #1 already recorded a **sibling** `x23::Deserializer: input too short` `XdrBadInput` on a *different* sharded RPC — auth's `mempoolauth_auth_data_changed`/`authdb_forward_key_changes` (see #1, "Separate anomaly" note). Two different sharded RPCs hitting the same "input too short" deserialize points at a **systemic serialization/framing bug in the sharded fan-out path**, not a one-off.
-
-### (b) findings — core-dump confirmed (2026-07-23)
-
-**Crash mechanism is 100% Bug 1, single-threaded, no shard-code fault.** `gdb thread apply all bt` on the 37 GB core: Thread 1 is the only faulting thread; its stack is exactly `reader()` → `fail()` → detached notify_vetted lambda → `trace_unhandled_exception` → `__cxa_call_terminate` → `abort`. All other ~214 threads are idle `WorkerPool` workers parked in a futex. **No concurrent `CHECK`, `process_transfers`, `scatter_gather`, or any shard-path frame** — the earlier "a shard thread CHECK-crashed first and cascaded" theory is *ruled out*. Note `fail()` invokes the pending-call callbacks **synchronously on the reader thread** ([rpc.cc:46-47](x23/x23/rpc.cc#L46-L47)), so the `XdrBadInput` unwinds *through* `fail()` — the exception isn't contained to the detached coroutine at all.
-
-**The 252 MB is a legitimate batch, not corruption.** `ParallelBatch` stores every serialized object concatenated in one `xdr` byte-vector ([xdr_util.h:203](hogd/base/xdr_util.h#L203)); ~500k txs → ~250 MB is expected. `read(..., full=true)` ([event.h:481](x23/x23/event.h#L481)) means "suspend until the whole `len` arrives or an error occurs", so the 11 MB return = the fd was **closed/poisoned mid-transfer**, not a partial/short socket read.
-
-**Mempool was NOT falling behind.** Its log shows a steady `nominate ret` / `commit_block ret` pair every ~6 s right up to the last block (`02:44:xx`→`02:45:06`) — zero deadline/poison/EAGAIN/backpressure/slow lines. So "sharding makes the mempool lag → connection breaks" is not supported by the mempool side.
-
-**Conclusion on the sharding-specific trigger (still the open question):** the crash *mechanism* (Bug 1) is sharding-independent code that is **in `main`** and never fires in single-shard runs — so what differs under 2 shards is that the **coordinator↔mempool connection (fd 22) gets interrupted mid-transfer**. The mempool did not cause it (no faulting shard thread), so it originates on the chuckd side or in mempool↔chuckd backpressure. Correlated chuckd-side event: SCP single-validator stall at slot 396 (`no scp providers among known validators`) in the same 1-2 s window; the 2-shard commit path (fan-out + cross-shard reads) perturbs block timing enough to trip chuckd's envelope-backfeed/repair path, which is smooth in single-shard. Both huge RPC directions (`submit_unvetted` in, `notify_vetted` out, each ~250 MB) ride this one connection.
-
-**The sibling clue holds:** issue #1's auth `mempoolauth_auth_data_changed: input too short` is the *same* Bug-1-class symptom (a dropped connection resolving an in-flight call with an empty buffer), not an independent serialization bug — so guarding these `co_await`s is broadly protective.
-
-### Next steps
-- (a) **Implement the Bug 1 guard first** (try/catch + result-check around the detached `co_await coordscheduler_notify_vetted`, and audit sibling unguarded coordinator/auth `co_await`s). This is the confirmed crash cause and is cheap. It converts the transient into a recoverable blip.
-- Then **rerun 2-shard** — with the crash removed, observe whether block production recovers from the slot-396 SCP transient (proving it was a survivable hiccup) or truly stalls (revealing a deeper 2-shard consensus/liveness issue to chase on the chuckd/scpd side).
-- If still stalling, instrument the chuckd/scpd slot-396 `no scp providers` path and the mempool↔chuckd write backpressure under ~250 MB batches.
-
-**Repro:** `hog.conf` → `hogdb_servers=("hog11" "hog2")`; idle cluster; `./scripts/launch-multi.sh`; wait ~35–40 min / ~block 395.
-
-**Artifacts (hog10): LOST 2026-08-06** — `/tmp` is tmpfs and hog10 rebooted, taking `mempool_exec.CRASH-2shard-notify_vetted-XdrBadInput.core` (37 GB) and `mempool_exec.CRASH-2shard-notify_vetted.log` with it. Preserve future artifacts on NFS (`/home/hog12/vinita/...`), not `/tmp/vinita`.
-
-**Teardown gotcha:** `pkill -f 'scripts/launch-multi.sh'` self-matches the wrapper shell — use the `[x]` bracket trick (`pgrep -f 'launch[-]multi\.sh'`).
+**Teardown gotcha:** `pkill -f 'scripts/launch-multi.sh'` self-matches the
+wrapper shell — use the bracket trick (`pgrep -f 'launch[-]multi\.sh'`).
 
 ---
 
-## 1. mempool SIGSEGV in `Scheduler::process_transfers` — 2-shard runs stall at block 0
-
-- **Status:** FIXED + VERIFIED on-cluster 2026-07-21 (barrier + genesis dedup). Not yet committed.
-
-**Verification (2026-07-21, 2-shard `launch-multi.sh`, hog11+hog2):** system ran healthily past genesis — no SIGSEGV / no new core on hog10, `mempool_exec` stayed alive, chuckd drove consensus to ~600 blocks in ~50s. The shard-1 smoking gun is resolved: **hog2 committed blocks (heights 589→594) with non-zero ramdb (`3% memory items`, was `0%/0B` its whole life)** and logged no `Failed to read hog age …0002`. Zero `invariant|conservation|CHECK FAILED|PANIC|mismatch` lines across all shards' fresh logs — confirming the dedup too (a double-count would trip the hog-conservation invariant on commit).
-- **Found:** 2026-07-16
-- **Branches:** `vp/sharding-v2-db-abstraction` @ `41636c5c`, and `vp/sharding-v2` (both rebased on main; `ctest` 2681/2681 green — bug is multi-shard end-to-end only, not covered by unit tests)
-
-**Symptom:** With 2 DB shards, mempool crashes ~1s after startup (just past block 0) → chuckd dies with `transport is closed` → block production frozen at block 0. Single-shard runs are healthy (verified: 60+ tx batches, consensus `|D:19|X:20|`).
-
-### Root cause (confirmed) — write/read shard-routing asymmetry: shard 1 is empty
-
-**All DB state lands on shard 0 (hog11); shard 1 (hog2) receives nothing, yet the scheduler reads hog-ages sharded across both shards.** Proven from the preserved run (2026-07-16, hog10 core + per-host logs):
-
-- hog2 (shard 1) hogdb: **`0% memory items`, `bytes written 0B` for its entire life; never logged `committed block 0`.** Its ramdb is empty.
-- hog11 (shard 0) hogdb: committed **block 0 only**, and its on-disk `0.log` holds `…0002`'s **balance (`0x42…`) and hog-age (`0x41…`) rows**. So the loadgen accounts are seeded at **genesis** (block 0), and that genesis reached **only shard 0**.
-- `shard_of_address(…0002, 2) = 1` (verified against the FNV-1a in [shard_router.h](hogd/db_shard_routing/shard_router.h)). The scheduler's `read_average_hog_ages` routes `…0002`'s read to shard 1 → hog2 (empty) → hog2 logs `rpc_from_sched.cc:75 Failed to read hog age for address …0002: Not Found`.
-- Net: `…0002`'s state physically sits on shard 0, but the scheduler reads it from shard 1. Any account routing to a non-primary shard is invisible to the scheduler.
-
-So the report's original fix #1 was directionally right but understated: it is **not just hog-ages, and not just "seeding"** — shard 1 gets no genesis/block state at all. The read path (`scheduler.cc` scatter_gather) shards by address; the write path effectively populates only shard 0.
-
-### Why the fan-out "skips" shard 1 — it's a genesis-delta ordering race (confirmed)
-
-`…0002` is **`kDeployContractAddress`** (`GenesisContractAddresses::kAddressInitialTokenClaim = 2`, encoded into the low bytes by [`make_precompile_address`](hogd/genesis/genesis_configuration.h#L21)) — the contract that holds the **entire initial hog token supply**, not a loadgen account. It routes to shard 1 (`shard_of_address(…0002, 2) = 1`).
-
-The mempool genesis fan-out ([rpc_from_coord.h:216](hogd/mempool/rpc_from_coord.h#L216)) loads genesis on shards **sequentially** (`for (auto &client : db_sched_clients_) co_await client->dbsched_load_genesis_configuration(...)`), shard 0 first. Committing genesis on shard 0 is a normal block commit: [`BlockTX::commit`](hogd/hogdb/block_tx.cc#L290) → `submit_job` → `dispatch_balance_deltas` → `scheddb_hogs_transferred`, dispatched **asynchronously** by shard 0's `BackgroundCommitWorker`. Genesis is loaded **replicated in full on every shard** (each runs the whole config against its own local `ctx_.get_db()`), so shard 0's block-0 deltas include `kDeployContractAddress` (a shard-1 account). There is **no gate** in [`scheddb_hogs_transferred`/`handle_transfer`](hogd/mempool/rpc_from_db.h#L45) — the scheduler processes those deltas immediately, and `process_transfers` reads each account's hog-age routed by `shard_of_address` → reads `…0002` from shard 1 (hog2). hog2 has **not run its genesis yet** (it is the next, not-yet-executed loop iteration). Read → NotFound → `CHECK` → UB SIGSEGV → the process dies **before** the fan-out's second iteration. That is why hog2 shows zero activity: "hog2 never got genesis" is a *consequence* of the crash, not a loop bug.
-
-(Separate, likely-unrelated anomaly: auth server hog8 logged `authdb_forward_key_changes: mempoolauth_auth_data_changed: x23::Deserializer: input too short`.)
-
-### Crash mechanism (confirmed) — a failing `CHECK` is UB in Release builds
-
-The binary is **`CMAKE_BUILD_TYPE=Release` → `-O3 -DNDEBUG`**. In `NDEBUG`, `x23::panic` compiles to **`std::unreachable()`** ([debug.h:194](x23/x23/debug.h#L194)), and `CHECK`/`CHECK_EQ` route through `x23::panic` ([log.h](hogd/base/log.h)). So when `process_transfers` hits `CHECK(missing.empty())` ([scheduler.cc:781](hogd/mempool/scheduler.cc#L781)) with `missing = {…0002}`, it is **undefined behavior, not a clean abort**. At `-O3` this manifests as the observed SIGSEGV during `_Unwind_Resume` in `process_transfers.actor.cold` — which is exactly why **there is no `CHECK FAILED` line in the log** and the backtrace jumps to a garbage address. (`do_panic` in a debug build would `std::abort()` cleanly; this build never calls it.)
-
-### Recommended fixes
-1. **Primary (ordering barrier) — IMPLEMENTED (2026-07-21):** genesis-block deltas must not be processed until **every** shard has finished loading genesis. Added `Scheduler::all_shards_genesis_ready_` (a `CoroFutex<bool>`, [scheduler.h:176](hogd/mempool/scheduler.h#L176)); raised after the fan-out loop in [rpc_from_coord.h](hogd/mempool/rpc_from_coord.h) `schedcoord_load_genesis_configuration` and, on restart (tip ≥ 0), in `finish_init`; waited on in [rpc_from_db.h:76](hogd/mempool/rpc_from_db.h#L76) `handle_transfer` before `process_transfers`. Builds clean; 59/59 mempool+scheduler unit tests pass. Fixes the crash; still needs the double-count fix below before cluster verification.
-   - **Failure-path handling (2026-07-22, from code review):** if the genesis fan-out fails on a shard, the barrier is now released with a one-way `Scheduler::genesis_load_failed_` latch set, and `handle_transfer` drops the transfer instead of hanging forever holding `scheduler_lock_` (or reading a half-initialized shard and hitting the missing-hog-age CHECK). Recovery from a partial genesis is only a fresh restart — an in-process retry can't succeed because shard 0 already committed block 0 (`rpc_from_sched.cc` rejects re-loading genesis onto a non-empty db), so the latch is correctly one-way.
-
-1b. **Double-count (CONFIRMED, fix pending) — companion to the barrier.** Genesis creates a real kBalance row for `kDeployContractAddress` (`FreeNativeTokenBalance` → `make_address_balance_item_key` → a `BalanceLock`, [hog_types.h:304](hogd/hogdb/hog_types.h#L304)), so genesis block 0 emits a `HogsTransferred` delta for it; `balance_lock`'s zero hog-age ([balance_lock.cc:135](hogd/hogdb/item_lock/balance_lock.cc#L135)) overwrites the direct `{supply,0,0}` write from [rpc_from_sched.cc:339](hogd/hogdb/rpc_from_sched.cc#L339), so the supply re-enters only via the scheduler adding the delta to `kHogAgeGroupReceived`. Because genesis is **replicated on every shard** and each shard's `BackgroundCommitWorker` dispatches all its deltas with no owner filter ([background_commit_worker.cc:40](hogd/hogdb/background_commit_worker.cc#L40)), the scheduler receives `kDeployContractAddress`'s block-0 delta once per shard → `kHogAgeGroupReceived = N×supply`. Block 0 has exactly this one delta (loadgen accounts are funded later via unfurl `claim_initial_tokens` txs). Fix options: **(A)** owner-shard filter at [block_tx.cc:352](hogd/hogdb/block_tx.cc#L352) — `shard_of_address(addr) == my_shard` — architecturally correct for any replicated write, but requires plumbing shard index+count into hogdb's `RPCContext` (hogdb has no shard identity today); **(B)** mempool-side genesis-scoped dedup (for `transfers.block == 0`, apply each address at most once) — contained, no protocol change, but genesis-specific.
-2. **Hardening (graceful degradation):** make `process_transfers` tolerate a missing hog-age the way `apply_committed_block_hog_ages` ([scheduler.cc:202](hogd/mempool/scheduler.cc#L202)) already does (route to a skipped/`missing` set instead of `CHECK`). Stops a data-availability gap from being fatal, but masks bug (1) — do it in addition to, not instead of.
-3. **Release safety (broad):** `CHECK` failures should abort with a diagnostic even under `NDEBUG`, not invoke `std::unreachable()`. Today every `CHECK` in a Release build is a latent UB SIGSEGV; this one was just the first to fire.
-
-**Repro:** `hog.conf` → `hogdb_servers=("hog11" "hog2")`; cluster idle (`ssh hog4 pgrep -af hogjob-hogci` empty); `./scripts/launch-multi.sh`.
-
-**Artifacts (hog10): LOST** — `mempool_exec.CRASH-dbabs-2shard.core` (this branch) and `mempool_exec.CRASH-2shard-process_transfers.core` (vp/sharding-v2) are no longer present; `/tmp` is tmpfs and did not survive the 2026-08-06 hog10 reboot. Binary `build/hogd/mempool/mempool_exec`; `gdb -q -batch -ex bt <binary> <core>`. Per-host hogdb logs under `/tmp/vinita/hogdb.log` (hog11=shard0, hog2=shard1); on-disk ramdb at `/tmp/vinita/hogdb.data/0.log`.
-
-**Note:** `launch-multi.sh` shares hog1–hog11 with the `hogci` CI bench (mutually destructive `killall` at startup) — verify the cluster is idle first. Script traps SIGTERM and can hang on teardown; may need SIGKILL by PID + `killall -9 -e …` per host.
