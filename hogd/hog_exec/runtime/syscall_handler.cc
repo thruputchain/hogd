@@ -1888,10 +1888,13 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
 
   // A read that would exceed the per-tx concurrent-observation cap surfaces as
   // a deterministic syscall error, so a contract can't drive the bounded
-  // observation vector past kMaxConcurrentRcqReadsPerTx (#2894). This is a
-  // dedicated resource-limit code contracts can handle as a stop condition,
-  // not a malformed-input error.
-  if (observation_cap_exceeded(execution_mode_data)) {
+  // observation vector past kMaxConcurrentRcqReadsPerTx (#2894). The same
+  // per-tx limit bounds past-block reads, which pin full decoded blocks in the
+  // shared snapshot cache and otherwise bypass the observation cap (#3531).
+  // This is a dedicated resource-limit code contracts can handle as a stop
+  // condition, not a malformed-input error.
+  if (observation_cap_exceeded(execution_mode_data) ||
+      past_block_rcq_read_cap_exceeded(execution_mode_data)) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
   }
