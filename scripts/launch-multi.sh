@@ -292,6 +292,38 @@ for s in "${hog_exec_servers[@]}"; do
   remote_launch "$s" "$HOG_EXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 done
 
+# Start hog-db.
+# Before the event server: the mempool will not complete the event
+# registration handshake until every db shard has registered, and the event
+# server gives up and exits if that handshake does not finish.  With one shard
+# the db came up inside the event server's patience either way; with N shards
+# it does not.
+echo "Start hog-db..."
+for i in "${!hog_db_servers[@]}"; do
+  s="${hog_db_servers[$i]}"
+  # Remove any existing database so the experiment starts from a clean slate.
+  if $delete_db; then
+    ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $hog_db_data_dir"
+  fi
+  remote_launch "$s" "$HOG_DB_BINARY" \
+    --db-path "$hog_db_data_dir" --ram-bytes $ram_bytes --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT --shard-id "$i" --total-shards "${#hog_db_servers[@]}" --preload-items $preload_items --preload-bytes-per-item $preload_bytes_per_item
+done
+
+# Start mempool.
+# Before the event server, which is the one component that cannot wait: its
+# event_init calls schedevent_prepare_event on an unguarded
+# SRpcStream::send_call, so if the mempool is not serving that RPC yet the
+# XdrException is unhandled and hog-event aborts (core in $logdir, "EOF waiting
+# for result of SchedEvent1::schedevent_prepare_event").  The mempool serves it
+# while still waiting for the rest of the cards, so starting it first suffices.
+echo "Start mempool..."
+remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
+  --bind-ip "$(hog_ip "$mempool_server")" \
+  --metrics-port $MEMPOOL_HTTP_PORT \
+  --network-hash 0000000000000000000000000000000000000000000000000000000000000000 \
+  --num-db-shards ${#hog_db_servers[@]} --num-exec-shards ${#hog_exec_servers[@]} \
+  --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
+
 # Start event.
 echo "Start event..."
 # The event work dir is never truncated by the event server, so without this it
@@ -315,31 +347,10 @@ fi
 remote_launch "$indexer_server" "$INDEXER_BINARY" \
   --event-addr "$(hog_ip "$event_server")":$EVENT_INDEXER_PORT --db-path "$logdir/indexer" --bind-ip "$(hog_ip "$indexer_server")" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
-# Start hog-db.
-echo "Start hog-db..."
-for i in "${!hog_db_servers[@]}"; do
-  s="${hog_db_servers[$i]}"
-  # Remove any existing database so the experiment starts from a clean slate.
-  if $delete_db; then
-    ssh "${COMMON_SSH_OPTS[@]}" "$s" "rm -rf $hog_db_data_dir"
-  fi
-  remote_launch "$s" "$HOG_DB_BINARY" \
-    --db-path "$hog_db_data_dir" --ram-bytes $ram_bytes --bind-ip "$(hog_ip "$s")" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT --shard-id "$i" --total-shards "${#hog_db_servers[@]}" --preload-items $preload_items --preload-bytes-per-item $preload_bytes_per_item
-done
-
 # Start auth.
 echo "Start auth..."
 remote_launch "$auth_server" "$AUTH_BINARY" \
   --mempool-addr "$(hog_ip "$mempool_server")":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip "$auth_server")" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
-
-# Start mempool.
-echo "Start mempool..."
-remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
-  --bind-ip "$(hog_ip "$mempool_server")" \
-  --metrics-port $MEMPOOL_HTTP_PORT \
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000000 \
-  --num-db-shards ${#hog_db_servers[@]} --num-exec-shards ${#hog_exec_servers[@]} \
-  --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
 
 # Wait for loadgen.
 # We already waited on [$LOADGEN_PORT] above, so we only still need to wait on
