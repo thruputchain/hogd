@@ -49,7 +49,16 @@ CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +nightly fetch \
 # reports produced by WorkerPool::submit. These reports dominate the suite
 # after Rust TSAN instrumentation is correctly wired and obscure actionable
 # races in application code.
-export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=1"
+#
+# print_suppressions=0: the "ThreadSanitizer: Matched N suppressions" summary
+# is written to stderr by every process that matches a suppression, including
+# child processes whose stderr a test parses. hog_devnode_test's
+# JsonLogFormatKeepsReadinessOnStdoutAndLogsJsonToStderr requires each stderr
+# line from the devnode to be a JSON log record, so the summary failed the run
+# whenever the child happened to trip the promise suppression. What is
+# suppressed is documented in .tsan_suppress; we do not need it echoed per
+# process.
+export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=0"
 export HOG_DEVNODE_STARTUP_TIMEOUT_SECS=180
 export HOG_DEVNODE_EXIT_TIMEOUT_SECS=120
 
