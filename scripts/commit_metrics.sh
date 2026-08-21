@@ -53,14 +53,46 @@ prepare_metrics_commit() {
     git commit -m "Add metrics for hogd $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>" --quiet
 }
 
+# A push can lose a race with another job's metrics commit: the branch has moved
+# on, ours is no longer a fast-forward, and rebuilding the commit on the new
+# parent is all it takes. A push rejected for any other reason -- a pre-receive
+# hook, a file over GitHub's size limit, a credential problem -- is refused
+# identically every time, and retrying it forever turns a permanent failure into
+# a job that sits here until its schedule's timeout kills it, with the reason
+# for the first rejection long since scrolled out of the retrievable log.
+#
+# So retry only while the evidence says a race was lost: the branch tip moved
+# between one attempt and the next fetch. A tip that has not moved cannot
+# produce a different answer. The attempt cap is the backstop for a branch busy
+# enough to keep moving under us.
+METRICS_PUSH_MAX_ATTEMPTS=${METRICS_PUSH_MAX_ATTEMPTS:-10}
+
+attempt=0
+previous_parent=""
 while true; do
   if ! prepare_metrics_commit; then
     exit 0
   fi
 
+  attempt=$((attempt + 1))
+  parent=$(git rev-parse FETCH_HEAD)
+
   if git push --quiet origin "HEAD:$METRICS_HISTORY_BRANCH"; then
     break
-  else
-    echo "Push failed, refreshing metrics_history parent and retrying..."
   fi
+
+  if [ "$parent" = "$previous_parent" ]; then
+    echo "Push rejected with $METRICS_HISTORY_BRANCH still at $parent, so no" \
+      "race was lost and a retry cannot help. Giving up after $attempt" \
+      "attempts." >&2
+    exit 1
+  fi
+
+  if [ "$attempt" -ge "$METRICS_PUSH_MAX_ATTEMPTS" ]; then
+    echo "Push still failing after $attempt attempts. Giving up." >&2
+    exit 1
+  fi
+
+  previous_parent=$parent
+  echo "Push failed, refreshing metrics_history parent and retrying..."
 done

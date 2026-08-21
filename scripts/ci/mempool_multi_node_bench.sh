@@ -170,8 +170,8 @@ publish_multi_node_logs() {
   for record in "${CONTROL_LOG_RECORDS[@]}"; do
     IFS='|' read -r host label stdout_path stderr_path <<<"$record"
     echo "copying ${label} logs from ${host}"
-    copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
-    copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    copy_remote_log "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
+    copy_remote_log "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
   done
 }
 

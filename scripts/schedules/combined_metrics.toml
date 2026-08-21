@@ -176,7 +176,10 @@ kill_stale_benchmark_processes
 ci_run_bench_step metrics ./scripts/ci/metrics.sh
 
 echo 'commit metrics'
-(./scripts/commit_metrics.sh) || true
+# A metrics push that cannot land must not fail the run -- the benchmark results
+# are the point of the job -- but it must not pass unremarked either.
+(./scripts/commit_metrics.sh) ||
+  echo 'commit_metrics.sh failed; metrics for this run were not published' >&2
 
 echo 'bench servers will be shut down by EXIT trap'
 

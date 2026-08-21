@@ -227,4 +227,69 @@ expect_contains 'exit wait for an unknown label says so' \
 expect_lacks 'exit wait for an unknown label stops the script' \
   'NOT REACHED' "$out"
 
+# A log copied for publication is capped, and the remote program it runs to do
+# that quotes the path and keeps the tail rather than the head.
+out=$(run_case '
+copy_remote_log hog7 "/tmp/mempool err.log" /dev/stdout
+') && status=0 || status=$?
+expect_status 'capped copy' 0 "$status"
+expect_contains 'capped copy quotes the remote path' \
+  'wc -c </tmp/mempool\ err.log' "$out"
+expect_contains 'capped copy keeps the tail' \
+  'tail -c 8388608 /tmp/mempool\ err.log' "$out"
+
+out=$(PUBLISHED_LOG_MAX_BYTES=64 run_case '
+copy_remote_log hog7 /tmp/mempool.log /dev/stdout
+') && status=0 || status=$?
+expect_status 'capped copy honours the cap override' 0 "$status"
+expect_contains 'capped copy honours the cap override' \
+  'tail -c 64 /tmp/mempool.log' "$out"
+
+# An unreadable log must stay as loud as a failed copy was.
+out=$(REMOTE_RUN_FAILS=1 run_case '
+copy_remote_log hog7 /tmp/mempool.log /dev/null
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unreadable log during a capped copy' 255 "$status"
+expect_lacks 'unreadable log stops the script' 'NOT REACHED' "$out"
+
+# The remote side of the copy, run for real: a log under the cap is copied
+# whole and unannotated, and one over it keeps exactly the last cap bytes and
+# says how much it dropped.
+work=$(mktemp -d)
+printf 'head\nmiddle\ntail\n' >"$work/small.log"
+out=$(bash -c "$(
+  . "$HELPERS"
+  capped_log_program "$(printf '%q' "$work/small.log")" 1024
+)") && status=0 || status=$?
+expect_status 'remote program, log under the cap' 0 "$status"
+expect_contains 'log under the cap is copied whole' 'head' "$out"
+expect_lacks 'log under the cap is not annotated' 'truncated' "$out"
+
+# 300 bytes of 'a' then a 10-byte marker; a 32-byte cap must land inside the
+# marker and drop 278 bytes.
+{ printf 'a%.0s' $(seq 300); printf 'ENDMARKER1'; } >"$work/big.log"
+out=$(bash -c "$(
+  . "$HELPERS"
+  capped_log_program "$(printf '%q' "$work/big.log")" 32
+)") && status=0 || status=$?
+expect_status 'remote program, log over the cap' 0 "$status"
+expect_contains 'log over the cap names what it dropped' \
+  '[truncated: 278 of 310 bytes dropped; the last 32 bytes follow]' "$out"
+expect_contains 'log over the cap keeps the tail' 'ENDMARKER1' "$out"
+bytes=$(printf '%s' "$out" | tail -c 32 | wc -c | tr -d ' ')
+expect_status 'log over the cap keeps exactly the cap' 32 "$bytes"
+
+out=$(bash -c "$(
+  . "$HELPERS"
+  capped_log_program "$(printf '%q' "$work/missing.log")" 32
+)" 2>/dev/null) && status=0 || status=$?
+if [[ $status -eq 0 ]]; then
+  echo 'FAIL remote program, missing log: exited 0, want nonzero'
+  fail=1
+else
+  echo 'ok   remote program, missing log'
+fi
+rm -rf "$work"
+
 exit "$fail"

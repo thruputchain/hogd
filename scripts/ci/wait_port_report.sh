@@ -147,6 +147,45 @@ replay_control_log() {
   remote_run "$host" "tail -n $READINESS_LOG_TAIL_LINES $quoted_paths" || true
 }
 
+# Cap on each log copied off a host for publication. GitHub refuses any file
+# over 100 MB outright, and one multi-node run's chuckd stderr has reached
+# 127 MB, so an uncapped copy does not make the metrics_history push large --
+# it makes it impossible, and the push then fails identically however many
+# times it is retried.
+PUBLISHED_LOG_MAX_BYTES=${PUBLISHED_LOG_MAX_BYTES:-8388608}
+
+# The program [copy_remote_log] runs on one host to emit at most [$2] bytes of
+# the log at [$1] (already quoted for the remote shell). It keeps the tail,
+# where whatever killed the process is, and a log that lost anything says so on
+# its first line, so a reader is never left guessing whether it starts at the
+# beginning.
+capped_log_program() {
+  cat <<EOF
+set -eu
+size=\$(wc -c <$1)
+if [ "\$size" -gt $2 ]; then
+  printf '[truncated: %s of %s bytes dropped; the last %s bytes follow]\n' \
+    "\$((size - $2))" "\$size" $2
+fi
+tail -c $2 $1
+EOF
+}
+
+# Copies one remote log to [$3], never writing more than the cap. Fails the way
+# a plain copy would when the log cannot be read at all, so a missing log stays
+# as loud as it was.
+copy_remote_log() {
+  local host=$1
+  local remote_path=$2
+  local local_path=$3
+  local quoted_path
+
+  printf -v quoted_path '%q' "$remote_path"
+  remote_run "$host" \
+    "$(capped_log_program "$quoted_path" "$PUBLISHED_LOG_MAX_BYTES")" \
+    >"$local_path"
+}
+
 # Replays the logs of a process by the label it was launched under. Used when a
 # process that came up cleanly dies later, where a readiness wait has nothing
 # left to say.
