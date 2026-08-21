@@ -1,0 +1,155 @@
+<title>Where Alice's Data Lives</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* A deck slide, committed to a white ground: single theme, every colour painted
+   explicitly so it holds whatever the viewer's theme is. Same IBM Plex family
+   and blue as the sharding report, so it sits with the rest of the deck. */
+.slide{
+  --paper:#ffffff;--panel:#f6f7f9;--panel-2:#eef0f4;
+  --ink:#101318;--ink-2:#4a5160;--ink-3:#79808f;
+  --rule:#e4e7ec;--rule-2:#cbd0d9;
+  --own:#2a78d6;--own-soft:#e8f1fb;
+  --other:#c9531f;--other-soft:#fbeee7;
+  width:100%;max-width:1600px;margin:0 auto;aspect-ratio:16/9;
+  container-type:inline-size;background:var(--paper);color:var(--ink);
+  font-family:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+/* Padding lives on a descendant: an element cannot query the container it is. */
+.stage{height:100%;padding:2.8cqw 3.2cqw 2.4cqw;display:flex;
+ flex-direction:column}
+*{box-sizing:border-box}
+body{margin:0;background:#ffffff}
+
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.85cqw;
+ letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0}
+h1{font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;font-size:2.7cqw;
+ line-height:1.08;letter-spacing:-.01em;margin:.55cqw 0 .5cqw;color:var(--ink)}
+.rule-line{font-size:1.35cqw;line-height:1.4;color:var(--ink-2);margin:0 0 .4cqw;
+ max-width:58ch}
+.rule-line b{color:var(--own);font-weight:600}
+figure{margin:.6cqw 0 0}
+figure svg{display:block;width:100%;height:auto}
+figcaption{font-size:.95cqw;color:var(--ink-3);margin-top:.4cqw}
+
+.takeaways{margin-top:auto;padding-top:1.2cqw;border-top:1px solid var(--rule);
+ display:grid;grid-template-columns:repeat(3,1fr);gap:1.8cqw}
+.takeaways p{margin:0;font-size:.95cqw;line-height:1.45;color:var(--ink-2)}
+.takeaways b{display:block;color:var(--ink);font-weight:600;margin-bottom:.15cqw}
+
+/* Marks. Blue is a record's own owner and the shard it reaches; rust is the
+   record that names Alice without belonging to her. */
+.card{fill:var(--panel);stroke:var(--rule-2);stroke-width:1}
+.card-own{fill:var(--own-soft);stroke:var(--own);stroke-width:1.5}
+.card-other{fill:var(--other-soft);stroke:var(--other);stroke-width:1.5}
+.slot{fill:var(--paper);stroke:var(--rule);stroke-width:1}
+.shard{fill:var(--panel-2);stroke:var(--rule-2);stroke-width:1}
+.shard-own{fill:var(--own-soft);stroke:var(--own);stroke-width:2}
+.shard-other{fill:var(--other-soft);stroke:var(--other);stroke-width:2}
+.arrow-own{stroke:var(--own);stroke-width:2;fill:none}
+.arrow-other{stroke:var(--other);stroke-width:2;fill:none}
+.router{fill:var(--paper);stroke:var(--ink-2);stroke-width:1.5}
+.h{font-size:15px;font-weight:600;fill:var(--ink)}
+.t{font-size:13px;fill:var(--ink)}
+.t-sm{font-size:11.5px;fill:var(--ink-3)}
+.m{font-family:"IBM Plex Mono",monospace;font-size:12.5px;fill:var(--ink-2)}
+.m-sm{font-family:"IBM Plex Mono",monospace;font-size:11px;fill:var(--ink-2)}
+.own{fill:var(--own)}.other{fill:var(--other)}
+.mid{text-anchor:middle}
+</style>
+
+<div class="slide"><div class="stage">
+  <p class="eyebrow">hogd &middot; database sharding</p>
+  <h1>Where Alice&#8217;s data lives</h1>
+  <p class="rule-line">The shard follows <b>the record&#8217;s owner</b> — never
+  the names inside it.</p>
+
+  <figure>
+    <svg viewBox="0 0 1040 400" role="img" aria-label="Alice's own records -- her balance, auth data, metadata, hog age and replay cache -- are owned by Alice, so hashing her address sends them all to shard 3. The token contract's records, including the slot holding Alice's token balance, are owned by the contract, so hashing the contract's address sends them to shard 2. Alice's name appears inside the token's keys but the router never reads that part.">
+      <defs>
+        <marker id="own" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2a78d6"/>
+        </marker>
+        <marker id="other" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#c9531f"/>
+        </marker>
+      </defs>
+
+      <!-- ── owner 1: the account ───────────────────────────────── -->
+      <rect class="card-own" x="8" y="16" width="288" height="150" rx="6"/>
+      <text class="h" x="26" y="44">Alice&#8217;s own records</text>
+      <text class="t-sm" x="26" y="62">owner: alice</text>
+      <rect class="slot" x="26" y="72" width="252" height="24" rx="3"/>
+      <text class="m-sm" x="38" y="88">B | alice</text>
+      <text class="t-sm" x="150" y="88">hog balance</text>
+      <rect class="slot" x="26" y="100" width="252" height="24" rx="3"/>
+      <text class="m-sm" x="38" y="116">D | alice</text>
+      <text class="t-sm" x="150" y="116">who may sign</text>
+      <rect class="slot" x="26" y="128" width="252" height="24" rx="3"/>
+      <text class="m-sm" x="38" y="144">M A U | alice</text>
+      <text class="t-sm" x="150" y="144">metadata, age, replay</text>
+
+      <!-- ── owner 2: the contract ──────────────────────────────── -->
+      <rect class="card-other" x="8" y="216" width="288" height="150" rx="6"/>
+      <text class="h" x="26" y="244">The token&#8217;s records</text>
+      <text class="t-sm" x="26" y="262">owner: usd-token</text>
+      <rect class="slot" x="26" y="272" width="252" height="24" rx="3"/>
+      <text class="m-sm" x="38" y="288">K | usd-token | h(bal,</text>
+      <text class="m-sm other" x="215" y="288">alice</text>
+      <text class="m-sm" x="253" y="288">)</text>
+      <rect class="slot" x="26" y="300" width="252" height="24" rx="3"/>
+      <text class="m-sm" x="38" y="316">K | usd-token | h(bal,</text>
+      <text class="m-sm" x="215" y="316">bob)</text>
+      <rect class="slot" x="26" y="328" width="252" height="24" rx="3"/>
+      <text class="m-sm" x="38" y="344">… 250,000 more holders</text>
+
+      <!-- ── the router ─────────────────────────────────────────── -->
+      <rect class="router" x="398" y="146" width="212" height="90" rx="6"/>
+      <text class="t mid" x="504" y="176">hash the</text>
+      <text class="t mid" x="504" y="194">owner&#8217;s address</text>
+      <text class="m-sm mid" x="504" y="218">FNV-1a % 4</text>
+      <path class="arrow-own" d="M300,91 C348,91 350,170 392,170"
+            marker-end="url(#own)"/>
+      <path class="arrow-other" d="M300,291 C348,291 350,212 392,212"
+            marker-end="url(#other)"/>
+
+      <!-- ── the shards ─────────────────────────────────────────── -->
+      <text class="t-sm" x="700" y="30">four shards</text>
+      <rect class="shard" x="700" y="42" width="330" height="52" rx="5"/>
+      <text class="m mid" x="865" y="74">shard 0</text>
+      <rect class="shard" x="700" y="102" width="330" height="52" rx="5"/>
+      <text class="m mid" x="865" y="134">shard 1</text>
+
+      <rect class="shard-other" x="700" y="162" width="330" height="52" rx="5"/>
+      <text class="m mid other" x="790" y="194">shard 2</text>
+      <text class="t mid other" x="925" y="188">the token&#8217;s shard</text>
+      <text class="t-sm mid" x="925" y="204">every holder&#8217;s slot</text>
+
+      <rect class="shard-own" x="700" y="222" width="330" height="52" rx="5"/>
+      <text class="m mid own" x="790" y="254">shard 3</text>
+      <text class="t mid own" x="925" y="248">Alice&#8217;s shard</text>
+      <text class="t-sm mid" x="925" y="264">all five of her records</text>
+
+      <path class="arrow-own" d="M610,205 C650,205 655,248 696,248" marker-end="url(#own)"/>
+      <path class="arrow-other" d="M610,186 C650,186 655,188 696,188" marker-end="url(#other)"/>
+
+      <!-- the point of the picture -->
+      <rect class="card" x="700" y="298" width="330" height="68" rx="6"/>
+      <text class="t" x="718" y="322">Alice&#8217;s token balance is on</text>
+      <text class="t" x="718" y="340"><tspan class="other">shard 2</tspan>, not on her own shard 3.</text>
+      <text class="t-sm" x="718" y="358">Her name is in the key, and the router never reads it.</text>
+    </svg>
+    <figcaption>Addresses are 32-byte sha256 digests, so they spread on their
+    own; the hash only folds one into a shard number.</figcaption>
+  </figure>
+
+  <div class="takeaways">
+    <p><b>An account is never split.</b> All five of Alice&#8217;s own records
+    share one shard, so anything about her alone is a single-shard read.</p>
+    <p><b>A hog transfer touches two.</b> Alice&#8217;s shard and Bob&#8217;s —
+    one each, because each balance is owned by its account.</p>
+    <p><b>A token never splits.</b> Every holder&#8217;s slot is owned by the
+    contract, so more shards cannot divide that ledger.</p>
+  </div>
+</div></div>

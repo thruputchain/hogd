@@ -1,0 +1,243 @@
+<title>Sharding throughput comparison</title>
+<style>
+  :root { color-scheme: light;
+    --surface-1:#fcfcfb; --plane:#f9f9f7; --text-primary:#0b0b0b;
+    --text-secondary:#52514e; --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
+    --border:rgba(11,11,11,.10); --s1:#2a78d6; --s2:#eb6834; --s4:#1baf7a;
+    --good:#0ca30c; --warn:#d03b3b; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    color-scheme: dark; --surface-1:#1a1a19; --plane:#0d0d0d; --text-primary:#fff;
+    --text-secondary:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+    --border:rgba(255,255,255,.10); --s1:#3987e5; --s2:#d95926; --s4:#199e70; } }
+  :root[data-theme="dark"] { color-scheme: dark; --surface-1:#1a1a19; --plane:#0d0d0d;
+    --text-primary:#fff; --text-secondary:#c3c2b7; --muted:#898781; --grid:#2c2c2a;
+    --axis:#383835; --border:rgba(255,255,255,.10); --s1:#3987e5; --s2:#d95926;
+    --s4:#199e70; }
+  body { margin:0; padding:32px 20px 64px; background:var(--plane);
+    color:var(--text-primary); font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:900px; margin:0 auto; }
+  h1 { font-size:28px; line-height:1.25; margin:0 0 8px; }
+  h2 { font-size:19px; margin:40px 0 4px; }
+  p.sub { color:var(--text-secondary); margin:0 0 8px; }
+  section { background:var(--surface-1); border:1px solid var(--border);
+    border-radius:12px; padding:20px; margin-top:16px; }
+  .tiles { display:flex; flex-wrap:wrap; gap:12px; margin-top:16px; }
+  .tile { flex:1 1 190px; background:var(--surface-1); border:1px solid var(--border);
+    border-radius:12px; padding:14px 16px; }
+  .tile .label { color:var(--text-secondary); font-size:13px; }
+  .tile .value { font-size:30px; font-weight:600; letter-spacing:-.01em; }
+  .tile .sub { color:var(--muted); font-size:12px; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:3px;
+    margin-right:6px; vertical-align:middle; }
+  .swatch.s1 { background:var(--s1); } .swatch.s2 { background:var(--s2); }
+  .swatch.s4 { background:var(--s4); }
+  .legend { display:flex; gap:18px; color:var(--text-secondary); font-size:13px;
+    margin-bottom:6px; }
+  svg { display:block; overflow:visible; }
+  .grid { stroke:var(--grid); stroke-width:1; } .axis { stroke:var(--axis); stroke-width:1; }
+  .tick { fill:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
+  .axlabel { fill:var(--text-secondary); font-size:12px; }
+  .value { fill:var(--text-primary); font-size:12px; font-weight:600; }
+  polyline { fill:none; stroke-linejoin:round; stroke-linecap:round; }
+  polyline.s1, line.mean.s1 { stroke:var(--s1); }
+  polyline.s2, line.mean.s2 { stroke:var(--s2); }
+  polyline.s4, line.mean.s4 { stroke:var(--s4); }
+  circle.dot { stroke:var(--surface-1); stroke-width:2; }
+  circle.dot.s1 { fill:var(--s1); } circle.dot.s2 { fill:var(--s2); }
+  circle.dot.s4 { fill:var(--s4); }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th,td { text-align:right; padding:7px 10px; border-bottom:1px solid var(--border);
+    font-variant-numeric:tabular-nums; }
+  th:first-child, td:first-child { text-align:left; font-variant-numeric:normal; }
+  th { color:var(--text-secondary); font-weight:600; }
+  .scroll { overflow-x:auto; }
+  .callout { border-left:3px solid var(--warn); padding-left:14px; }
+</style>
+<main>
+<h1>Sharding throughput comparison</h1>
+<p class="sub">hogd on the hog cluster, branch <code>vp/sharding-v2-db-abstraction</code>.
+Workload: chuckd <code>coordinator_loadgen</code>, 1,000,000-transaction batches,
+offered faster than the system commits so the database is the limit rather than the
+harness.</p>
+
+<div class="tiles"><div class="tile"><span class="swatch s1"></span><div class="label">1 DB shard (unsharded)</div><div class="value">211,182</div><div class="sub">tx/s · 2 runs · spread 3,369</div></div><div class="tile"><span class="swatch s2"></span><div class="label">2 DB shards</div><div class="value">214,325</div><div class="sub">tx/s · 2 runs · spread 6,710</div></div><div class="tile"><span class="swatch s4"></span><div class="label">4 DB shards</div><div class="value">196,985</div><div class="sub">tx/s · 3 runs · spread 10,133</div></div><div class="tile"><div class="label">2 shards vs 1</div><div class="value">+1.5%</div><div class="sub">smaller than the 5% spread within one configuration</div></div></div>
+
+<h2>Throughput does not scale with shard count</h2>
+<section>
+<p>Adding database shards does not add throughput, and by four shards it costs a
+little. Across 7 runs that completed on a quiet cluster:</p>
+<table><thead><tr><th>shards</th><th>tx/s</th><th>runs</th>
+<th>vs 1 shard</th><th>share of linear scaling</th></tr></thead>
+<tbody><tr><td>1</td><td>211,182</td><td>2</td><td>+0.0%</td><td>100%</td></tr><tr><td>2</td><td>214,325</td><td>2</td><td>+1.5%</td><td>51%</td></tr><tr><td>4</td><td>196,985</td><td>3</td><td>-6.7%</td><td>23%</td></tr></tbody></table>
+<p class="sub">Linear scaling would mean N shards deliver N× the throughput of one.
+The measured share falls from 51% at two shards to 23% at four — the
+hardware doubles, then doubles again, while throughput stays flat and then dips.
+That is the signature of a system whose limit lies somewhere other than the
+database: dividing the database adds coordination cost without removing the
+constraint.</p>
+</section>
+
+<h2>Throughput per run, measured over an identical block window</h2>
+<section>
+<svg viewBox="0 0 760 340" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="300.0" x2="744" y2="300.0"/><text class="tick" x="54" y="304.0" text-anchor="end">0</text><line class="grid" x1="64" y1="246.7" x2="744" y2="246.7"/><text class="tick" x="54" y="250.7" text-anchor="end">200.0K</text><line class="grid" x1="64" y1="193.5" x2="744" y2="193.5"/><text class="tick" x="54" y="197.5" text-anchor="end">400.0K</text><line class="grid" x1="64" y1="140.2" x2="744" y2="140.2"/><text class="tick" x="54" y="144.2" text-anchor="end">600.0K</text><line class="grid" x1="64" y1="86.9" x2="744" y2="86.9"/><text class="tick" x="54" y="90.9" text-anchor="end">800.0K</text><line class="axis" x1="64" y1="300" x2="744" y2="300"/><text class="axlabel" x="404" y="336" text-anchor="middle"></text><text class="axlabel" transform="translate(14,174) rotate(-90)" text-anchor="middle">tx/s over work blocks 3-20</text><line class="ideal" x1="64" y1="75.0" x2="744" y2="75.0" stroke-width="2"/><text class="ideal-label" x="744" y="67.0" text-anchor="end">844,728 — what 4 shards would give if capacity scaled with shard count</text><line class="mean s1" x1="107.33333333333331" y1="243.8" x2="247.33333333333331" y2="243.8" stroke-width="2"/><circle class="dot s1" cx="165.3" cy="244.2" r="6"><title>1shard-1M-01: 209,497 tx/s</title></circle><circle class="dot s1" cx="189.3" cy="243.3" r="6"><title>1shard-1M-03: 212,867 tx/s</title></circle><text class="tick" x="177" y="320" text-anchor="middle">1 DB shard (unsharded)</text><text class="value" x="177" y="229.8" text-anchor="middle">211,182</text><line class="mean s2" x1="334.0" y1="242.9" x2="474.0" y2="242.9" stroke-width="2"/><circle class="dot s2" cx="392.0" cy="243.8" r="6"><title>2shard-1M-03: 210,970 tx/s</title></circle><circle class="dot s2" cx="416.0" cy="242.0" r="6"><title>2shard-1M-04: 217,680 tx/s</title></circle><text class="tick" x="404" y="320" text-anchor="middle">2 DB shards</text><text class="value" x="404" y="228.9" text-anchor="middle">214,325</text><line class="mean s4" x1="560.6666666666666" y1="247.5" x2="700.6666666666666" y2="247.5" stroke-width="2"/><circle class="dot s4" cx="606.7" cy="248.6" r="6"><title>4shard-1M-03: 193,050 tx/s</title></circle><circle class="dot s4" cx="630.7" cy="248.1" r="6"><title>4shard-1M-01: 194,721 tx/s</title></circle><circle class="dot s4" cx="654.7" cy="245.9" r="6"><title>4shard-1M-02: 203,183 tx/s</title></circle><text class="tick" x="631" y="320" text-anchor="middle">4 DB shards</text><text class="value" x="631" y="233.5" text-anchor="middle">196,985</text></svg>
+<p class="sub">Every run offered the same workload, so block <em>n</em> of one run is
+comparable to block <em>n</em> of another. Hover a point for its run. The upper line
+is where 2 shards would sit if throughput capacity scaled with shard count; the
+measured result is 23% of it — i.e. the second shard adds
+essentially none of the throughput capacity it doubles the hardware for.</p>
+</section>
+
+<h2>Why a whole-run average would mislead</h2>
+<section>
+<div class="legend"><span><span class="swatch s1"></span>1 DB shard (unsharded)</span><span><span class="swatch s2"></span>2 DB shards</span><span><span class="swatch s4"></span>4 DB shards</span></div>
+<svg viewBox="0 0 760 320" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="280.0" x2="744" y2="280.0"/><text class="tick" x="54" y="284.0" text-anchor="end">0</text><line class="grid" x1="64" y1="215.5" x2="744" y2="215.5"/><text class="tick" x="54" y="219.5" text-anchor="end">100.0K</text><line class="grid" x1="64" y1="151.0" x2="744" y2="151.0"/><text class="tick" x="54" y="155.0" text-anchor="end">200.0K</text><line class="grid" x1="64" y1="86.5" x2="744" y2="86.5"/><text class="tick" x="54" y="90.5" text-anchor="end">300.0K</text><text class="tick" x="193.5" y="300" text-anchor="middle">5</text><text class="tick" x="355.4" y="300" text-anchor="middle">10</text><text class="tick" x="517.3" y="300" text-anchor="middle">15</text><text class="tick" x="679.2" y="300" text-anchor="middle">20</text><line class="axis" x1="64" y1="280" x2="744" y2="280"/><text class="axlabel" x="404" y="316" text-anchor="middle">work block within the run</text><text class="axlabel" transform="translate(14,164) rotate(-90)" text-anchor="middle">throughput (tx/s)</text><polyline class="s1" points="64.0,72.4 96.4,129.5 128.8,129.9 161.1,126.5 193.5,127.3 225.9,101.0 258.3,98.2 290.7,74.1 323.0,122.3 355.4,92.2 387.8,72.1 420.2,219.5 452.6,59.0 485.0,214.4 517.3,110.6 549.7,107.5 582.1,95.1 614.5,128.1 646.9,137.8 679.2,208.5 711.6,103.5 744.0,185.0" fill="none" stroke-width="2" opacity="0.5"><title>1shard-1M-01: 209,497 tx/s over blocks 3-20</title></polyline><polyline class="s1" points="64.0,73.3 96.4,128.8 128.8,129.7 161.1,127.3 193.5,127.0 225.9,84.8 258.3,127.3 290.7,99.2 323.0,101.1 355.4,66.4 387.8,129.1 420.2,199.4 452.6,99.9 485.0,110.0 517.3,226.8 549.7,97.1 582.1,118.9 614.5,166.1 646.9,123.5 679.2,151.3 711.6,120.1 744.0,147.0" fill="none" stroke-width="2" opacity="0.5"><title>1shard-1M-03: 212,867 tx/s over blocks 3-20</title></polyline><polyline class="s2" points="64.0,81.7 96.4,128.9 128.8,127.6 161.1,131.8 193.5,129.8 225.9,94.6 258.3,130.9 290.7,90.5 323.0,126.7 355.4,101.5 387.8,131.2 420.2,184.0 452.6,128.0 485.0,101.7 517.3,225.6 549.7,110.8 582.1,108.0 614.5,167.6 646.9,134.4 679.2,148.0 711.6,131.6 744.0,146.2" fill="none" stroke-width="2" opacity="0.5"><title>2shard-1M-03: 210,970 tx/s over blocks 3-20</title></polyline><polyline class="s2" points="64.0,143.3 96.4,132.7 128.8,133.9 161.1,137.2 193.5,126.4 225.9,104.8 258.3,121.8 290.7,121.1 323.0,124.0 355.4,94.1 387.8,112.6 420.2,82.8 452.6,195.6 485.0,103.7 517.3,87.8 549.7,224.7 582.1,107.9 614.5,112.1 646.9,159.8 679.2,106.3 711.6,163.1 744.0,77.8" fill="none" stroke-width="2" opacity="0.5"><title>2shard-1M-04: 217,680 tx/s over blocks 3-20</title></polyline><polyline class="s4" points="64.0,115.5 96.4,155.7 128.8,154.7 161.1,154.2 193.5,148.5 225.9,116.3 258.3,148.7 290.7,115.8 323.0,112.9 355.4,142.4 387.8,114.8 420.2,150.8 452.6,122.4 485.0,192.6 517.3,139.5 549.7,107.8 582.1,228.9 614.5,112.6 646.9,152.3 679.2,166.8 711.6,150.6 744.0,163.6" fill="none" stroke-width="2" opacity="0.5"><title>4shard-1M-01: 194,721 tx/s over blocks 3-20</title></polyline><polyline class="s4" points="64.0,158.9 96.4,152.0 128.8,147.8 161.1,149.7 193.5,102.0 225.9,139.5 258.3,107.5 290.7,139.5 323.0,139.8 355.4,141.8 387.8,113.9 420.2,108.0 452.6,141.1 485.0,126.7 517.3,163.5 549.7,235.0 582.1,127.1 614.5,135.4 646.9,118.3 679.2,115.2 711.6,150.7 744.0,133.6" fill="none" stroke-width="2" opacity="0.5"><title>4shard-1M-02: 203,183 tx/s over blocks 3-20</title></polyline><polyline class="s4" points="64.0,115.7 96.4,153.6 128.8,152.8 161.1,156.4 193.5,155.7 225.9,126.3 258.3,129.7 290.7,142.9 323.0,113.2 355.4,117.6 387.8,114.8 420.2,149.1 452.6,115.5 485.0,198.5 517.3,121.7 549.7,113.4 582.1,232.1 614.5,138.4 646.9,130.5 679.2,167.8 711.6,120.7 744.0,182.0" fill="none" stroke-width="2" opacity="0.5"><title>4shard-1M-03: 193,050 tx/s over blocks 3-20</title></polyline><polyline class="s1" points="64.0,72.8 96.4,129.1 128.8,129.8 161.1,126.9 193.5,127.2 225.9,92.9 258.3,112.7 290.7,86.6 323.0,111.7 355.4,79.3 387.8,100.6 420.2,209.4 452.6,79.5 485.0,162.2 517.3,168.7 549.7,102.3 582.1,107.0 614.5,147.1 646.9,130.7 679.2,179.9 711.6,111.8 744.0,166.0" fill="none" stroke-width="4" opacity="1.0"><title>1 DB shard (unsharded): mean of 2 runs</title></polyline><polyline class="s2" points="64.0,112.5 96.4,130.8 128.8,130.7 161.1,134.5 193.5,128.1 225.9,99.7 258.3,126.4 290.7,105.8 323.0,125.4 355.4,97.8 387.8,121.9 420.2,133.4 452.6,161.8 485.0,102.7 517.3,156.7 549.7,167.8 582.1,107.9 614.5,139.9 646.9,147.1 679.2,127.1 711.6,147.4 744.0,112.0" fill="none" stroke-width="4" opacity="1.0"><title>2 DB shards: mean of 2 runs</title></polyline><polyline class="s4" points="64.0,130.0 96.4,153.8 128.8,151.8 161.1,153.4 193.5,135.4 225.9,127.4 258.3,128.6 290.7,132.7 323.0,122.0 355.4,133.9 387.8,114.5 420.2,136.0 452.6,126.3 485.0,172.6 517.3,141.6 549.7,152.1 582.1,196.0 614.5,128.8 646.9,133.7 679.2,149.9 711.6,140.7 744.0,159.7" fill="none" stroke-width="4" opacity="1.0"><title>4 DB shards: mean of 3 runs</title></polyline></svg>
+<p class="sub">Thin lines are individual runs; thick lines are the mean per
+configuration. Throughput falls 17–37% within every run as the submission backlog
+builds, so a run's average depends on how long it happened to survive. The two
+configurations track each other throughout.</p>
+</section>
+
+<h2>The comparison holds in every window</h2>
+<section class="scroll">
+<table><thead><tr><th>window</th><th>1 shard</th><th>2 shards</th><th>difference</th></tr></thead>
+<tbody><tr><td>blocks 3–8 (early)</td><td>256,323</td><td>244,773</td><td>-4.5%</td></tr><tr><td>blocks 9–14 (mid)</td><td>202,261</td><td>227,401</td><td>+12.4%</td></tr><tr><td>blocks 15–20 (late)</td><td>191,008</td><td>181,614</td><td>-4.9%</td></tr><tr><td>blocks 3–20 (all)</td><td>211,182</td><td>214,325</td><td>+1.5%</td></tr></tbody></table>
+</section>
+
+<h2>Every run</h2>
+<section class="scroll">
+<table><thead><tr><th>run</th><th>shards</th><th>tx/s (blocks 3–20)</th>
+<th>blocks</th><th>peak co-tenant CPU</th><th>cluster</th></tr></thead>
+<tbody><tr><td>1shard-1M-03</td><td>1</td><td>212,867</td><td>24</td><td>5%</td><td>quiet</td></tr><tr><td>1shard-1M-01</td><td>1</td><td>209,497</td><td>24</td><td>5%</td><td>quiet</td></tr><tr><td>2shard-1M-04</td><td>2</td><td>217,680</td><td>23</td><td>43%</td><td>quiet</td></tr><tr><td>2shard-1M-03</td><td>2</td><td>210,970</td><td>24</td><td>59%</td><td>quiet</td></tr><tr><td>4shard-1M-02</td><td>4</td><td>203,183</td><td>22</td><td>0%</td><td>quiet</td></tr><tr><td>4shard-1M-01</td><td>4</td><td>194,721</td><td>24</td><td>0%</td><td>quiet</td></tr><tr><td>4shard-1M-03</td><td>4</td><td>193,050</td><td>23</td><td>0%</td><td>quiet</td></tr></tbody></table>
+<p class="sub">Runs on a contended cluster are shown rather than dropped: throughput
+is uncorrelated with contention here — runs at 4% and 3,784% co-tenant CPU land in
+the same band — because these are 128-core hosts and hogd is not CPU-starved.</p>
+</section>
+
+<h2>Under real memory pressure, sharding is the difference between finishing and failing</h2>
+<section>
+<svg viewBox="0 0 760 330" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="290.0" x2="630" y2="290.0"/><text class="tick" x="54" y="294.0" text-anchor="end">0 GiB</text><line class="grid" x1="64" y1="231.7" x2="630" y2="231.7"/><text class="tick" x="54" y="235.7" text-anchor="end">10 GiB</text><line class="grid" x1="64" y1="173.4" x2="630" y2="173.4"/><text class="tick" x="54" y="177.4" text-anchor="end">20 GiB</text><line class="grid" x1="64" y1="115.2" x2="630" y2="115.2"/><text class="tick" x="54" y="119.2" text-anchor="end">30 GiB</text><line class="grid" x1="64" y1="56.9" x2="630" y2="56.9"/><text class="tick" x="54" y="60.9" text-anchor="end">40 GiB</text><line class="axis" x1="64" y1="290" x2="630" y2="290"/><text class="axlabel" x="347" y="326" text-anchor="middle"></text><text class="axlabel" transform="translate(14,165) rotate(-90)" text-anchor="middle">ramdb capacity across all shards</text><rect x="113.3" y="235.8" width="90" height="54.2" rx="4" fill="#cde2fb"><title>1 shard(s): 9.3 GiB capacity</title></rect><rect x="113.3" y="247.5" width="90" height="40.5" rx="4" fill="#d03b3b"><title>1 shard(s): 7.3 GiB of state held, 33M txs, stalled</title></rect><text class="value" x="158" y="227.8" text-anchor="middle">9.3 GiB</text><text class="tick" x="158" y="239.5" text-anchor="middle">7.3 GiB · stalled</text><text class="tick" x="158" y="310" text-anchor="middle">1 shard</text><rect x="302.0" y="181.6" width="90" height="108.4" rx="4" fill="#cde2fb"><title>2 shard(s): 18.6 GiB capacity</title></rect><rect x="302.0" y="228.8" width="90" height="59.2" rx="4" fill="#2a78d6"><title>2 shard(s): 10.5 GiB of state held, 40M txs, completed</title></rect><text class="value" x="347" y="173.6" text-anchor="middle">18.6 GiB</text><text class="tick" x="347" y="220.8" text-anchor="middle">10.5 GiB · completed</text><text class="tick" x="347" y="310" text-anchor="middle">2 shards</text><rect x="490.7" y="72.6" width="90" height="217.4" rx="4" fill="#cde2fb"><title>4 shard(s): 37.3 GiB capacity</title></rect><rect x="490.7" y="225.3" width="90" height="62.7" rx="4" fill="#2a78d6"><title>4 shard(s): 11.1 GiB of state held, 39M txs, completed</title></rect><text class="value" x="536" y="64.6" text-anchor="middle">37.3 GiB</text><text class="tick" x="536" y="217.3" text-anchor="middle">11.1 GiB · completed</text><text class="tick" x="536" y="310" text-anchor="middle">4 shards</text><text class="tick" x="640" y="135">capacity</text><text class="value" x="640" y="245">state held</text></svg>
+<table><thead><tr><th>shards</th><th>capacity</th><th>state held</th>
+<th>headroom</th><th>txs carried</th><th>outcome</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>9.3 GiB</td><td>7.3 GiB</td><td>2.0 GiB</td><td>33,000,000</td>
+<td>stalled at 78% — mempool aborted</td></tr>
+<tr><td>2</td><td>18.6 GiB</td><td>10.5 GiB</td><td>8.1 GiB</td><td>40,500,000</td>
+<td>completed</td></tr>
+<tr><td>4</td><td>37.3 GiB</td><td>11.1 GiB</td><td>26.1 GiB</td><td>39,000,000</td>
+<td>completed</td></tr>
+</tbody></table>
+<p class="sub">Every other measurement in this report was taken with the working
+set at 8–27% of a single shard's memory, so the capacity sharding adds was never
+used. These runs use <code>--num-virtual-accts</code>, which pays transfers to
+synthetic recipients that nothing is deployed at, so each first payment inserts a
+new item and state grows with the transaction count. Two runs per configuration.</p>
+<p class="sub"><strong>Both unsharded runs failed and every sharded run finished.</strong>
+At one shard the cache reached 78% and the mempool aborted
+(<code>terminate called without an active exception</code>) after 33M transactions.
+Two and four shards carried 39–41M and completed with 8 and 26 GiB spare.</p>
+<p class="sub">Block commit time under this pressure, over the same matched
+window (1,000,000-tx blocks): <strong>1 shard 5.39&nbsp;s median</strong>
+(mean 5.93, p90 7.54), <strong>2 shards 5.75&nbsp;s</strong> (6.17, 7.76),
+<strong>4 shards 6.14&nbsp;s</strong> (6.59, 8.27). The same mild per-block cost
+as everywhere else in this report — sharding buys the ability to finish at all
+here, not faster blocks.</p>
+<p class="sub">Read the workload figures as a floor, not a ceiling: the sharded
+runs stopped because the coordinator finished submitting, not because they ran
+out of memory, so 1.23× is the least they could carry rather than the most.
+Capacity itself scales exactly 2× per shard; how much workload that converts to
+has not yet been measured to the limit.</p>
+</section>
+
+<h2>Memory capacity does scale — exactly 2× per shard</h2>
+<section>
+<svg viewBox="0 0 760 320" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="280.0" x2="640" y2="280.0"/><text class="tick" x="54" y="284.0" text-anchor="end">0 GiB</text><line class="grid" x1="64" y1="224.0" x2="640" y2="224.0"/><text class="tick" x="54" y="228.0" text-anchor="end">10 GiB</text><line class="grid" x1="64" y1="168.0" x2="640" y2="168.0"/><text class="tick" x="54" y="172.0" text-anchor="end">20 GiB</text><line class="grid" x1="64" y1="112.0" x2="640" y2="112.0"/><text class="tick" x="54" y="116.0" text-anchor="end">30 GiB</text><line class="grid" x1="64" y1="55.9" x2="640" y2="55.9"/><text class="tick" x="54" y="59.9" text-anchor="end">40 GiB</text><line class="axis" x1="64" y1="280" x2="640" y2="280"/><text class="axlabel" x="352" y="316" text-anchor="middle"></text><text class="axlabel" transform="translate(14,160) rotate(-90)" text-anchor="middle">ramdb cache across all shards</text><rect x="115.0" y="227.8" width="90" height="52.2" rx="4" fill="#cde2fb"><title>1 shard(s): 9.3 GiB of cache</title></rect><rect x="115.0" y="265.9" width="90" height="12.1" rx="4" fill="#2a78d6"><title>1 shard(s): 2.5 GiB in use (27%)</title></rect><text class="value" x="160" y="219.8" text-anchor="middle">9.3 GiB</text><text class="tick" x="160" y="300" text-anchor="middle">1 shard</text><rect x="307.0" y="175.7" width="90" height="104.3" rx="4" fill="#cde2fb"><title>2 shard(s): 18.6 GiB of cache</title></rect><rect x="307.0" y="265.9" width="90" height="12.1" rx="4" fill="#2a78d6"><title>2 shard(s): 2.5 GiB in use (14%)</title></rect><text class="value" x="352" y="167.7" text-anchor="middle">18.6 GiB</text><text class="tick" x="352" y="300" text-anchor="middle">2 shards</text><rect x="499.0" y="71.3" width="90" height="208.7" rx="4" fill="#cde2fb"><title>4 shard(s): 37.3 GiB of cache</title></rect><rect x="499.0" y="263.3" width="90" height="14.7" rx="4" fill="#2a78d6"><title>4 shard(s): 3.0 GiB in use (8%)</title></rect><text class="value" x="544" y="63.3" text-anchor="middle">37.3 GiB</text><text class="tick" x="544" y="300" text-anchor="middle">4 shards</text><text class="tick" x="650" y="148">capacity</text><text class="value" x="650" y="266">in use</text></svg>
+<p class="sub">Each shard runs with <code>--ram-bytes 10000000000</code>, which
+hogdb reports as a 9.31&nbsp;GiB cache, so total in-memory capacity is 9.3, 18.6
+and 37.3&nbsp;GiB at one, two and four shards. This is the one dimension where
+sharding delivers its full promise, and it is measured rather than assumed: the
+same working set occupies 27% of the cache on one shard, 13–14% on two and 8% on
+four — halving each time the shard count doubles.</p>
+<p class="sub">The 10&nbsp;GB figure is a hardcoded flag, not a limit. These hosts
+have 377&nbsp;GB of memory with 336&nbsp;GB free, so each shard is using 2.7% of
+its machine and the setting could be raised by an order of magnitude. Note the
+corollary: at 27% utilisation on a single shard, <strong>this workload never
+comes close to exhausting memory</strong>, which is why the extra capacity buys
+no throughput here. Demonstrating a memory benefit needs a working set larger
+than one shard can hold.</p>
+</section>
+
+<h2>Sharding adds work the executors must absorb</h2>
+<section>
+<svg viewBox="0 0 760 320" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="280.0" x2="650" y2="280.0"/><text class="tick" x="54" y="284.0" text-anchor="end">0</text><line class="grid" x1="64" y1="232.9" x2="650" y2="232.9"/><text class="tick" x="54" y="236.9" text-anchor="end">50.0K</text><line class="grid" x1="64" y1="185.9" x2="650" y2="185.9"/><text class="tick" x="54" y="189.9" text-anchor="end">100.0K</text><line class="grid" x1="64" y1="138.8" x2="650" y2="138.8"/><text class="tick" x="54" y="142.8" text-anchor="end">150.0K</text><line class="grid" x1="64" y1="91.7" x2="650" y2="91.7"/><text class="tick" x="54" y="95.7" text-anchor="end">200.0K</text><text class="tick" x="64.0" y="300" text-anchor="middle">1</text><text class="tick" x="259.3" y="300" text-anchor="middle">2</text><text class="tick" x="650.0" y="300" text-anchor="middle">4</text><line class="axis" x1="64" y1="280" x2="650" y2="280"/><text class="axlabel" x="357" y="316" text-anchor="middle">database shards</text><text class="axlabel" transform="translate(14,164) rotate(-90)" text-anchor="middle">tx/s over work blocks 3-20</text><polyline points="64.0,84.3 259.3,101.7 650.0,132.8" fill="none" stroke="#9ec5f4" stroke-width="3" stroke-linejoin="round"/><circle cx="64.0" cy="84.3" r="6" fill="#9ec5f4" stroke="#fcfcfb" stroke-width="2"><title>1 executor(s), 1 shard(s): 207,948 tx/s from 1 run(s)</title></circle><circle cx="259.3" cy="101.7" r="6" fill="#9ec5f4" stroke="#fcfcfb" stroke-width="2"><title>1 executor(s), 2 shard(s): 189,390 tx/s from 2 run(s)</title></circle><circle cx="650.0" cy="132.8" r="6" fill="#9ec5f4" stroke="#fcfcfb" stroke-width="2"><title>1 executor(s), 4 shard(s): 156,428 tx/s from 2 run(s)</title></circle><text class="value" x="662" y="136.8">1 executor</text><polyline points="64.0,81.2 259.3,78.3 650.0,94.6" fill="none" stroke="#2a78d6" stroke-width="3" stroke-linejoin="round"/><circle cx="64.0" cy="81.2" r="6" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>2 executor(s), 1 shard(s): 211,182 tx/s from 2 run(s)</title></circle><circle cx="259.3" cy="78.3" r="6" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>2 executor(s), 2 shard(s): 214,325 tx/s from 2 run(s)</title></circle><circle cx="650.0" cy="94.6" r="6" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>2 executor(s), 4 shard(s): 196,985 tx/s from 3 run(s)</title></circle><text class="value" x="662" y="98.6">2 executors</text></svg>
+<table><thead><tr><th>executors</th><th>1 shard</th><th>2 shards</th>
+<th>4 shards</th></tr></thead><tbody><tr><td>1</td><td>207,948</td><td>189,390</td><td>156,428</td></tr><tr><td>2</td><td>211,182</td><td>214,325</td><td>196,985</td></tr></tbody></table>
+<p class="sub">With one database there is almost nothing for a second executor to
+do: 207,948 tx/s against 211,182, a 1.5% gap. By four shards the gap is 21%.
+Neither arm ever <em>gains</em> from sharding, but an under-provisioned executor
+tier makes the penalty about three times worse — throughput falls 25% from one
+to four shards on a single executor, against 7% on two. So sharding creates work
+the executor tier has to absorb, and part of the cost measured elsewhere in this
+report is provisioning rather than anything inherent to sharding.</p>
+</section>
+
+<h2>Blocks get slower as shards are added</h2>
+<section>
+<div class="legend"><span><span class="swatch s1"></span>1 DB shard (unsharded)</span><span><span class="swatch s2"></span>2 DB shards</span><span><span class="swatch s4"></span>4 DB shards</span></div>
+<svg viewBox="0 0 760 300" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="260.0" x2="744" y2="260.0"/><text class="tick" x="54" y="264.0" text-anchor="end">0s</text><line class="grid" x1="64" y1="209.0" x2="744" y2="209.0"/><text class="tick" x="54" y="213.0" text-anchor="end">2s</text><line class="grid" x1="64" y1="157.9" x2="744" y2="157.9"/><text class="tick" x="54" y="161.9" text-anchor="end">5s</text><line class="grid" x1="64" y1="106.9" x2="744" y2="106.9"/><text class="tick" x="54" y="110.9" text-anchor="end">8s</text><line class="grid" x1="64" y1="55.8" x2="744" y2="55.8"/><text class="tick" x="54" y="59.8" text-anchor="end">10s</text><line class="axis" x1="64" y1="260" x2="744" y2="260"/><text class="axlabel" x="404" y="296" text-anchor="middle"></text><text class="axlabel" transform="translate(14,154) rotate(-90)" text-anchor="middle">seconds to commit a 1M-tx block</text><line class="mean s1" x1="177.3" y1="176.2" x2="177.3" y2="75.7" stroke-width="2"/><circle class="dot s1" cx="177.3" cy="176.2" r="7"><title>1 DB shard (unsharded): median 4.11s over 36 blocks</title></circle><circle class="dot s1" cx="177.3" cy="75.7" r="5"><title>1 DB shard (unsharded): p90 9.03s</title></circle><text class="value" x="191" y="180.2">4.11s median</text><text class="tick" x="191" y="79.7">9.03s p90</text><text class="tick" x="177" y="280" text-anchor="middle">1 DB shard (unsharded)</text><line class="mean s2" x1="404.0" y1="174.9" x2="404.0" y2="122.8" stroke-width="2"/><circle class="dot s2" cx="404.0" cy="174.9" r="7"><title>2 DB shards: median 4.17s over 36 blocks</title></circle><circle class="dot s2" cx="404.0" cy="122.8" r="5"><title>2 DB shards: p90 6.72s</title></circle><text class="value" x="418" y="178.9">4.17s median</text><text class="tick" x="418" y="126.8">6.72s p90</text><text class="tick" x="404" y="280" text-anchor="middle">2 DB shards</text><line class="mean s4" x1="630.7" y1="166.3" x2="630.7" y2="142.6" stroke-width="2"/><circle class="dot s4" cx="630.7" cy="166.3" r="7"><title>4 DB shards: median 4.59s over 54 blocks</title></circle><circle class="dot s4" cx="630.7" cy="142.6" r="5"><title>4 DB shards: p90 5.75s</title></circle><text class="value" x="645" y="170.3">4.59s median</text><text class="tick" x="645" y="146.6">5.75s p90</text><text class="tick" x="631" y="280" text-anchor="middle">4 DB shards</text></svg>
+<table><thead><tr><th>shards</th><th>median</th><th>mean</th><th>p90</th>
+<th>worst</th><th>median vs 1 shard</th></tr></thead>
+<tbody><tr><td>1</td><td>4.11s</td><td>4.74s</td><td>9.03s</td><td>12.13s</td><td>+0.0%</td></tr><tr><td>2</td><td>4.17s</td><td>4.67s</td><td>6.72s</td><td>11.86s</td><td>+1.6%</td></tr><tr><td>4</td><td>4.59s</td><td>5.08s</td><td>5.75s</td><td>14.34s</td><td>+11.8%</td></tr></tbody></table>
+<p class="sub">Time to commit a 1,000,000-transaction block, over the same block
+window as the throughput figures. The typical block gets steadily slower — the
+other side of the missing throughput — while the tail gets <em>faster</em>: p90
+falls from 9.0&nbsp;s to 5.8&nbsp;s. Spreading work over more databases smooths out
+whichever single shard would otherwise straggle, so the body of the distribution
+tightens even as its centre moves the wrong way.</p>
+</section>
+
+<h2>Smaller batches: 100,000-transaction submissions</h2>
+<section>
+<div class="legend"><span><span class="swatch s1"></span>1 DB shard (unsharded)</span><span><span class="swatch s2"></span>2 DB shards</span><span><span class="swatch s4"></span>4 DB shards</span></div>
+<svg viewBox="0 0 760 280" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="240.0" x2="744" y2="240.0"/><text class="tick" x="54" y="244.0" text-anchor="end">0</text><line class="grid" x1="64" y1="181.6" x2="744" y2="181.6"/><text class="tick" x="54" y="185.6" text-anchor="end">20.0K</text><line class="grid" x1="64" y1="123.2" x2="744" y2="123.2"/><text class="tick" x="54" y="127.2" text-anchor="end">40.0K</text><line class="grid" x1="64" y1="64.9" x2="744" y2="64.9"/><text class="tick" x="54" y="68.9" text-anchor="end">60.0K</text><line class="axis" x1="64" y1="240" x2="744" y2="240"/><text class="axlabel" x="404" y="276" text-anchor="middle"></text><text class="axlabel" transform="translate(14,144) rotate(-90)" text-anchor="middle">tx/s across blocks 1-110</text><line class="mean s1" x1="164.0" y1="89.0" x2="304.0" y2="89.0" stroke-width="2"/><circle class="dot s1" cx="234.0" cy="89.0" r="6"><title>1shard-100k-01: 51,725 tx/s</title></circle><text class="tick" x="234" y="260" text-anchor="middle">1 DB shard (unsharded)</text><text class="value" x="234" y="75.0" text-anchor="middle">51,725</text><line class="mean s2" x1="504.0" y1="82.5" x2="644.0" y2="82.5" stroke-width="2"/><circle class="dot s2" cx="561.0" cy="85.0" r="6"><title>2shard-100k-01: 53,089 tx/s</title></circle><circle class="dot s2" cx="587.0" cy="80.0" r="6"><title>2shard-100k-02: 54,812 tx/s</title></circle><text class="tick" x="574" y="260" text-anchor="middle">2 DB shards</text><text class="value" x="574" y="68.5" text-anchor="middle">53,951</text></svg>
+<p class="sub">Throughput here is <strong>capped by the harness, not by hogd</strong>:
+chuckd waits at least a second between submissions, so the ceiling is ~100,000 tx/s
+and the database idles between batches (median submit call: 92&nbsp;microseconds).
+Both configurations sit against that ceiling. Measured over blocks 1–110 of each run,
+so run length cannot influence it.</p>
+<p class="sub">These rates are far below the block times below would imply, because
+block duration is heavily skewed: the mean is 3.4× the median (median 1.2&nbsp;s,
+p90 ~9&nbsp;s, worst 23&nbsp;s). Total throughput follows the mean and so is
+dominated by the slow tail; the median describes a typical block. The two measures
+disagree in direction, and both are reported rather than picking the flattering
+one: <strong>1 shard has the faster typical block (−9.6% median), 2 shards the
+slightly better tail</strong>, and overall throughput is a wash.</p>
+</section>
+
+<h2>Block commit time — the same answer, with 10× the samples</h2>
+<section>
+<div class="legend"><span><span class="swatch s1"></span>1 DB shard (unsharded)</span><span><span class="swatch s2"></span>2 DB shards</span><span><span class="swatch s4"></span>4 DB shards</span></div>
+<svg viewBox="0 0 760 300" width="100%" preserveAspectRatio="xMidYMid meet" role="img"><line class="grid" x1="64" y1="260.0" x2="744" y2="260.0"/><text class="tick" x="54" y="264.0" text-anchor="end">0.0s</text><line class="grid" x1="64" y1="200.1" x2="744" y2="200.1"/><text class="tick" x="54" y="204.1" text-anchor="end">2.0s</text><line class="grid" x1="64" y1="140.3" x2="744" y2="140.3"/><text class="tick" x="54" y="144.3" text-anchor="end">4.0s</text><line class="grid" x1="64" y1="80.4" x2="744" y2="80.4"/><text class="tick" x="54" y="84.4" text-anchor="end">6.0s</text><text class="tick" x="213.7" y="280" text-anchor="middle">25</text><text class="tick" x="369.7" y="280" text-anchor="middle">50</text><text class="tick" x="525.7" y="280" text-anchor="middle">75</text><text class="tick" x="681.6" y="280" text-anchor="middle">100</text><line class="axis" x1="64" y1="260" x2="744" y2="260"/><text class="axlabel" x="404" y="296" text-anchor="middle">block index within the run</text><text class="axlabel" transform="translate(14,154) rotate(-90)" text-anchor="middle">seconds per 200,000-tx block</text><polyline class="s1" points="64.0,222.9 70.2,226.2 76.5,225.6 82.7,224.2 89.0,225.6 95.2,226.6 101.4,225.6 107.7,225.7 113.9,225.9 120.1,225.9 126.4,225.6 132.6,225.9 138.9,227.4 145.1,225.9 151.3,174.4 157.6,225.9 163.8,226.2 170.1,174.4 176.3,212.7 182.5,212.7 188.8,201.9 195.0,201.9 201.2,201.9 207.5,212.7 213.7,201.9 220.0,201.9 226.2,201.9 232.4,182.8 238.7,201.9 244.9,182.8 251.2,182.8 257.4,182.8 263.6,171.7 269.9,182.8 276.1,171.7 282.3,171.7 288.6,171.7 294.8,147.8 301.1,147.8 307.3,134.9 313.5,147.8 319.8,147.8 326.0,134.9 332.3,147.8 338.5,134.9 344.7,134.9 351.0,226.5 357.2,226.5 363.4,226.8 369.7,226.8 375.9,226.8 382.2,229.2 388.4,229.2 394.6,229.2 400.9,229.2 407.1,229.5 413.4,229.2 419.6,226.2 425.8,226.2 432.1,225.6 438.3,212.7 444.6,212.7 450.8,212.7 457.0,226.2 463.3,193.3 469.5,193.3 475.7,193.3 482.0,193.3 488.2,182.5 494.5,182.5 500.7,182.5 506.9,155.0 513.2,155.0 519.4,155.0 525.7,146.0 531.9,155.0 538.1,146.0 544.4,146.0 550.6,146.0 556.8,113.7 563.1,113.7 569.3,105.0 575.6,113.7 581.8,113.7 588.0,105.0 594.3,113.7 600.5,105.0 606.8,105.0 613.0,105.0 619.2,82.2 625.5,82.2 631.7,67.3 637.9,82.2 644.2,82.2 650.4,82.2 656.7,227.1 662.9,82.2 669.1,67.3 675.4,226.5 681.6,226.5 687.9,226.5 694.1,226.5 700.3,227.1 706.6,227.4 712.8,227.4 719.0,227.4 725.3,227.4 731.5,227.4 737.8,227.1 744.0,228.6" fill="none" stroke-width="3" opacity="0.95"><title>1 DB shard (unsharded): median of 1 runs</title></polyline><polyline class="s2" points="64.0,225.7 70.2,221.3 76.5,221.4 82.7,219.2 89.0,221.4 95.2,223.3 101.4,221.4 107.7,219.2 113.9,216.9 120.1,211.8 126.4,202.1 132.6,202.1 138.9,199.1 145.1,198.9 151.3,178.3 157.6,178.3 163.8,178.3 170.1,174.3 176.3,174.3 182.5,174.3 188.8,174.3 195.0,178.3 201.2,174.3 207.5,174.3 213.7,165.6 220.0,154.5 226.2,154.5 232.4,147.3 238.7,147.3 244.9,147.3 251.2,147.3 257.4,147.3 263.6,137.2 269.9,147.3 276.1,114.3 282.3,114.3 288.6,116.4 294.8,116.4 301.1,114.3 307.3,114.3 313.5,116.4 319.8,116.4 326.0,105.9 332.3,116.4 338.5,87.2 344.7,84.2 351.0,87.2 357.2,142.2 363.4,84.2 369.7,84.2 375.9,142.2 382.2,149.3 388.4,149.3 394.6,156.8 400.9,185.0 407.1,185.0 413.4,215.3 419.6,215.3 425.8,215.3 432.1,215.3 438.3,215.3 444.6,215.3 450.8,198.4 457.0,215.3 463.3,198.4 469.5,198.4 475.7,194.8 482.0,189.7 488.2,189.7 494.5,169.3 500.7,169.3 506.9,166.9 513.2,156.6 519.4,166.9 525.7,156.3 531.9,156.3 538.1,156.3 544.4,151.2 550.6,151.2 556.8,151.2 563.1,151.2 569.3,151.2 575.6,144.2 581.8,136.7 588.0,128.9 594.3,136.7 600.5,136.7 606.8,128.9 613.0,128.9 619.2,128.9 625.5,128.9 631.7,122.3 637.9,111.6 644.2,108.1 650.4,103.5 656.7,108.1 662.9,108.1 669.1,103.5 675.4,103.5 681.6,103.5 687.9,103.5 694.1,103.5 700.3,151.1 706.6,151.1 712.8,117.7 719.0,151.1 725.3,225.0 731.5,225.0 737.8,225.0 744.0,225.1" fill="none" stroke-width="3" opacity="0.95"><title>2 DB shards: median of 2 runs</title></polyline></svg>
+<p class="sub">From the 100,000-tx-batch runs, whose throughput is capped by the
+harness but whose block durations are not: each point is the median time to commit
+a 200,000-transaction block, across 3 runs and 836 blocks.
+Both configurations slow at the same rate as a run proceeds, with 2 shards
+consistently a little above 1 shard.</p>
+<table><thead><tr><th>window</th><th>1 shard</th><th>2 shards</th><th>difference</th></tr></thead>
+<tbody><tr><td>blocks 1–50</td><td>1.195s</td><td>1.470s</td><td>+23.0%</td></tr><tr><td>blocks 51–100</td><td>1.905s</td><td>2.173s</td><td>+14.0%</td></tr><tr><td>blocks 1–110</td><td>1.150s</td><td>1.317s</td><td>+14.6%</td></tr></tbody></table>
+<p class="sub">Measured over matched windows deliberately. Comparing whole-run
+medians instead would show 2 shards 19% <em>faster</em> — an artifact of the
+1-shard runs happening to last longer and so sampling more of the degraded tail.</p>
+</section>
+
+<h2>What these numbers are not</h2>
+<section class="callout">
+<p>They are <strong>not sustained throughput</strong>. The offered rate exceeds
+capacity, the backlog grows, and the coordinator stops after its last batch — so no
+run reaches equilibrium. Second-half rates of 168–186k tx/s are closer to the
+sustainable figure and still falling. Establishing the steady state needs a longer
+run at an offered rate just above capacity.</p>
+<p>They are valid for <em>comparing</em> shard counts, which is what they are used
+for here: both configurations were measured over identical windows of an identical
+workload.</p>
+</section>
+</main>

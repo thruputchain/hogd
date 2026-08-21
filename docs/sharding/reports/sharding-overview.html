@@ -1,0 +1,616 @@
+<title>hogd Database Sharding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F1F3F1;
+    --surface:     #FBFCFA;
+    --surface-alt: #E7EAE7;
+    --ink:         #161E1D;
+    --ink-soft:    #48534F;
+    --ink-faint:   #7C8783;
+    --rule:        #D2D8D4;
+    --rule-strong: #B6BFBA;
+    --accent:      #0D6A60;
+    --accent-soft: #DCEAE6;
+    --amber:       #93610F;
+    --amber-soft:  #F1E7D3;
+    --crit:        #94322A;
+    --crit-soft:   #F2DFDC;
+
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans:  "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+    --mono:  "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #101514;
+      --surface:     #171E1D;
+      --surface-alt: #1F2726;
+      --ink:         #E4EAE7;
+      --ink-soft:    #A5B0AC;
+      --ink-faint:   #77837F;
+      --rule:        #2B3533;
+      --rule-strong: #3C4846;
+      --accent:      #57C4B2;
+      --accent-soft: #16302D;
+      --amber:       #D8A452;
+      --amber-soft:  #2E2617;
+      --crit:        #E08A80;
+      --crit-soft:   #33201E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #101514;
+    --surface:     #171E1D;
+    --surface-alt: #1F2726;
+    --ink:         #E4EAE7;
+    --ink-soft:    #A5B0AC;
+    --ink-faint:   #77837F;
+    --rule:        #2B3533;
+    --rule-strong: #3C4846;
+    --accent:      #57C4B2;
+    --accent-soft: #16302D;
+    --amber:       #D8A452;
+    --amber-soft:  #2E2617;
+    --crit:        #E08A80;
+    --crit-soft:   #33201E;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 60rem; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+
+  header.masthead {
+    padding: 4.5rem 0 2rem;
+    border-bottom: 2px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  h1 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(2.6rem, 7vw, 4.4rem);
+    line-height: 0.98;
+    letter-spacing: -0.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: clamp(1.1rem, 2.4vw, 1.32rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 44ch;
+    margin: 0;
+  }
+  .factbar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 1.25rem 1.75rem;
+    border-top: 1px solid var(--rule);
+    padding-top: 1.4rem;
+  }
+  .fact dt {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 0.3rem;
+  }
+  .fact dd {
+    font-family: var(--sans);
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.005em;
+  }
+  .fact dd .sub { display: block; font-family: var(--mono); font-size: 0.75rem; font-weight: 400; color: var(--ink-faint); letter-spacing: 0; }
+
+  /* ---------- sections ---------- */
+
+  section { padding-top: 3.5rem; }
+
+  h2 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(1.5rem, 3.4vw, 2rem);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.35rem;
+    text-wrap: balance;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 0.9rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 1.12rem;
+    letter-spacing: 0.005em;
+    margin: 2rem 0 0.4rem;
+  }
+  p { margin: 0 0 1rem; max-width: 68ch; }
+  p.lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 62ch; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  strong { font-weight: 600; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--surface-alt);
+    padding: 0.08em 0.32em;
+    border-radius: 3px;
+  }
+
+  ul.plain { margin: 0 0 1rem; padding-left: 1.1rem; max-width: 68ch; }
+  ul.plain li { margin-bottom: 0.45rem; }
+  ul.plain li::marker { color: var(--accent); }
+
+  /* ---------- diagram ---------- */
+
+  figure { margin: 1.75rem 0; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--ink-faint);
+    margin-top: 0.7rem;
+    line-height: 1.5;
+  }
+  .diagram-frame {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1.5rem 1.25rem;
+    overflow-x: auto;
+  }
+  .diagram-frame > svg { min-width: 30rem; }
+
+  /* ---------- decision cards ---------- */
+
+  .decisions { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; margin-top: 1.5rem; }
+  @media (min-width: 46rem) { .decisions { grid-template-columns: 1fr 1fr; } }
+  .decision { background: var(--surface); padding: 1.4rem 1.4rem 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .decision .tag {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .decision h3 { margin: 0; font-size: 1.06rem; }
+  .decision p { margin: 0; font-size: 0.95rem; color: var(--ink-soft); max-width: none; }
+
+  /* ---------- timeline ---------- */
+
+  ol.timeline { list-style: none; margin: 1.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+  ol.timeline li {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.3rem 1.5rem;
+    padding: 1.25rem 0;
+    border-top: 1px solid var(--rule);
+  }
+  ol.timeline li:last-child { border-bottom: 1px solid var(--rule); }
+  @media (min-width: 46rem) {
+    ol.timeline li { grid-template-columns: 8.5rem 1fr; }
+  }
+  .phase-when {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+    padding-top: 0.22rem;
+  }
+  .phase-when .n { display: block; font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.15rem; }
+  .phase-body h3 { margin: 0 0 0.3rem; }
+  .phase-body p { margin: 0; font-size: 0.97rem; color: var(--ink-soft); }
+
+  /* ---------- tables ---------- */
+
+  .table-scroll { overflow-x: auto; margin: 1.4rem 0 0.6rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 34rem; font-family: var(--sans); font-size: 0.95rem; }
+  caption {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 0.9rem 1rem 0.7rem;
+  }
+  th, td { text-align: left; padding: 0.62rem 1rem; border-top: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    border-top: 1px solid var(--rule-strong);
+    white-space: nowrap;
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 0.88rem; white-space: nowrap; }
+  tbody tr:hover { background: var(--surface-alt); }
+  .win { color: var(--accent); font-weight: 600; }
+  .loss { color: var(--crit); font-weight: 600; }
+
+  /* ---------- status chips ---------- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 0.16rem 0.45rem;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip.fixed { background: var(--accent-soft); color: var(--accent); }
+  .chip.open  { background: var(--amber-soft); color: var(--amber); }
+  .chip.crit  { background: var(--crit-soft); color: var(--crit); }
+
+  .origin { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+
+  /* ---------- pull quote ---------- */
+
+  .pull {
+    margin: 2rem 0;
+    padding: 1.4rem 0 1.4rem 1.5rem;
+    border-left: 3px solid var(--accent);
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: clamp(1.2rem, 2.8vw, 1.55rem);
+    line-height: 1.28;
+    letter-spacing: -0.005em;
+    max-width: 34ch;
+    text-wrap: balance;
+  }
+  .pull span { display: block; font-family: var(--serif); font-weight: 400; font-size: 0.96rem; line-height: 1.55; color: var(--ink-soft); margin-top: 0.7rem; max-width: 48ch; }
+
+  /* ---------- callout ---------- */
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--amber);
+    border-radius: 3px;
+    padding: 1.1rem 1.3rem;
+    margin: 1.5rem 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .label {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+
+  /* ---------- takeaways ---------- */
+
+  .takeaways { list-style: none; margin: 1.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .takeaways li { background: var(--surface); padding: 1.15rem 1.35rem; display: grid; grid-template-columns: 1.6rem 1fr; gap: 0.9rem; align-items: start; }
+  .takeaways .mark { font-family: var(--mono); font-size: 0.8rem; color: var(--accent); padding-top: 0.16rem; font-variant-numeric: tabular-nums; }
+  .takeaways p { margin: 0; font-size: 0.99rem; max-width: none; }
+
+  footer.colophon {
+    margin-top: 4rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    line-height: 1.7;
+    color: var(--ink-faint);
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Engineering overview &middot; Jun 29 – Aug 18, 2026</p>
+  <h1>Sharding the hogd database</h1>
+  <p class="standfirst">One logical database, N hogdb processes — routed by address, invisible to consensus, and validated end&#8209;to&#8209;end on the cluster.</p>
+  <dl class="factbar">
+    <div class="fact"><dt>Branch</dt><dd>vp/sharding-v2<span class="sub">PR #3108 · draft</span></dd></div>
+    <div class="fact"><dt>Commits</dt><dd>44<span class="sub">47 files · ~2,650 ins.</span></dd></div>
+    <div class="fact"><dt>New tests</dt><dd>31<span class="sub">across 5 new suites</span></dd></div>
+    <div class="fact"><dt>Cluster runs</dt><dd>175<span class="sub">9 hosts · 1/2/4 shards</span></dd></div>
+    <div class="fact"><dt>Issues filed</dt><dd>10<span class="sub">6 outside sharding</span></dd></div>
+  </dl>
+</header>
+
+<section>
+  <p class="kicker">The problem</p>
+  <h2>hogdb was one process holding all of state</h2>
+  <p class="lede">Balances, auth data, contract data, retrocausal queues, wasm code, hog ages — all of it in a single hogdb. That process is the memory and write-bandwidth ceiling for the whole validator.</p>
+  <p>The complication is that three independent subsystems talk to hogdb directly, each with its own concurrency model: the <strong>mempool scheduler</strong> (async, coroutine RPC), <strong>hogexec's DatabaseProxy</strong> (synchronous, per-transaction), and the <strong>auth server</strong> (async, subscription-driven). Before this work they shared no code for talking to the database. "Just add a shard" therefore means changing three client paths at once — and if any two of them disagree about which shard owns an address, the write lands on one shard and the read asks another. There is no error. You get <code>Not Found</code>, which most call sites read as "no such account."</p>
+  <div class="pull">A read must repeat the routing its write used.
+  <span>Every other decision in this design is a consequence of that one sentence. The three ways to break it — different code, different hash version, right code pointed at the wrong socket — each got its own mechanism, and each shipped after a real bug.</span></div>
+</section>
+
+<section>
+  <p class="kicker">What shipped</p>
+  <h2>One routing rule, three client paths</h2>
+  <p>The core of the change is a new module, <code>hogd/db_shard_routing/</code>: two headers that own key placement, batch splitting, and concurrent fan-out. Every subsystem now goes through it rather than holding its own database client.</p>
+
+  <div class="diagram-frame">
+  <figure>
+    <svg viewBox="0 0 700 300" role="img" aria-label="Three client paths — mempool ShardedDbSched, auth DBAuthClient, and hogexec DatabaseProxy — all route through the shared db_shard_routing core, which fans out to N hogdb shards.">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Mono, monospace" font-size="11.5" color="currentColor">
+
+        <!-- clients -->
+        <g>
+          <rect x="8" y="24" width="188" height="46" rx="3" fill="var(--surface-alt)" stroke="var(--rule-strong)"/>
+          <text x="22" y="44" fill="var(--ink)" font-weight="500">mempool scheduler</text>
+          <text x="22" y="60" fill="var(--ink-faint)" font-size="10">ShardedDbSched · async</text>
+
+          <rect x="8" y="94" width="188" height="46" rx="3" fill="var(--surface-alt)" stroke="var(--rule-strong)"/>
+          <text x="22" y="114" fill="var(--ink)" font-weight="500">auth server</text>
+          <text x="22" y="130" fill="var(--ink-faint)" font-size="10">DBAuthClient · subscriptions</text>
+
+          <rect x="8" y="164" width="188" height="46" rx="3" fill="var(--surface-alt)" stroke="var(--rule-strong)"/>
+          <text x="22" y="184" fill="var(--ink)" font-weight="500">hogexec</text>
+          <text x="22" y="200" fill="var(--ink-faint)" font-size="10">DatabaseProxy · synchronous</text>
+        </g>
+
+        <!-- arrows into core -->
+        <g stroke="var(--rule-strong)" fill="none" marker-end="url(#ar)" color="var(--rule-strong)">
+          <path d="M196 47 H 240 Q 252 47 252 60 V 128"/>
+          <path d="M196 117 H 252"/>
+          <path d="M196 187 H 240 Q 252 187 252 174 V 148"/>
+        </g>
+
+        <!-- core -->
+        <rect x="272" y="60" width="168" height="128" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+        <text x="288" y="84" fill="var(--accent)" font-weight="600" font-size="12">db_shard_routing</text>
+        <text x="288" y="106" fill="var(--ink-soft)" font-size="10.5">shard_of_address()</text>
+        <text x="288" y="123" fill="var(--ink-soft)" font-size="10.5">split_by_shard()</text>
+        <text x="288" y="140" fill="var(--ink-soft)" font-size="10.5">gather_positional()</text>
+        <text x="288" y="157" fill="var(--ink-soft)" font-size="10.5">ShardedClient fan-out</text>
+        <text x="288" y="176" fill="var(--ink-faint)" font-size="10">order_shards_by_id()</text>
+
+        <!-- arrows out -->
+        <g stroke="var(--rule-strong)" fill="none" marker-end="url(#ar)" color="var(--rule-strong)">
+          <path d="M440 124 H 470 Q 482 124 482 111 V 52 H 520"/>
+          <path d="M440 124 H 520"/>
+          <path d="M440 124 H 470 Q 482 124 482 137 V 196 H 520"/>
+        </g>
+
+        <!-- shards -->
+        <g>
+          <rect x="524" y="30" width="164" height="44" rx="3" fill="var(--surface-alt)" stroke="var(--rule-strong)"/>
+          <text x="538" y="49" fill="var(--ink)" font-weight="500">hogdb shard 0</text>
+          <text x="538" y="64" fill="var(--ink-faint)" font-size="10">owns 'B'|'D'|'K'|'Q'|'A' keys</text>
+
+          <rect x="524" y="102" width="164" height="44" rx="3" fill="var(--surface-alt)" stroke="var(--rule-strong)"/>
+          <text x="538" y="121" fill="var(--ink)" font-weight="500">hogdb shard 1</text>
+          <text x="538" y="136" fill="var(--ink-faint)" font-size="10">+ own globals, own block tx</text>
+
+          <rect x="524" y="174" width="164" height="44" rx="3" fill="none" stroke="var(--rule)" stroke-dasharray="4 3"/>
+          <text x="538" y="199" fill="var(--ink-faint)">… shard N−1</text>
+        </g>
+
+        <!-- footer note -->
+        <line x1="8" y1="248" x2="688" y2="248" stroke="var(--rule)"/>
+        <text x="8" y="270" fill="var(--ink-faint)" font-size="10.5">each shard hashes only the items it owns  →  LtHash16 partials sum to the unsharded db hash  →  block header is shard-count independent</text>
+      </g>
+    </svg>
+    <figcaption>Three clients, one placement rule. Divergence between them is a data-loss bug, not a performance bug — which is why the routing lives in one shared header rather than three implementations.</figcaption>
+  </figure>
+  </div>
+
+  <div class="decisions">
+    <div class="decision">
+      <span class="tag">Key placement</span>
+      <h3>Everything an account owns lands on one shard</h3>
+      <p>Balances, auth data, contract data, retrocausal queues, and hog ages all route on the <em>address</em> — contract data ignores the key field deliberately, so a single-account transaction touches a single shard. Wasm code is content-addressed to shard 0; db tip and cost model are replicated to every shard.</p>
+    </div>
+    <div class="decision">
+      <span class="tag">Block hash</span>
+      <h3>Partial hashes that sum</h3>
+      <p>Each shard hashes only its own items. Because these are <code>LtHash16</code> multiset values they are additive, so the partials sum to exactly the unsharded hash. The block header therefore does not depend on how many shards a validator runs — a 1-shard and a 4-shard validator produce byte-identical headers, with no protocol change.</p>
+    </div>
+    <div class="decision">
+      <span class="tag">Shard identity</span>
+      <h3>A shard knows which shard it is</h3>
+      <p><code>--shard-id</code> / <code>--total-shards</code>, persisted in a metadata record excluded from the consensus hash. The persisted record is authoritative and flags may only confirm it; relabelling a populated database is fail-stop. Identity travels to clients on the <code>ShardCard</code>, and clients bind by <em>declared id</em>, never by connection-arrival order.</p>
+    </div>
+    <div class="decision">
+      <span class="tag">Fan-out discipline</span>
+      <h3>Launch all, drain before rethrowing, visit every shard</h3>
+      <p>All shard calls are issued before any is awaited, so N shards cost one round trip. A throw mid-gather drains its siblings first — abandoning a running <code>x23::Async</code> is a use-after-free. And no fan-out ever early-returns: stopping partway through a commit leaves some shards committed and others only prepared, which abort cannot undo.</p>
+    </div>
+    <div class="decision">
+      <span class="tag">Zero copy</span>
+      <h3>Batch splitting that doesn't duplicate 250&nbsp;MB</h3>
+      <p><code>notify_vetted</code> batches reach ~250&nbsp;MB. Rather than materialize per-shard sub-batches, the split records only per-shard index vectors plus a borrow of the source, and a gather view serializes the source items in place through an x23 <code>serialize_equiv</code> specialization.</p>
+    </div>
+    <div class="decision">
+      <span class="tag">Control plane</span>
+      <h3>Replicated globals, with agreement required</h3>
+      <p>Every shard runs the whole block lifecycle against its own globals. Writes go to all; reads require unanimity — <code>get_tip</code> fail-stops on partial genesis or any tip mismatch. That is the validator-startup detector for a crash mid-commit-fan-out. Loud beats livelock.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="kicker">How it went</p>
+  <h2>Five phases, June to August</h2>
+  <ol class="timeline">
+    <li>
+      <div class="phase-when"><span class="n">Phase 1</span>Jun 29 – Jul 9</div>
+      <div class="phase-body">
+        <h3>Make the executor shard-shaped, then extract the layer</h3>
+        <p>Reshaped hogexec's single database client into a per-shard array, turned on per-key routing, and made writes a two-phase fan-out across shards. Then pulled the routing, splitting, and gathering out into <code>db_shard_routing</code> so the mempool and auth could share it instead of reimplementing it.</p>
+      </div>
+    </li>
+    <li>
+      <div class="phase-when"><span class="n">Phase 2</span>Jul 16 – Jul 24</div>
+      <div class="phase-body">
+        <h3>First 2-shard cluster runs — and the block-0 stall</h3>
+        <p>The first multi-shard run stalled at block 0 with a mempool SIGSEGV. Root cause was a genesis-delta ordering race: the scheduler read hog ages routed to shards that hadn't loaded genesis yet. Fixed with a genesis-readiness barrier. By July 24 a 2-shard run completed all 1,000 work batches — ~39.9M txs at ~18,000 tx/s — with the new coordinator-failure guard catching the exact condition that had previously killed the process.</p>
+      </div>
+    </li>
+    <li>
+      <div class="phase-when"><span class="n">Phase 3</span>Jul 27 – Aug 4</div>
+      <div class="phase-body">
+        <h3>Correctness hardening, and the silent auth stall</h3>
+        <p>Shard identity end-to-end, fail-stop on divergent tips, a per-block transfer barrier, shard-owner-only genesis with a global header hash, and golden values pinning the address→shard map. Removing replicated genesis then exposed a latent bug: the auth server was bound to a single shard, so it could only see half the accounts. The symptom was 16,945 empty blocks in 28 minutes — height climbing fast, no crash, nothing in any log. Fixed with routed reads, subscription fan-out, and per-height key-change aggregation.</p>
+      </div>
+    </li>
+    <li>
+      <div class="phase-when"><span class="n">Phase 4</span>Aug 3 – Aug 4</div>
+      <div class="phase-body">
+        <h3>Review, tests, and a validated run</h3>
+        <p>Six review rounds; five fan-out bugs fixed in one pass (including the drain-before-rethrow use-after-free, found in review rather than testing). 31 targeted tests across five new suites, plus CI format and tidy clean. The August 4 cluster run committed <strong>79,490,644 transactions across 343 non-empty blocks</strong> with the two shards balanced at 49% / 50%, <code>auth_failed</code> zero for the whole run, and no cores or invariant failures on any of the nine hosts.</p>
+      </div>
+    </li>
+    <li>
+      <div class="phase-when"><span class="n">Phase 5</span>Aug 10 – Aug 18</div>
+      <div class="phase-body">
+        <h3>Benchmark campaign — 175 runs at 1, 2 and 4 shards</h3>
+        <p>Built a repeatable harness (one run per configuration, automatic collection, verdict, and analysis) and swept shard count, executor count, cache size, batch size, and workload shape. This is what produced the performance and capacity answers below — and four more bugs, none of them sharding's.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <p class="kicker">Results</p>
+  <h2>What the numbers actually say</h2>
+  <p class="lede">Sharding is a <strong>capacity</strong> win, not a throughput win. That is the honest headline, and it is worth stating before anyone reads a tx/s figure the wrong way.</p>
+
+  <div class="table-scroll">
+  <table>
+    <caption>Throughput — two executors, 1M-tx batches, matched block windows</caption>
+    <thead><tr><th>Shards</th><th class="num">tx/s</th><th class="num">vs 1 shard</th><th class="num">% of linear</th><th class="num">Median block</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td class="num">211,182</td><td class="num">—</td><td class="num">—</td><td class="num">4.11 s</td></tr>
+      <tr><td>2</td><td class="num">214,325</td><td class="num">+1.5%</td><td class="num">51%</td><td class="num">4.17 s</td></tr>
+      <tr><td>4</td><td class="num">196,985</td><td class="num loss">−6.7%</td><td class="num">23%</td><td class="num">4.59 s</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Throughput is flat, then declines. Splitting a block into phases explains why: <strong>commit gets 24% faster with shards (2,194 → 1,666 ms) while nomination gets 61% slower (1,352 → 2,180 ms)</strong> and swamps the gain. Nomination is where the scheduler does its per-address hog-age reads. The batched scatter-gather is correct — one RPC per shard, not one per account — but it waits for the slowest shard, so its cost grows with shard count. <em>That is the specific engineering target if sharding throughput matters.</em></p>
+
+  <div class="table-scroll">
+  <table>
+    <caption>Capacity — state grows with transaction count, 10 GB per shard</caption>
+    <thead><tr><th>Shards</th><th>Occupancy</th><th>Outcome</th><th class="num">Txs</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td class="num">78%</td><td><span class="chip crit">stalled</span> mempool aborted</td><td class="num">33M</td></tr>
+      <tr><td>2</td><td class="num">77% / 35%</td><td><span class="chip fixed">completed</span></td><td class="num">40.5M</td></tr>
+      <tr><td>4</td><td class="num">62% / 20% / 21% / 20%</td><td><span class="chip fixed">completed</span></td><td class="num">39M</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Both unsharded runs failed; every sharded run finished. This is the result that justifies the work — sharding buys headroom, which is what it was for.</p>
+
+  <div class="callout">
+    <span class="label">Caveat that bounds every capacity number</span>
+    <p>The mempool holds at most 5,000,000 pending transactions and silently discards the rest (a hardcoded constant with an existing <code>TODO</code> asking for it to be a flag). Offering 1.3 billion transactions committed only 78.8M. Raising that constant is the prerequisite for any large-capacity demonstration — but not before the detached-coroutine guard lands, because a 50M backlog reaches 41.8&nbsp;GB of mempool RSS and 252&nbsp;MB database messages, which is where issue #10 bites.</p>
+  </div>
+</section>
+
+<section>
+  <p class="kicker">Side effects</p>
+  <h2>Sharding was a load-bearing test of main</h2>
+  <p>Ten issues are written up with repro steps and artifacts. <strong>Most of them are not sharding bugs</strong> — they are pre-existing assumptions that only break when something exercises them. Sharding was the first thing to do so.</p>
+
+  <div class="table-scroll">
+  <table>
+    <caption>Selected issues, newest first</caption>
+    <thead><tr><th>#</th><th>Issue</th><th>Origin</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td class="num">10</td><td>hogdb dies silently at a 50M backlog and takes the mempool with it — an unguarded <code>co_await</code> in a detached coroutine, third call site</td><td class="origin">pre-existing</td><td><span class="chip open">open</span></td></tr>
+      <tr><td class="num">9</td><td>Every benchmark abandons its mempool backlog: the load driver stops nominating when its batch list runs out, so capacity figures are lower bounds</td><td class="origin">groundhog-go</td><td><span class="chip open">open</span></td></tr>
+      <tr><td class="num">8</td><td>Event server work dir never deleted — reached 146 GB and stalled five consecutive runs. Also: chuckd's "memory allocation failure" panic is not an OOM, it prints an XDR comment string</td><td class="origin">pre-existing</td><td><span class="chip fixed">fixed</span></td></tr>
+      <tr><td class="num">7</td><td>hogdb's hog-conservation invariant is whole-db but evaluated per shard, so assertion-enabled multi-shard runs die at genesis with equal-and-opposite sums</td><td class="origin">sharding-adjacent</td><td><span class="chip open">open</span></td></tr>
+      <tr><td class="num">5</td><td>Genesis reports complete before its hog accounting lands; the first submitted batch is discarded for "0 hogs" — 1 shard wins the race by luck, N shards lose it reliably</td><td class="origin">pre-existing</td><td><span class="chip fixed">fixed</span></td></tr>
+      <tr><td class="num">4</td><td>Auth server bound to one shard → 100% auth-fail and empty blocks forever</td><td class="origin">pre-existing</td><td><span class="chip fixed">fixed</span></td></tr>
+      <tr><td class="num">3</td><td>chuckd panics on teardown; the race window scales with submit latency, which 2-shard fan-out widens to ~120 ms</td><td class="origin">groundhog-go</td><td><span class="chip open">open</span></td></tr>
+      <tr><td class="num">1</td><td>Mempool SIGSEGV in <code>process_transfers</code>, 2-shard runs stall at block 0</td><td class="origin">sharding</td><td><span class="chip fixed">fixed</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Two findings worth escalating beyond this project</h3>
+  <ul class="plain">
+    <li><strong>A failing <code>CHECK</code> in a Release build is undefined behavior.</strong> Under <code>NDEBUG</code>, <code>x23::panic</code> compiles to <code>std::unreachable()</code>, so a failing <code>CHECK</code> at <code>-O3</code> became a SIGSEGV with no <code>CHECK FAILED</code> line and a garbage backtrace. It cost days on a 37 GB core to establish that a clean assertion failure was hiding behind a segfault. This applies to every <code>CHECK</code> in every Release binary we ship.</li>
+    <li><strong>An unguarded <code>co_await</code> in a detached coroutine is fatal to the process.</strong> On stream failure every in-flight call is handed an empty buffer; deserializing it throws, and a detached coroutine with no handler terminates. Three separate call sites have now killed the mempool this way.</li>
+    <li><strong>Release builds in this tree were not <code>NDEBUG</code>.</strong> A vendored dependency does <code>add_definitions(-UNDEBUG)</code> for every non-Debug build, and it lands after the release flags on the command line. Every performance number measured from this build directory before August 10 was assertion-enabled.</li>
+  </ul>
+</section>
+
+<section>
+  <p class="kicker">Remaining</p>
+  <h2>What is not done</h2>
+  <ul class="plain">
+    <li><strong>Protocol reconciliation (merge blocker).</strong> The <code>ShardCard</code> identity fields sit on an interim protocol branch; they must land on protocol main and propagate through groundhog-go before this PR can merge.</li>
+    <li><strong>Viewing snapshots.</strong> Snapshots open on the primary shard only, while snapshot-scoped reads route by address to the owner. Latent today because the read path is unexercised; the fix is to open on every shard and thread one id per shard. This is the largest remaining piece of design work.</li>
+    <li><strong>A keyed routing hash.</strong> FNV-1a is unkeyed and therefore grindable. Replacing it needs a key that survives restarts — and it gets harder the more data exists on disk, so it should not wait long.</li>
+    <li><strong>Commit atomicity.</strong> Commit still fans out non-atomically. Partial commit is <em>detected</em> at startup, not prevented.</li>
+    <li><strong>The nomination path.</strong> Per-address hog-age reads are the reason throughput doesn't scale. Named target, not yet worked.</li>
+    <li><strong>Scale.</strong> Unit-tested at N = 2, 4, 8 and benchmarked at 4; the long clean correctness runs are all at N = 2.</li>
+  </ul>
+</section>
+
+<section>
+  <p class="kicker">If you remember five things</p>
+  <h2>The short version</h2>
+  <ol class="takeaways">
+    <li><span class="mark">01</span><p>The database is now N processes, and <strong>the block header does not know it</strong>. LtHash16 additivity makes shard count a local deployment decision rather than a protocol change.</p></li>
+    <li><span class="mark">02</span><p><strong>One routing rule, one implementation</strong>, shared by the mempool, executor, and auth paths. Identity is persisted, declared, and fail-stop at every seam.</p></li>
+    <li><span class="mark">03</span><p>Fan-out has a discipline — <strong>launch all, drain before rethrowing, visit every shard</strong>. Each of those three rules is a bug that actually happened.</p></li>
+    <li><span class="mark">04</span><p><strong>Validated on a 2-shard cluster:</strong> 79.5M transactions, 343 non-empty blocks, shards balanced 49/50, zero cores and zero invariant failures. Then 175 runs at 1, 2 and 4 shards to find out what it buys.</p></li>
+    <li><span class="mark">05</span><p>What it buys is <strong>capacity, not speed</strong>: every sharded capacity run finished where the unsharded ones stalled, while throughput stayed flat because nomination got slower as commit got faster. And along the way it surfaced ten issues, most of which were sitting on main, invisible.</p></li>
+  </ol>
+</section>
+
+<footer class="colophon">
+  Branch <code>vp/sharding-v2-db-abstraction</code> · PR #3108 (draft) · 44 commits, Jun 29 – Aug 18 2026<br>
+  Detail: <code>SHARDING-TALK.md</code> (20-slide walkthrough with speaker notes) · <code>ISSUES.md</code> (10 issues with repro + artifacts) · <code>shard-bench/HANDOFF.md</code> (harness and campaign)
+</footer>
+
+</div>

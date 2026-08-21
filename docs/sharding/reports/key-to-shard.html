@@ -1,0 +1,231 @@
+<title>How a Key Finds Its Shard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* The campaign's report palette, so this slide sits with the rest of the deck.
+   Light is the bare :root; dark is redefined twice so the OS default and an
+   explicit toggle both resolve. */
+:root{--ground:#fbfbfc;--panel:#f2f3f6;--ink:#12141a;--ink-2:#4a4f5c;
+ --ink-3:#767c8b;--rule:#e3e5ea;--rule-2:#cfd3dc;
+ --acc:#2a78d6;--acc-soft:rgba(42,120,214,.13);--off:#eb6834;
+ --off-soft:rgba(235,104,52,.12)}
+:root:not([data-theme="light"]){@media (prefers-color-scheme:dark){
+ --ground:#14161b;--panel:#1c1f26;--ink:#f2f3f5;--ink-2:#b9bec9;
+ --ink-3:#8b909c;--rule:#2b2f38;--rule-2:#3a3f4a;
+ --acc:#3987e5;--acc-soft:rgba(57,135,229,.2);--off:#d95926;
+ --off-soft:rgba(217,89,38,.2)}}
+:root[data-theme="dark"]{--ground:#14161b;--panel:#1c1f26;--ink:#f2f3f5;
+ --ink-2:#b9bec9;--ink-3:#8b909c;--rule:#2b2f38;--rule-2:#3a3f4a;
+ --acc:#3987e5;--acc-soft:rgba(57,135,229,.2);--off:#d95926;
+ --off-soft:rgba(217,89,38,.2)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+ font-family:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+ -webkit-font-smoothing:antialiased}
+
+/* A slide: fixed 16:9, and every size below is a share of its width, so the
+   whole thing scales as one piece instead of reflowing. */
+.slide{width:100%;max-width:1600px;margin:0 auto;aspect-ratio:16/9;
+ container-type:inline-size;background:var(--ground)}
+/* The padding lives on a descendant: an element cannot query the container it
+   is, so cqw on .slide itself would resolve against the viewport. */
+.stage{height:100%;padding:2.6cqw 3cqw 2.2cqw;display:flex;
+ flex-direction:column}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.85cqw;
+ letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0}
+h1{font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;
+ font-size:2.5cqw;line-height:1.1;letter-spacing:-.01em;margin:.5cqw 0 .3cqw}
+.thesis{font-size:1.15cqw;line-height:1.45;color:var(--ink-2);max-width:62ch;
+ margin:0 0 1.4cqw}
+.thesis b{color:var(--ink);font-weight:600}
+
+.band{display:grid;gap:1.6cqw}
+.split{grid-template-columns:1fr 1.06fr;align-items:start;margin-top:1.2cqw}
+figure{margin:0}
+figure svg{display:block;width:100%;height:auto}
+figcaption{font-size:.92cqw;line-height:1.4;color:var(--ink-3);
+ margin-top:.5cqw;max-width:56ch}
+figcaption b{color:var(--ink-2);font-weight:500}
+.fignum{font-family:"IBM Plex Mono",monospace;font-size:.8cqw;
+ letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);
+ margin:0 0 .45cqw}
+
+/* SVG marks. Structure inherits the page ink through currentColor; the two
+   literal hues are reserved for meaning -- blue is the path a key takes, amber
+   is the field the router refuses to look at. */
+.box{fill:var(--panel);stroke:var(--rule-2);stroke-width:1}
+.box-acc{fill:var(--acc-soft);stroke:var(--acc);stroke-width:1.5}
+.box-off{fill:var(--off-soft);stroke:var(--off);stroke-width:1.5;
+ stroke-dasharray:5 3}
+.shard{fill:var(--panel);stroke:var(--rule-2);stroke-width:1}
+.shard-hit{fill:var(--acc-soft);stroke:var(--acc);stroke-width:1.5}
+.flow{stroke:var(--acc);stroke-width:1.6;fill:none}
+.flow-thin{stroke:var(--ink-3);stroke-width:1.2;fill:none}
+.t{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;fill:var(--ink)}
+.t-sm{font-family:"IBM Plex Sans",sans-serif;font-size:11px;fill:var(--ink-3)}
+.t-mono{font-family:"IBM Plex Mono",monospace;font-size:12px;fill:var(--ink)}
+.t-mono-sm{font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+ fill:var(--ink-2)}
+.t-acc{fill:var(--acc);font-weight:500}
+.t-off{fill:var(--off);font-weight:500}
+.mid{text-anchor:middle}.end{text-anchor:end}
+
+.notes{margin-top:auto;padding-top:1.1cqw;border-top:1px solid var(--rule);
+ display:grid;grid-template-columns:repeat(3,1fr);gap:1.6cqw}
+.notes p{margin:0;font-size:.88cqw;line-height:1.45;color:var(--ink-3)}
+.notes b{color:var(--ink-2);font-weight:500;font-family:"IBM Plex Mono",monospace}
+code{font-family:"IBM Plex Mono",monospace;font-size:.95em;color:var(--ink-2)}
+</style>
+
+<div class="slide"><div class="stage">
+  <p class="eyebrow">hogd &middot; database sharding</p>
+  <h1>How a key finds its shard</h1>
+  <p class="thesis">One function decides, and it reads <b>only the address</b>
+  field of the key: <code>shard_of_address()</code> hashes those 32 bytes with
+  FNV&#8209;1a and takes the remainder modulo the shard count. Whose address it
+  is depends on the prefix — <b>the account's</b> for a balance,
+  <b>the contract's</b> for contract storage. Everything under one address
+  therefore lands together, which is the whole design and also its sharpest
+  edge.</p>
+
+  <figure>
+    <p class="fignum">1 &nbsp;the key</p>
+    <svg viewBox="0 0 900 132" role="img" aria-label="A ramdb key is a one-byte prefix, a 32-byte address, and for some prefixes a 32-byte key field. Only the address field is passed to the router; the key field is ignored.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--acc)"/>
+        </marker>
+      </defs>
+      <!-- the byte strip -->
+      <rect class="box" x="8" y="16" width="86" height="46" rx="4"/>
+      <text class="t-mono mid" x="51" y="44">'K'</text>
+      <text class="t-sm mid" x="51" y="76">prefix · 1 B</text>
+
+      <rect class="box-acc" x="102" y="16" width="330" height="46" rx="4"/>
+      <text class="t mid t-acc" x="267" y="38">address</text>
+      <text class="t-mono-sm mid" x="267" y="54">2bd806c9 7f0e00af …</text>
+      <text class="t-sm mid" x="267" y="76">32 B · sha256 of a key or deploy preimage</text>
+
+      <rect class="box-off" x="440" y="16" width="330" height="46" rx="4"/>
+      <text class="t mid t-off" x="605" y="38">key</text>
+      <text class="t-mono-sm mid" x="605" y="54">a1f0 39cc …</text>
+      <text class="t-sm mid" x="605" y="76">32 B · which slot inside that address</text>
+
+      <!-- what the router reads, and what it refuses to -->
+      <path class="flow" d="M267,88 L267,110" marker-end="url(#a1)"/>
+      <text class="t-mono t-acc" x="282" y="115">shard_of_address()</text>
+      <path class="flow-thin" d="M605,88 L605,104" stroke-dasharray="4 3"/>
+      <line x1="596" y1="108" x2="614" y2="122" stroke="var(--off)" stroke-width="1.6"/>
+      <line x1="614" y1="108" x2="596" y2="122" stroke="var(--off)" stroke-width="1.6"/>
+      <text class="t-sm t-off" x="626" y="119">never read</text>
+    </svg>
+    <figcaption>Ten prefixes key the database. The address field holds an
+    <b>account's</b> address under <b>B</b> balance, <b>D</b> auth data,
+    <b>M</b> metadata, <b>A</b> hog age and <b>U</b> replay cache; a
+    <b>contract's</b> address under <b>K</b> storage and <b>Q</b> queued block; a
+    content hash under <b>C</b> wasm code and <b>R</b> its refcount.
+    <b>&lt;</b> globals are not sharded at all — every shard keeps its
+    own.</figcaption>
+  </figure>
+
+  <div class="band split">
+    <figure>
+      <p class="fignum">2 &nbsp;the routing</p>
+      <svg viewBox="0 0 470 250" role="img" aria-label="The 32 address bytes are folded into a 64-bit FNV-1a hash, and the remainder modulo the shard count names the shard. Alice's address lands on shard 3 of 4.">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                  markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--acc)"/>
+          </marker>
+        </defs>
+        <rect class="box-acc" x="8" y="14" width="200" height="42" rx="4"/>
+        <text class="t-sm" x="18" y="31">address · 32 B</text>
+        <text class="t-mono-sm" x="18" y="48">2bd806c97f0e00af…</text>
+
+        <path class="flow" d="M108,60 L108,90" marker-end="url(#a2)"/>
+        <text class="t-mono-sm t-acc" x="118" y="72">h ^= byte</text>
+        <text class="t-mono-sm t-acc" x="118" y="86">h *= prime</text>
+
+        <rect class="box" x="8" y="94" width="200" height="42" rx="4"/>
+        <text class="t-sm" x="18" y="111">FNV&#8209;1a, 64&#8209;bit</text>
+        <text class="t-mono-sm" x="18" y="128">0x7594bb2303b5ea13</text>
+
+        <path class="flow" d="M108,140 L108,172" marker-end="url(#a2)"/>
+        <text class="t-mono-sm t-acc" x="118" y="160">% shard_count</text>
+
+        <rect class="box" x="8" y="176" width="200" height="38" rx="4"/>
+        <text class="t-mono mid" x="108" y="200">… % 4  =  3</text>
+
+        <!-- the four shards, with the one that owns it lit -->
+        <text class="t-sm" x="266" y="26">four shards</text>
+        <rect class="shard" x="266" y="36" width="190" height="34" rx="4"/>
+        <text class="t-mono mid" x="361" y="58">shard 0</text>
+        <rect class="shard" x="266" y="78" width="190" height="34" rx="4"/>
+        <text class="t-mono mid" x="361" y="100">shard 1</text>
+        <rect class="shard" x="266" y="120" width="190" height="34" rx="4"/>
+        <text class="t-mono mid" x="361" y="142">shard 2</text>
+        <rect class="shard-hit" x="266" y="162" width="190" height="34" rx="4"/>
+        <text class="t-mono mid t-acc" x="361" y="184">shard 3</text>
+        <path class="flow" d="M214,195 C240,195 240,179 262,179" marker-end="url(#a2)"/>
+        <text class="t-sm mid" x="361" y="216">a true modulo, so 3 shards</text>
+        <text class="t-sm mid" x="361" y="230">route as well as 4</text>
+      </svg>
+      <figcaption>Addresses are sha256 digests, so they spread on their own and
+      the hash only has to fold them into a machine word. It is
+      <b>unkeyed</b> — deterministic, and grindable until a keyed hash replaces
+      it.</figcaption>
+    </figure>
+
+    <figure>
+      <p class="fignum">3 &nbsp;the consequence</p>
+      <svg viewBox="0 0 500 250" role="img" aria-label="Everything the system keys by Alice's own address -- her balance, auth data, metadata, hog age and replay cache -- lands on Alice's shard. Her balance inside a token contract is keyed by the token's address instead, so it lands on the token's shard, not on Alice's.">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+                  markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--acc)"/>
+          </marker>
+        </defs>
+        <!-- everything keyed by Alice herself -->
+        <text class="t-sm" x="8" y="18">keyed by Alice&#8217;s own address</text>
+        <rect class="box-acc" x="8" y="26" width="212" height="62" rx="4"/>
+        <text class="t-mono" x="20" y="48">B  D  M  A  U | alice</text>
+        <text class="t-sm" x="20" y="66">balance &middot; auth &middot; metadata</text>
+        <text class="t-sm" x="20" y="80">&middot; hog age &middot; replay cache</text>
+        <path class="flow" d="M224,57 L292,57" marker-end="url(#a3)"/>
+        <rect class="shard-hit" x="316" y="40" width="118" height="34" rx="4"/>
+        <text class="t-mono mid t-acc" x="375" y="62">shard 3</text>
+        <text class="t-sm mid" x="375" y="90">Alice&#8217;s shard</text>
+
+        <line x1="8" y1="118" x2="492" y2="118" stroke="var(--rule)" stroke-width="1"/>
+
+        <!-- her balance inside a token contract, keyed by the token -->
+        <text class="t-sm" x="8" y="144">keyed by the token&#8217;s address</text>
+        <rect class="box" x="8" y="152" width="212" height="62" rx="4"/>
+        <text class="t-mono-sm" x="20" y="174">K | usd-token |</text>
+        <text class="t-mono-sm t-off" x="20" y="190">h(&#8220;balance&#8221;, alice)</text>
+        <text class="t-sm" x="20" y="206">her name is in the key half</text>
+        <path class="flow" d="M224,183 L292,183" marker-end="url(#a3)"/>
+        <rect class="shard-hit" x="316" y="166" width="118" height="34" rx="4"/>
+        <text class="t-mono mid t-acc" x="375" y="188">shard 2</text>
+        <text class="t-sm mid t-off" x="375" y="216">the token&#8217;s shard</text>
+      </svg>
+      <figcaption>Alice&#8217;s shard holds what the system keys by
+      <b>Alice herself</b>. What a contract stores <em>about</em> her is keyed by
+      <b>the contract</b>, so every holder&#8217;s balance in a token lands on
+      that token&#8217;s one shard — <b>splitting the database does not split
+      that workload</b>, which is why an ERC20 benchmark barely notices the extra
+      shards.</figcaption>
+    </figure>
+  </div>
+
+  <div class="notes">
+    <p><b>read must match write.</b> A lookup repeats the same routing, or it
+    asks a shard that never held the item. There is no redirect.</p>
+    <p><b>shard 0 is the fallback.</b> <code>C</code> keys hash wasm code rather
+    than an address, and requests with no address at all — the db tip, view
+    snapshots — go there.</p>
+    <p><b>every shard hashes only what it owns.</b> The LtHash16 partials sum to
+    the hash an unsharded database would produce, so the block header does not
+    depend on the shard count.</p>
+  </div>
+</div></div>
