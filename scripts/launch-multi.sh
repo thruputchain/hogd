@@ -65,7 +65,7 @@ txs_per_block=100000
 num_blocks=1000
 # The hogdb data directory. A long run writes >100 GB here, so it should not be
 # on a tmpfs.
-hogdb_data_dir=/var/tmp/$(whoami)/hogdb.data
+hog_db_data_dir=/var/tmp/$(whoami)/hogdb.data
 
 # override above in build or source directory hog.conf file
 if test -r "$HOGD_BUILD_DIR/hog.conf"; then
@@ -215,7 +215,7 @@ trap cleanup EXIT INT TERM
 # builds x23's `bench` target, which does not compile against crc32c's
 # vendored Google Benchmark headers, and `set -e` would abort the run.
 cmake --build "$HOGD_BUILD_DIR" --parallel "$(nproc)" --target \
-  mempool_exec hogdb_exec hogexec event_exec indexer_exec auth_exec loadgen_server
+  hog-mempool hog-db hog-exec hog-event hog-indexer hog-auth loadgen_server
 # These build scripts place the binaries in the current working directory, so we
 # [pushd "$HOG_BUILD_DIR"] so that the binaries are placed in the build
 # directory.
