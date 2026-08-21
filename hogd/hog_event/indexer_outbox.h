@@ -15,7 +15,6 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
-#include "proposal.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -62,7 +61,6 @@ struct IndexerOutboxCandidateRecordInfo {
   uint64_t payload_byte_length;
   SHA256Hash payload_digest;
   EventsHash event_root;
-  ProposalTxsHash proposal_txs_hash;
 };
 
 struct IndexerOutboxEpochOriginInfo {

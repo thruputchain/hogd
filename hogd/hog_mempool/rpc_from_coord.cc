@@ -538,11 +538,10 @@ MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
 
 x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
-                                              BlockHeight block_height,
-                                              ProposalTxsHash proposal_txs_hash)
+                                              BlockHeight block_height)
 {
-  co_return co_await event_sched_client_->eventsched_close_block(
-      block_id, block_height, proposal_txs_hash);
+  co_return co_await event_sched_client_->eventsched_close_block(block_id,
+                                                                 block_height);
 }
 
 x23::Async<DbBlockResult>
@@ -1198,12 +1197,10 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
             cache.proposal_result.proposed_block().proposal.transactions);
       });
   nodes.close_event = dag.async<EventBlockResult>(
-      "close event block", dag.after(nodes.proposal_txs_hash),
-      [&, proposal_txs_hash =
-              nodes.proposal_txs_hash]() -> x23::Async<EventBlockResult> {
+      "close event block", proposal_deps,
+      [&]() -> x23::Async<EventBlockResult> {
         co_return co_await eventsched_close_block(
-            cache.block_id, db_tip.value.proposal_header.block_height + 1,
-            proposal_txs_hash.get());
+            cache.block_id, db_tip.value.proposal_header.block_height + 1);
       });
   nodes.txset_hash =
       dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
@@ -1684,7 +1681,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
                                  ceremony_proposal_txs.nondeterministic_data);
     const DbBlockResult db_close = co_await close_snapshot(block_id);
     const EventBlockResult event_close =
-        co_await eventsched_close_block(block_id, 1, ceremony_proposal_txs);
+        co_await eventsched_close_block(block_id, 1);
     if (db_close.result() != DbSchedResult::DbSchedResultOK ||
         event_close.error() != RPCError::kRPCNone) {
       co_await cleanup();
@@ -2357,12 +2354,11 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         return proposal_txs_compatibility_hash(proposal.transactions);
       });
   auto close_event_node = validation_dag.async<EventBlockResult>(
-      "close event block", validation_dag.after(proposal_txs_hash_node),
-      [&, proposal_txs_hash_node]() -> x23::Async<EventBlockResult> {
+      "close event block", validation_dag.after(check_validation_node),
+      [&]() -> x23::Async<EventBlockResult> {
         co_return co_await eventsched_close_block(validation_block_id,
                                                   scheduler_->current_block() +
-                                                      1,
-                                                  proposal_txs_hash_node.get());
+                                                      1);
       });
   x23::DagDeps close_validation_deps =
       merge_dag_deps(validation_dag.after(close_snapshot_node, close_event_node,
@@ -2415,7 +2411,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       });
 
   validation_dag.async<void>(
-      "build validation result", validation_dag.after(check_closed_node),
+      "build validation result",
+      validation_dag.after(check_closed_node, proposal_txs_hash_node),
       [&]() -> x23::Async<void> {
         ConsensusValue value{.protocol = 0,
                              .ext = {},

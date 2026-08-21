@@ -143,8 +143,8 @@ commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
     bodies.push_back(*body);
   }
   ProposalTxs proposal_txs = make_proposal_txs(bodies);
-  EventBlockResult closed = mempool_rpc.eventsched_close_block(
-      block_id, height, proposal_txs_compatibility_hash(proposal_txs))();
+  EventBlockResult closed =
+      mempool_rpc.eventsched_close_block(block_id, height)();
   CHECK_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
       make_consensus_value(height, closed.root_hash(), proposal_txs);
@@ -252,7 +252,7 @@ public:
     value.proposal_header.block_height = origin_.first_height;
     value.proposal_header.block_timepoint = 1000;
     value.proposal_header.events_hash =
-        compute_indexer_outbox_event_root(TxEventLogBatch{});
+        compute_indexer_outbox_event_root({}, {});
     auto txs_root = compute_indexer_proposal_txs_root(proposal)();
     CHECK(txs_root.has_value());
     value.proposal_header.txs_hash = *txs_root;

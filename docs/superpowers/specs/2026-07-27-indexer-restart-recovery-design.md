@@ -55,28 +55,29 @@ header, origin, full `ConsensusValue`, event/body vectors, block identity, and
 record marker. Anything above x23's
 unchunked 31-bit record-body limit is rejected before a durable write.
 
-The committed record carries a digest over its full payload because transaction
-bodies are deliberately outside the consensus event root. Loading validates the
-digest, batch lengths, each body's transaction hash against its paired event
-log, the body-derived transaction root, and the recomputed event root. Published
-corruption is fatal; incomplete candidate or temporary files are not part of
-the committed outbox.
-
-`ProposalTxsHash` intentionally commits `ParallelBatch` segmentation and cannot
-be reconstructed from transaction bodies alone. Removing the duplicate
-`ProposalTxs` preimage therefore makes nondeterministic proposal data trusted
-output of the finalized internal scheduler/executor path rather than something
-the event service independently re-authenticates against that compatibility
-hash. The durable payload digest still detects later corruption. Each inner
-`Transaction` remains independently bound to the consensus transaction-set
-root; its signature wrapper shares the trusted internal-data boundary because
-`TransactionHash` deliberately excludes signatures.
+The committed record carries a digest over its full payload to detect later
+at-rest corruption. Loading validates the digest, batch lengths, each body's
+transaction hash against its paired event log, the body-derived transaction
+root, and the recomputed event root. The event root authenticates each
+`TxEventLog` together with its transaction's
+`NondeterministicProposalData`; each inner `Transaction` is independently bound
+to the consensus transaction-set root. The `SignedTransaction` signature
+wrapper remains outside both roots because `TransactionHash` deliberately
+excludes signatures. Published corruption is fatal; incomplete candidate or
+temporary files are not part of the committed outbox.
 
 Scheduler `BlockID` is process-local and may be regenerated during recovery. It
 is used only to locate candidate state and alias commit RPCs; it is not part of
 the committed outbox payload, committed header, wire value, payload digest, or
 indexer identity ledger. A committed record is identified by its
 `ConsensusValue` hash and full-payload digest.
+
+Event close receives only the block ID and height. Because the event root now
+commits both event logs and nondeterministic proposal data, restart promotion
+selects a candidate by protocol, height, and the finalized
+`ProposalHeader.events_hash`; no separate proposal tag is passed to event or
+stored in candidate state. `ConsensusValue.proposal_txs_hash` remains unchanged
+for consensus proposal authentication.
 
 Chuckd persists the consensus value before calling scheduler commit. A durable
 candidate therefore closes the chain-ahead/outbox-missing window: if the process
@@ -119,9 +120,10 @@ only as one ordered prefix below an unbroken current-protocol suffix that starts
 at its durable epoch origin and whose tip exactly matches the scheduler's
 canonical `ConsensusValue`. Pulling an archival record currently decodes it with
 the current generated payload type after checking the envelope's recorded
-protocol. Replay across epochs therefore requires that the committed payload XDR
-remain wire-compatible; an incompatible payload change requires either a
-retained versioned decoder or a clean-chain migration.
+protocol. Replay across epochs therefore requires both wire-compatible
+committed-payload XDR and compatible commitment-validation semantics. An
+incompatible payload or root-definition change requires either retained
+versioned decoding and validation or a clean-chain migration.
 An archival record after the current suffix, an unknown envelope version, a
 current-protocol gap, an origin mismatch, or archival records without enough
 current-protocol state to prove the boundary leaves the event service unhealthy.
@@ -220,6 +222,8 @@ event, indexer, and devnode suites.
 | Durable progress and indexed rows reopen atomically, then resume from the exact next height | `StrictIndexerTest.SuccessfulStrictApplyReopensAllRowsAndProgressTogether`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
 | A lost reply repeats the same immutable block and duplicate application is idempotent | `EventRpcTest.ExactProgressReturnsNextAndUnchangedProgressRepeatsIt`; `StrictIndexerTest.DuplicateLedgerAndFutureGapWriteNothing` |
 | Finalized scheduler commit makes the durable record pullable | `EventRpcTest.FinalizedCommitMakesRecordPullable` |
+| Restart promotion ignores regenerated process-local block IDs and selects the candidate whose event root binds the finalized nondeterministic data | `EventRpcTest.ReconciliationPromotesRetainedCandidateWithRegeneratedBlockId`; `HogDevnode.DataDirPromotesFinalizedCandidateAfterRestart` |
+| Event commitment binds nondeterministic proposal data while excluding signature-wrapper malleability | `IndexerOutboxTest.EventRootBindsNondeterministicDataButNotSignatureWrapper`; `IndexerOutboxTest.EventLeafSerializesEventBeforeNondeterministicData` |
 | A dropped event connection clears readiness, is retried, and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
 | A blocked pull is bounded by its RPC deadline and reconnects | `IndexerPullController.RpcTimeoutReconnectsAfterBlockedPull` |
 | Initial catch-up has no wall-clock deadline, and shutdown cancels an in-flight pull before joining | `IndexerPullController.DestructionCancelsBlockedPull` |
@@ -230,8 +234,9 @@ event, indexer, and devnode suites.
 The archived-to-current integration fixture rewrites current-format test records
 under an archival protocol identity. It proves origin ordering, RPC traversal,
 durable application, and restart behavior, but does not prove decoding of an
-incompatible historical payload schema. That limitation is the wire-compatibility
-requirement stated in the protocol epoch policy above.
+incompatible historical payload schema or commitment definition. That
+limitation is the compatibility requirement stated in the protocol epoch
+policy above.
 
 ## Hosted Validation
 

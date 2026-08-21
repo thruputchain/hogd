@@ -5,6 +5,7 @@
 #include <format>
 #include <span>
 
+#include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -22,42 +23,65 @@
 #include "x23/vec.h"
 
 namespace hogd {
-namespace {
+size_t
+serialize_event_commitment_leaf(
+    x23::Buf &buf, const TxEventLog &event,
+    const NondeterministicProposalData &nondeterministic_data)
+{
+  buf.resize_uninitialized(0);
+  x23::serialize_to(&buf, event);
+  const size_t event_xdr_size = buf.size();
+  x23::serialize_to(&buf, nondeterministic_data);
+  return event_xdr_size;
+}
 
-IndexerPayloadStatus<TxsHash>
-validate_event_body_mapping_and_compute_root(
-    const TxEventLogBatch &event_logs,
-    const ProposedTransactionBatch &tx_bodies)
+IndexerPayloadStatus<IndexerPayloadRoots>
+compute_indexer_payload_roots(const TxEventLogBatch &event_logs,
+                              const ProposedTransactionBatch &tx_bodies)
 {
   if (event_logs.size() != tx_bodies.size()) {
     return std::unexpected("event/body batch cardinalities differ");
   }
 
-  MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+  MerkleTriePrefix event_trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+  MerkleTriePrefix tx_trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
+  x23::Buf event_leaf;
   for (size_t i = 0; i < tx_bodies.size(); ++i) {
     const TransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
     if (body_hash != event_logs[i].tx_hash) {
       return std::unexpected(std::format(
           "transaction body hash differs from event log at index {}", i));
     }
-    if (!trie.insert(HexArray(body_hash), std::span<const std::byte>())) {
+    if (!tx_trie.insert(HexArray(body_hash), std::span<const std::byte>())) {
+      return std::unexpected("event/body batch contains duplicate hashes");
+    }
+    serialize_event_commitment_leaf(
+        event_leaf, event_logs[i], tx_bodies[i].nondeterministic_proposal_data);
+    const std::span<const std::byte> bytes =
+        std::as_bytes(std::span(event_leaf));
+    if (!event_trie.insert(bytes.first<32>(), bytes.subspan(32))) {
       return std::unexpected("event/body batch contains duplicate hashes");
     }
   }
-  trie.generate_all_hashes(/*num_threads=*/1);
-  return trie.get_root_hash();
+  event_trie.generate_all_hashes(/*num_threads=*/1);
+  tx_trie.generate_all_hashes(/*num_threads=*/1);
+  return IndexerPayloadRoots{.events_hash = event_trie.get_root_hash(),
+                             .txs_hash = tx_trie.get_root_hash()};
 }
 
-} // namespace
-
-SHA256Hash
-compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs)
+EventsHash
+compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs,
+                                  const ProposedTransactionBatch &tx_bodies)
 {
+  CHECK_EQ(event_logs.size(), tx_bodies.size());
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
-  for (const TxEventLog &event_log : event_logs) {
-    x23::Buf serialized = x23::serialize(event_log);
-    std::span<const std::byte> bytes = std::as_bytes(std::span(serialized));
-    CHECK(trie.insert_or_update(bytes.first<32>(), bytes.subspan(32)));
+  x23::Buf event_leaf;
+  for (size_t i = 0; i < event_logs.size(); ++i) {
+    serialize_event_commitment_leaf(
+        event_leaf, event_logs[i], tx_bodies[i].nondeterministic_proposal_data);
+    const std::span<const std::byte> bytes =
+        std::as_bytes(std::span(event_leaf));
+    CHECK(trie.insert(bytes.first<32>(), bytes.subspan(32)));
   }
   trie.generate_all_hashes(/*num_threads=*/1);
   return trie.get_root_hash();
@@ -92,26 +116,17 @@ validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload)
   if (payload.consensus_value.proposal_header.block_height < 0) {
     co_return std::unexpected("committed outbox height is negative");
   }
-  if (compute_indexer_outbox_event_root(payload.event_logs) !=
+  auto roots =
+      compute_indexer_payload_roots(payload.event_logs, payload.tx_bodies);
+  if (!roots) {
+    co_return std::unexpected(roots.error());
+  }
+  if (roots->events_hash !=
       payload.consensus_value.proposal_header.events_hash) {
-    co_return std::unexpected("event root differs from payload identity");
+    co_return std::unexpected("event root differs from ProposalHeader");
   }
-  // ProposalTxsHash intentionally preserves ParallelBatch segmentation, so it
-  // cannot be reconstructed from tx_bodies without retaining the duplicate
-  // ProposalTxs preimage. The finalized scheduler/executor path is trusted for
-  // nondeterministic proposal data; the payload digest detects durable
-  // corruption. We still independently bind every inner Transaction to the
-  // consensus transaction-set root below; signatures share the trusted
-  // internal-data boundary because TransactionHash excludes them.
-  auto txs_root =
-      validate_event_body_mapping_and_compute_root(payload.event_logs,
-                                                   payload.tx_bodies);
-  if (!txs_root) {
-    co_return std::unexpected(txs_root.error());
-  }
-  if (*txs_root != payload.consensus_value.proposal_header.txs_hash) {
-    co_return std::unexpected(
-        "canonical transaction root differs from ProposalHeader");
+  if (roots->txs_hash != payload.consensus_value.proposal_header.txs_hash) {
+    co_return std::unexpected("transaction root differs from ProposalHeader");
   }
   co_return IndexerPayloadStatus<void>{};
 }

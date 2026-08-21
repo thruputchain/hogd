@@ -19,7 +19,6 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_event/status.h"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -44,9 +43,8 @@ public:
   // Closes a block.
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
-  x23::Async<EventStatus<SHA256Hash>>
-  close_block(BlockID block_id, BlockHeight block_height,
-              ProposalTxsHash proposal_txs_hash);
+  x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
+                                                  BlockHeight block_height);
 
   // Durably publishes a closed block and GCs the block context.
   // Returns the block height on success.

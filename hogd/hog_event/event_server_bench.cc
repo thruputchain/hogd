@@ -23,12 +23,9 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/init.h"
-#include "hogd/xdr/proposal_hash.h"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_event.hh"
 #include "transaction.hh"
@@ -120,6 +117,8 @@ create_fake_body(size_t tx_id)
   body.signed_tx.tx.uniquifier.block_expiry_height = 1'000'000;
   body.signed_tx.tx.uniquifier.nonce = tx_id;
   body.signed_tx.tx.invocation.gas_limit = 1'000'000;
+  body.nondeterministic_proposal_data.nondeterministic_bits.push_back(0xa5);
+  body.nondeterministic_proposal_data.nondeterministic_bit_count = 8;
   return body;
 }
 
@@ -248,23 +247,8 @@ run_event_bench(const std::string &exec_server_addr,
   if (res1 != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close executor event handle");
   }
-  x23::XdrVec<TransactionHash> hashes;
-  x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
-  hashes.reserve(num_events);
-  nondeterministic_data.reserve(num_events);
-  for (size_t i = 0; i < num_events; ++i) {
-    ProposedTransaction body = create_fake_body(i);
-    hashes.push_back(sha256(body.signed_tx.tx));
-    nondeterministic_data.push_back(body.nondeterministic_proposal_data);
-  }
-  ProposalTxs proposal_txs{
-      .hash = t_to_parallel_batch(hashes)(),
-      .nondeterministic_data = t_to_parallel_batch(nondeterministic_data)(),
-  };
   auto close_res =
-      event_sched_client.eventsched_close_block(block_number, block_number,
-                                                proposal_txs_compatibility_hash(
-                                                    proposal_txs))();
+      event_sched_client.eventsched_close_block(block_number, block_number)();
   if (close_res.error() != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close block");
   }

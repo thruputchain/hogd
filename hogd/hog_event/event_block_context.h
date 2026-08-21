@@ -23,7 +23,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "indexer.hh"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -112,8 +111,9 @@ public:
   // was not called). Events must only be emitted while an executor handle is
   // held.
   //
-  // Keep [body] paired with its event log for the durable indexer outbox. It is
-  // not hashed into the consensus event trie.
+  // Keep [body] paired with its event log for the durable indexer outbox. Its
+  // nondeterministic proposal data, but not its signature wrapper, is hashed
+  // into the consensus event trie.
   x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
@@ -121,8 +121,7 @@ public:
 
   x23::Async<IndexerOutboxCandidatePayload>
   snapshot_indexer_outbox_candidate(BlockHeight block_height,
-                                    SHA256Hash event_root,
-                                    ProposalTxsHash proposal_txs_hash);
+                                    SHA256Hash event_root);
 
   x23::Async<void> wait_file_done();
   void delete_events_file();

@@ -1706,16 +1706,6 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
             SchedulerProposalOutcome::SchedulerProposalOK);
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
 
-  auto forwarded_proposal_txs_hash =
-      server.event_sched_rpc().get_closed_proposal_txs_hash(
-          proposed.block_id)();
-  if (!forwarded_proposal_txs_hash.has_value()) {
-    ADD_FAILURE() << "Proposal transaction hash was not forwarded";
-    return;
-  }
-  EXPECT_EQ(*forwarded_proposal_txs_hash,
-            proposal_txs_compatibility_hash(proposed.proposal.transactions));
-
   EXPECT_EQ(proposed.proposal.header.proposer, context.proposer);
   EXPECT_EQ(proposed.proposal.header.block_timepoint, context.block_timepoint);
   EXPECT_NE(proposed.proposal.header.storage_hash, StorageShortHash{});
@@ -1739,7 +1729,7 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
   EXPECT_EQ(get_tip.db_tip().value.proposal_header, proposed.proposal.header);
 }
 
-TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
+TEST(Mempool, EmptyProposalForwardsConsensusValue)
 {
   MempoolTestInfra server;
   SchedulerGetTipResult get_tip =
@@ -1755,16 +1745,6 @@ TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
   EXPECT_TRUE(proposed.proposal.transactions.hash.xdr.empty());
   EXPECT_TRUE(proposed.proposal.transactions.nondeterministic_data.xdr.empty());
-
-  auto forwarded_proposal_txs_hash =
-      server.event_sched_rpc().get_closed_proposal_txs_hash(
-          proposed.block_id)();
-  if (!forwarded_proposal_txs_hash.has_value()) {
-    ADD_FAILURE() << "Proposal transaction hash was not forwarded";
-    return;
-  }
-  EXPECT_EQ(*forwarded_proposal_txs_hash,
-            proposal_txs_compatibility_hash(proposed.proposal.transactions));
 
   ConsensusValue value = consensus_value(parent_tip, proposed.proposal);
   ASSERT_EQ(server.mempool_coord_rpc().schedulercoord_commit_block(

@@ -31,7 +31,6 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/control_client.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
@@ -39,8 +38,6 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
 #include "network.hh"
-#include "proposal.hh"
-#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -250,8 +247,7 @@ open_block(db_sched_client_t &db_sched_client,
 void
 close_block(db_sched_client_t &db_sched_client,
             event_sched_client_t &event_sched_client,
-            std::vector<exec_client_t> &exec_clients, uint64_t block_number,
-            const ProposalTxs &proposal_txs)
+            std::vector<exec_client_t> &exec_clients, uint64_t block_number)
 {
   auto start_time = x23::fastclock::get_ns();
   info("closing block {}", block_number);
@@ -269,9 +265,7 @@ close_block(db_sched_client_t &db_sched_client,
   }
   // We use [block_number] as the height as well.
   auto event_async =
-      event_sched_client.eventsched_close_block(block_number, block_number,
-                                                proposal_txs_compatibility_hash(
-                                                    proposal_txs));
+      event_sched_client.eventsched_close_block(block_number, block_number);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -280,7 +274,6 @@ close_block(db_sched_client_t &db_sched_client,
   auto close_time = x23::fastclock::get_ns();
   ConsensusValue value{};
   value.proposal_header.block_height = block_number;
-  value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
   auto commit_res =
       db_sched_client.dbsched_commit_snapshot(block_number, value);
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
@@ -347,7 +340,6 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number)
 {
-
   auto start_time = x23::fastclock::get_ns();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
@@ -373,17 +365,8 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto end_coros_time = x23::fastclock::get_ns();
   double elapsed_time = end_coros_time - start_coros_time;
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
-  x23::XdrVec<TransactionHash> hashes;
-  hashes.reserve(txs->size());
-  for (const SignedTransaction &tx : *txs) {
-    hashes.push_back(sha256(tx.tx));
-  }
-  ProposalTxs proposal_txs{
-      .hash = t_to_parallel_batch(hashes)(),
-      .nondeterministic_data = t_to_parallel_batch(nominations)(),
-  };
   close_block(db_sched_client, event_sched_client, exec_clients,
-              current_block_number, proposal_txs);
+              current_block_number);
 
   auto end_block_time = x23::fastclock::get_ns();
   std::println("open_time {} middle_time {} close_time {} inner tps: {}",

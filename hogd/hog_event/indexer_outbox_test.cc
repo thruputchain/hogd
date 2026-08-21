@@ -136,30 +136,20 @@ sort_event_body_batches(ProposedTransactionBatch &bodies,
 }
 
 IndexerOutboxCandidatePayload
-make_candidate_with_proposal(BlockID block_id, BlockHeight height,
-                             const ProposalTxs &proposal_txs,
-                             ProposedTransactionBatch bodies,
-                             TxEventLogBatch events)
+make_candidate(BlockID block_id, BlockHeight height,
+               ProposedTransactionBatch bodies, TxEventLogBatch events)
 {
   sort_event_body_batches(bodies, events);
+  const EventsHash event_root =
+      compute_indexer_outbox_event_root(events, bodies);
   return IndexerOutboxCandidatePayload{
       .format_version = kIndexerOutboxFormatVersion,
       .block_id = block_id,
       .block_height = height,
-      .event_root = compute_indexer_outbox_event_root(events),
-      .proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs),
+      .event_root = event_root,
       .event_logs = std::move(events),
       .tx_bodies = std::move(bodies),
   };
-}
-
-IndexerOutboxCandidatePayload
-make_candidate(BlockID block_id, BlockHeight height,
-               ProposedTransactionBatch bodies, TxEventLogBatch events)
-{
-  ProposalTxs proposal_txs = make_canonical_proposal_txs(bodies);
-  return make_candidate_with_proposal(block_id, height, proposal_txs,
-                                      std::move(bodies), std::move(events));
 }
 
 IndexerOutboxCommittedPayload
@@ -171,7 +161,8 @@ make_committed_with_proposal(BlockHeight height,
   sort_event_body_batches(bodies, events);
   ConsensusValue value;
   value.proposal_header.block_height = height;
-  value.proposal_header.events_hash = compute_indexer_outbox_event_root(events);
+  value.proposal_header.events_hash =
+      compute_indexer_outbox_event_root(events, bodies);
   auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
@@ -261,7 +252,7 @@ make_committed_payload_golden_fixture()
   payload.event_logs[0].tx_hash = sha256(payload.tx_bodies[0].signed_tx.tx);
   ProposalTxs proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(payload.event_logs);
+      compute_indexer_outbox_event_root(payload.event_logs, payload.tx_bodies);
   auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
@@ -909,8 +900,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   TxEventLogBatch arrival_events{make_event(body_a, 0x11),
                                  make_event(body_b, 0x12),
                                  make_event(body_c, 0x13)};
-  auto candidate = make_candidate_with_proposal(42, 7, proposal_txs,
-                                                arrival_bodies, arrival_events);
+  auto candidate = make_candidate(42, 7, arrival_bodies, arrival_events);
   auto committed = make_committed_with_proposal(7, proposal_txs, arrival_bodies,
                                                 arrival_events);
   committed.consensus_value.prev_hash[0] = 0x77;
@@ -1041,18 +1031,18 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
       make_committed_payload_golden_fixture();
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
-  constexpr size_t kExpectedByteLength = 684;
-  const SHA256Hash kExpectedDigest{0x92, 0xa0, 0x63, 0xe0, 0x64, 0xba, 0x85,
-                                   0xef, 0xce, 0xd9, 0xb0, 0x0c, 0x1d, 0xf4,
-                                   0x61, 0xc0, 0x10, 0x84, 0x5e, 0x83, 0xda,
-                                   0xc9, 0x82, 0xa9, 0x54, 0x8c, 0x9b, 0x28,
-                                   0xb5, 0xed, 0xd9, 0x52};
+  constexpr size_t kExpectedByteLength = 576;
+  const SHA256Hash kExpectedDigest{0xac, 0x20, 0x4b, 0x69, 0x7f, 0x4a, 0x80,
+                                   0xfb, 0x7c, 0x64, 0x1d, 0x1f, 0x2b, 0x13,
+                                   0xe8, 0xc8, 0x43, 0xdf, 0x11, 0x77, 0xa9,
+                                   0xbd, 0x06, 0x0b, 0xbf, 0x44, 0x47, 0xd6,
+                                   0x4d, 0xf2, 0x6e, 0xd6};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
 }
 
-TEST_F(IndexerOutboxTest, StableEnvelopeHeaderMatchesGolden)
+TEST_F(IndexerOutboxTest, StableEnvelopeReservedSlotPreservesGolden)
 {
   IndexerOutboxRecordHeader header{
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
@@ -1068,6 +1058,10 @@ TEST_F(IndexerOutboxTest, StableEnvelopeHeaderMatchesGolden)
   header.consensus_hash[31] = 0x60;
   header.prev_hash[0] = 0x61;
   header.prev_hash[31] = 0x80;
+  // This zero-valued reserved slot occupied the same wire position as the old
+  // ProposalTxsHash field. Keeping the existing golden pins header decoding
+  // compatibility across the semantic rename.
+  header.reserved_hash = {};
   const x23::Buf encoded = x23::serialize(header);
 
   constexpr size_t kExpectedByteLength = 212;
@@ -1279,7 +1273,7 @@ TEST_F(IndexerOutboxTest,
   EXPECT_NE(body_mismatch.error().find("body hash"), std::string::npos);
 }
 
-TEST_F(IndexerOutboxTest, CandidateProposalHashMutationIsRejected)
+TEST_F(IndexerOutboxTest, CandidateHeaderPayloadEventRootMismatchIsRejected)
 {
   IndexerOutboxStore store = open_store(dir_);
   ProposedTransaction body_a = make_body(81);
@@ -1293,7 +1287,7 @@ TEST_F(IndexerOutboxTest, CandidateProposalHashMutationIsRejected)
   const std::string filename = IndexerOutboxStore::candidate_filename(481);
 
   IndexerOutboxCandidatePayload mutated = candidate;
-  mutated.proposal_txs_hash[0] ^= 1;
+  mutated.event_root[0] ^= 1;
   write_payload(dir_, filename, mutated);
   auto result = store.load_candidate(481)();
   ASSERT_FALSE(result.has_value());
@@ -1344,7 +1338,8 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
   mutate_payload<IndexerOutboxCommittedPayload>(
       dir_, filename, [](auto &payload) {
         payload.consensus_value.proposal_header.events_hash =
-            compute_indexer_outbox_event_root(payload.event_logs);
+            compute_indexer_outbox_event_root(payload.event_logs,
+                                              payload.tx_bodies);
         payload.consensus_value.proposal_header.block_height = 19;
       });
   auto height_mismatch = store.load_committed(18)();
@@ -1461,6 +1456,7 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   TxEventLog event_a = make_event(body_a, 0x77);
   TxEventLog event_b = make_event(body_b, 0x88, /*with_emitted_event=*/false);
   TxEventLogBatch events{event_a, event_b};
+  ProposedTransactionBatch bodies{body_a, body_b};
 
   EventBlockContext context(dir_.directory(), 100);
   context.executor_open_block();
@@ -1470,13 +1466,65 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   context.finish_file_write()();
   const SHA256Hash production_root = context.get_root_hash();
   context.finish_file(production_root)();
-  EXPECT_EQ(compute_indexer_outbox_event_root(events), production_root);
+  EXPECT_EQ(compute_indexer_outbox_event_root(events, bodies), production_root);
 
   EventBlockContext empty_context(dir_.directory(), 101);
   empty_context.finish_file_write()();
   const SHA256Hash empty_production_root = empty_context.get_root_hash();
   empty_context.finish_file(empty_production_root)();
-  EXPECT_EQ(compute_indexer_outbox_event_root({}), empty_production_root);
+  EXPECT_EQ(compute_indexer_outbox_event_root({}, {}), empty_production_root);
+}
+
+TEST_F(IndexerOutboxTest,
+       EventRootBindsNondeterministicDataButNotSignatureWrapper)
+{
+  ProposedTransaction body = make_body(10);
+  TxEventLog event = make_event(body, 0x99);
+  const EventsHash baseline =
+      compute_indexer_outbox_event_root({event}, {body});
+
+  ProposedTransaction changed_nondeterministic_data = body;
+  changed_nondeterministic_data.nondeterministic_proposal_data
+      .nondeterministic_bits[0] ^= 0xff;
+  EXPECT_NE(compute_indexer_outbox_event_root({event},
+                                              {changed_nondeterministic_data}),
+            baseline);
+
+  ProposedTransaction changed_signatures = body;
+  changed_signatures.signed_tx.signatures.push_back(DecoratedSignature{});
+  EXPECT_EQ(compute_indexer_outbox_event_root({event}, {changed_signatures}),
+            baseline);
+}
+
+TEST_F(IndexerOutboxTest, EventLeafSerializesEventBeforeNondeterministicData)
+{
+  ProposedTransaction body = make_body(11);
+  TxEventLog event = make_event(body, 0xaa);
+  x23::Buf actual;
+  const size_t event_xdr_size =
+      serialize_event_commitment_leaf(actual, event,
+                                      body.nondeterministic_proposal_data);
+
+  x23::Buf expected = x23::serialize(event);
+  ASSERT_EQ(event_xdr_size, expected.size());
+  x23::serialize_to(&expected, body.nondeterministic_proposal_data);
+  EXPECT_EQ(actual, expected);
+}
+
+TEST_F(IndexerOutboxTest, CommittedValidationRejectsDuplicateTransactionHash)
+{
+  ProposedTransaction body = make_body(12);
+  auto payload =
+      make_committed(20, {body}, {make_event(body, /*marker=*/0xbb)});
+  TxEventLog duplicate_event = payload.event_logs.front();
+  ProposedTransaction duplicate_body = payload.tx_bodies.front();
+  payload.event_logs.push_back(std::move(duplicate_event));
+  payload.tx_bodies.push_back(std::move(duplicate_body));
+
+  auto result = validate_indexer_committed_payload(payload)();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("duplicate"), std::string::npos)
+      << result.error();
 }
 
 } // namespace
