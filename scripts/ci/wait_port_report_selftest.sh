@@ -268,7 +268,10 @@ expect_lacks 'log under the cap is not annotated' 'truncated' "$out"
 
 # 300 bytes of 'a' then a 10-byte marker; a 32-byte cap must land inside the
 # marker and drop 278 bytes.
-{ printf 'a%.0s' $(seq 300); printf 'ENDMARKER1'; } >"$work/big.log"
+{
+  printf 'a%.0s' $(seq 300)
+  printf 'ENDMARKER1'
+} >"$work/big.log"
 out=$(bash -c "$(
   . "$HELPERS"
   capped_log_program "$(printf '%q' "$work/big.log")" 32
