@@ -144,8 +144,7 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   // hex_string prepends 0x.
   EXPECT_EQ(std::format("0x{}",
                         require_string(require_field(default_wallet, "hash"))),
-            hex_string(
-                native_default_wallet_hash().hash));
+            hex_string(native_default_wallet_hash().hash));
   EXPECT_EQ(require_field(default_wallet, "contract_size").as_integer(),
             std::optional<std::int64_t>{0});
   EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),

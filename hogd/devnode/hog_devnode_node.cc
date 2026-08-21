@@ -180,9 +180,8 @@ build_genesis_configuration(LocalBootstrapConfig const &config,
 }
 
 std::string
-build_data_dir_metadata_json(
-    LocalBootstrapConfig const &config,
-    GenesisConfiguration const &genesis_configuration)
+build_data_dir_metadata_json(LocalBootstrapConfig const &config,
+                             GenesisConfiguration const &genesis_configuration)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -1109,8 +1108,7 @@ HogDevnodeNode::open_db_backend() const
     throw std::runtime_error(std::format(
         "unsupported hog-devnode data directory: recovered chain network "
         "hash {} does not match requested network hash {}",
-        format_network_hash(
-            recovered_tip->value.proposal_header.network_hash),
+        format_network_hash(recovered_tip->value.proposal_header.network_hash),
         format_network_hash(network_hash_)));
   }
   return db;

@@ -61,14 +61,13 @@ append_bootstrap_account(GenesisConfigurationBuilder &builder,
   auto keypair = derive_bootstrap_account_keypair(seed, index);
   SHA256Hash nonce = derive_wallet_nonce(seed, index);
   ContractAddress address =
-      calculate_genesis_deployment_address(
-          sha256(*wallet_contract), nonce);
+      calculate_genesis_deployment_address(sha256(*wallet_contract), nonce);
 
   builder.add_distribution(wallet_contract, nonce,
-                             wallet_meta::entrypoint<u8"initialize">(),
-                             wallet_meta::make_calldata<u8"initialize">(
-                                 keypair.first),
-                             static_cast<int128_t>(storage_tokens));
+                           wallet_meta::entrypoint<u8"initialize">(),
+                           wallet_meta::make_calldata<u8"initialize">(
+                               keypair.first),
+                           static_cast<int128_t>(storage_tokens));
   return BootstrapAccountMetadata{
       .index = index,
       .role = role,
@@ -88,7 +87,7 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
   return BootstrapAccountArtifact{
       .genesis_configuration =
           builder.build(network_hash, cost_model,
-                           *load_stock_genesis_root_contract()),
+                        *load_stock_genesis_root_contract()),
       .initialization_txs =
           builder.make_genesis_ceremony_transactions(cost_model),
       .accounts = std::move(accounts),

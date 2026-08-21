@@ -23,7 +23,6 @@ BUILD_DIR=$1
 ./scripts/make_metric_file.sh erc20-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 >metrics_history/metrics/erc20-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-
 # Performance metrics
 ## hog_db_bench (roundrobin_payments)
 ./scripts/make_metric_file.sh hog-db-bench $GIT_branch $GIT_commit $GIT_commit_time

@@ -74,8 +74,8 @@ ERC20ExperimentState::initialize_wallets(SHA256Hash const &wallet_contract_hash)
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
         .secret_key = keys.second,
-        .address = calculate_genesis_deployment_address(
-            wallet_contract_hash, make_nonce(i)),
+        .address = calculate_genesis_deployment_address(wallet_contract_hash,
+                                                        make_nonce(i)),
         .initial_nonce = make_nonce(i),
     });
   }
@@ -109,13 +109,13 @@ ERC20ExperimentState::generate_experiment()
       kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
   builder.add_distribution(erc20_contract, make_nonce(0),
-                             erc20_meta::entrypoint<u8"initialize">(),
-                             erc20_meta::make_calldata<u8"initialize">(
-                                 owner_address),
-                             // The number of hogs each wallet starts with.
-                             wallet_initial_hogs);
-  erc20_address_ = calculate_genesis_deployment_address(
-      sha256(*erc20_contract), make_nonce(0));
+                           erc20_meta::entrypoint<u8"initialize">(),
+                           erc20_meta::make_calldata<u8"initialize">(
+                               owner_address),
+                           // The number of hogs each wallet starts with.
+                           wallet_initial_hogs);
+  erc20_address_ = calculate_genesis_deployment_address(sha256(*erc20_contract),
+                                                        make_nonce(0));
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -124,10 +124,10 @@ ERC20ExperimentState::generate_experiment()
     // in the future, with whatever initialization procedures we use, but it
     // works for now.
     builder.add_distribution(wallet_contract, wallet.initial_nonce,
-                               wallet_meta::entrypoint<u8"initialize">(),
-                               wallet_meta::make_calldata<u8"initialize">(
-                                   wallet.public_key),
-                               wallet_initial_hogs);
+                             wallet_meta::entrypoint<u8"initialize">(),
+                             wallet_meta::make_calldata<u8"initialize">(
+                                 wallet.public_key),
+                             wallet_initial_hogs);
   }
 
   // make mint txs

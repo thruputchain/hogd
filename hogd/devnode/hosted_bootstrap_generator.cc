@@ -442,8 +442,7 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     const SHA256Hash nonce =
         derive_hosted_faucet_nonce(config.faucet->public_key);
     const ContractAddress wallet_address =
-        calculate_genesis_deployment_address(
-            wallet_contract_hash, nonce);
+        calculate_genesis_deployment_address(wallet_contract_hash, nonce);
 
     for (BootstrapAccountMetadata const &account : accounts) {
       if (account.address == wallet_address) {
@@ -467,8 +466,8 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
   HostedBootstrapArtifact artifact{
       .genesis_configuration =
           builder.build(config.network_hash,
-                           StorageCostModel::default_cost_model(),
-                           *load_stock_genesis_root_contract()),
+                        StorageCostModel::default_cost_model(),
+                        *load_stock_genesis_root_contract()),
       .initialization_txs = builder.make_genesis_ceremony_transactions(
           StorageCostModel::default_cost_model()),
       .accounts = std::move(accounts),

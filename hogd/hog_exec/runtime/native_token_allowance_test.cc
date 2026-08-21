@@ -61,8 +61,7 @@ protected:
     auto token_contract = make_native_contract(std::to_underlying(
         HogexecPrecompiledNativeContracts::kNativeContractHogToken));
     write_contract(token_contract);
-    write_deployment(kNativeTokenContractAddress,
-                     token_contract);
+    write_deployment(kNativeTokenContractAddress, token_contract);
   }
 
   static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
@@ -96,8 +95,8 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r = client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value() || !r.value().value().value().is_ok() ||
@@ -150,14 +149,13 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
   // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
   // to pay the replay-cache storage cost.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r_adj = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                          make_difference(100));
     if (!r_adj.has_value() || !r_adj.value().has_value() ||
@@ -218,14 +216,13 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
   constexpr static ContractAddress kReceiverAddr = make_contract_address(176);
 
   setup_grant_storage_token(kOwnerAddr, 1'000'000);
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r =
         client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                              make_amount(50));
@@ -271,14 +268,13 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
   // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
   // to pay the replay-cache storage cost.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     for (int128_t d : {100, 50}) {
       auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                        make_difference(d));
@@ -346,15 +342,14 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   setup_grant_storage_token(kOwnerAddr,
                             1'000'000 + replay_cache_cost_charged(2));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost() * 4);
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost() * 4);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                     make_difference(100'000));
@@ -368,8 +363,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
       });
   fns_owner.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
         if (!r.has_value() || !r.value().has_value() ||
@@ -386,8 +381,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                                  make_amount(50'000));
@@ -401,8 +396,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
       });
   fns_spender.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                                  make_amount(60'000));
@@ -523,14 +518,13 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   // to pay the replay-cache storage cost, so the commit assertion below turns
   // on the allowance semantics rather than on the invoked address's funding.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto grant =
         client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
@@ -612,8 +606,7 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
   auto allowance_item = lookup_storage_item_from_db(
-      AddressAndKey{.address =
-                        kNativeTokenContractAddress,
+      AddressAndKey{.address = kNativeTokenContractAddress,
                     .key = std::move(allowance_storage_key)});
   ASSERT_TRUE(allowance_item.has_value());
   EXPECT_EQ(from_xdr(allowance_item->nnint()), kGrant);
@@ -634,8 +627,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r = client.invoke_opt<u8"transfer">(ctx, kOwnerAddr, make_amount(37));
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value() || !r.value().value().value().is_ok()) {
@@ -717,17 +710,16 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                             1'000'000 + replay_cache_cost_charged(2));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost() * 4);
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost() * 4);
 
   // Owner method 0: seed allowance for spender.
   // Owner method 1: adjust allowance for spender by +10 (must abort: overflow).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                          make_difference(
                                                              kSeedAllowance));
@@ -741,8 +733,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
       });
   fns_owner.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r_adj = client.invoke_opt<u8"adjust_allowance">(
             ctx, kSpenderAddr, make_difference(kOverflowIncrement));
         // Strict allowance must reject the overflowing increment at invoke.
@@ -762,8 +754,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r_xfer =
             client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                                  make_amount(kTransferAmount));
@@ -865,14 +857,13 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
   // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
   // to pay the replay-cache storage cost.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kOwnerAddr,
                                                      make_difference(100));
     if (r.has_value() && r.value().has_value() &&
@@ -927,23 +918,21 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   setup_grant_storage_token(kOwnerAddr,
                             1'000'000 + replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
-  setup_grant_storage_token(
-      kNativeTokenContractAddress, 0);
+  setup_grant_storage_token(kNativeTokenContractAddress, 0);
 
   auto allowance_key_data =
       Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr, kOwnerAddr);
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  AddressAndKey allowance_addrkey{
-      .address = kNativeTokenContractAddress,
-      .key = std::move(allowance_storage_key)};
+  AddressAndKey allowance_addrkey{.address = kNativeTokenContractAddress,
+                                  .key = std::move(allowance_storage_key)};
   ASSERT_FALSE(lookup_storage_item_from_db(allowance_addrkey).has_value());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r =
         client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                              make_amount(100));
@@ -991,9 +980,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   EXPECT_FALSE(lookup_storage_item_from_db(allowance_addrkey).has_value())
       << "self transfer_from must not create an allowance row";
 
-  auto native_token_balance_item =
-      lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-          kNativeTokenContractAddress));
+  auto native_token_balance_item = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kNativeTokenContractAddress));
   ASSERT_TRUE(native_token_balance_item.has_value());
   EXPECT_EQ(from_xdr(native_token_balance_item->nnint()), 0)
       << "native token contract storage balance must be unchanged";
@@ -1038,16 +1026,15 @@ TEST_F(NativeTokenAllowanceTest,
   setup_grant_storage_token(kOwnerAddr, kInitialOwnerBalance +
                                             replay_cache_cost_charged(1));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      cost_model->get_nnint_cost() * 4);
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            cost_model->get_nnint_cost() * 4);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   // Method 0: owner grants the spender an allowance for the transfer.
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto delta = make_difference(kTransferAmount);
         auto r =
             client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr, delta);
@@ -1064,8 +1051,8 @@ TEST_F(NativeTokenAllowanceTest,
   // setup has no supply record.
   fns_owner.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto allowance =
             client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
@@ -1096,8 +1083,8 @@ TEST_F(NativeTokenAllowanceTest,
   // Method 0: spender transfers the owner's funds to the all-zero address.
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"transfer_from">(
             ctx, kOwnerAddr, kZeroAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
@@ -1192,8 +1179,7 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_EQ(tx_event_log.value().events.size(), 1);
 
   auto const &event = tx_event_log.value().events[0];
-  EXPECT_EQ(event.contract_address,
-            kNativeTokenContractAddress);
+  EXPECT_EQ(event.contract_address, kNativeTokenContractAddress);
   EXPECT_EQ(event.num_topics, 3U);
   auto expected_event =
       make_event_from_cxs_struct(native_token_transfer_event_signature(),
@@ -1252,16 +1238,15 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   // Native token contract pays for the new allowance NNInt entry created in
   // Tx1; Tx2's staged debit reverts with the aborted frame so no extra cost.
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   // Owner method 0: grant the spender an allowance of kGrantAllowance.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                          make_difference(
                                                              kGrantAllowance));
@@ -1282,8 +1267,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"transfer_from">(
             ctx, kOwnerAddr, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
@@ -1380,9 +1365,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  AddressAndKey allowance_addrkey{
-      .address = kNativeTokenContractAddress,
-      .key = std::move(allowance_storage_key)};
+  AddressAndKey allowance_addrkey{.address = kNativeTokenContractAddress,
+                                  .key = std::move(allowance_storage_key)};
   auto allowance_item = lookup_storage_item_from_db(allowance_addrkey);
   ASSERT_TRUE(allowance_item.has_value())
       << "allowance NNInt entry must exist after Tx1";
@@ -1412,15 +1396,14 @@ TEST_F(NativeTokenAllowanceTest,
       kTransferAmount + kCommittedOwnerRemainder + replay_cache_cost_charged(1);
 
   setup_grant_storage_token(kOwnerAddr, kOwnerGrant);
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      cost_model->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            cost_model->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> spender_fns;
   spender_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto first = client.invoke_opt<u8"transfer_from">(
             ctx, kOwnerAddr, kReceiverAddr,
@@ -1461,8 +1444,8 @@ TEST_F(NativeTokenAllowanceTest,
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> owner_fns;
   owner_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            kNativeTokenContractAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto grant = client.invoke_opt<u8"adjust_allowance">(
             ctx, kSpenderAddr, make_difference(kGrantedAllowance));
         if (!grant.has_value() || !grant.value().has_value() ||
@@ -1537,9 +1520,8 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  AddressAndKey allowance_addrkey{
-      .address = kNativeTokenContractAddress,
-      .key = std::move(allowance_storage_key)};
+  AddressAndKey allowance_addrkey{.address = kNativeTokenContractAddress,
+                                  .key = std::move(allowance_storage_key)};
   auto allowance_item = lookup_storage_item_from_db(allowance_addrkey);
   ASSERT_TRUE(allowance_item.has_value());
   EXPECT_EQ(from_xdr(allowance_item->nnint()), kResidualAllowance);
@@ -1573,14 +1555,13 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
   constexpr static ContractAddress kReceiverAddr = make_contract_address(235);
 
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      kNativeTokenContractAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto transfer =
         client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                              make_amount(0));
@@ -1645,12 +1626,10 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  EXPECT_FALSE(
-      lookup_storage_item_from_db(
-          AddressAndKey{
-              .address = kNativeTokenContractAddress,
-              .key = std::move(allowance_storage_key)})
-          .has_value());
+  EXPECT_FALSE(lookup_storage_item_from_db(
+                   AddressAndKey{.address = kNativeTokenContractAddress,
+                                 .key = std::move(allowance_storage_key)})
+                   .has_value());
 }
 
 TEST_F(NativeTokenAllowanceTest,

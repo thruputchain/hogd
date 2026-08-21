@@ -59,8 +59,9 @@ struct BenchmarkState : public CommonBenchState {
         client_meta_t::make_calldata<u8"fibonacci">(uint32_t{5}),
         1'000'000'000);
 
-    contract_addr_ = calculate_genesis_deployment_address(
-        sha256(*fibonacci_contract), SHA256Hash{});
+    contract_addr_ =
+        calculate_genesis_deployment_address(sha256(*fibonacci_contract),
+                                             SHA256Hash{});
 
     run_genesis_configuration(genesis_builder);
   }

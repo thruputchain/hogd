@@ -188,11 +188,9 @@ protected:
     auto token_contract = make_native_contract(std::to_underlying(
         HogexecPrecompiledNativeContracts::kNativeContractHogToken));
     write_contract(token_contract);
-    write_deployment(kNativeTokenContractAddress,
-                     token_contract);
+    write_deployment(kNativeTokenContractAddress, token_contract);
     // Cover the native token's own storage writes (e.g. the allowance row).
-    setup_grant_storage_token(
-        kNativeTokenContractAddress, 10'000'000);
+    setup_grant_storage_token(kNativeTokenContractAddress, 10'000'000);
 
     // Build the wrapper contract. Each method takes the target token address as
     // its sole calldata argument and drives the shared ERC20 trait.
@@ -378,8 +376,7 @@ TEST_F(NativeRv32TokenEventParityTest,
   auto rv32_transfer_from = run_op(kMethodTransferFrom, kSpender, kRv32Token);
 
   // --- native token: balance was granted in SetUp, so just the three ops. ---
-  ContractAddress const native_token =
-      kNativeTokenContractAddress;
+  ContractAddress const native_token = kNativeTokenContractAddress;
   auto native_transfer = run_op(kMethodTransfer, kAlice, native_token);
   auto native_approval = run_op(kMethodAdjustAllowance, kAlice, native_token);
   auto native_transfer_from =
@@ -417,8 +414,7 @@ TEST_F(NativeRv32TokenEventParityTest,
       run_op(kMethodNettedNegativeApproval, kAlice, kRv32Token);
 
   // --- native token: nothing to set up beyond SetUp(). ---
-  ContractAddress const native_token =
-      kNativeTokenContractAddress;
+  ContractAddress const native_token = kNativeTokenContractAddress;
   auto native_approval =
       run_op(kMethodNettedNegativeApproval, kAlice, native_token);
 

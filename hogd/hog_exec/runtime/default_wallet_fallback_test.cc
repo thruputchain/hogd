@@ -560,8 +560,8 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
   builder.set_default_wallet(
       NativeContractTestFramework::make_deployed_contract_hash(echo_obj));
   run_genesis_initialization(builder.build(NetworkHash{},
-                             *get_default_cost_model(),
-                             *load_stock_genesis_root_contract()),
+                                           *get_default_cost_model(),
+                                           *load_stock_genesis_root_contract()),
                              BlockExecutionMode::kBlockExecutionModeProposal);
 
   // The configured contract's code record must exist in the store; genesis
@@ -606,8 +606,8 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
   builder.set_default_wallet(
       NativeContractTestFramework::make_deployed_contract_hash(echo_obj));
   run_genesis_initialization(builder.build(NetworkHash{},
-                             *get_default_cost_model(),
-                             *load_stock_genesis_root_contract()),
+                                           *get_default_cost_model(),
+                                           *load_stock_genesis_root_contract()),
                              BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto rv32_ctx = std::make_unique<Rv32Context>();

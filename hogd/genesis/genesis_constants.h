@@ -18,12 +18,10 @@ genesis_contract_address(GenesisContractAddresses value)
 }
 
 inline constexpr ContractAddress kNativeTokenContractAddress =
-    genesis_contract_address(
-        GenesisContractAddresses::kAddressNativeToken);
+    genesis_contract_address(GenesisContractAddresses::kAddressNativeToken);
 
 inline constexpr ContractAddress kGenesisRootContractAddress =
-    genesis_contract_address(
-        GenesisContractAddresses::kAddressGenesisRoot);
+    genesis_contract_address(GenesisContractAddresses::kAddressGenesisRoot);
 
 // Contract-data key reserved to the native token implementation. Ordinary
 // contracts cannot write storage owned by the native token address.

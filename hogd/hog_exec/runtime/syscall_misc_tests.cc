@@ -949,8 +949,8 @@ TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
   builder.set_default_wallet(
       NativeContractTestFramework::make_deployed_contract_hash(contract));
   run_genesis_initialization(builder.build(NetworkHash{},
-                             *get_default_cost_model(),
-                             *load_stock_genesis_root_contract()),
+                                           *get_default_cost_model(),
+                                           *load_stock_genesis_root_contract()),
                              BlockExecutionMode::kBlockExecutionModeProposal);
   write_contract(contract);
 

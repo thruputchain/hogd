@@ -144,8 +144,8 @@ GenesisConfigurationBuilder::build(NetworkHash const &network_hash,
       .network_hash = network_hash,
       .storage_cost_model = cost_model.to_xdr(),
       .root_contract = root_contract,
-      .default_wallet = default_wallet_override_.value_or(
-          native_default_wallet_hash()),
+      .default_wallet =
+          default_wallet_override_.value_or(native_default_wallet_hash()),
   };
 }
 
@@ -224,8 +224,8 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
 }
 
 ContractAddress
-calculate_genesis_deployment_address(
-    SHA256Hash const &contract_hash, SHA256Hash const &nonce)
+calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
+                                     SHA256Hash const &nonce)
 {
   ContractDeploymentHashPreimage preimage{
       .deployer_address = kGenesisRootContractAddress,

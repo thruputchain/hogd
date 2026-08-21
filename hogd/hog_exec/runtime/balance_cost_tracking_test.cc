@@ -54,8 +54,7 @@ protected:
     auto token_contract = make_native_contract(std::to_underlying(
         HogexecPrecompiledNativeContracts::kNativeContractHogToken));
     write_contract(token_contract);
-    write_deployment(kNativeTokenContractAddress,
-                     token_contract);
+    write_deployment(kNativeTokenContractAddress, token_contract);
   }
 
   static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
@@ -97,8 +96,8 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   // Create a contract that will transfer tokens
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto native_token_client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
@@ -188,8 +187,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   // Create a contract that will transfer tokens
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto native_token_client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
@@ -203,8 +202,8 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
     return {};
   });
   fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto native_token_client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
@@ -328,8 +327,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
       0,
       [kFirstTransferAmount, kSecondTransferAmount](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto native_token_addr =
-            kNativeTokenContractAddress;
+        auto native_token_addr = kNativeTokenContractAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         // 1. Try to transfer (balance_cost - 1) in try_invoke frame -
@@ -486,8 +484,7 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr =
-        kNativeTokenContractAddress;
+    auto native_token_addr = kNativeTokenContractAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
     // The public transfer path is strict now; stage the deferred negative
@@ -588,8 +585,7 @@ TEST_F(BalanceCostTrackingTest,
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr =
-        kNativeTokenContractAddress;
+    auto native_token_addr = kNativeTokenContractAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
     // The public transfer path is strict now; stage the deferred negative
@@ -686,8 +682,7 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr =
-        kNativeTokenContractAddress;
+    auto native_token_addr = kNativeTokenContractAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
     auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
@@ -803,8 +798,8 @@ TEST_F(BalanceCostTrackingTest,
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto first =
         client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
@@ -922,8 +917,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
       receiver_fns;
   receiver_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto native_token_addr =
-            kNativeTokenContractAddress;
+        auto native_token_addr = kNativeTokenContractAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         auto calldata_back =
@@ -958,8 +952,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> sender_fns;
   sender_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto native_token_addr =
-            kNativeTokenContractAddress;
+        auto native_token_addr = kNativeTokenContractAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
         // (a) Transfer to fresh receiver; the amount covers its balance-cost.
@@ -1074,8 +1067,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_addr =
-        kNativeTokenContractAddress;
+    auto native_token_addr = kNativeTokenContractAddress;
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
     auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
@@ -1182,8 +1174,8 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto native_token_client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
@@ -1284,8 +1276,8 @@ TEST_F(BalanceCostTrackingTest,
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto native_token_client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
@@ -1385,8 +1377,8 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto native_token_client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
         ctx, kReceiverAddr,
@@ -1480,8 +1472,8 @@ TEST_F(BalanceCostTrackingTest,
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        kNativeTokenContractAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto const expected_total_supply = make_amount(uint128_t{0});
 
@@ -1573,8 +1565,7 @@ TEST_F(BalanceCostTrackingTest,
   ASSERT_EQ(tx_event_log.value().events.size(), 1);
 
   auto const &event = tx_event_log.value().events[0];
-  EXPECT_EQ(event.contract_address,
-            kNativeTokenContractAddress);
+  EXPECT_EQ(event.contract_address, kNativeTokenContractAddress);
   EXPECT_EQ(event.num_topics, 3U);
   auto expected_event =
       make_event_from_cxs_struct(native_token_transfer_event_signature(),

@@ -722,8 +722,7 @@ private:
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
           .root_contract = *root_contract,
-          .default_wallet =
-              native_default_wallet_hash(),
+          .default_wallet = native_default_wallet_hash(),
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;

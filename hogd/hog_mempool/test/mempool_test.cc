@@ -2300,20 +2300,19 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   const int128_t allocation = 1'000'000'000;
   using fibonacci_meta = ContractTraitMeta<fibonacci::Fibonacci>;
   builder.add_distribution(fibonacci_contract, deployment_nonce,
-                             fibonacci_meta::entrypoint<u8"fibonacci">(),
-                             fibonacci_meta::make_calldata<u8"fibonacci">(
-                                 uint32_t{0}),
-                             allocation);
+                           fibonacci_meta::entrypoint<u8"fibonacci">(),
+                           fibonacci_meta::make_calldata<u8"fibonacci">(
+                               uint32_t{0}),
+                           allocation);
   builder.add_distribution(fibonacci_contract, second_deployment_nonce,
-                             fibonacci_meta::entrypoint<u8"fibonacci">(),
-                             fibonacci_meta::make_calldata<u8"fibonacci">(
-                                 uint32_t{1}),
-                             allocation);
+                           fibonacci_meta::entrypoint<u8"fibonacci">(),
+                           fibonacci_meta::make_calldata<u8"fibonacci">(
+                               uint32_t{1}),
+                           allocation);
 
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis =
-      builder.build(MempoolTestInfra::kNetworkHash, cost_model,
-                       *root_contract);
+      builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract);
   const GenesisConfigurationHash genesis_configuration_hash = sha256(genesis);
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 std::move(genesis))(),
@@ -2394,14 +2393,14 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       genesis_configuration_hash);
 
   const ContractAddress deployed =
-      calculate_genesis_deployment_address(
-          sha256(*fibonacci_contract), deployment_nonce);
+      calculate_genesis_deployment_address(sha256(*fibonacci_contract),
+                                           deployment_nonce);
   ASSERT_TRUE(server.read_address_metadata(deployed).has_value());
   ASSERT_TRUE(server.read_address_balance(deployed).has_value());
   EXPECT_GT(*server.read_address_balance(deployed), 0);
   const ContractAddress second_deployed =
-      calculate_genesis_deployment_address(
-          sha256(*fibonacci_contract), second_deployment_nonce);
+      calculate_genesis_deployment_address(sha256(*fibonacci_contract),
+                                           second_deployment_nonce);
   ASSERT_TRUE(server.read_address_metadata(second_deployed).has_value());
   ASSERT_TRUE(server.read_address_balance(second_deployed).has_value());
   EXPECT_GT(*server.read_address_balance(second_deployed), 0);
