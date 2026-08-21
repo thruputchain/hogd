@@ -1742,9 +1742,19 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     cache.tx_hashes.clear();
   }
 
-  if (co_await schedulercoord_commit_block_impl(block_id, value) !=
-      SchedulerCommitOutcome::SchedulerCommitOK) {
-    co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+  // A joint DB/event commit may already have succeeded in one subsystem when
+  // the other reports failure. It is not safe to abandon or retry that block
+  // in-process; fail-stop so startup recovery can reconcile durable state.
+  SchedulerCommitOutcome commit_outcome;
+  try {
+    commit_outcome = co_await schedulercoord_commit_block_impl(block_id, value);
+  } catch (const std::exception &e) {
+    panic("genesis ceremony commit failed: {}", e.what());
+  } catch (...) {
+    panic("genesis ceremony commit failed with an unknown exception");
+  }
+  if (commit_outcome != SchedulerCommitOutcome::SchedulerCommitOK) {
+    panic("genesis ceremony commit returned {}", commit_outcome);
   }
   GenesisCeremonyResult committed(
       GenesisCeremonyOutcome::GenesisCeremonyCommitted);
