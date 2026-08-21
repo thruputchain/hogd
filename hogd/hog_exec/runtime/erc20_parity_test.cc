@@ -22,7 +22,7 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"

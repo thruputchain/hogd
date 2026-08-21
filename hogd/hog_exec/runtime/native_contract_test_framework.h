@@ -555,6 +555,21 @@ public:
     return &default_cost_model;
   }
 
+  // RPC-size regression tests deliberately lower the message cap below the
+  // size of the stock genesis-root artifact. They do not execute the root, so
+  // use the smallest configuration accepted by the genesis prerequisite
+  // loader and reserve the constrained RPC budget for the payload under test.
+  static GenesisConfiguration make_compact_test_genesis_configuration()
+  {
+    Contract root(ContractType::kRv32);
+    root.rv32_contract().data.push_back(0);
+    return GenesisConfiguration{
+        .storage_cost_model = get_default_cost_model()->to_xdr(),
+        .root_contract = std::move(root),
+        .default_wallet = native_default_wallet_hash(),
+    };
+  }
+
   PerTransactionDatabaseProxy make_new_per_tx_db_proxy(TransactionID tx_id)
   {
     assert(db_proxy_);

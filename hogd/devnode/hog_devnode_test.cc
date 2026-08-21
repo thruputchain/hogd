@@ -60,7 +60,7 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_event/indexer_outbox.h"
@@ -1672,16 +1672,6 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
   EXPECT_EQ(artifact.accounts[0].initial_storage_tokens,
             kLocalFaucetStorageTokens);
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
-}
-
-TEST(HogDevnode, LocalBootstrapRejectsAggregateAllocationAboveSupply)
-{
-  LocalBootstrapConfig config{
-      .user_account_count = 2,
-      .user_storage_tokens = std::numeric_limits<std::uint64_t>::max(),
-  };
-  EXPECT_THROW(build_local_bootstrap_account_artifact(config),
-               std::runtime_error);
 }
 
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)

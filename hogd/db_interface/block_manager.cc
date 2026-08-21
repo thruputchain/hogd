@@ -11,7 +11,6 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
-#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/genesis/genesis_configuration.h"

@@ -11,7 +11,6 @@
 
 // generated x23 headers
 #include "address_auth.hh"
-#include "auth_claim.hh"
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
@@ -22,7 +21,6 @@
 #include "hogd/base/string.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 
 #include "hogd/base/log.h"
@@ -35,6 +33,7 @@
 #include "hogd/hog_db/block_tx.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/metrics/health.h"

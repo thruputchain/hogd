@@ -4,16 +4,13 @@
 #include <cstdint>
 #include <format>
 #include <memory>
-#include <optional>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/dev_wallet.h"
 #include "contract.hh"
-#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"

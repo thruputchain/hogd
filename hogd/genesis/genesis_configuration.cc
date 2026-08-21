@@ -2,7 +2,6 @@
 #include "hogd/genesis/genesis_constants.h"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

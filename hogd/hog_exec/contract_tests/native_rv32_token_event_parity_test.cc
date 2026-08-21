@@ -19,7 +19,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
