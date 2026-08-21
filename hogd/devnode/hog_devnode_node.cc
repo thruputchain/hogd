@@ -590,7 +590,8 @@ HogDevnodeNode::HogDevnodeNode(
       panic("devnode connect to dbauth failed: {}",
             dbauth_res.error().error_code().message());
     dbauth_client_t dbauth_client = std::move(*dbauth_res);
-    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+    auth_server_ =
+        std::make_unique<AuthServer>(std::move(dbauth_client), network_hash_);
 
     auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
     auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;

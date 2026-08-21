@@ -74,17 +74,23 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
                      .address_for_db = auth_db_address.c_str(),
                      .address_for_mempool = auth_mempool_address.c_str()};
   IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(auth_card)();
-  if (intro.shards().empty()) {
+  if (intro.outcome() != IntroAuthOutcome::kSuccess) {
+    panic("Failed to introduce auth server to mempool: {}", intro.outcome());
+  }
+  if (intro.success().shards.empty()) {
     panic("No db shards registered with mempool");
   }
-  ShardCard &shard = intro.shards()[0];
+  ShardCard &shard = intro.success().shards[0];
+  CHECK_EQ(intro.success().shards.size(),
+           1U); // multiple shards not supported yet
   const std::string address_for_auth = shard.address_for_auth.c_str();
   auto dbauth_res = make_dbauth_client(address_for_auth)();
   if (!dbauth_res)
     panic("auth connect to dbauth failed: {}",
           dbauth_res.error().error_code().message());
   dbauth_client_t dbauth_client = std::move(*dbauth_res);
-  AuthServer auth_server(std::move(dbauth_client));
+  AuthServer auth_server(std::move(dbauth_client),
+                         intro.success().network_hash);
 
   auth_server.set_mempool_client(std::move(mempool_client));
   auth_db_rpc->impl()->set_auth_server(auth_server);

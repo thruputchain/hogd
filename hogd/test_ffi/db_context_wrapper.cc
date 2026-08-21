@@ -43,7 +43,8 @@ make_dbauth_client(x23::HostPort const &hostport)
 }
 } // namespace
 
-DBContext::DBContext(StorageCostModelXdr const &cost_model)
+DBContext::DBContext(StorageCostModelXdr const &cost_model,
+                     NetworkHash network_hash)
   : db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
@@ -56,8 +57,8 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model)
       x23::HostPort{"localhost", hog_db_wrapper_.coord_port()}, false);
 
   x23::HostPort auth_port{"localhost", hog_db_wrapper_.auth_port()};
-  auth_server_ =
-      std::make_unique<AuthServer>(make_dbauth_client(auth_port), 16);
+  auth_server_ = std::make_unique<AuthServer>(make_dbauth_client(auth_port),
+                                              network_hash, 16);
   auth_db_server_->max_message_size_ = hogd::kBulkRpcMaxMessageSize;
   auth_db_server_->impl()->set_auth_server(*auth_server_);
   auth_db_server_.start_server(/*port=*/0);
