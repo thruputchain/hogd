@@ -124,6 +124,13 @@ public:
   {
     // Reserve one savepoint slot for the root commit frame, which always
     // pushes a subtransaction through the same HogDb path.
+    //
+    // This bounds the number of *live* (retained) HogDb savepoints, matching
+    // the HogDb layer's own guard on get_savepoint_head(). Savepoints popped by
+    // a reverting/failing frame free depth for reuse, so this is not a
+    // cumulative per-transaction limit; cumulative TryInvoke work is bounded by
+    // gas instead (each acquisition requires a gas-charged child frame). See
+    // InvocationFrame::commit_manually_reverted_frame for the reuse rationale.
     return total_try_invoke_depth_ >= kMaxSavepointDepth - 1;
   }
 
