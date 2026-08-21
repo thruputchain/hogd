@@ -278,6 +278,10 @@ TEST_F(GenesisConfigurationUnfurlTest, DoubleLoadError)
   auto r = get_coord_client().dbsched_load_genesis_configuration(
       genesis_configuration, genesis_value);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultOK);
+  DbTipResult tip = get_coord_client().dbsched_get_tip();
+  ASSERT_EQ(tip.result(), DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.genesis_configuration_hash,
+            sha256(genesis_configuration));
   r = get_coord_client().dbsched_load_genesis_configuration(
       genesis_configuration, genesis_value);
   ASSERT_EQ(r, DbSchedResult::DbSchedResultError);

@@ -2,31 +2,11 @@
 
 #include <utility>
 
-#include "genesis.hh"
 #include "hogd/base/types.h"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
-
-// Address of the initial token claim precompile. The replay cache is disabled
-// for it: it manages replay protection itself, via the exclusive deletes of its
-// stored claim entries, so the executor consumes no uniquifier for a
-// transaction rooted at this address, and HogDb rejects any replay-cache delta
-// keyed here as invalid executor behavior. (A replay cache here would also be a
-// DoS vector, since anyone could fill it with failing transactions, which the
-// contract could not prevent.) This mirrors GenesisConfigurationLoader's
-// derivation of the same precompile address.
-constexpr ContractAddress kInitialTokenClaimPrecompileAddress = [] {
-  ContractAddress addr{};
-  uint32_t underlying =
-      std::to_underlying(GenesisContractAddresses::kAddressInitialTokenClaim);
-  addr[28] = (underlying >> 24) & 0xFF;
-  addr[29] = (underlying >> 16) & 0xFF;
-  addr[30] = (underlying >> 8) & 0xFF;
-  addr[31] = underlying & 0xFF;
-  return addr;
-}();
 
 class ReplayCache {
 public:

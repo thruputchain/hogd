@@ -1053,14 +1053,14 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfiguration
+GenesisConfigurationV2
 build_test_data_dir_genesis(LocalBootstrapConfig const &config)
 {
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration.storage_cost_model =
+  artifact.genesis_configuration_v2.storage_cost_model =
       StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration);
+  return std::move(artifact.genesis_configuration_v2);
 }
 
 void
@@ -1068,7 +1068,7 @@ write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              LocalBootstrapConfig const &config,
                              std::int64_t schema_version = 2)
 {
-  const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
+  const GenesisConfigurationV2 genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", schema_version);
@@ -1156,7 +1156,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact({});
-  GenesisConfiguration genesis = std::move(artifact.genesis_configuration);
+  GenesisConfigurationV2 genesis = std::move(artifact.genesis_configuration_v2);
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 
@@ -1644,7 +1644,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
       build_local_bootstrap_account_artifact(config);
 
   ASSERT_EQ(first.accounts.size(), 4UL);
-  ASSERT_EQ(first.initialization_txs.size(), 4UL);
+  ASSERT_EQ(first.initialization_txs.size(), 1UL);
   ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 

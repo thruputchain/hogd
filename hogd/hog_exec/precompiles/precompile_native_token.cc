@@ -20,6 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
@@ -194,6 +195,177 @@ using amount_t = std::tuple<uint64_t, uint64_t>;
 using difference_t = std::tuple<int64_t, uint64_t>;
 
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
+
+InvokeStatus<Result<void, ERC20Exception>>
+mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
+{
+  if (!ctx.consume_gas(1)) {
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  auto sender = get_msg_sender(ctx);
+  if (!sender) {
+    return sender.error();
+  }
+  if (*sender != kGenesisRootContractAddress) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  const uint128_t unsigned_amount =
+      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+  if (unsigned_amount > kMaxInt128) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+  const int128_t signed_amount = unsigned_amount;
+
+  int128_t supply_base{};
+  bool supply_base_present{};
+  int128_t supply_add{};
+  auto get =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
+                                                 true, supply_base,
+                                                 supply_base_present,
+                                                 supply_add);
+  if (!get) {
+    return NativeContractBuilder::host_fn_error_conversion(get.error());
+  }
+  if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    supply_base = 0;
+    supply_base_present = true;
+    supply_add = 0;
+  }
+  if (*get != SyscallErrorCode::kSyscallErrorCodeNone &&
+      *get != SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (!supply_base_present || integer_add_overflow(supply_add, signed_amount) ||
+      integer_add_overflow(supply_base, supply_add + signed_amount)) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  auto credit =
+      ctx.handler().modify_native_token_balance(receiver, signed_amount);
+  if (!credit) {
+    return credit.error().to_invoke_error();
+  }
+  if (!credit.value().has_value()) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+
+  const int128_t new_add = supply_add + signed_amount;
+  auto set = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+      kNativeTokenTotalSupplyKey, &supply_base, new_add,
+      std::to_underlying(StorageDeltaFlags::None));
+  if (!set) {
+    return NativeContractBuilder::host_fn_error_conversion(set.error());
+  }
+  if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  ContractAddress zero{};
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{.from_address = zero,
+                                               .to_address = receiver,
+                                               .amount =
+                                                   to_xdr(signed_amount)});
+  if (!event_buf) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
+    return emitted.error();
+  }
+  return {Result<void, ERC20Exception>::make_ok()};
+}
+
+InvokeStatus<Result<void, ERC20Exception>>
+burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
+{
+  if (!ctx.consume_gas(1)) {
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  auto sender = get_msg_sender(ctx);
+  if (!sender) {
+    return sender.error();
+  }
+  if (*sender != kGenesisRootContractAddress) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  const uint128_t unsigned_amount =
+      uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
+  if (unsigned_amount > kMaxInt128) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+  const int128_t signed_amount = unsigned_amount;
+
+  // Match the reference ERC20's strict balance debit: reject before staging
+  // any state if the requested burn exceeds the owner's running balance.
+  auto owner_balance = ctx.handler().get_native_token_balance(owner);
+  if (!owner_balance) {
+    return owner_balance.error().to_invoke_error();
+  }
+  if (!owner_balance.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (signed_amount > owner_balance.value().value()) {
+    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+  }
+
+  int128_t supply_base{};
+  bool supply_base_present{};
+  int128_t supply_add{};
+  auto get =
+      ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
+                                                 true, supply_base,
+                                                 supply_base_present,
+                                                 supply_add);
+  if (!get) {
+    return NativeContractBuilder::host_fn_error_conversion(get.error());
+  }
+  const int128_t supply_delta = -signed_amount;
+  if (*get != SyscallErrorCode::kSyscallErrorCodeNone || !supply_base_present ||
+      integer_add_overflow(supply_add, supply_delta)) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  const int128_t new_add = supply_add + supply_delta;
+  if (integer_add_overflow(supply_base, new_add) || supply_base + new_add < 0) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  auto debit = ctx.handler().modify_native_token_balance(owner, supply_delta);
+  if (!debit) {
+    return debit.error().to_invoke_error();
+  }
+  if (!debit.value().has_value()) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  auto set = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+      kNativeTokenTotalSupplyKey, &supply_base, new_add,
+      std::to_underlying(StorageDeltaFlags::None));
+  if (!set) {
+    return NativeContractBuilder::host_fn_error_conversion(set.error());
+  }
+  if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+
+  ContractAddress zero{};
+  auto event_buf =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{.from_address = owner,
+                                               .to_address = zero,
+                                               .amount =
+                                                   to_xdr(signed_amount)});
+  if (!event_buf) {
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
+    return emitted.error();
+  }
+  return {Result<void, ERC20Exception>::make_ok()};
+}
 
 // implementation functions
 InvokeStatus<Result<void, ERC20Exception>>
@@ -561,12 +733,10 @@ make_native_token_contract()
       });
 
   // mint
-  builder.add<itc_erc20::ERC20, u8"mint">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, u8"mint", 1>);
+  builder.add<itc_erc20::ERC20, u8"mint">(mint_impl);
 
   // burn
-  builder.add<itc_erc20::ERC20, u8"burn">(
-      kAlwaysErrorMethod<itc_erc20::ERC20, u8"burn", 1>);
+  builder.add<itc_erc20::ERC20, u8"burn">(burn_impl);
 
   // total_supply
   builder.add<itc_erc20::ERC20, u8"total_supply">(
@@ -577,8 +747,30 @@ make_native_token_contract()
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        uint128_t total_supply =
-            uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+        int128_t supply_base{};
+        bool supply_base_present{};
+        int128_t supply_add{};
+        auto get = runtime.syscall<SyscallNo::kNonnegativeIntGet>(
+            kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
+            supply_add);
+        if (!get.has_value()) {
+          return NativeContractBuilder::host_fn_error_conversion(get.error());
+        }
+        uint128_t total_supply;
+        if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+          // V1 compatibility during the staged migration.
+          total_supply =
+              uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+        }
+        else if (*get != SyscallErrorCode::kSyscallErrorCodeNone ||
+                 !supply_base_present ||
+                 integer_add_overflow(supply_base, supply_add) ||
+                 supply_base + supply_add < 0) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        else {
+          total_supply = supply_base + supply_add;
+        }
         return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(total_supply >> 64,
                             total_supply & 0xffffffffffffffffULL))};

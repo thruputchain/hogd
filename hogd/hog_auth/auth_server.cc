@@ -161,6 +161,15 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
       info("initializing auth server to height {}", current_height);
       current_height_futex_.broadcast(&default_threadpool());
       co_await Health::instance().set_current_block_height(current_height);
+      // No update callback is delivered for blocks that committed before this
+      // subscription was installed.  Tell the mempool which height the auth
+      // server initialized from so its downstream watermark cannot remain
+      // behind forever.  An empty batch is sufficient: a freshly initialized
+      // mempool has no cached transactions that need revalidation.
+      if (mempool_client_) {
+        co_await mempool_client_->mempoolauth_auth_data_changed(
+            current_height, KeyChangeBatch{});
+      }
     }
     else {
       info("auth server already initialized to height {} by concurrent "

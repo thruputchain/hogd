@@ -65,9 +65,27 @@ public:
     context_id_ = result.success().context_id;
 
     // Pass the genesis configuration to the db.
-    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_configuration(
+    CHECK_EQ(sched_coord_client.schedcoord_load_genesis_configuration_v2(
                  result.success().genesis_configuration)(),
              DbSchedResult::DbSchedResultOK);
+
+    SchedulerGetTipResult tip_result =
+        sched_coord_client.schedcoord_get_tip()();
+    CHECK_EQ(tip_result.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    DbTip ret = tip_result.db_tip();
+
+    GenesisCeremonyResult ceremony_result =
+        sched_coord_client.schedulercoord_commit_genesis_ceremony(
+            GenesisCeremonyRequest{
+                .expected_parent_height = 0,
+                .expected_parent_value_hash = sha256(ret.value),
+                .context = ProposalContext{.protocol = 0},
+                .transactions = t_to_parallel_batch(
+                    result.success().genesis_ceremony_txs)(),
+            })();
+    CHECK_EQ(ceremony_result.outcome(),
+             GenesisCeremonyOutcome::GenesisCeremonyCommitted);
+    ret = ceremony_result.commit().db_tip;
 
     // We need to nominate and commit the initialization transactions. So first,
     // we start by adding them to the mempool with
@@ -75,10 +93,6 @@ public:
     const x23::XdrVec<InitializationBlock> &init_txs =
         result.success().initialization_txs;
     constexpr ValidatorID kValidatorId{};
-    SchedulerGetTipResult tip_result =
-        sched_coord_client.schedcoord_get_tip()();
-    CHECK_EQ(tip_result.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-    DbTip ret = tip_result.db_tip();
     for (const InitializationBlock &init_tx : init_txs) {
       sched_coord_client.schedulercoord_submit_vetted(kValidatorId,
                                                       t_to_parallel_batch(

@@ -18,6 +18,7 @@
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
+#include "built_contracts/fibonacci.h"
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
@@ -28,7 +29,9 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
@@ -613,14 +616,14 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
@@ -663,7 +666,8 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
@@ -739,14 +743,14 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
@@ -789,7 +793,8 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, SubmitUnvettedMalformedBatchDoesNotCrash)
@@ -973,14 +978,14 @@ TEST(Mempool, NominateTxWithError)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
     EXPECT_TRUE(
@@ -1023,7 +1028,8 @@ TEST(Mempool, NominateTxWithError)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, BlockHeightsIncrement)
@@ -1036,14 +1042,14 @@ TEST(Mempool, BlockHeightsIncrement)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     DbTip db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, i);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, i + 1);
 
     auto res_nominate = propose_block(server, db_tip);
     ASSERT_EQ(res_nominate.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
 
     const Proposal &proposal = res_nominate.proposed_block().proposal;
-    EXPECT_EQ(proposal.header.block_height, i + 1);
+    EXPECT_EQ(proposal.header.block_height, i + 2);
 
     auto res_commit =
         commit_block(server, db_tip, res_nominate.proposed_block());
@@ -1053,7 +1059,8 @@ TEST(Mempool, BlockHeightsIncrement)
   SchedulerGetTipResult get_tip =
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height, kNumBlocks);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            kNumBlocks + 1);
 }
 
 TEST(Mempool, NominateCommit)
@@ -1194,8 +1201,10 @@ TEST(Mempool, CommitBlockNotFound)
 
   MempoolTestInfra server;
 
+  ConsensusValue value{};
+  value.proposal_header.block_height = 2;
   auto res_commit = server.mempool_coord_rpc().schedulercoord_commit_block(
-      /*block_id=*/1, ConsensusValue{})();
+      /*block_id=*/1, std::move(value))();
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
 }
 
@@ -1227,7 +1236,7 @@ TEST(Mempool, Validate)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1326,7 +1335,7 @@ TEST(Mempool, ValidateBatch)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
 
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -1368,7 +1377,7 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    ASSERT_EQ(db_tip.value.proposal_header.block_height, 1);
+    ASSERT_EQ(db_tip.value.proposal_header.block_height, 2);
   }
 
   // Submit the same tx again so that hog_db detects the duplicate tx and
@@ -1430,7 +1439,7 @@ TEST(Mempool, ValidateWrongTxsHash)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
     proposal.header.txs_hash[0] ^= 0xff;
   }
@@ -1477,7 +1486,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
     // Remove a transaction from the proposal.
     tx_hashes.pop_back();
@@ -1532,7 +1541,7 @@ TEST(Mempool, ValidateBatchMissingTx)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
   }
 
   // Remove a transaction.
@@ -1577,7 +1586,7 @@ TEST(Mempool, ValidateCommit)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1892,7 +1901,7 @@ TEST(Mempool, ValidateTwo)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1913,7 +1922,7 @@ TEST(Mempool, ValidateTwo)
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
   res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
@@ -1925,7 +1934,7 @@ TEST(Mempool, ValidateTwo)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
   }
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -1942,7 +1951,7 @@ TEST(Mempool, ValidateTwo)
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.id, res_validate.block().block_id);
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 3);
 }
 
 TEST(Mempool, GetTip)
@@ -1956,7 +1965,7 @@ TEST(Mempool, GetTip)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   DbTip db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   auto event_tip = Registration::registration().event_canonical_tip();
   if (!event_tip.has_value()) {
     ADD_FAILURE() << "Event canonical tip was not published";
@@ -1984,7 +1993,7 @@ TEST(Mempool, GetTip)
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
     db_tip = get_tip.db_tip();
-    EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
   }
   // The nominated block above also contains [txs[0]], we did not commit the
   // block, so [txs[0]] should not be detected as a duplicate.
@@ -1999,7 +2008,7 @@ TEST(Mempool, GetTip)
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 0);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
 
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
@@ -2009,7 +2018,7 @@ TEST(Mempool, GetTip)
   EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   db_tip = get_tip.db_tip();
   EXPECT_EQ(db_tip.id, res_validate.block().block_id);
-  EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
   event_tip = Registration::registration().event_canonical_tip();
   if (!event_tip.has_value()) {
     ADD_FAILURE() << "Event canonical tip was not updated";
@@ -2041,15 +2050,11 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =
       create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
-  auth_data.last_written_height = 0;
+  auth_data.last_written_height = 1;
   auth_data.required_weight = 1;
 
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
-  KeyChangeBatch key_changes_initial = {
-      {.address = MempoolTestInfra::kAccountAddresses[0],
-       .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
-
   Transaction &tx = txs[0].tx;
   tx.auth_claim = make_sign_claim(0);
 
@@ -2064,15 +2069,14 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // Now raise the required_weight to 10 — the tx (weight 1) no longer qualifies
   auth_data.required_weight = 10;
-  auth_data.last_written_height = 1;
+  auth_data.last_written_height = 2;
   server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                auth_data);
   KeyChangeBatch key_changes_update = {
       {.address = MempoolTestInfra::kAccountAddresses[0],
        .auth_data = x23::Ptr<AddressAuthData>(auth_data)}};
 
-  server.register_auth_data_updates(0, std::move(key_changes_initial))();
-  server.register_auth_data_updates(1, std::move(key_changes_update))();
+  server.register_auth_data_updates(2, std::move(key_changes_update))();
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
@@ -2277,7 +2281,174 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
   ASSERT_EQ(pending_proposal.wait_for(std::chrono::seconds(5)),
             std::future_status::ready);
   EXPECT_EQ(pending_proposal.get().outcome(),
-            SchedulerProposalOutcome::SchedulerProposalOK);
+            SchedulerProposalOutcome::SchedulerProposalError);
+}
+
+TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
+{
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+
+  GenesisConfigurationBuilder builder;
+  auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
+  const SHA256Hash deployment_nonce = make_test_nonce(9001);
+  const SHA256Hash second_deployment_nonce = make_test_nonce(9002);
+  const int128_t allocation = 1'000'000'000;
+  using fibonacci_meta = ContractTraitMeta<fibonacci::Fibonacci>;
+  builder.add_initial_config(fibonacci_contract, deployment_nonce,
+                             fibonacci_meta::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta::make_calldata<u8"fibonacci">(
+                                 uint32_t{0}),
+                             allocation);
+  builder.add_initial_config(fibonacci_contract, second_deployment_nonce,
+                             fibonacci_meta::entrypoint<u8"fibonacci">(),
+                             fibonacci_meta::make_calldata<u8"fibonacci">(
+                                 uint32_t{1}),
+                             allocation);
+
+  auto root_contract = load_stock_genesis_root_contract();
+  GenesisConfigurationV2 genesis =
+      builder.build_v2(MempoolTestInfra::kNetworkHash, cost_model,
+                       *root_contract);
+  const GenesisConfigurationHash genesis_configuration_hash = sha256(genesis);
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
+                std::move(genesis))(),
+            DbSchedResult::DbSchedResultOK);
+
+  auto root_balance = server.read_address_balance(kGenesisRootContractAddress);
+  ASSERT_FALSE(root_balance.has_value());
+  EXPECT_EQ(root_balance.error(), HogDbCode::kNotFound);
+  auto replay_meta =
+      server.read_address_replay_cache_meta(kGenesisRootContractAddress);
+  ASSERT_FALSE(replay_meta.has_value());
+  EXPECT_EQ(replay_meta.error(), HogDbCode::kNotFound);
+  auto total_supply = server.read_nnint128(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  ASSERT_FALSE(total_supply.has_value());
+  EXPECT_EQ(total_supply.error(), HogDbCode::kNotFound);
+
+  const SchedulerGetTipResult parent =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+  EXPECT_EQ(parent.db_tip().value.proposal_header.genesis_configuration_hash,
+            genesis_configuration_hash);
+
+  SignedTransactionBatch ceremony_txs;
+  ceremony_txs.append_range(
+      builder.make_genesis_ceremony_transactions(cost_model));
+  ASSERT_EQ(ceremony_txs.size(), 1);
+  ASSERT_EQ(ceremony_txs[0].tx.contracts_to_deploy.size(), 1);
+
+  SignedTransactionBatch unauthorized_txs = ceremony_txs;
+  unauthorized_txs[0].tx.auth_claim.source_address_claim().required_weight = 1;
+  GenesisCeremonyRequest unauthorized_request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(parent.db_tip().value),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = t_to_parallel_batch(unauthorized_txs)(),
+  };
+  auto coordinator_client = server.mempool_coord_client();
+  std::promise<void> ceremony_started;
+  auto ceremony_started_future = ceremony_started.get_future();
+  auto pending_unauthorized = std::async(std::launch::async, [&] {
+    auto ceremony = coordinator_client.schedulercoord_commit_genesis_ceremony(
+        std::move(unauthorized_request));
+    ceremony_started.set_value();
+    return ceremony();
+  });
+  ASSERT_EQ(ceremony_started_future.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  EXPECT_EQ(pending_unauthorized.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+  EXPECT_FALSE(server.mempool_coord_rpc().ready());
+
+  server.register_runtime_after_genesis();
+
+  ASSERT_EQ(pending_unauthorized.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  EXPECT_EQ(pending_unauthorized.get().outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
+
+  ParallelSignedTransactionBatch parallel = t_to_parallel_batch(ceremony_txs)();
+  GenesisCeremonyRequest request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(parent.db_tip().value),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = parallel,
+  };
+
+  // Exercise the RPC encoding and coroutine return path.  Directly invoking
+  // MempoolCoordinatorRpc does not cover ownership of the nested
+  // ParallelBatch vectors in GenesisCeremonyResult.
+  GenesisCeremonyResult result =
+      coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
+  ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
+  EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(
+      result.commit().db_tip.value.proposal_header.genesis_configuration_hash,
+      genesis_configuration_hash);
+
+  const ContractAddress deployed =
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), deployment_nonce);
+  ASSERT_TRUE(server.read_address_metadata(deployed).has_value());
+  ASSERT_TRUE(server.read_address_balance(deployed).has_value());
+  EXPECT_GT(*server.read_address_balance(deployed), 0);
+  const ContractAddress second_deployed =
+      GenesisConfigurationLoader::calculate_deployed_address(
+          sha256(*fibonacci_contract), second_deployment_nonce);
+  ASSERT_TRUE(server.read_address_metadata(second_deployed).has_value());
+  ASSERT_TRUE(server.read_address_balance(second_deployed).has_value());
+  EXPECT_GT(*server.read_address_balance(second_deployed), 0);
+  ASSERT_TRUE(
+      server.read_address_balance(kGenesisRootContractAddress).has_value());
+  EXPECT_EQ(*server.read_address_balance(kGenesisRootContractAddress), 0);
+
+  GenesisCeremonyResult retry =
+      coordinator_client.schedulercoord_commit_genesis_ceremony(
+          std::move(request))();
+  EXPECT_EQ(retry.outcome(),
+            GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+}
+
+TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
+{
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  GenesisConfigurationBuilder builder;
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
+                builder.build_or_panic(
+                    StorageCostModel::default_cost_model()))(),
+            DbSchedResult::DbSchedResultOK);
+  server.register_runtime_after_genesis();
+
+  const SchedulerGetTipResult parent =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+
+  SchedulerProposalResult normal_proposal =
+      server.mempool_coord_rpc().schedulercoord_propose_block(
+          parent.db_tip().id, ProposalContext{.protocol = 0})();
+  EXPECT_EQ(normal_proposal.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+
+  for (const BlockHeight height : {BlockHeight{0}, BlockHeight{1}}) {
+    Proposal proposal{};
+    proposal.header.network_hash = MempoolTestInfra::kNetworkHash;
+    proposal.header.block_height = height;
+    EXPECT_EQ(server.mempool_coord_rpc()
+                  .schedulercoord_validate_block(parent.db_tip().id,
+                                                 std::move(proposal))()
+                  .outcome(),
+              SchedulerValidationOutcome::SchedulerValidationInvalid);
+
+    ConsensusValue value{};
+    value.proposal_header.block_height = height;
+    EXPECT_EQ(server.mempool_coord_rpc().schedulercoord_commit_block(
+                  /*block_id=*/0, std::move(value))(),
+              SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue);
+  }
 }
 
 TEST(Mempool, SubmitUnvettedDuplicateTxDropped)

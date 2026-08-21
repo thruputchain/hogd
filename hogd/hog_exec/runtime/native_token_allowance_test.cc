@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/genesis_root.h"
+#include "built_contracts/genesis_root.hh"
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
@@ -17,8 +19,10 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -27,6 +31,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -36,6 +41,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -1645,6 +1651,166 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
               .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
               .key = std::move(allowance_storage_key)})
           .has_value());
+}
+
+TEST_F(NativeTokenAllowanceTest,
+       GenesisRootBurnAuthorityIsNotHeightLimitedByPrecompile)
+{
+  constexpr static ContractAddress kOwnerAddr = make_contract_address(236);
+  constexpr static int128_t kInitialSupply = 1'000;
+  constexpr static int128_t kBurnAmount = 400;
+
+  setup_grant_storage_token(kGenesisRootContractAddress,
+                            replay_cache_cost_charged(1));
+  setup_grant_storage_token(kOwnerAddr, kInitialSupply);
+
+  StorageKey supply_key(StorageKeyType::ContractData);
+  supply_key.contract_data_key() = kNativeTokenTotalSupplyKey;
+  const AddressAndKey supply_addrkey{.address = kNativeTokenContractAddress,
+                                     .key = supply_key};
+  write_item(supply_addrkey, std::make_shared<const StorageItemWrapper>(
+                                 kInitialSupply, get_default_cost_model()));
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+    auto burn =
+        client.invoke_opt<u8"burn">(ctx, kOwnerAddr, make_amount(kBurnAmount));
+    if (!burn.has_value() || !burn.value().has_value() ||
+        !burn.value().value().has_value() ||
+        !burn.value().value().value().is_ok()) {
+      ADD_FAILURE() << "genesis-root burn did not succeed";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+    auto burn = client.invoke_opt<u8"burn">(ctx, kOwnerAddr, make_amount(1));
+    if (!burn.has_value() || !burn.value().has_value() ||
+        !burn.value().value().has_value() ||
+        !burn.value().value().value().is_ok()) {
+      ADD_FAILURE() << "genesis-root burn failed after height 1";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+  auto root_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  constexpr int32_t kRootNativeId = 43;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kRootNativeId, std::move(root_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto root_xdr = make_native_contract(kRootNativeId);
+  write_contract(root_xdr);
+  write_deployment(kGenesisRootContractAddress, root_xdr);
+
+  auto handler_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address =
+                                         kGenesisRootContractAddress,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  EphemeralTxIdentifier tx_id;
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+  advance_block();
+
+  auto owner_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kOwnerAddr));
+  ASSERT_TRUE(owner_balance.has_value());
+  EXPECT_EQ(from_xdr(owner_balance->nnint()), kInitialSupply - kBurnAmount);
+
+  auto total_supply = lookup_storage_item_from_db(supply_addrkey);
+  ASSERT_TRUE(total_supply.has_value());
+  EXPECT_EQ(from_xdr(total_supply->nnint()), kInitialSupply - kBurnAmount);
+
+  auto event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(event_log.has_value());
+  ASSERT_EQ(event_log->exec_result, ExecResult::ExecResultOK);
+  ASSERT_EQ(event_log->events.size(), 1U);
+  auto const &event = event_log->events.front();
+  EXPECT_EQ(event.contract_address, kNativeTokenContractAddress);
+  EXPECT_EQ(event.num_topics, 3U);
+
+  ContractAddress zero{};
+  auto expected_event =
+      make_event_from_cxs_struct(native_token_transfer_event_signature(),
+                                 TransferEvent{
+                                     .from_address = kOwnerAddr,
+                                     .to_address = zero,
+                                     .amount = to_xdr(kBurnAmount),
+                                 });
+  ASSERT_TRUE(expected_event);
+  EXPECT_TRUE(std::ranges::equal(event.serialized_event, *expected_event));
+
+  // The precompile continues to trust the root after the ceremony. Issuance
+  // policy, including any height restriction, belongs to the root contract.
+  setup_grant_storage_token(kGenesisRootContractAddress,
+                            replay_cache_cost_charged(1));
+  auto late_tx = SignedTransaction{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address =
+                                         kGenesisRootContractAddress,
+                                     .entrypoint = entrypoint_from_method_id(1),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}},
+                      .uniquifier = make_new_uniquifier()}};
+  auto late_handler = make_new_system_call_handler(late_tx, *runtime_context);
+  ASSERT_TRUE(late_handler.root_invoke().is_root_success());
+  ASSERT_EQ(late_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      late_handler.emit_events(ExecResult::ExecResultOK,
+                               ProposedTransaction{.signed_tx = late_tx})());
+  advance_block();
+
+  owner_balance = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kOwnerAddr));
+  ASSERT_TRUE(owner_balance.has_value());
+  EXPECT_EQ(from_xdr(owner_balance->nnint()), kInitialSupply - kBurnAmount - 1);
+  total_supply = lookup_storage_item_from_db(supply_addrkey);
+  ASSERT_TRUE(total_supply.has_value());
+  EXPECT_EQ(from_xdr(total_supply->nnint()), kInitialSupply - kBurnAmount - 1);
+}
+
+TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
+{
+  auto root_contract = load_stock_genesis_root_contract();
+  write_contract(root_contract);
+  write_deployment(kGenesisRootContractAddress, root_contract);
+
+  advance_block();
+  ASSERT_GT(get_block_number(), 1UL);
+
+  ContractTraitClient<genesis_root::GenesisRoot> root_client(
+      kGenesisRootContractAddress);
+  auto tx = Transaction{
+      .invocation = root_client.make_invocation<u8"distribute">(
+          UINT64_MAX, x23::Vec<genesis_root::Distribution, UINT32_MAX>{},
+          make_amount(0), make_amount(0)),
+      .uniquifier = make_new_uniquifier(),
+  };
+  auto runtime_context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(tx, *runtime_context);
+  EXPECT_FALSE(handler.root_invoke().is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

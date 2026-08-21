@@ -39,7 +39,10 @@ struct HostedBootstrapGeneratorConfig {
 };
 
 struct HostedBootstrapArtifact {
+  // Legacy representation retained for callers that still inspect allocation
+  // inputs. genesis_json/genesis_hash describe genesis_configuration_v2.
   GenesisConfiguration genesis_configuration;
+  GenesisConfigurationV2 genesis_configuration_v2;
   std::vector<SignedTransaction> initialization_txs;
   std::vector<BootstrapAccountMetadata> accounts;
   std::optional<HostedFaucetMetadata> faucet;

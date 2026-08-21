@@ -185,7 +185,7 @@ TEST(Scheduler, Single)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             5'000'000'000);
   EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
-            age->average_ages[kHogAgeGroupToSchedule] + 1);
+            age->average_ages[kHogAgeGroupToSchedule] + 2);
 }
 
 TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
@@ -228,7 +228,7 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
             (5'000'000'000 * 10) - gas_limit);
   EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
             gas_limit);
-  EXPECT_EQ(after_commit->average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  EXPECT_EQ(after_commit->average_ages[kHogAgeGroupAlreadyScheduled], 2);
   after_lock.unlock();
 }
 
@@ -348,6 +348,29 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   scheduler->process_transfers(transfer)();
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+}
+
+TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress account = make_account_address(99);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = kBlock;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(age->address, account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
             static_cast<uint128_t>(5'000'000'000));
   EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
@@ -537,7 +560,7 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
 
   const auto [age, lock] = scheduler->get_cached_hog_age(account);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 2);
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }
@@ -567,11 +590,10 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  // The genesis block triggers the [auth_data_changed()] callback in the
-  // mempool, which calls [remove_from_scheduler()]. We call the same method
-  // below, so to avoid a data race, we wait for the [auth_data_changed()]
-  // callback to complete.
-  server.mempool_coord_rpc().wait_for_auth_data(/*expected_height=*/0)();
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. We call
+  // the same method below, so wait for both callbacks to complete.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();
@@ -606,11 +628,10 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  // The genesis block triggers the [auth_data_changed()] callback in the
-  // mempool, which calls [remove_from_scheduler()]. We call the same method
-  // below, so to avoid a data race, we wait for the [auth_data_changed()]
-  // callback to complete.
-  server.mempool_coord_rpc().wait_for_auth_data(/*expected_height=*/0)();
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. We call
+  // the same method below, so wait for both callbacks to complete.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();
@@ -638,11 +659,10 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
 
   MempoolTestInfra server;
-  // The genesis block triggers the [auth_data_changed()] callback in the
-  // mempool, which calls [remove_from_scheduler()]. We call the same method
-  // below, so to avoid a data race, we wait for the [auth_data_changed()]
-  // callback to complete.
-  server.mempool_coord_rpc().wait_for_auth_data(/*expected_height=*/0)();
+  // Genesis initialization and the ceremony trigger [auth_data_changed()]
+  // callbacks in the mempool, which call [remove_from_scheduler()]. We call
+  // the same method below, so wait for both callbacks to complete.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   scheduler->add_txs({txs[0], txs[1]})();

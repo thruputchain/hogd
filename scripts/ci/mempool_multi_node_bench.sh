@@ -348,6 +348,8 @@ done
 echo 'launch mempools'
 node0_mempool_host="${MEMPOOL_HOSTS[0]}"
 node1_mempool_host="${MEMPOOL_HOSTS[1]}"
+node0_mempool_exit_file="$(node_dir 0)/mempool.exit"
+node1_mempool_exit_file="$(node_dir 1)/mempool.exit"
 node0_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
@@ -384,6 +386,7 @@ $(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+printf '%s\n' "\$status" >$(printf '%q' "$node0_mempool_exit_file")
 exit \$status
 EOF
 )
@@ -396,6 +399,7 @@ $(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+printf '%s\n' "\$status" >$(printf '%q' "$node1_mempool_exit_file")
 exit \$status
 EOF
 )
@@ -471,7 +475,8 @@ for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${CHUCKD_HOSTS[$node]}" "node${node}_chuckd" "$SLOT_A_CPUS" \
     "$CHUCKD_BINARY" -l info --skip 5 --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
-    --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 --storage-dir "$(node_storage_dir "$node")" \
+    --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 \
+    --network-hash 0000000000000000000000000000000000000000000000000000000000000001 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
     --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
     --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
@@ -497,6 +502,32 @@ for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_b" "$SLOT_B_CPUS" \
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
+
+# query_proc_status reports the most recently launched process on a control
+# server. hog-db is launched on the same hosts after the mempools, so waiting
+# directly here would wait forever on the long-lived database instead. Make a
+# short marker waiter the most recent process; it exits with the status written
+# by the corresponding timed mempool wrapper.
+node0_mempool_wait_script=$(
+  cat <<EOF
+set -euo pipefail
+while [[ ! -f $(printf '%q' "$node0_mempool_exit_file") ]]; do sleep 1; done
+read -r status <$(printf '%q' "$node0_mempool_exit_file")
+exit "\$status"
+EOF
+)
+node1_mempool_wait_script=$(
+  cat <<EOF
+set -euo pipefail
+while [[ ! -f $(printf '%q' "$node1_mempool_exit_file") ]]; do sleep 1; done
+read -r status <$(printf '%q' "$node1_mempool_exit_file")
+exit "\$status"
+EOF
+)
+control_start_with_ulimit "$node0_mempool_host" "node0_mempool_wait" \
+  "$SLOT_B_CPUS" /usr/bin/bash -lc "$node0_mempool_wait_script"
+control_start_with_ulimit "$node1_mempool_host" "node1_mempool_wait" \
+  "$SLOT_B_CPUS" /usr/bin/bash -lc "$node1_mempool_wait_script"
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
 node0_mempool_pid=$!

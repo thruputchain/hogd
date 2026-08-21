@@ -193,6 +193,9 @@ public:
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block(BlockID block_id, ConsensusValue value);
 
+  x23::Async<GenesisCeremonyResult>
+  schedulercoord_commit_genesis_ceremony(GenesisCeremonyRequest request);
+
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
@@ -245,6 +248,8 @@ public:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     genesis_value.proposal_header.network_hash = network_hash_;
+    genesis_value.proposal_header.genesis_configuration_hash =
+        sha256(genesis_configuration);
     DbSchedResult ret =
         co_await db_sched_client_->dbsched_load_genesis_configuration(
             genesis_configuration, genesis_value);
@@ -273,6 +278,60 @@ public:
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
 
+    co_return ret;
+  }
+
+  x23::Async<DbSchedResult> schedcoord_load_genesis_configuration_v2(
+      GenesisConfigurationV2 genesis_configuration)
+  {
+    CHECK(initialized_.load(std::memory_order_acquire));
+
+    DbSchedResult ret;
+    {
+      x23::CoroGuard commit_cg;
+      co_await commit_cg(commit_lock_);
+
+      if (last_committed_block_.value.proposal_header.block_height != -1 ||
+          genesis_configuration.network_hash != network_hash_) {
+        co_return DbSchedResult::DbSchedResultError;
+      }
+      CHECK_EQ(auth_data_height(), -1);
+      CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
+
+      ConsensusValue genesis_value{};
+      genesis_value.proposal_header.block_height = 0;
+      genesis_value.proposal_header.network_hash = network_hash_;
+      genesis_value.proposal_header.genesis_configuration_hash =
+          sha256(genesis_configuration);
+      ret = co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
+          genesis_configuration, genesis_value);
+      if (ret != DbSchedResult::DbSchedResultOK) {
+        co_return ret;
+      }
+
+      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
+      last_committed_block_ = db_res.db_tip();
+      CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
+      CHECK_EQ(last_committed_block_.id, 0UL);
+      Registration::registration().publish_event_canonical_tip(
+          EventCanonicalTip{.block_id = last_committed_block_.id,
+                            .consensus_value = last_committed_block_.value});
+      scheduler_->set_current_block(0);
+      co_await Health::instance().set_current_block_height(0);
+      MempoolMetrics::instance().current_block_height.record(0);
+      MempoolMetrics::instance().scheduler_pending_tx_count.record(
+          scheduler_->size());
+      MempoolMetrics::instance().scheduler_tx_cache_size.record(
+          scheduler_->tx_cache_size());
+      scheduler_->transfer_finished_.store(0);
+    }
+
+    // The database's height-0 notification reaches us through the auth server,
+    // whose callback also takes commit_lock_.  Release that lock explicitly
+    // before waiting, and do not acknowledge the genesis load until the
+    // downstream auth state is usable by the ceremony RPC.
+    co_await wait_for_auth_data(/*expected_height=*/0);
     co_return ret;
   }
 
@@ -590,6 +649,10 @@ private:
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
 
+  x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block_impl(BlockID block_id,
+                                   ConsensusValue expected_value);
+
   x23::Async<bool>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
@@ -771,7 +834,6 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-
   using FailedAuthenticationTxSet =
       SynchronizedMap<TransactionHash, char, SipHash24Hasher>;
   SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
