@@ -199,7 +199,8 @@ struct ErrorSyscallMeta {
 
 TEST(MockSyscallTest, IntTypeTest)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
 
@@ -241,7 +242,8 @@ TEST(MockSyscallTest, IntTypeTest)
 
 TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -278,7 +280,8 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
 
 TEST(MockSyscallTest, SpanTest)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -314,7 +317,8 @@ TEST(MockSyscallTest, SpanTest)
 
 TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -354,7 +358,8 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 // fault. (Offset slots keep the full u64 to carry host pointers and sentinels.)
 TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -403,7 +408,8 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
 
 TEST(MockSyscallTest, NoReturnTest)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -429,7 +435,7 @@ TEST(MockSyscallTest, NoReturnTest)
 
 TEST(MockSyscallTest, NoSyscallTest)
 {
-  auto db_result = create_db(nullptr, 0);
+  auto db_result = create_db(nullptr, 0, NetworkHash{}.data());
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer free_db_defer([&] { free_db(db_result.db); });
   auto &db_context = *static_cast<DBContext *>(db_result.db);
@@ -459,7 +465,8 @@ TEST(MockSyscallTest, NoSyscallTest)
 
 TEST(MockSyscallTest, ErrorSyscallTest)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr());
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{});
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},

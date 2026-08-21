@@ -37,7 +37,7 @@ namespace hogd {
 inline void *
 make_db()
 {
-  auto db = create_db(nullptr, 0);
+  auto db = create_db(nullptr, 0, NetworkHash{}.data());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }

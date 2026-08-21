@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 21
+#define TEST_FFI_VERSION_MINOR 22
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -155,7 +155,8 @@ struct GetSnapshotStorageItemResult {
 };
 
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
-                                uint32_t serialized_cost_model_len);
+                                uint32_t serialized_cost_model_len,
+                                const uint8_t *serialized_network_hash);
 enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);

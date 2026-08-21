@@ -54,7 +54,7 @@ namespace {
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0);
+  auto db = create_db(nullptr, 0, NetworkHash{}.data());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -829,7 +829,8 @@ TEST(TestBindingsTest, CostModelRoundtrip)
 
   // Create a DB seeded with the custom cost model.
   auto db_result = create_db(serialized_model.data(),
-                             static_cast<uint32_t>(serialized_model.size()));
+                             static_cast<uint32_t>(serialized_model.size()),
+                             NetworkHash{}.data());
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });

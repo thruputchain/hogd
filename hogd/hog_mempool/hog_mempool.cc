@@ -44,6 +44,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   info("NETWORK HASH={}", format_network_hash(network_hash));
 
+  registration.set_network_hash(network_hash);
+
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.
   HttpServer metrics_server;
