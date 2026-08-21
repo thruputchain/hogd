@@ -2310,6 +2310,7 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   GenesisConfigurationV2 genesis =
       builder.build_v2(MempoolTestInfra::kNetworkHash, cost_model,
                        *root_contract);
+  const GenesisConfigurationHash genesis_configuration_hash = sha256(genesis);
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
@@ -2330,6 +2331,8 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+  EXPECT_EQ(parent.db_tip().value.proposal_header.genesis_configuration_hash,
+            genesis_configuration_hash);
 
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
@@ -2382,6 +2385,9 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(result.commit()
+                .db_tip.value.proposal_header.genesis_configuration_hash,
+            genesis_configuration_hash);
 
   const ContractAddress deployed =
       GenesisConfigurationLoader::calculate_deployed_address(

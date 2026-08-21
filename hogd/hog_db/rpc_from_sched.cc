@@ -328,9 +328,10 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   // bootstrap sentinel after the tip has already been persisted, so a bad
   // height here would otherwise be written to the db before terminating the
   // process. Reject it up front instead (issue #3246).
-  if (value.proposal_header.block_height != kGenesisBlockHeight) {
-    error("Genesis block must have height {}, got {}", kGenesisBlockHeight,
-          value.proposal_header.block_height);
+  if (value.proposal_header.block_height != kGenesisBlockHeight ||
+      value.proposal_header.genesis_configuration_hash !=
+          sha256(genesis_configuration)) {
+    error("Genesis block has an invalid height or configuration hash");
     co_return DbSchedResult::DbSchedResultError;
   }
 
@@ -497,8 +498,10 @@ HogDbSchedRpc::dbsched_load_genesis_configuration_v2(
   }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||
       value.proposal_header.network_hash !=
-          genesis_configuration.network_hash) {
-    error("invalid V2 genesis height or network hash");
+          genesis_configuration.network_hash ||
+      value.proposal_header.genesis_configuration_hash !=
+          sha256(genesis_configuration)) {
+    error("invalid V2 genesis height, network hash, or configuration hash");
     co_return DbSchedResult::DbSchedResultError;
   }
 
