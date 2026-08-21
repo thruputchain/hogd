@@ -56,6 +56,10 @@ class Rv32Context final : public RuntimeContext {
 public:
   InvokeErrorCode verify_contract(Contract const &contract) const override;
 
+  InvokeErrorCode
+  verify_and_cache_contract(Contract const &contract, SHA256Hash const &hash,
+                            SystemCallHandler &handler) const override;
+
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) override;

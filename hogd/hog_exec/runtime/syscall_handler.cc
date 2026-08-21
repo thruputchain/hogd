@@ -293,7 +293,7 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  for (auto const &[_, contract] : newly_created_contracts_) {
+  for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
     // runtime-agnostic, and rejecting here -- before any body execution --
     // guarantees commit_transaction never stages an oversized code row
@@ -305,7 +305,14 @@ SystemCallHandler::perform_initial_validation()
           InvokeError{InvokeErrorCode::Deterministic};
       return {};
     }
-    auto res = runtime_context_.verify_contract(*contract);
+    // verify_and_cache_contract lets a runtime that keeps a reusable
+    // transaction-local translation (RV32) deposit the translation it builds
+    // here into local_rv32_translations_, so a same-transaction deployment +
+    // invocation reuses it instead of lowering the identical bytes a second
+    // time on first invocation (#3536). Other runtimes fall back to plain
+    // verify_contract and cache nothing.
+    auto res =
+        runtime_context_.verify_and_cache_contract(*contract, hash, *this);
     // TODO(geoff): gas costs for verifying contracts
     if (res != InvokeErrorCode::None) {
       error("Contract verification failed");

@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -43,5 +44,17 @@ MultiplexedContext::verify_contract(Contract const &contract) const
     return InvokeErrorCode::Deterministic;
   }
   return it->second.first->verify_contract(contract);
+}
+
+InvokeErrorCode
+MultiplexedContext::verify_and_cache_contract(Contract const &contract,
+                                              SHA256Hash const &hash,
+                                              SystemCallHandler &handler) const
+{
+  auto it = contexts_.find(contract.contract_type());
+  if (it == contexts_.end()) {
+    return InvokeErrorCode::Deterministic;
+  }
+  return it->second.first->verify_and_cache_contract(contract, hash, handler);
 }
 } // namespace hogd

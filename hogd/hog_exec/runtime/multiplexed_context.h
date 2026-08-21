@@ -7,6 +7,7 @@
 #include "contract.hh"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -24,6 +25,10 @@ public:
                    SystemCallHandler *syscall_handler) override;
 
   InvokeErrorCode verify_contract(Contract const &contract) const override;
+
+  InvokeErrorCode
+  verify_and_cache_contract(Contract const &contract, SHA256Hash const &hash,
+                            SystemCallHandler &handler) const override;
 
   ~MultiplexedContext() override
   {

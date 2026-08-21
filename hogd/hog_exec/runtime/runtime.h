@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -36,6 +37,21 @@ public:
   // Perform any required validation checks on the contract.
   // In the case of webassembly, this is the webassembly validator.
   virtual InvokeErrorCode verify_contract(Contract const &contract) const = 0;
+
+  // Verify an attached contract during initial validation and, for runtimes
+  // that keep a reusable per-transaction translation (RV32), deposit the
+  // translation built here into `handler` (keyed by `hash`) so a
+  // same-transaction deployment reuses it instead of lowering the identical
+  // bytes again on first invocation (#3536). The default just runs
+  // verify_contract and caches nothing; runtimes with no reusable translation
+  // (native, test stubs) inherit it.
+  virtual InvokeErrorCode
+  verify_and_cache_contract(Contract const &contract,
+                            SHA256Hash const & /*hash*/,
+                            SystemCallHandler & /*handler*/) const
+  {
+    return verify_contract(contract);
+  }
 
   virtual SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,

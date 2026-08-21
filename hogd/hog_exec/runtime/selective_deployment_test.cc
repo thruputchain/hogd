@@ -439,8 +439,9 @@ TEST_P(SelectiveDeploymentTest,
 }
 
 // A contract deployed via the deploy syscall is invokable in the same
-// transaction: the tx-local rv32 translation path translates on first use and
-// memoizes for the second invoke.
+// transaction: the attachment is translated once during initial validation and
+// cached in local_rv32_translations_, so both in-transaction invokes reuse that
+// translation rather than lowering the bytes again.
 TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
 {
   Contract fib_contract(ContractType::kRv32);

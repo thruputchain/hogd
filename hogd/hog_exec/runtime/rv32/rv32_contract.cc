@@ -189,6 +189,26 @@ Rv32Context::verify_contract(Contract const &contract) const
   return InvokeErrorCode::None;
 }
 
+InvokeErrorCode
+Rv32Context::verify_and_cache_contract(Contract const &contract,
+                                       SHA256Hash const &hash,
+                                       SystemCallHandler &handler) const
+{
+  if (contract.contract_type() != ContractType::kRv32) {
+    return InvokeErrorCode::Deterministic;
+  }
+  // Verifying an RV32 attachment requires the same full translation as
+  // verify_contract (see above), so do it once through the transaction-local
+  // cache: a same-transaction deployment + first invocation then reuses this
+  // translation instead of lowering the identical bytes again (#3536). A null
+  // result is the same deterministic rejection verify_contract produces for a
+  // non-translatable artifact.
+  if (handler.get_or_create_local_rv32_translation(hash, contract) == nullptr) {
+    return InvokeErrorCode::Deterministic;
+  }
+  return InvokeErrorCode::None;
+}
+
 SystemStatus<std::unique_ptr<Runtime>>
 Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
                               SystemCallHandler *syscall_handler)
