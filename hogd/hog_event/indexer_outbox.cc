@@ -299,18 +299,43 @@ encode_file(const Payload &payload)
     return std::unexpected(size.error());
   }
 
-  x23::Buf payload_bytes = x23::serialize(payload);
+  // Encode the payload straight into its final offset in the file buffer
+  // rather than serializing it standalone and then appending it. A full
+  // block's candidate payload carries every event log and every transaction
+  // body, which runs to hundreds of megabytes; the append cost a second copy
+  // of all of it and doubled peak memory, both on the close_block() critical
+  // path.
+  //
+  // This works because the encoded header size does not depend on the payload:
+  // payload_byte_length is a fixed-width hyper, payload_digest and the other
+  // identity fields are fixed-width, and protocol is fixed for a given binary.
+  // So we can lay the header down with a placeholder digest, append the
+  // payload, and then rewrite the header in place once we can hash it. The
+  // CHECK_EQ below pins that size invariance -- if a future header field makes
+  // the encoding content-dependent this fails loudly instead of silently
+  // writing a corrupt record.
   IndexerOutboxRecordHeader header =
-      make_header(payload, payload_bytes.size(),
-                  sha256(x23::BufView(payload_bytes)));
+      make_header(payload, payload_size, SHA256Hash{});
   x23::Buf header_bytes = x23::serialize(header);
   if (header_bytes.size() > kMaxIndexerOutboxHeaderBytes) {
     return std::unexpected("indexer outbox header exceeds bounded limit");
   }
   x23::Buf file_bytes =
       x23::serialize(static_cast<uint32_t>(header_bytes.size()));
+  const size_t header_offset = file_bytes.size();
   file_bytes.append_range(header_bytes);
-  file_bytes.append_range(payload_bytes);
+  const size_t payload_offset = file_bytes.size();
+  file_bytes.reserve(payload_offset + payload_size);
+  x23::serialize_to(&file_bytes, payload);
+  CHECK_EQ(file_bytes.size() - payload_offset, payload_size);
+
+  header.payload_digest =
+      sha256(x23::BufView(file_bytes.data() + payload_offset, payload_size));
+  x23::Buf final_header_bytes = x23::serialize(header);
+  CHECK_EQ(final_header_bytes.size(), header_bytes.size());
+  std::copy(final_header_bytes.begin(), final_header_bytes.end(),
+            file_bytes.begin() + header_offset);
+
   if (auto valid = validate_indexer_outbox_file_size(file_bytes.size());
       !valid) {
     return std::unexpected(valid.error());
