@@ -53,6 +53,9 @@ ci_wait_port() {
 remote_run() {
   [ \"\${REMOTE_RUN_FAILS:-0}\" != 1 ] || { echo 'ssh: closed' >&2; return 255; }
   echo \"REMOTE(\$1): \$2\"
+  [ \"\${REMOTE_RUN_TIMES_OUT:-0}\" != 1 ] || return 124
+  [ -z \"\${REMOTE_EXIT_STATUS:-}\" ] ||
+    echo \"CONTROL_EXIT_STATUS=\$REMOTE_EXIT_STATUS\"
 }
 record() { CONTROL_LOG_RECORDS+=(\"\$1|\$2|\$3|\$4\"); }
 $1
@@ -155,5 +158,73 @@ expect_contains 'log milestone timeout names the process' \
   'waiting for node0_mempool to report: PORT mempool.executor=8071' "$out"
 expect_contains 'log milestone timeout replays logs' \
   'node0_mempool on hog7' "$out"
+
+# An exit wait reports the status the process recorded, not the status of
+# whatever the control server happens to have launched most recently.
+out=$(REMOTE_EXIT_STATUS=0 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_exit_status node0_mempool /work/node0/mempool.exit
+echo REACHED
+') && status=0 || status=$?
+expect_status 'recorded clean exit' 0 "$status"
+expect_contains 'clean exit names the status' \
+  'node0_mempool on hog7 exited with status 0' "$out"
+expect_contains 'clean exit runs on' 'REACHED' "$out"
+
+out=$(REMOTE_EXIT_STATUS=2 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_exit_status node0_mempool /work/node0/mempool.exit
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'recorded failure is returned' 2 "$status"
+expect_contains 'recorded failure names the status' \
+  'node0_mempool on hog7 exited with status 2' "$out"
+expect_lacks 'recorded failure stops the script' 'NOT REACHED' "$out"
+
+# A marker that never appears is a wait that did not happen, not a clean exit.
+out=$(REMOTE_RUN_TIMES_OUT=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_exit_status node0_mempool /work/node0/mempool.exit
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'exit wait times out' 124 "$status"
+expect_contains 'exit wait timeout names the process' \
+  'Timed out after 900s waiting for node0_mempool on hog7 to exit' "$out"
+expect_lacks 'exit wait timeout stops the script' 'NOT REACHED' "$out"
+
+out=$(REMOTE_RUN_FAILS=1 run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_exit_status node0_mempool /work/node0/mempool.exit
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unreachable host during exit wait' 255 "$status"
+expect_contains 'unreachable host during exit wait says so' \
+  'could not wait for node0_mempool on hog7 to exit (status 255)' "$out"
+expect_lacks 'unreachable host during exit wait stops the script' \
+  'NOT REACHED' "$out"
+
+# A marker holding something other than a status fails the wait and shows what
+# was read instead, and the marker path reaches the remote shell quoted.
+out=$(run_case '
+record hog7 node0_mempool /tmp/mempool.out /tmp/mempool.err
+wait_control_exit_status node0_mempool "/work/a b/mempool.exit"
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'unusable recorded status' 1 "$status"
+expect_contains 'unusable recorded status says so' \
+  'recorded no usable exit status in /work/a b/mempool.exit' "$out"
+expect_contains 'exit wait quotes the marker path' \
+  '/work/a\\\ b/mempool.exit' "$out"
+expect_lacks 'unusable recorded status stops the script' 'NOT REACHED' "$out"
+
+out=$(REMOTE_EXIT_STATUS=0 run_case '
+wait_control_exit_status node1_mempool /work/node1/mempool.exit
+echo NOT REACHED
+') && status=0 || status=$?
+expect_status 'exit wait for an unknown label' 1 "$status"
+expect_contains 'exit wait for an unknown label says so' \
+  'no control log record for node1_mempool' "$out"
+expect_lacks 'exit wait for an unknown label stops the script' \
+  'NOT REACHED' "$out"
 
 exit "$fail"

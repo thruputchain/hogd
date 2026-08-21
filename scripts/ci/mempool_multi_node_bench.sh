@@ -348,6 +348,14 @@ done
 echo 'launch mempools'
 node0_mempool_host="${MEMPOOL_HOSTS[0]}"
 node1_mempool_host="${MEMPOOL_HOSTS[1]}"
+# Where each timed mempool wrapper records the status it exited with, for
+# [wait_control_exit_status] to read. These live under the node's work dir,
+# which the 'clear benchmark work dirs' step above has just emptied, so a
+# marker from an earlier run cannot be mistaken for this one's.
+node0_mempool_exit_file="$(node_dir 0)/mempool.exit"
+node1_mempool_exit_file="$(node_dir 1)/mempool.exit"
+printf -v node0_mempool_exit_q '%q' "$node0_mempool_exit_file"
+printf -v node1_mempool_exit_q '%q' "$node1_mempool_exit_file"
 node0_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
@@ -384,6 +392,12 @@ $(quote_cmd timeout 360s "${node0_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+# Rename the marker into place so a reader that sees the file always sees a
+# complete status. A record that cannot be written must not replace the status
+# this exits with, which is the more useful signal of the two.
+printf '%s\n' "\$status" >${node0_mempool_exit_q}.tmp &&
+  mv -f ${node0_mempool_exit_q}.tmp ${node0_mempool_exit_q} ||
+  echo "failed to record exit status in ${node0_mempool_exit_q}" >&2
 exit \$status
 EOF
 )
@@ -396,6 +410,9 @@ $(quote_cmd timeout 360s "${node1_mempool_cmd[@]}")
 status=\$?
 set -e
 [ \$status -eq 124 ] && status=0
+printf '%s\n' "\$status" >${node1_mempool_exit_q}.tmp &&
+  mv -f ${node1_mempool_exit_q}.tmp ${node1_mempool_exit_q} ||
+  echo "failed to record exit status in ${node1_mempool_exit_q}" >&2
 exit \$status
 EOF
 )
@@ -498,9 +515,9 @@ for node in "${NODE_IDS[@]}"; do
     "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
-"$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &
+wait_control_exit_status node0_mempool "$node0_mempool_exit_file" &
 node0_mempool_pid=$!
-"$CONTROL_CLI" "$node1_mempool_host" "$CI_CONTROL_PORT" wait &
+wait_control_exit_status node1_mempool "$node1_mempool_exit_file" &
 node1_mempool_pid=$!
 
 echo 'wait for process readiness'

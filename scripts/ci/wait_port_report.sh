@@ -70,6 +70,68 @@ wait_control_log_line() {
   return 1
 }
 
+# How long a launched process gets to record its exit status before the wait
+# gives up on it.
+CONTROL_EXIT_WAIT_TIMEOUT_SEC=${CONTROL_EXIT_WAIT_TIMEOUT_SEC:-900}
+
+# Waits for one launched process to exit and returns the status it exited with.
+#
+# [control_cli wait] cannot answer this question. The control server's
+# proc-status RPC reports the host's *most recently launched* process, so a wait
+# aimed at one process silently becomes a wait on whatever was launched on that
+# host after it. On the mempool hosts that is hog-db, which outlives the
+# benchmark: the wait then never returns and the whole schedule sits idle until
+# its timeout kills it.
+#
+# The process records its own status in [$marker_path] instead, and this reads
+# it. A marker file also removes the race a poll has: the status is still there
+# to be read when the wait starts after the process has already gone.
+#
+# Returns the recorded status. A wait that could not observe the exit at all --
+# an unreachable host, a marker that never appeared, a marker holding something
+# other than a status -- says so and returns nonzero, so a run is never reported
+# as having exited cleanly on the strength of a wait that did not happen.
+wait_control_exit_status() {
+  local wanted_label=$1
+  local marker_path=$2
+  local timeout_sec=${CONTROL_EXIT_WAIT_TIMEOUT_SEC}
+  local record host label stdout_path stderr_path
+  local quoted_marker poll_command output recorded status=0
+
+  for record in ${CONTROL_LOG_RECORDS[@]+"${CONTROL_LOG_RECORDS[@]}"}; do
+    IFS='|' read -r host label stdout_path stderr_path <<<"$record"
+    [[ $label == "$wanted_label" ]] || continue
+
+    printf -v quoted_marker '%q' "$marker_path"
+    printf -v poll_command 'timeout %ss bash -c %q' "$timeout_sec" \
+      "until [ -f $quoted_marker ]; do sleep 1; done; read -r status <$quoted_marker; printf 'CONTROL_EXIT_STATUS=%s\\n' \"\$status\""
+
+    echo "Waiting for $wanted_label on $host to exit"
+    output=$(remote_run "$host" "$poll_command") || status=$?
+    if [[ $status -ne 0 ]]; then
+      if [[ $status -eq 124 ]]; then
+        echo "Timed out after ${timeout_sec}s waiting for $wanted_label on $host to exit" >&2
+      else
+        echo "could not wait for $wanted_label on $host to exit (status $status)" >&2
+      fi
+      return "$status"
+    fi
+
+    recorded=$(printf '%s\n' "$output" | sed -n 's/^CONTROL_EXIT_STATUS=//p' | tail -n 1)
+    if [[ ! $recorded =~ ^[0-9]+$ ]]; then
+      echo "$wanted_label on $host recorded no usable exit status in $marker_path" >&2
+      printf '%s\n' "$output" | sed 's/^/     | /' >&2
+      return 1
+    fi
+
+    echo "$wanted_label on $host exited with status $recorded"
+    return "$recorded"
+  done
+
+  echo "no control log record for $wanted_label" >&2
+  return 1
+}
+
 # Replays the tail of one launched process's stdout and stderr. Best effort: a
 # host that has gone away must not replace the failure being reported with a
 # failure of its own.
