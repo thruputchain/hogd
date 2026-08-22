@@ -606,9 +606,9 @@ IndexerOutboxStore::publish_candidate_encoded(
   // The payload's fixed prefix comes from encoding the same struct with empty
   // vectors. XDR lays a variable-length vector down as a u32 count followed by
   // its elements, and event_logs/tx_bodies are the struct's last two fields, so
-  // that encoding is exactly [prefix][0u32][0u32]. Dropping those two counts and
-  // emitting the real ones keeps this tied to the generated XDR rather than to a
-  // hand-rolled field layout.
+  // that encoding is exactly [prefix][0u32][0u32]. Dropping those two counts
+  // and emitting the real ones keeps this tied to the generated XDR rather than
+  // to a hand-rolled field layout.
   IndexerOutboxCandidatePayload shape{
       .format_version = kIndexerOutboxFormatVersion,
       .block_id = block_id,

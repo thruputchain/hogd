@@ -54,7 +54,6 @@ xdr_equal(const T &lhs, const T &rhs)
   return x23::serialize(lhs) == x23::serialize(rhs);
 }
 
-
 IndexerOutboxStore
 open_indexer_outbox_store(std::string_view work_directory)
 {
@@ -327,8 +326,9 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     // content-addressed by the event root and the finalized ConsensusValue
     // carries exactly that root, so there is nothing to search for -- and
     // nothing had to be written a second time at close to make this possible.
-    auto pairs = read_final_events_file(
-        work_directory_, consensus_value.proposal_header.events_hash);
+    auto pairs =
+        read_final_events_file(work_directory_,
+                               consensus_value.proposal_header.events_hash);
     if (!pairs) {
       error("failed to read events file for committed height {}: {}",
             block_height, pairs.error());
@@ -987,8 +987,6 @@ EventRPCContext::reserve_block_operation(BlockID block_id,
   co_await g(lock_);
   co_return block_operations_.try_emplace(block_id, operation).second;
 }
-
-
 
 x23::Async<void>
 EventRPCContext::finish_block_operation(

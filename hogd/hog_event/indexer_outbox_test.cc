@@ -1129,10 +1129,11 @@ TEST_F(IndexerOutboxTest, EncodedCandidateMatchesStructuredByteForByte)
     x23::serialize_to(&body_bufs[slot], candidate.tx_bodies[i]);
   }
 
-  auto encoded = store.publish_candidate_encoded(
-      42, 7, candidate.event_root,
-      static_cast<uint32_t>(candidate.event_logs.size()), event_bufs,
-      body_bufs);
+  auto encoded =
+      store.publish_candidate_encoded(42, 7, candidate.event_root,
+                                      static_cast<uint32_t>(
+                                          candidate.event_logs.size()),
+                                      event_bufs, body_bufs);
   ASSERT_TRUE(encoded.has_value()) << encoded.error();
 
   // publish_bytes() replaces an existing record only when it is byte-identical,

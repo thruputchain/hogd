@@ -1410,8 +1410,9 @@ TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
 
     // The events file outlives commit; reclaiming it belongs to a later GC
     // pass, not to promotion.
-    EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
-        temp_dir(), close_result.root_hash())));
+    EXPECT_TRUE(std::filesystem::exists(
+        EventBlockContext::final_events_filename(temp_dir(),
+                                                 close_result.root_hash())));
     auto committed = ctx.indexer_outbox_store().load_committed(9)();
     ASSERT_TRUE(committed.has_value()) << committed.error();
     expect_xdr_equal(committed->consensus_value, consensus_value);
@@ -2785,7 +2786,8 @@ TEST_F(EventRpcTest, RecoveryPicksCanonicalEventsFileAmongCompetingBlocks)
   // exactly the canonical file's name.
   ProposedTransaction canonical_body = make_body(210);
   ProposedTransaction competing_body = canonical_body;
-  competing_body.nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
+  competing_body.nondeterministic_proposal_data.nondeterministic_bits[0] ^=
+      0xff;
   ProposalTxs canonical_txs = make_proposal_txs({canonical_body});
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;

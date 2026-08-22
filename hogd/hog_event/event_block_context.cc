@@ -346,7 +346,6 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   file_done_.broadcast(pool);
 }
 
-
 x23::Async<void>
 EventBlockContext::wait_file_done()
 {
@@ -458,8 +457,7 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
   }
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
   file.seekg(0);
-  if (size > 0 &&
-      !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
+  if (size > 0 && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
     return std::unexpected(std::format("failed to read events file {}", name));
   }
 
@@ -473,18 +471,20 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
     TxEventLog event;
     ProposedTransaction body;
     try {
-      offset += x23::deserialize_from(
-          &event, x23::BufViewEnd(x23::BufView(bytes.data() + offset,
-                                               bytes.size() - offset)));
+      offset += x23::deserialize_from(&event,
+                                      x23::BufViewEnd(
+                                          x23::BufView(bytes.data() + offset,
+                                                       bytes.size() - offset)));
       if (offset >= bytes.size()) {
         return std::unexpected(
             std::format("events file {} ends with an event log that has no "
                         "transaction body",
                         name));
       }
-      offset += x23::deserialize_from(
-          &body, x23::BufViewEnd(x23::BufView(bytes.data() + offset,
-                                              bytes.size() - offset)));
+      offset += x23::deserialize_from(&body,
+                                      x23::BufViewEnd(
+                                          x23::BufView(bytes.data() + offset,
+                                                       bytes.size() - offset)));
     } catch (const x23::XdrException &e) {
       return std::unexpected(
           std::format("malformed events file {}: {}", name, e.what()));

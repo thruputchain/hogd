@@ -133,7 +133,6 @@ public:
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
-
   x23::Async<void> wait_file_done();
   void delete_events_file();
 
