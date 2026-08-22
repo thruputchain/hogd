@@ -375,12 +375,20 @@ BlockTX::commit(WorkerPool &pool)
     background_commit_worker_.submit_job(block_height_, std::move(key_changes),
                                          std::move(balance_deltas));
   } catch (const std::exception &e) {
-    panic("exception during BlockTX::commit(); RAMDB has no rollback and may "
-          "be ahead of the published DB tip: {}",
-          e.what());
+    // panic() formats its message with allocating calls and is not noexcept,
+    // so under the same memory pressure that got us here it could throw and
+    // escape this handler, defeating the fail stop. The noexcept wrapper
+    // turns any such throw into std::terminate().
+    [&e]() noexcept {
+      panic("exception during BlockTX::commit(); RAMDB has no rollback and "
+            "may be ahead of the published DB tip: {}",
+            e.what());
+    }();
   } catch (...) {
-    panic("exception during BlockTX::commit(); RAMDB has no rollback and may "
-          "be ahead of the published DB tip");
+    []() noexcept {
+      panic("exception during BlockTX::commit(); RAMDB has no rollback and "
+            "may be ahead of the published DB tip");
+    }();
   }
 
   return {};
