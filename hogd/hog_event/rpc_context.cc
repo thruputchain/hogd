@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <cerrno>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <exception>
 #include <expected>
 #include <filesystem>
@@ -253,6 +256,17 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     // That file is the block's durable record. Promotion at commit opens it by
     // the finalized ProposalHeader.events_hash, which is exactly this name, so
     // a crash between close and commit loses nothing.
+    // Claim the name before publishing under it, not after.  Another block
+    // with the same event root may already have published this file and be
+    // tearing down; if it dropped the last claim in the window between our
+    // link() and our claim, it would unlink the file we are about to depend
+    // on at commit.  Claiming first means the count never reaches zero while
+    // this block still needs the name.
+    {
+      x23::CoroGuard g;
+      co_await g(lock_);
+      retain_events_file(out_hash);
+    }
     co_await context->get().finish_file(out_hash);
   } catch (const std::exception &e) {
     panic("failed to durably close event block {}: {}", block_id, e.what());
@@ -1026,11 +1040,44 @@ EventRPCContext::gc_context(BlockID block_id)
 }
 
 void
+EventRPCContext::retain_events_file(SHA256Hash const &hash)
+{
+  ++events_file_refs_[hash];
+}
+
+void
+EventRPCContext::release_events_file(SHA256Hash const &hash)
+{
+  auto it = events_file_refs_.find(hash);
+  CHECK(it != events_file_refs_.end());
+  CHECK_GT(it->second, 0U);
+  if (--it->second > 0) {
+    return;
+  }
+  events_file_refs_.erase(it);
+  auto name = EventBlockContext::final_events_filename(work_directory_, hash);
+  if (std::remove(name.c_str()) != 0) {
+    warn("failed to remove events file '{}': {}", name, strerror(errno));
+  }
+}
+
+void
 EventRPCContext::gc_context_internal(
     std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it)
 {
   // the block must already have been shutdown by this point,
   // and should have no outstanding references
+  //
+  // Drop this block's claim on its events file before the context goes away.
+  // By here the block is settled: a committed block has already published its
+  // durable outbox record (commit_block publishes before it finishes the block
+  // operation), and an abandoned block lost to a sibling that committed.  What
+  // the file's name may still be needed for is some *other* live block that
+  // shares the same event root, which is what the refcount tracks.
+  if (it->second.get().has_root_hash()) {
+    release_events_file(it->second.get().root_hash());
+  }
+
   auto thread_ul = cache_.lock_threads();
   cache_.for_each(thread_ul, [&](ContextCache &cache) {
     std::lock_guard g(cache.mtx_);

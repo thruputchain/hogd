@@ -136,6 +136,15 @@ public:
   x23::Async<void> wait_file_done();
   void delete_events_file();
 
+  // Set once the block has published its events file; the name is shared, so
+  // reclamation is EventRPCContext's job rather than this context's.
+  bool has_root_hash() const { return has_root_hash_; }
+  SHA256Hash const &root_hash() const
+  {
+    CHECK(has_root_hash_);
+    return root_hash_;
+  }
+
   void set_block_height(BlockHeight h)
   {
     CHECK_EQ(block_height_, -1);
@@ -180,14 +189,26 @@ private:
   // so that we do not nondeterministically exclude events from the block.
   x23::Detached flush_buffer_async(std::vector<uint8_t> buf);
   void sync_file(x23::CoroGuard const &g);
-  // The rename is slow if there's already a file of the same hash.
-  // (the time to delete the previous file).
-  // In actual practice, it should be impossible for this to occur,
-  // as the output files contain transaction hashes (which are uniquified)
-  // unless multiple replicas make the exact same nomination.  We could deal
-  // with this edge case if this becomes a problem, but I suspect this will not
-  // matter significantly.
-  void rename_file(x23::CoroGuard const & /*unused*/, SHA256Hash const &hash);
+  // Publishes the temp file under its content-addressed name, first writer
+  // wins.
+  //
+  // The name is many-to-one over blocks, not one-to-one: every empty block
+  // shares one name (the empty-trie root is a constant), and two identical
+  // nominations share one.  So the file is not owned by the block that created
+  // it, and a link() that treats EEXIST as success is what keeps it immutable
+  // once published -- a rename would let a later block silently replace an
+  // earlier block's durable record.
+  //
+  // An already-present file is equally valid, not necessarily byte-identical:
+  // a shared event root pins the event logs and the nondeterministic proposal
+  // data, but pair order follows per-thread flush order, and the signature
+  // wrappers are outside both consensus roots.  Which copy survives is
+  // therefore not observable to anything that validates against the header.
+  //
+  // Because the name outlives its creator, no block may unlink it on its own
+  // authority.  EventRPCContext refcounts the name across live block contexts
+  // and reclaims it when the last holder is torn down.
+  void publish_file(x23::CoroGuard const & /*unused*/, SHA256Hash const &hash);
 
   static x23::ThreadPool &get_threadpool()
   {

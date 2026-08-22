@@ -16,6 +16,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_event/status.h"
@@ -91,6 +92,13 @@ private:
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
           it);
 
+  // Records that a block published its events file under [hash].  Caller holds
+  // lock_.
+  void retain_events_file(SHA256Hash const &hash);
+  // Drops one block's claim on [hash], unlinking the file when the last one
+  // goes away.  Caller holds lock_.
+  void release_events_file(SHA256Hash const &hash);
+
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
   x23::Async<void>
@@ -122,6 +130,19 @@ private:
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
   std::unordered_map<BlockID, BlockOperation> block_operations_;
+  // Live claims on each published <event root>.events file, guarded by lock_.
+  //
+  // The name is content-addressed, so it is shared by every block with the
+  // same event root -- all empty blocks, at every height, and any two
+  // identical nominations.  A block therefore cannot reclaim "its" file on its
+  // own: abandoning an empty block at one height would delete the file a
+  // closed-but-uncommitted empty block at another height still has to read at
+  // commit.  A claim is taken when a block publishes the file and dropped when
+  // its context is torn down, whether that is via commit or via abandonment.
+  //
+  // In-memory only.  Files that survive a crash have no claims, and reclaiming
+  // those is startup reconciliation's job.
+  std::unordered_map<SHA256Hash, size_t, SipHash24Hasher> events_file_refs_;
   // Guarded by outbox_commit_lock_. Every record through this finalized
   // height is pullable, including a crash-window record one ahead of HogDB.
   std::optional<BlockHeight> finalized_indexer_tail_;

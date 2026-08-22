@@ -159,14 +159,21 @@ EventBlockContext::sync_file(x23::CoroGuard const & /*unused*/)
 }
 
 void
-EventBlockContext::rename_file(x23::CoroGuard const & /*unused*/,
-                               SHA256Hash const &hash)
+EventBlockContext::publish_file(x23::CoroGuard const & /*unused*/,
+                                SHA256Hash const &hash)
 {
   auto old_name = temp_events_filename(work_directory_, block_id_);
   auto new_name = final_events_filename(work_directory_, hash);
-  int rc = std::rename(old_name.c_str(), new_name.c_str());
-  if (rc != 0) {
-    panic("failed to rename events file '{}' to '{}': {}", old_name, new_name,
+  // link() rather than rename(): rename would clobber, and the destination
+  // name is shared between blocks (see publish_file's declaration).  EEXIST
+  // means another block already published an equally valid file under this
+  // root, so keep theirs and drop ours.
+  if (link(old_name.c_str(), new_name.c_str()) != 0 && errno != EEXIST) {
+    panic("failed to link events file '{}' to '{}': {}", old_name, new_name,
+          strerror(errno));
+  }
+  if (std::remove(old_name.c_str()) != 0) {
+    panic("failed to remove temp events file '{}': {}", old_name,
           strerror(errno));
   }
 }
@@ -325,9 +332,9 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   root_hash_ = hash;
   has_root_hash_ = true;
   auto ts4 = x23::fastclock::now();
-  rename_file(g, hash);
+  publish_file(g, hash);
   auto ts5 = x23::fastclock::now();
-  info("time to rename file: {} ns", ts5 - ts4);
+  info("time to publish file: {} ns", ts5 - ts4);
   auto directory = Directory::open(work_directory_, /*create=*/false);
   if (!directory) {
     panic("failed to open events directory after rename: {}",
@@ -356,19 +363,14 @@ void
 EventBlockContext::delete_events_file()
 {
   events_file_.reset();
-  if (has_root_hash_) {
-    auto name = final_events_filename(work_directory_, root_hash_);
-    if (std::remove(name.c_str()) != 0) {
-      warn("delete_events_file: failed to remove final file '{}': {}", name,
-           strerror(errno));
-    }
-  }
-  else {
-    auto name = temp_events_filename(work_directory_, block_id_);
-    if (std::remove(name.c_str()) != 0) {
-      warn("delete_events_file: failed to remove temp file '{}': {}", name,
-           strerror(errno));
-    }
+  // Only the temp file is this block's to remove.  Once published, the name is
+  // content-addressed and shared with any other block that produced the same
+  // event root, so it is reclaimed by refcount in EventRPCContext.
+  CHECK(!has_root_hash_);
+  auto name = temp_events_filename(work_directory_, block_id_);
+  if (std::remove(name.c_str()) != 0) {
+    warn("delete_events_file: failed to remove temp file '{}': {}", name,
+         strerror(errno));
   }
 }
 

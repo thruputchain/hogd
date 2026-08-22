@@ -5,6 +5,8 @@
 #include <chrono> // IWYU pragma: keep
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <latch>
 #include <limits>
 #include <memory>
@@ -1315,7 +1317,7 @@ TEST_F(EventRpcTest, AbandonActiveBlockDeletesTempFile)
   EXPECT_FALSE(std::filesystem::exists(temp_file));
 }
 
-TEST_F(EventRpcTest, AbandonClosedBlockPreservesFinalFile)
+TEST_F(EventRpcTest, AbandonClosedBlockReclaimsUnsharedFinalFile)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1337,12 +1339,15 @@ TEST_F(EventRpcTest, AbandonClosedBlockPreservesFinalFile)
       EventBlockContext::final_events_filename(temp_dir(), result.root_hash());
   auto temp_file = EventBlockContext::temp_events_filename(temp_dir(), 1);
 
+  // A block is abandoned because a sibling committed, so it lost and its
+  // events file is dead.  No other live block shares this root, so the last
+  // claim on the name goes away with the context and the file is reclaimed.
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
-  EXPECT_TRUE(std::filesystem::exists(final_file));
+  EXPECT_FALSE(std::filesystem::exists(final_file));
   EXPECT_FALSE(std::filesystem::exists(temp_file));
 }
 
-TEST_F(EventRpcTest, CommitBlockKeepsFinalFile)
+TEST_F(EventRpcTest, CommitBlockReclaimsUnsharedFinalFile)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1368,7 +1373,10 @@ TEST_F(EventRpcTest, CommitBlockKeepsFinalFile)
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(1, value)(),
             RPCError::kRPCNone);
-  EXPECT_TRUE(std::filesystem::exists(final_file));
+  // Commit moved the payload into the durable committed record, so the last
+  // claim on the file drops with the context and the file goes away.
+  EXPECT_FALSE(std::filesystem::exists(final_file));
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
 }
 
 TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
@@ -1408,9 +1416,9 @@ TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(41, consensus_value)(),
               RPCError::kRPCNone);
 
-    // The events file outlives commit; reclaiming it belongs to a later GC
-    // pass, not to promotion.
-    EXPECT_TRUE(std::filesystem::exists(
+    // Promotion copied the payload into the committed record, and no other
+    // live block shares this event root, so the file is reclaimed.
+    EXPECT_FALSE(std::filesystem::exists(
         EventBlockContext::final_events_filename(temp_dir(),
                                                  close_result.root_hash())));
     auto committed = ctx.indexer_outbox_store().load_committed(9)();
@@ -1427,7 +1435,7 @@ TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
   expect_xdr_equal(committed->consensus_value, consensus_value);
 }
 
-TEST_F(EventRpcTest, AbandonClosedBlockRetainsEventsFileForReconciliation)
+TEST_F(EventRpcTest, AbandonClosedBlockReclaimsItsEventsFile)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1447,11 +1455,10 @@ TEST_F(EventRpcTest, AbandonClosedBlockRetainsEventsFileForReconciliation)
       EventBlockContext::final_events_filename(temp_dir(), closed.root_hash());
   ASSERT_TRUE(std::filesystem::exists(events_file));
 
-  // Abandoning a block that already closed must keep its events file: the
-  // block may still be finalized, and that file is the only copy of its events
-  // until commit promotes them.
+  // Abandonment follows a sibling committing at this height, so this block
+  // will never be promoted and nothing else holds its root.
   ASSERT_EQ(mempool_rpc.eventsched_abandon_block(42)(), RPCError::kRPCNone);
-  EXPECT_TRUE(std::filesystem::exists(events_file));
+  EXPECT_FALSE(std::filesystem::exists(events_file));
   EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(10)().has_value());
 }
 
@@ -1690,7 +1697,10 @@ TEST_F(EventRpcTest, CommitPromotesEventsFileAfterContextRestart)
                                                           closed.root_hash());
     value = make_consensus_value(1, closed.root_hash(), proposal_txs);
     value.prev_hash = sha256(genesis);
-    ASSERT_EQ(mempool_rpc.eventsched_abandon_block(47)(), RPCError::kRPCNone);
+    // Leave the block closed and un-torn-down: a crash runs no destructors and
+    // certainly does not abandon, and abandonment would mean a sibling
+    // committed -- the opposite of the case being modelled.  Dropping the
+    // context reclaims nothing, so the file is still there on restart.
     ASSERT_TRUE(std::filesystem::exists(final_file));
   }
 
@@ -2772,9 +2782,9 @@ TEST_F(EventRpcTest, CloseDoesNotMakeEventsPullableBeforeCommit)
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
 
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
-  // Abandoning a closed block keeps the events file, so a later commit of the
-  // same consensus value can still promote it.
-  EXPECT_TRUE(std::filesystem::exists(events_file));
+  // Abandonment means a sibling committed, so the block lost and its events
+  // file is reclaimed with its last claim.
+  EXPECT_FALSE(std::filesystem::exists(events_file));
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
   EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
@@ -2884,9 +2894,10 @@ TEST_F(EventRpcTest, IndexerPullsBlockRecoveredAfterCrashBetweenCloseAndCommit)
 
 TEST_F(EventRpcTest, ReconciliationDoesNotRepromoteArchivalCommittedTip)
 {
-  // The events file is retained after commit -- unlike the candidate record it
-  // replaces, which was removed at commit -- so its presence must never be read
-  // as "this height still needs promoting".
+  // An events file can outlive the commit of its height: a crash leaves one
+  // behind with no live claim on it, and a file shared with another block
+  // survives until that block settles.  Its presence must never be read as
+  // "this height still needs promoting".
   //
   // A committed record tagged with an archival protocol is not the
   // current-protocol tip, so a promotion gate keyed on that would fire here and
@@ -2903,8 +2914,13 @@ TEST_F(EventRpcTest, ReconciliationDoesNotRepromoteArchivalCommittedTip)
     block = commit_empty_block(ctx, 861, 1, sha256(genesis));
     events_file = EventBlockContext::final_events_filename(
         temp_dir(), block.proposal_header.events_hash);
-    ASSERT_TRUE(std::filesystem::exists(events_file));
   }
+
+  // Put the file back to stand in for one a crash left behind at this root.
+  {
+    std::ofstream leftover(events_file, std::ios::binary);
+  }
+  ASSERT_TRUE(std::filesystem::exists(events_file));
 
   rewrite_outbox_protocol(temp_dir(), IndexerOutboxStore::committed_filename(1),
                           "hogp/archival");
@@ -2916,6 +2932,94 @@ TEST_F(EventRpcTest, ReconciliationDoesNotRepromoteArchivalCommittedTip)
   EventRPCContext restarted(temp_dir());
   EXPECT_TRUE(restarted.reconcile_outbox_tip(1, block)().has_value());
   EXPECT_TRUE(std::filesystem::exists(events_file));
+}
+
+TEST_F(EventRpcTest, EmptyBlocksShareOneEventsFileAcrossHeights)
+{
+  // Every empty block has the same event root -- the empty trie's -- so they
+  // all publish under one content-addressed name.  That name is therefore not
+  // one block's property: it has to survive until the last block holding it
+  // has settled, whatever order they close and commit in.
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  ASSERT_EQ(rpc.eventsched_open_block(51)(), RPCError::kRPCNone);
+  EventBlockResult first = rpc.eventsched_close_block(51, 1)();
+  ASSERT_EQ(first.error(), RPCError::kRPCNone);
+  ASSERT_EQ(rpc.eventsched_open_block(52)(), RPCError::kRPCNone);
+  EventBlockResult second = rpc.eventsched_close_block(52, 2)();
+  ASSERT_EQ(second.error(), RPCError::kRPCNone);
+
+  EXPECT_EQ(first.root_hash(), second.root_hash());
+  const std::string events_file =
+      EventBlockContext::final_events_filename(temp_dir(), first.root_hash());
+  ASSERT_TRUE(std::filesystem::exists(events_file));
+
+  ConsensusValue one =
+      make_consensus_value(1, first.root_hash(), ProposalTxs{});
+  one.prev_hash = sha256(genesis);
+  ASSERT_EQ(rpc.eventsched_commit_block(51, one)(), RPCError::kRPCNone);
+  // Height 2 is closed and still has to read this file at commit, so
+  // committing height 1 must not take it away.
+  EXPECT_TRUE(std::filesystem::exists(events_file));
+
+  ConsensusValue two =
+      make_consensus_value(2, second.root_hash(), ProposalTxs{});
+  two.prev_hash = sha256(one);
+  ASSERT_EQ(rpc.eventsched_commit_block(52, two)(), RPCError::kRPCNone);
+  EXPECT_FALSE(std::filesystem::exists(events_file));
+
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value());
+}
+
+TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
+{
+  // Two empty nominations race at height 1 and an empty block at height 2 is
+  // already closed behind them.  All three are the same file.  When the loser
+  // at height 1 is abandoned, reclaiming "its" file would leave height 2's
+  // commit reading a file that is no longer there -- a fail-closed commit on
+  // an ordinary idle chain.
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  ASSERT_EQ(rpc.eventsched_open_block(61)(), RPCError::kRPCNone);
+  EventBlockResult loser = rpc.eventsched_close_block(61, 1)();
+  ASSERT_EQ(loser.error(), RPCError::kRPCNone);
+  ASSERT_EQ(rpc.eventsched_open_block(62)(), RPCError::kRPCNone);
+  EventBlockResult winner = rpc.eventsched_close_block(62, 1)();
+  ASSERT_EQ(winner.error(), RPCError::kRPCNone);
+  ASSERT_EQ(rpc.eventsched_open_block(63)(), RPCError::kRPCNone);
+  EventBlockResult next_height = rpc.eventsched_close_block(63, 2)();
+  ASSERT_EQ(next_height.error(), RPCError::kRPCNone);
+
+  const std::string events_file =
+      EventBlockContext::final_events_filename(temp_dir(), loser.root_hash());
+  ASSERT_EQ(loser.root_hash(), winner.root_hash());
+  ASSERT_EQ(loser.root_hash(), next_height.root_hash());
+  ASSERT_TRUE(std::filesystem::exists(events_file));
+
+  ConsensusValue one =
+      make_consensus_value(1, winner.root_hash(), ProposalTxs{});
+  one.prev_hash = sha256(genesis);
+  ASSERT_EQ(rpc.eventsched_commit_block(62, one)(), RPCError::kRPCNone);
+
+  // The sibling committing is exactly why the loser is abandoned.
+  ASSERT_EQ(rpc.eventsched_abandon_block(61)(), RPCError::kRPCNone);
+  EXPECT_TRUE(std::filesystem::exists(events_file));
+
+  ConsensusValue two =
+      make_consensus_value(2, next_height.root_hash(), ProposalTxs{});
+  two.prev_hash = sha256(one);
+  EXPECT_EQ(rpc.eventsched_commit_block(63, two)(), RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value());
+  EXPECT_FALSE(std::filesystem::exists(events_file));
 }
 
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
