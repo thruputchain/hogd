@@ -1359,6 +1359,91 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
 }
 
+// A legacy rv32 row already persisted in the database -- one that no longer
+// translates under the current loader -- must not be deployable by hash. It is
+// not attached to the transaction, so perform_initial_validation() never sees
+// it; deploy_contract() must apply the same translatability check and reject it
+// deterministically. Without that check the deployment commits and a later
+// invocation of the deployed address escalates a failed rv32 translation to
+// ExecResultUnrecoverable (#3541).
+TEST_P(SelectiveDeploymentTest, LegacyUntranslatableRv32NotDeployableByHash)
+{
+  auto legacy_contract =
+      std::make_shared<Contract>(make_untranslatable_rv32_contract());
+  ASSERT_FALSE(
+      Rv32Contract::create(legacy_contract->rv32_contract()).has_value());
+  auto legacy_hash = sha256(*legacy_contract);
+
+  constexpr static SHA256Hash kDeployNonce = []() {
+    SHA256Hash nonce{};
+    nonce[0] = 0x42;
+    return nonce;
+  }();
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_deployer;
+  fns_deployer.emplace(
+      0,
+      [legacy_hash](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto deploy_result =
+            ctx.handler().deploy_contract(kDeployNonce, legacy_hash);
+        if (!deploy_result.has_value()) {
+          return deploy_result.error().to_invoke_error();
+        }
+        if (!deploy_result.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto native_deployer =
+      std::make_unique<NativeContract>(std::move(fns_deployer));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_deployer));
+  NativeContext native_context(std::move(contract_map));
+  Rv32Context rv32_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kRv32, {&rv32_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  // The untranslatable row is persisted but NOT attached to the transaction,
+  // so it is reachable only via deploy_contract()'s resolve-by-hash path.
+  write_contract(legacy_contract);
+
+  auto deployed_addr =
+      SystemCallHandler::static_get_deploy_address(deployer_addr, kDeployNonce,
+                                                   legacy_hash);
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+  setup_grant_storage_token(deployed_addr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
+
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxDeterministicError);
+
+  advance_block();
+  EXPECT_FALSE(lookup_deployment_from_db(deployed_addr).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,

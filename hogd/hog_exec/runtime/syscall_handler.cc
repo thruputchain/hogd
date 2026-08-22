@@ -1572,6 +1572,18 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
+  // Transaction-attached contracts are verified in
+  // perform_initial_validation(); a contract resolved by hash from the database
+  // has not been. Apply the same check here so a persisted-but-untranslatable
+  // row (e.g. a legacy rv32 blob that no longer translates under the current
+  // loader) is rejected as contract-attributable invalid input at deploy time.
+  // Without this the deployment commits and a later invocation reaches
+  // make_new_runtime() with an empty cached translation, which escalates to
+  // Unrecoverable.
+  if (runtime_context_.verify_contract(contract) != InvokeErrorCode::None) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
