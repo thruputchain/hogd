@@ -160,6 +160,17 @@ public:
 
   x23::Async<IndexerOutboxStatus<void>>
   publish_committed(const IndexerOutboxCommittedPayload &payload) const;
+  // Publishes a committed record for an events file this process already
+  // streamed and made durable: the record is written by reference, without
+  // reading the file back or recomputing the consensus roots. The caller
+  // vouches for the root (the live block context computed it over the pairs it
+  // streamed), so this is only for the live commit path; restart promotion and
+  // synthetic publishers go through publish_committed, which validates the
+  // full payload. The referenced file must exist -- publication fails closed
+  // if it does not -- and its size is checked against the pull RPC replay
+  // bound so an unservable record is rejected at commit, not at first pull.
+  x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
+      const IndexerOutboxCommittedStoredPayload &stored) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
@@ -266,6 +277,26 @@ private:
   // written for them from the payload in hand.
   IndexerOutboxStatus<void>
   ensure_events_file(const IndexerOutboxCommittedPayload &payload) const;
+  // Size of the events file for [event_root], or a fail-closed error when it
+  // is missing or not a regular file.
+  IndexerOutboxStatus<uint64_t>
+  probe_events_file_size(const EventsHash &event_root) const;
+  // Reconciliation-time validation of one current-protocol committed record:
+  // decodes the record's own stored payload (a few hundred bytes) against its
+  // header, and probes that the referenced events file exists and fits the
+  // pull replay record. Deliberately does NOT read the events file: its pairs
+  // are validated fail-closed wherever they are loaded, so restart-to-ready
+  // stays proportional to record count rather than retained transaction
+  // bytes.
+  IndexerOutboxStatus<void> validate_committed_record_reference(
+      const IndexerOutboxCommittedRecordInfo &record) const;
+  // Common tail of committed publication. [payload_for_ensure] non-null means
+  // the caller holds the full payload and a missing events file is written
+  // from it (publish_committed); null means the file must already exist
+  // (publish_committed_reference).
+  x23::Async<IndexerOutboxStatus<void>> publish_committed_stored(
+      const IndexerOutboxCommittedStoredPayload &stored,
+      const IndexerOutboxCommittedPayload *payload_for_ensure) const;
 
   UniqueFd directory_fd_;
   // The parent directory, where <event_root>.events files live. A committed

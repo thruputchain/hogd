@@ -802,6 +802,26 @@ IndexerOutboxStore::publish_committed(
       .format_version = payload.format_version,
       .consensus_value = payload.consensus_value,
   };
+  co_return co_await publish_committed_stored(stored, &payload);
+}
+
+x23::Async<IndexerOutboxStatus<void>>
+IndexerOutboxStore::publish_committed_reference(
+    const IndexerOutboxCommittedStoredPayload &stored) const
+{
+  if (stored.consensus_value.proposal_header.block_height < 0) {
+    co_return std::unexpected("committed outbox height is negative");
+  }
+  co_return co_await publish_committed_stored(stored, nullptr);
+}
+
+x23::Async<IndexerOutboxStatus<void>>
+IndexerOutboxStore::publish_committed_stored(
+    const IndexerOutboxCommittedStoredPayload &stored,
+    const IndexerOutboxCommittedPayload *payload_for_ensure) const
+{
+  const BlockHeight height =
+      stored.consensus_value.proposal_header.block_height;
   auto bytes = encode_file(stored);
   if (!bytes) {
     co_return std::unexpected(bytes.error());
@@ -811,13 +831,37 @@ IndexerOutboxStore::publish_committed(
   co_await publication_guard(*committed_publication_lock_);
   // The record stores only {format_version, consensus_value}; the event logs
   // and transaction bodies live once, in the content-addressed events file the
-  // header's event_root names. The production commit path streamed that file
-  // at close, so ensure_events_file is a probe there; synthetic publishers get
-  // it written from the payload in hand. It is durable before the record that
-  // references it is published, and under the publication lock so concurrent
-  // publishes of one root cannot interleave writes to its temp file.
-  if (auto ensured = ensure_events_file(payload); !ensured) {
-    co_return ensured;
+  // header's event_root names. It is durable before the record that references
+  // it is published, and under the publication lock so concurrent publishes of
+  // one root cannot interleave writes to its temp file.
+  if (payload_for_ensure != nullptr) {
+    // The caller holds the full payload (restart promotion, synthetic
+    // publishers): a missing file is written from it, first writer wins.
+    if (auto ensured = ensure_events_file(*payload_for_ensure); !ensured) {
+      co_return ensured;
+    }
+  }
+  else {
+    // Reference publication: the live commit path, whose block streamed and
+    // fsynced the file at close. It must exist -- a record must never
+    // reference a payload that is not durable -- and it must fit the pull
+    // RPC's replay record, so an unservable block fails at commit rather than
+    // at first pull. The two batch counts (4 bytes each) are the only
+    // reassembly bytes not in the file.
+    auto file_size = probe_events_file_size(
+        stored.consensus_value.proposal_header.events_hash);
+    if (!file_size) {
+      co_return std::unexpected(file_size.error());
+    }
+    auto batches_size = checked_add(static_cast<size_t>(*file_size), 8);
+    if (!batches_size) {
+      co_return std::unexpected("events file size overflows replay record");
+    }
+    if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
+            x23::xdr_size(stored.consensus_value), *batches_size, 0);
+        !rpc_size) {
+      co_return std::unexpected(rpc_size.error());
+    }
   }
   auto exists = has_committed(height);
   if (!exists) {
@@ -859,7 +903,7 @@ IndexerOutboxStore::publish_committed(
   if (!current_epoch_started) {
     if (cache.current_origin) {
       if (height != cache.current_origin->origin.first_height ||
-          payload.consensus_value.prev_hash !=
+          stored.consensus_value.prev_hash !=
               cache.current_origin->origin.first_prev_hash) {
         co_return std::unexpected(
             "first committed record does not match current outbox epoch "
@@ -898,7 +942,7 @@ IndexerOutboxStore::publish_committed(
       co_return std::unexpected(
           "new committed outbox height is not the next canonical height");
     }
-    if (payload.consensus_value.prev_hash != cache.latest->consensus_hash) {
+    if (stored.consensus_value.prev_hash != cache.latest->consensus_hash) {
       co_return std::unexpected(
           "new committed outbox record does not link to previous consensus "
           "value");
@@ -1273,16 +1317,16 @@ IndexerOutboxStore::validate_committed_history_unlocked(
         co_return std::unexpected("committed outbox chain is discontinuous");
       }
       if (record.protocol == current_protocol) {
-        auto loaded = co_await load_committed_record(record.block_height,
-                                                     current_protocol);
-        if (!loaded) {
+        // Continuity was established from the headers above. The record's own
+        // stored payload is decoded and cross-checked (it is a few hundred
+        // bytes), and the referenced events file is probed for existence and
+        // replay size -- but its pairs are not read back here. They are
+        // validated fail-closed wherever they are loaded, so restart-to-ready
+        // scales with record count, not retained transaction bytes.
+        if (auto valid = validate_committed_record_reference(record); !valid) {
           co_return std::unexpected(
               std::format("invalid current committed outbox record at {}: {}",
-                          record.block_height, loaded.error()));
-        }
-        if (loaded->info != record) {
-          co_return std::unexpected(
-              "current committed outbox header/payload metadata mismatch");
+                          record.block_height, valid.error()));
         }
       }
       previous = record;
@@ -2028,6 +2072,69 @@ IndexerOutboxStore::assemble_committed_payload(
       .event_logs = std::move(pairs->event_logs),
       .tx_bodies = std::move(pairs->tx_bodies),
   };
+}
+
+IndexerOutboxStatus<uint64_t>
+IndexerOutboxStore::probe_events_file_size(const EventsHash &event_root) const
+{
+  const std::string name = events_file_basename(event_root);
+  struct stat file_stat{};
+  if (fstatat(events_directory_fd_.get(), name.c_str(), &file_stat,
+              AT_SYMLINK_NOFOLLOW) != 0) {
+    return std::unexpected(
+        system_error(std::format("probe events file {}", name), errno));
+  }
+  if (!S_ISREG(file_stat.st_mode) || file_stat.st_size < 0) {
+    return std::unexpected(
+        std::format("events file {} is not a regular file", name));
+  }
+  return static_cast<uint64_t>(file_stat.st_size);
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::validate_committed_record_reference(
+    const IndexerOutboxCommittedRecordInfo &record) const
+{
+  const std::string filename = committed_filename(record.block_height);
+  auto header = load_header(filename);
+  if (!header) {
+    return std::unexpected(header.error());
+  }
+  auto bytes = load_payload(filename, *header);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  auto stored =
+      decode_payload<IndexerOutboxCommittedStoredPayload>(*bytes, "committed");
+  if (!stored) {
+    return std::unexpected(stored.error());
+  }
+  if (sha256(stored->consensus_value) != header->consensus_hash ||
+      stored->consensus_value.prev_hash != header->prev_hash ||
+      stored->consensus_value.proposal_header.events_hash !=
+          header->event_root ||
+      stored->consensus_value.proposal_header.block_height !=
+          header->block_height) {
+    return std::unexpected("committed outbox header/payload metadata mismatch");
+  }
+  if (committed_record_info_from_header(*header) != record) {
+    return std::unexpected(
+        "committed outbox header does not match enumerated record");
+  }
+  auto file_size = probe_events_file_size(header->event_root);
+  if (!file_size) {
+    return std::unexpected(file_size.error());
+  }
+  auto batches_size = checked_add(static_cast<size_t>(*file_size), 8);
+  if (!batches_size) {
+    return std::unexpected("events file size overflows replay record");
+  }
+  if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
+          x23::xdr_size(stored->consensus_value), *batches_size, 0);
+      !rpc_size) {
+    return std::unexpected(rpc_size.error());
+  }
+  return {};
 }
 
 IndexerOutboxStatus<void>

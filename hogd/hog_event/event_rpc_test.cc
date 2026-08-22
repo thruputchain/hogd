@@ -1648,10 +1648,11 @@ TEST_F(EventRpcTest, PrepublishedConsensusRetryServesTheRecord)
   ASSERT_TRUE(retained.has_value()) << retained.error();
   expect_xdr_equal(*retained, committed);
 
-  // The events file IS the record's payload now, so corrupting it corrupts the
-  // record: a later retry fails closed instead of serving damaged pairs.
+  // The events file IS the record's payload now, so corrupting it corrupts
+  // the record. Commit and its retries are metadata-only and stay cheap; the
+  // damage is caught fail-closed where the payload is actually read, at load.
   corrupt_events_file(temp_dir(), closed.root_hash());
-  EXPECT_NE(mempool_rpc.eventsched_commit_block(453, value)(),
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(453, value)(),
             RPCError::kRPCNone);
   EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(13)().has_value());
 }
@@ -2700,6 +2701,32 @@ TEST_F(EventRpcTest, ReconciliationRejectsCorruptCurrentEpochPayload)
   EXPECT_FALSE(ctx.reconcile_outbox_tip(214, value)().has_value());
 }
 
+TEST_F(EventRpcTest, ReconciliationRejectsCommittedRecordWithMissingEventsFile)
+{
+  // The committed record references its events file rather than embedding the
+  // pairs, so a record whose file is gone is a record with no payload.
+  // Reconciliation probes for the file (without reading it) and must fail
+  // closed at startup rather than hand the indexer an unservable record.
+  ConsensusValue value;
+  {
+    EventRPCContext ctx(temp_dir());
+    EventMempoolRpc mempool_rpc(ctx);
+    ASSERT_EQ(mempool_rpc.eventsched_open_block(215)(), RPCError::kRPCNone);
+    EventBlockResult closed = mempool_rpc.eventsched_close_block(215, 21)();
+    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+    value = make_consensus_value(21, closed.root_hash(), ProposalTxs{});
+    initialize_test_origin(ctx, value);
+    ASSERT_EQ(mempool_rpc.eventsched_commit_block(215, value)(),
+              RPCError::kRPCNone);
+    ASSERT_TRUE(std::filesystem::remove(
+        EventBlockContext::final_events_filename(temp_dir(),
+                                                 closed.root_hash())));
+  }
+
+  EventRPCContext restarted(temp_dir());
+  EXPECT_FALSE(restarted.reconcile_outbox_tip(215, value)().has_value());
+}
+
 TEST_F(EventRpcTest, ReconciliationRejectsMismatchedCommittedRecordAhead)
 {
   EventRPCContext ctx(temp_dir());
@@ -3017,6 +3044,61 @@ TEST_F(EventRpcTest, StaleTempFileFromAReusedBlockIdIsDiscarded)
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
 }
 
+TEST_F(EventRpcTest, ReusedBlockIdWithLinkedTempDoesNotTruncatePublishedFile)
+{
+  // publish_file() links the final name and then unlinks the temp name.  A
+  // crash between the two leaves both names on ONE inode.  If a later run
+  // reuses the temp name's block id and opens the temp file in place, it
+  // corrupts the published events file through the shared inode -- and a
+  // later commit of the published block fails root validation against a file
+  // this block never touched by name.  open_events_file() must break the link
+  // (unlink + O_EXCL) instead of opening in place.
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  ProposedTransaction body = make_body(83);
+  ProposalTxs proposal_txs = make_proposal_txs({body});
+  ASSERT_EQ(rpc.eventsched_open_block(83)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_open_block(83)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(83, 1, make_event(body, 83),
+                                              body)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_close_block(83)(), RPCError::kRPCNone);
+  EventBlockResult closed = rpc.eventsched_close_block(83, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  const std::string final_file =
+      EventBlockContext::final_events_filename(temp_dir(), closed.root_hash());
+  const auto published_size = std::filesystem::file_size(final_file);
+  ASSERT_GT(published_size, 0U);
+
+  // The crash state: block 84's publish linked this same final name (same
+  // root) and died before unlinking its temp, so the temp name is a hard link
+  // to the published inode.
+  constexpr BlockID kCrashedBlockId = 84;
+  std::filesystem::create_hard_link(
+      final_file,
+      EventBlockContext::temp_events_filename(temp_dir(), kCrashedBlockId));
+
+  // A restarted scheduler reuses the crashed run's block id.  Opening the
+  // block must not disturb the published file.
+  ASSERT_EQ(rpc.eventsched_open_block(kCrashedBlockId)(), RPCError::kRPCNone);
+  EXPECT_EQ(std::filesystem::file_size(final_file), published_size);
+
+  // The published block still commits and round-trips.
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), proposal_txs);
+  value.prev_hash = sha256(genesis);
+  EXPECT_EQ(rpc.eventsched_commit_block(83, value)(), RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
+
+  ASSERT_EQ(rpc.eventsched_abandon_block(kCrashedBlockId)(),
+            RPCError::kRPCNone);
+}
+
 TEST_F(EventRpcTest, EmptyBlocksShareOneEventsFileAcrossHeights)
 {
   // Every empty block has the same event root -- the empty trie's -- so they
@@ -3111,6 +3193,26 @@ TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
   EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(2)().has_value());
 }
 
+TEST_F(EventRpcTest, OversizedEventsFileIsRejectedBeforeAllocation)
+{
+  // A block's pairs were bounded to the pull RPC replay limit at publication,
+  // so a larger file cannot be valid.  A sparse or corrupt file must be a
+  // fail-closed error, not a file-sized allocation.
+  const SHA256Hash root{};
+  const std::string name =
+      EventBlockContext::final_events_filename(temp_dir(), root);
+  {
+    std::ofstream sparse(name, std::ios::binary);
+    ASSERT_TRUE(sparse.good());
+  }
+  std::filesystem::resize_file(name, kMaxIndexerOutboxPayloadBytes + 1);
+
+  auto pairs = read_final_events_file(temp_dir(), root);
+  ASSERT_FALSE(pairs.has_value());
+  EXPECT_NE(pairs.error().find("exceeds replayable payload size"),
+            std::string::npos);
+}
+
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
 {
   EventRPCContext ctx(temp_dir());
@@ -3134,7 +3236,7 @@ TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
 }
 
-TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsCorrupt)
+TEST_F(EventRpcTest, CorruptEventsFileFailsClosedWhereItIsRead)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -3155,11 +3257,21 @@ TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsCorrupt)
   initialize_test_origin(ctx, value);
   corrupt_events_file(temp_dir(), closed.root_hash());
 
-  // A truncated events file must fail the commit rather than promote whatever
-  // pairs happened to parse.
-  EXPECT_NE(mempool_rpc.eventsched_commit_block(99, value)(),
+  // Restart promotion (no live context vouches for the file) reads the pairs
+  // back, so a truncated file fails the commit rather than promoting whatever
+  // happened to parse. Block id 100 never opened, so this takes the cold path.
+  EXPECT_NE(mempool_rpc.eventsched_commit_block(100, value)(),
             RPCError::kRPCNone);
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
+
+  // The live path is metadata-only -- this block computed the root over the
+  // pairs it streamed, so commit publishes the reference without reading the
+  // file back. At-rest damage is caught fail-closed at load instead, where the
+  // payload is actually read.
+  EXPECT_EQ(mempool_rpc.eventsched_commit_block(99, value)(),
+            RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
+  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(1)().has_value());
 }
 
 } // namespace hogd

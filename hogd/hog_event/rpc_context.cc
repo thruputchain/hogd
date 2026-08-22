@@ -42,20 +42,12 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
-
-template<typename T>
-bool
-xdr_equal(const T &lhs, const T &rhs)
-{
-  return x23::serialize(lhs) == x23::serialize(rhs);
-}
 
 IndexerOutboxStore
 open_indexer_outbox_store(std::string_view work_directory)
@@ -320,26 +312,56 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     co_await finish_block_operation(block_id, context_ptr, false);
     co_return EventError{EventErrorCode::kInternal};
   }
-  IndexerOutboxCommittedPayload committed;
   if (*committed_exists) {
-    auto loaded = co_await indexer_outbox_store_.load_committed(block_height);
-    if (!loaded) {
+    // An idempotent retry: the record's header carries the consensus hash, so
+    // the retry is matched without reading the payload back.
+    auto info =
+        indexer_outbox_store_.load_committed_record_info_raw(block_height);
+    if (!info) {
       error("failed to load committed indexer outbox record at height {}: {}",
-            block_height, loaded.error());
+            block_height, info.error());
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
-    if (!xdr_equal(loaded->consensus_value, consensus_value)) {
+    if (info->consensus_hash != sha256(consensus_value)) {
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kBadBlockID};
     }
-    committed = std::move(*loaded);
+  }
+  else if (context_ptr != nullptr) {
+    // The live commit path publishes the record by reference. This block
+    // computed the event root itself over the exact pairs it streamed, and
+    // close made the file durable before returning, so there is nothing to
+    // read back or recompute -- the root only has to match the finalized
+    // header, and the store still probes that the referenced file exists and
+    // fits the pull RPC's replay record.
+    if (!context_ptr->get().has_root_hash() ||
+        context_ptr->get().root_hash() !=
+            consensus_value.proposal_header.events_hash) {
+      error("commit_block: block {} root does not match finalized events_hash",
+            block_id);
+      co_await finish_block_operation(block_id, context_ptr, false);
+      co_return EventError{EventErrorCode::kBadBlockID};
+    }
+    const IndexerOutboxCommittedStoredPayload stored{
+        .format_version = kIndexerOutboxFormatVersion,
+        .consensus_value = consensus_value,
+    };
+    if (auto published =
+            co_await indexer_outbox_store_.publish_committed_reference(stored);
+        !published) {
+      error("failed to publish committed indexer outbox record for block {}: "
+            "{}",
+            block_id, published.error());
+      co_await finish_block_operation(block_id, context_ptr, false);
+      co_return EventError{EventErrorCode::kInternal};
+    }
   }
   else {
-    // Promotion reads the block's events file directly. That file is
-    // content-addressed by the event root and the finalized ConsensusValue
-    // carries exactly that root, so there is nothing to search for -- and
-    // nothing had to be written a second time at close to make this possible.
+    // Restart promotion: no live context vouches for the file, so read it
+    // back and validate the full payload. The file is content-addressed by
+    // the event root and the finalized ConsensusValue carries exactly that
+    // root, so there is nothing to search for.
     auto pairs =
         read_final_events_file(work_directory_,
                                consensus_value.proposal_header.events_hash);
@@ -349,7 +371,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
-    committed = IndexerOutboxCommittedPayload{
+    IndexerOutboxCommittedPayload committed{
         .format_version = kIndexerOutboxFormatVersion,
         .consensus_value = consensus_value,
         .event_logs = std::move(pairs->event_logs),

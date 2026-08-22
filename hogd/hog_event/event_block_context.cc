@@ -1,5 +1,7 @@
 #include "hogd/hog_event/event_block_context.h"
 
+#include "hogd/hog_event/indexer_outbox.h"
+
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -56,14 +58,25 @@ EventBlockContext::open_events_file()
     panic("failed to open work directory: {}", dir.error());
   }
   auto filename = temp_events_filename(work_directory_, block_id_);
-  // O_TRUNC because the name is only unique among live blocks.  Block ids are
-  // process-local, so a crash can leave a temp file that a later run reuses
-  // the name of; writing into it from offset zero would leave any longer stale
-  // tail in place.  That tail then travels into the published events file and
-  // fails root validation at commit -- an empty block after a crash would
-  // publish the whole stale file.
+  // The temp name is only unique among live blocks: block ids are
+  // process-local, so a crash can leave a temp file behind under a name a
+  // later run reuses.  Worse than a stale tail, that leftover can be a hard
+  // link to a PUBLISHED events file -- publish_file() links the final name
+  // before unlinking the temp name, and a crash between the two leaves both
+  // names on one inode -- so opening it in place (with O_TRUNC or otherwise)
+  // would corrupt the published file through the shared inode.  Unlinking the
+  // stale name first breaks any such link, and O_EXCL guarantees this block
+  // writes a fresh, empty inode of its own.
   // NOLINTNEXTLINE(misc-include-cleaner)
-  auto fd = open(filename.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
+  int fd = open(filename.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0666);
+  if (fd == -1 && errno == EEXIST) {
+    if (unlink(filename.c_str()) != 0) {
+      panic("failed to unlink stale temp events file '{}': {}", filename,
+            strerror(errno));
+    }
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    fd = open(filename.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0666);
+  }
   if (fd == -1) {
     panic("failed to open events file: {}", strerror(errno));
   }
@@ -497,6 +510,14 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
   const std::streamoff size = file.tellg();
   if (size < 0) {
     return std::unexpected(std::format("failed to size events file {}", name));
+  }
+  // A block's pairs were bounded to the pull RPC's replay limit at
+  // publication, so a larger file cannot be a valid events file.  Rejecting
+  // before the allocation keeps a corrupt or sparse file a clean fail-closed
+  // error instead of an unbounded allocation.
+  if (std::cmp_greater(size, kMaxIndexerOutboxPayloadBytes)) {
+    return std::unexpected(
+        std::format("events file {} exceeds replayable payload size", name));
   }
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
   file.seekg(0);
