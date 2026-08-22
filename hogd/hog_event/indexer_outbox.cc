@@ -17,7 +17,6 @@
 #include <optional>
 #include <span>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <stdio.h>
 #include <string>
 #include <string_view>
 #include <sys/file.h>
@@ -33,8 +32,10 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_event/event_block_context.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
@@ -242,8 +243,8 @@ make_header(const IndexerOutboxCandidatePayload &payload, size_t payload_size,
 }
 
 IndexerOutboxRecordHeader
-make_header(const IndexerOutboxCommittedPayload &payload, size_t payload_size,
-            SHA256Hash digest)
+make_header(const IndexerOutboxCommittedStoredPayload &payload,
+            size_t payload_size, SHA256Hash digest)
 {
   IndexerOutboxRecordHeader header{
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
@@ -266,9 +267,9 @@ committed_record_info_from_header(const IndexerOutboxRecordHeader &header)
       .block_height = header.block_height,
       .protocol = std::string(header.protocol),
       .payload_byte_length = header.payload_byte_length,
-      .payload_digest = header.payload_digest,
       .consensus_hash = header.consensus_hash,
       .prev_hash = header.prev_hash,
+      .event_root = header.event_root,
   };
 }
 
@@ -329,22 +330,17 @@ encode_file(const Payload &payload)
   x23::serialize_to(&file_bytes, payload);
   CHECK_EQ(file_bytes.size() - payload_offset, payload_size);
 
-  // Candidate records carry no payload digest, so the zero-digest header laid
-  // down above is already final for them.
+  // Only epoch-origin records carry a payload digest; candidate and committed
+  // headers keep the zero digest laid down above.
   //
-  // A candidate's integrity does not rest on this digest. Promotion selects it
-  // by the finalized ProposalHeader.events_hash and then re-derives both the
-  // event root and every body's transaction hash, load already checks the file
-  // size against payload_byte_length, and malformed XDR is rejected on decode.
-  // What the digest uniquely covered is the SignedTransaction signature
-  // wrapper -- deliberately outside both roots, and verified by nothing. So it
-  // bought a full-payload hash at close, and another on every candidate
-  // enumeration, for no detection this path does not already have. At-rest
-  // corruption of a candidate is now caught at promotion instead of at load:
-  // one step later, still fail-closed.
-  //
-  // Committed and epoch-origin records are archival and keep their digest.
-  if constexpr (!std::same_as<Payload, IndexerOutboxCandidatePayload>) {
+  // A committed record's integrity does not rest on a digest: its stored
+  // payload is only {format_version, consensus_value}, checked against the
+  // header's consensus_hash on load, and the event logs and transaction bodies
+  // it references are reassembled from the content-addressed events file and
+  // revalidated against both consensus roots. What a digest would uniquely
+  // cover is the SignedTransaction signature wrapper -- deliberately outside
+  // both roots, and any wrapper satisfying the auth claim is equally valid.
+  if constexpr (std::same_as<Payload, IndexerOutboxEpochOrigin>) {
     header.payload_digest =
         sha256(x23::BufView(file_bytes.data() + payload_offset, payload_size));
     x23::Buf final_header_bytes = x23::serialize(header);
@@ -534,7 +530,16 @@ IndexerOutboxStore::finish_opening(UniqueFd directory_fd)
         system_error("lock indexer outbox directory", error));
   }
 
-  IndexerOutboxStore store(std::move(directory_fd));
+  // The store lives at <events directory>/indexer-outbox, and committed
+  // records reference <event_root>.events files in that parent directory.
+  const int events_fd =
+      openat(directory_fd.get(), "..", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+  if (events_fd < 0) {
+    return std::unexpected(
+        system_error("open events directory above indexer outbox", errno));
+  }
+
+  IndexerOutboxStore store(std::move(directory_fd), UniqueFd(events_fd));
   if (auto cleaned = store.cleanup_stale_temp_files(); !cleaned) {
     return std::unexpected(cleaned.error());
   }
@@ -793,13 +798,27 @@ IndexerOutboxStore::publish_committed(
   if (auto valid = co_await validate_committed(payload, height); !valid) {
     co_return valid;
   }
-  auto bytes = encode_file(payload);
+  const IndexerOutboxCommittedStoredPayload stored{
+      .format_version = payload.format_version,
+      .consensus_value = payload.consensus_value,
+  };
+  auto bytes = encode_file(stored);
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
 
   x23::CoroGuard publication_guard;
   co_await publication_guard(*committed_publication_lock_);
+  // The record stores only {format_version, consensus_value}; the event logs
+  // and transaction bodies live once, in the content-addressed events file the
+  // header's event_root names. The production commit path streamed that file
+  // at close, so ensure_events_file is a probe there; synthetic publishers get
+  // it written from the payload in hand. It is durable before the record that
+  // references it is published, and under the publication lock so concurrent
+  // publishes of one root cannot interleave writes to its temp file.
+  if (auto ensured = ensure_events_file(payload); !ensured) {
+    co_return ensured;
+  }
   auto exists = has_committed(height);
   if (!exists) {
     co_return std::unexpected(exists.error());
@@ -946,11 +965,13 @@ IndexerOutboxStore::load_committed_record(
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
-  auto payload =
-      decode_payload<IndexerOutboxCommittedPayload>(*bytes, "committed");
+  auto payload = assemble_committed_payload(*header, *bytes);
   if (!payload) {
     co_return std::unexpected(payload.error());
   }
+  // validate_committed recomputes both consensus roots over the reassembled
+  // pairs; with the record now referencing the events file rather than
+  // embedding a digested copy, this is what validates the payload at rest.
   if (auto valid = co_await validate_committed(*payload, block_height);
       !valid) {
     co_return std::unexpected(valid.error());
@@ -1439,9 +1460,6 @@ IndexerOutboxStore::load_committed_record_info_raw(
       header->block_height != block_height) {
     return std::unexpected("committed outbox filename/header mismatch");
   }
-  if (auto valid = validate_payload_digest(filename, *header); !valid) {
-    return std::unexpected(valid.error());
-  }
   return committed_record_info_from_header(*header);
 }
 
@@ -1467,9 +1485,6 @@ IndexerOutboxStore::enumerate_committed_records_raw() const
             IndexerOutboxRecordKind::IndexerOutboxCommitted ||
         header->block_height != *height) {
       return std::unexpected("committed outbox filename/header mismatch");
-    }
-    if (auto valid = validate_payload_digest(name, *header); !valid) {
-      return std::unexpected(valid.error());
     }
     records.push_back(committed_record_info_from_header(*header));
   }
@@ -1932,15 +1947,151 @@ IndexerOutboxStore::load_payload(std::string_view filename,
     offset += static_cast<size_t>(read_size);
     file_offset += read_size;
   }
-  // Candidates carry no digest (see encode_file); the size check above plus
-  // decode and the event-root comparison in load_candidate() are what validate
-  // them, and promotion re-derives the roots.
-  if (header.record_identity.kind() !=
-          IndexerOutboxRecordKind::IndexerOutboxCandidate &&
+  // Only epoch origins carry a digest (see encode_file). Candidate and
+  // committed payloads are validated structurally: the size check above,
+  // bounds-checked decode, and -- for committed records -- the consensus_hash
+  // comparison plus root revalidation of the reassembled events-file pairs.
+  if (header.record_identity.kind() ==
+          IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
       sha256(x23::BufView(payload)) != header.payload_digest) {
     return std::unexpected("indexer outbox payload digest mismatch");
   }
   return payload;
+}
+
+namespace {
+
+std::string
+events_file_basename(const EventsHash &event_root)
+{
+  return encode_hex(std::as_bytes(std::span(event_root))) + ".events";
+}
+
+} // namespace
+
+IndexerOutboxStatus<IndexerOutboxCommittedPayload>
+IndexerOutboxStore::assemble_committed_payload(
+    const IndexerOutboxRecordHeader &header,
+    std::span<const uint8_t> stored_bytes) const
+{
+  auto stored =
+      decode_payload<IndexerOutboxCommittedStoredPayload>(stored_bytes,
+                                                          "committed");
+  if (!stored) {
+    return std::unexpected(stored.error());
+  }
+
+  const std::string name = events_file_basename(header.event_root);
+  const int fd = openat(events_directory_fd_.get(), name.c_str(),
+                        O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    return std::unexpected(
+        system_error(std::format("open events file {}", name), errno));
+  }
+  UniqueFd file(fd);
+  struct stat file_stat{};
+  if (fstat(file.get(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode) ||
+      file_stat.st_size < 0) {
+    return std::unexpected(system_error("stat events file", errno));
+  }
+  // A record's pairs were bounded to the pull RPC's replay limit at
+  // publication, so anything larger is not this record's file.
+  if (std::cmp_greater(file_stat.st_size, kMaxIndexerOutboxPayloadBytes)) {
+    return std::unexpected(
+        std::format("events file {} exceeds replayable payload size", name));
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(file_stat.st_size));
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const ssize_t read_size =
+        pread(file.get(), bytes.data() + offset, bytes.size() - offset,
+              static_cast<off_t>(offset));
+    if (read_size < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return std::unexpected(system_error("read events file", errno));
+    }
+    if (read_size == 0) {
+      return std::unexpected(std::format("truncated events file {}", name));
+    }
+    offset += static_cast<size_t>(read_size);
+  }
+
+  auto pairs = parse_events_file_pairs(bytes, name);
+  if (!pairs) {
+    return std::unexpected(pairs.error());
+  }
+  return IndexerOutboxCommittedPayload{
+      .format_version = stored->format_version,
+      .consensus_value = std::move(stored->consensus_value),
+      .event_logs = std::move(pairs->event_logs),
+      .tx_bodies = std::move(pairs->tx_bodies),
+  };
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::ensure_events_file(
+    const IndexerOutboxCommittedPayload &payload) const
+{
+  const std::string name =
+      events_file_basename(payload.consensus_value.proposal_header.events_hash);
+  if (faccessat(events_directory_fd_.get(), name.c_str(), F_OK,
+                AT_SYMLINK_NOFOLLOW) == 0) {
+    // The common case: close_block streamed and fsynced this file before the
+    // block could commit. An existing file under this event root carries pairs
+    // that validate against the same roots, so it is kept, first writer wins.
+    return {};
+  }
+  if (errno != ENOENT) {
+    return std::unexpected(system_error("probe events file", errno));
+  }
+
+  x23::Buf bytes;
+  CHECK_EQ(payload.event_logs.size(), payload.tx_bodies.size());
+  for (size_t i = 0; i < payload.event_logs.size(); ++i) {
+    x23::serialize_to(&bytes, payload.event_logs[i]);
+    x23::serialize_to(&bytes, payload.tx_bodies[i]);
+  }
+
+  const std::string temp_name = name + "_outbox_temp";
+  const int temp_fd =
+      openat(events_directory_fd_.get(), temp_name.c_str(),
+             O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0666);
+  if (temp_fd < 0) {
+    return std::unexpected(system_error("create events temp file", errno));
+  }
+  UniqueFd temp(temp_fd);
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const ssize_t written =
+        write(temp.get(), bytes.data() + offset, bytes.size() - offset);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return std::unexpected(system_error("write events file", errno));
+    }
+    offset += static_cast<size_t>(written);
+  }
+  if (fsync(temp.get()) != 0) {
+    return std::unexpected(system_error("fsync events file", errno));
+  }
+  // First writer wins, exactly as close_block publishes: the name is shared by
+  // every block with this event root, so an existing file must not be
+  // replaced.
+  if (linkat(events_directory_fd_.get(), temp_name.c_str(),
+             events_directory_fd_.get(), name.c_str(), 0) != 0 &&
+      errno != EEXIST) {
+    return std::unexpected(system_error("link events file", errno));
+  }
+  if (unlinkat(events_directory_fd_.get(), temp_name.c_str(), 0) != 0) {
+    return std::unexpected(system_error("unlink events temp file", errno));
+  }
+  if (fsync(events_directory_fd_.get()) != 0) {
+    return std::unexpected(system_error("fsync events directory", errno));
+  }
+  return {};
 }
 
 IndexerOutboxStatus<void>

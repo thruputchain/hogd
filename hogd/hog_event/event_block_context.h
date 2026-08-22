@@ -80,6 +80,12 @@ struct EventBlockPairs {
   ProposedTransactionBatch tx_bodies;
 };
 
+// Parses the byte contents of a finalized events file: a flat sequence of
+// [TxEventLog][ProposedTransaction] pairs with no header or counts. [name] is
+// used in diagnostics only.
+std::expected<EventBlockPairs, std::string>
+parse_events_file_pairs(std::span<const uint8_t> bytes, std::string_view name);
+
 // Reads back a finalized events file, which is a flat sequence of
 // [TxEventLog][ProposedTransaction] pairs.
 //

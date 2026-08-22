@@ -388,6 +388,17 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
 
   outbox_guard.reset();
 
+  // The committed record references the events file rather than embedding the
+  // pairs, so the file must outlive every block context that shares its root.
+  // Take a claim on the record's behalf; it is never released, matching the
+  // record's own retention. finish_block_operation below then releases the
+  // block's claim without the count reaching zero.
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    retain_events_file(consensus_value.proposal_header.events_hash);
+  }
+
   info("EventRPCContext::commit_block: block_id={} done, gc", block_id);
   co_await finish_block_operation(block_id, context_ptr,
                                   context_ptr != nullptr);
@@ -581,6 +592,19 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     co_return EventError{EventErrorCode::kInternal};
   }
 
+  // Committed records reference their <event_root>.events files, so every
+  // validated record takes a permanent claim on its file's name. This is what
+  // stops a later live block that happens to share a root (every empty block
+  // does) from unlinking a record's payload when it is abandoned. Records
+  // committed after this point take their claim in commit_block.
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    for (const auto &record : *records) {
+      retain_events_file(record.event_root);
+    }
+  }
+
   // Mutation phase. Every rejection above preserves events files and committed
   // records byte-for-byte.
   if (planned_origin) {
@@ -745,8 +769,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     const BlockHeight origin_boundary = progress.origin.first_height - 1;
     if (progress.contiguous_height < 0) {
       if (progress.contiguous_height != origin_boundary ||
-          progress.last_consensus_hash != progress.origin.first_prev_hash ||
-          progress.last_payload_digest != SHA256Hash{}) {
+          progress.last_consensus_hash != progress.origin.first_prev_hash) {
         co_return pull_failure(
             EventIndexerPullProgressConflict,
             "indexer progress conflicts with epoch boundary");
@@ -764,8 +787,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
       }
       const bool empty_epoch_boundary =
           progress.contiguous_height == origin_boundary &&
-          progress.last_consensus_hash == progress.origin.first_prev_hash &&
-          progress.last_payload_digest == SHA256Hash{};
+          progress.last_consensus_hash == progress.origin.first_prev_hash;
       bool validate_retained_record = true;
       if (empty_epoch_boundary && !*progress_record) {
         validate_retained_record = false;
@@ -781,8 +803,6 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
         if ((**progress_record).block_height != progress.contiguous_height ||
             (**progress_record).consensus_hash !=
                 progress.last_consensus_hash ||
-            (**progress_record).payload_digest !=
-                progress.last_payload_digest ||
             (progress.contiguous_height == origin_boundary &&
              progress.last_consensus_hash != progress.origin.first_prev_hash) ||
             (progress.contiguous_height > origin_boundary &&
@@ -899,14 +919,14 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox identity is invalid");
   }
-  // The loaded record has already validated payload/header hashes, so preserve
-  // that durable identity instead of hashing the payload again.
+  // The loaded record already validated both consensus roots and the header's
+  // consensus_hash, so preserve that durable identity instead of hashing the
+  // consensus value again.
   IndexerCommittedBlock block{
       .payload = std::move(loaded->payload),
       .identity =
           IndexerCommittedBlockIdentity{
               .consensus_hash = loaded->info.consensus_hash,
-              .payload_digest = loaded->info.payload_digest,
           },
   };
 

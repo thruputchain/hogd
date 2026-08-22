@@ -85,7 +85,6 @@
 #include "view.hh"
 #include "view_gateway.hh"
 #include "x23/serialize.h"
-#include "x23/vec.h"
 
 #ifndef HOG_DEVNODE_BINARY
 #error "HOG_DEVNODE_BINARY must be defined by CMake"
@@ -2616,24 +2615,16 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
 
     // Model what closing left behind: the block's events file, content
     // addressed by its event root, with the height never promoted to a
-    // committed record.  The finalized run's own copy is gone -- committing
-    // dropped the last claim on it -- so rebuild it from the committed
-    // payload, which is the [TxEventLog][ProposedTransaction] run close wrote.
-    ASSERT_EQ(committed->event_logs.size(), committed->tx_bodies.size());
-    x23::Buf events_bytes;
-    for (size_t i = 0; i < committed->event_logs.size(); ++i) {
-      x23::serialize_to(&events_bytes, committed->event_logs[i]);
-      x23::serialize_to(&events_bytes, committed->tx_bodies[i]);
-    }
-    std::ofstream events_out(EventBlockContext::final_events_filename(
-                                 (data_dir / "events").string(),
-                                 finalized.proposal_header.events_hash),
-                             std::ios::binary | std::ios::trunc);
-    ASSERT_TRUE(
-        events_out.write(reinterpret_cast<const char *>(events_bytes.data()),
-                         static_cast<std::streamsize>(events_bytes.size())));
-    events_out.close();
-    ASSERT_TRUE(events_out.good());
+    // committed record. The finalized run retains it -- its committed record
+    // references it as its payload -- so copy it from there.
+    std::filesystem::copy_file(
+        EventBlockContext::final_events_filename(
+            (finalized_data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        EventBlockContext::final_events_filename(
+            (data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        std::filesystem::copy_options::overwrite_existing);
 
     auto recovering_store = IndexerOutboxStore::open(
         (data_dir / "events" / "indexer-outbox").string());
@@ -2663,10 +2654,8 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
   auto committed = recovered_store->load_committed(2)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   EXPECT_EQ(committed->consensus_value, finalized);
-  // Reconciliation promotes by reading the file directly, with no block
-  // context to hold a claim on it, so nothing reclaims it here -- unlike an
-  // ordinary commit, where the committing block drops the last claim. Files a
-  // crash left behind are the startup sweep's to reclaim.
+  // The promoted committed record references this file as its payload, so it
+  // is retained for as long as the record lives.
   EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
       (data_dir / "events").string(), finalized.proposal_header.events_hash)));
 }

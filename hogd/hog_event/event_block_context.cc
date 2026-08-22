@@ -449,24 +449,8 @@ EventBlockContext::await_all_executors_closed()
 }
 
 std::expected<EventBlockPairs, std::string>
-read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
+parse_events_file_pairs(std::span<const uint8_t> bytes, std::string_view name)
 {
-  const std::string name =
-      EventBlockContext::final_events_filename(work_directory, hash);
-  std::ifstream file(name, std::ios::binary | std::ios::ate);
-  if (!file) {
-    return std::unexpected(std::format("failed to open events file {}", name));
-  }
-  const std::streamoff size = file.tellg();
-  if (size < 0) {
-    return std::unexpected(std::format("failed to size events file {}", name));
-  }
-  std::vector<uint8_t> bytes(static_cast<size_t>(size));
-  file.seekg(0);
-  if (size > 0 && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
-    return std::unexpected(std::format("failed to read events file {}", name));
-  }
-
   // The file is a flat run of [TxEventLog][ProposedTransaction] pairs with no
   // count: deserialize_from() reports how much each value consumed, so the run
   // is walked to the end. It is bounds-checked, so a truncated or corrupt file
@@ -499,6 +483,27 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
     pairs.tx_bodies.push_back(std::move(body));
   }
   return pairs;
+}
+
+std::expected<EventBlockPairs, std::string>
+read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
+{
+  const std::string name =
+      EventBlockContext::final_events_filename(work_directory, hash);
+  std::ifstream file(name, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return std::unexpected(std::format("failed to open events file {}", name));
+  }
+  const std::streamoff size = file.tellg();
+  if (size < 0) {
+    return std::unexpected(std::format("failed to size events file {}", name));
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(size));
+  file.seekg(0);
+  if (size > 0 && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
+    return std::unexpected(std::format("failed to read events file {}", name));
+  }
+  return parse_events_file_pairs(bytes, name);
 }
 
 } // namespace hogd

@@ -47,9 +47,10 @@ struct IndexerOutboxCommittedRecordInfo {
   BlockHeight block_height;
   std::string protocol;
   uint64_t payload_byte_length;
-  SHA256Hash payload_digest;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
+  // Names the <event_root>.events file the record's pairs live in.
+  EventsHash event_root;
 
   bool operator==(const IndexerOutboxCommittedRecordInfo &) const = default;
 };
@@ -216,8 +217,9 @@ public:
   x23::Async<size_t> committed_history_scan_count_for_test() const;
 
 private:
-  explicit IndexerOutboxStore(UniqueFd directory_fd)
-    : directory_fd_(std::move(directory_fd))
+  IndexerOutboxStore(UniqueFd directory_fd, UniqueFd events_directory_fd)
+    : directory_fd_(std::move(directory_fd)),
+      events_directory_fd_(std::move(events_directory_fd))
   {}
 
   static IndexerOutboxStatus<IndexerOutboxStore>
@@ -253,8 +255,24 @@ private:
   validate_payload_digest(std::string_view filename,
                           const IndexerOutboxRecordHeader &header) const;
   IndexerOutboxStatus<bool> has_regular_file(std::string_view filename) const;
+  // Reads <event_root>.events from the events directory and reassembles the
+  // full committed payload the stored record references.
+  IndexerOutboxStatus<IndexerOutboxCommittedPayload>
+  assemble_committed_payload(const IndexerOutboxRecordHeader &header,
+                             std::span<const uint8_t> stored_bytes) const;
+  // Publishes the payload's pairs as <event_root>.events if that file does not
+  // already exist, first writer wins. The production commit path streamed the
+  // file at close, so this is a stat; synthetic publishers get the file
+  // written for them from the payload in hand.
+  IndexerOutboxStatus<void>
+  ensure_events_file(const IndexerOutboxCommittedPayload &payload) const;
 
   UniqueFd directory_fd_;
+  // The parent directory, where <event_root>.events files live. A committed
+  // record stores only {format_version, consensus_value} and its event logs
+  // and transaction bodies are read back from the events file its header's
+  // event_root names -- the same file close_block streamed, written once.
+  UniqueFd events_directory_fd_;
   bool recognized_residue_on_open_ = false;
   // The generated XDR members are movable without allocation, but clang-tidy
   // follows an infeasible copying path through their implicit move functions.

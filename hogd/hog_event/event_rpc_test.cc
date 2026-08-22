@@ -263,7 +263,7 @@ rewrite_committed_prev_hash(std::string_view directory,
   x23::deserialize(&header_size, x23::BufView(bytes->data(), size_t{4}));
   IndexerOutboxRecordHeader header;
   x23::deserialize(&header, x23::BufView(bytes->data() + 4, header_size));
-  IndexerOutboxCommittedPayload payload;
+  IndexerOutboxCommittedStoredPayload payload;
   x23::deserialize(&payload, x23::BufView(bytes->data() + 4 + header_size,
                                           bytes->size() - 4 - header_size));
   payload.consensus_value.prev_hash = std::move(prev_hash);
@@ -344,7 +344,6 @@ progress_at(const EventIndexerPulledBlock &pulled)
       .contiguous_height =
           pulled.block.payload.consensus_value.proposal_header.block_height,
       .last_consensus_hash = pulled.block.identity.consensus_hash,
-      .last_payload_digest = pulled.block.identity.payload_digest,
   };
   return progress;
 }
@@ -401,7 +400,6 @@ TEST_F(EventRpcTest, FreshPullReturnsCurrentOriginOrFirstBlock)
       .origin = empty.origin(),
       .contiguous_height = 0,
       .last_consensus_hash = sha256(genesis),
-      .last_payload_digest = {},
   };
   EventIndexerPullResult initialized_empty =
       ctx.pull_indexer_next(pull_request(initialized))();
@@ -436,7 +434,6 @@ TEST_F(EventRpcTest, ExactProgressReturnsNextAndUnchangedProgressRepeatsIt)
       .origin = first.pulled_block().origin,
       .contiguous_height = 1,
       .last_consensus_hash = record->consensus_hash,
-      .last_payload_digest = record->payload_digest,
   };
   EventIndexerPullResult caught_up =
       ctx.pull_indexer_next(pull_request(progress))();
@@ -475,7 +472,6 @@ TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
       .origin = caught_up.origin(),
       .contiguous_height = 0,
       .last_consensus_hash = sha256(genesis),
-      .last_payload_digest = {},
   };
   IndexerProgress unknown = boundary;
   unknown.initialized().origin.protocol = "hogp/unknown";
@@ -486,7 +482,7 @@ TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
   EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
   ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   IndexerProgress forged = progress_at(first.pulled_block());
-  forged.initialized().last_payload_digest[0] ^= 1;
+  forged.initialized().last_consensus_hash[0] ^= 1;
   EXPECT_EQ(ctx.pull_indexer_next(pull_request(forged))().outcome(),
             EventIndexerPullOutcome::EventIndexerPullProgressConflict);
 }
@@ -665,7 +661,6 @@ TEST_F(EventRpcTest, MissingOrCorruptPullableRecordIsInternalFailure)
 TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
 {
   auto archival = make_empty_committed(20, ConsensusValueHash{});
-  SHA256Hash archival_digest;
   {
     EventRPCContext previous(temp_dir());
     initialize_test_origin(previous, archival.consensus_value);
@@ -676,7 +671,6 @@ TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
         previous.indexer_outbox_store().enumerate_committed_records_raw();
     ASSERT_TRUE(records.has_value()) << records.error();
     ASSERT_EQ(records->size(), 1UL);
-    archival_digest = records->front().payload_digest;
   }
   rewrite_outbox_protocol(temp_dir(),
                           IndexerOutboxStore::committed_filename(20),
@@ -701,7 +695,6 @@ TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
           },
       .contiguous_height = 20,
       .last_consensus_hash = sha256(archival.consensus_value),
-      .last_payload_digest = archival_digest,
   };
   IndexerProgress bad_boundary = progress;
   bad_boundary.initialized().last_consensus_hash[0] ^= 1;
@@ -789,7 +782,6 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
         .origin = origin,
         .contiguous_height = 0,
         .last_consensus_hash = boundary,
-        .last_payload_digest = {},
     };
     return progress;
   };
@@ -1347,7 +1339,7 @@ TEST_F(EventRpcTest, AbandonClosedBlockReclaimsUnsharedFinalFile)
   EXPECT_FALSE(std::filesystem::exists(temp_file));
 }
 
-TEST_F(EventRpcTest, CommitBlockReclaimsUnsharedFinalFile)
+TEST_F(EventRpcTest, CommitBlockRetainsFinalFileAsRecordPayload)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1373,9 +1365,10 @@ TEST_F(EventRpcTest, CommitBlockReclaimsUnsharedFinalFile)
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(1, value)(),
             RPCError::kRPCNone);
-  // Commit moved the payload into the durable committed record, so the last
-  // claim on the file drops with the context and the file goes away.
-  EXPECT_FALSE(std::filesystem::exists(final_file));
+  // The committed record references the events file rather than embedding a
+  // second copy of the pairs, so commit takes a permanent claim on it and the
+  // block context's teardown must not reclaim it.
+  EXPECT_TRUE(std::filesystem::exists(final_file));
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
 }
 
@@ -1416,9 +1409,9 @@ TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(41, consensus_value)(),
               RPCError::kRPCNone);
 
-    // Promotion copied the payload into the committed record, and no other
-    // live block shares this event root, so the file is reclaimed.
-    EXPECT_FALSE(std::filesystem::exists(
+    // The committed record references this file as its payload, so promotion
+    // retains it for as long as the record lives.
+    EXPECT_TRUE(std::filesystem::exists(
         EventBlockContext::final_events_filename(temp_dir(),
                                                  close_result.root_hash())));
     auto committed = ctx.indexer_outbox_store().load_committed(9)();
@@ -1615,7 +1608,7 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
   expect_xdr_equal(*loaded, committed);
 }
 
-TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresEventsFile)
+TEST_F(EventRpcTest, PrepublishedConsensusRetryServesTheRecord)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1645,15 +1638,22 @@ TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresEventsFile)
   ASSERT_TRUE(
       ctx.indexer_outbox_store().publish_committed(committed)().has_value());
 
-  // Once a committed record exists for the height, commit returns it and never
-  // consults the events file. Corrupt the file to prove that: a retry must
-  // still succeed and must still yield the originally published record.
-  corrupt_events_file(temp_dir(), closed.root_hash());
+  // Once a committed record exists for the height, a retry of the same
+  // consensus value returns it. The record stores only the consensus value and
+  // references the events file for its pairs, so the retry reads the same
+  // single copy commit itself promoted from.
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(452, value)(),
             RPCError::kRPCNone);
   auto retained = ctx.indexer_outbox_store().load_committed(13)();
   ASSERT_TRUE(retained.has_value()) << retained.error();
   expect_xdr_equal(*retained, committed);
+
+  // The events file IS the record's payload now, so corrupting it corrupts the
+  // record: a later retry fails closed instead of serving damaged pairs.
+  corrupt_events_file(temp_dir(), closed.root_hash());
+  EXPECT_NE(mempool_rpc.eventsched_commit_block(453, value)(),
+            RPCError::kRPCNone);
+  EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(13)().has_value());
 }
 
 using EventRpcDeathTest = EventRpcTest;
@@ -2934,6 +2934,45 @@ TEST_F(EventRpcTest, ReconciliationDoesNotRepromoteArchivalCommittedTip)
   EXPECT_TRUE(std::filesystem::exists(events_file));
 }
 
+TEST_F(EventRpcTest, RestartSeedsClaimsForCommittedRecordsEventsFiles)
+{
+  // A committed record published by an earlier run references its events file,
+  // but in-memory claims die with the process. Reconciliation must re-seed
+  // them: otherwise a later live block that shares the root -- any empty block
+  // does -- would unlink the record's payload when it is abandoned, and the
+  // record would stop loading.
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue one;
+  std::string events_file;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    one = commit_empty_block(ctx, 55, 1, sha256(genesis));
+    events_file = EventBlockContext::final_events_filename(
+        temp_dir(), one.proposal_header.events_hash);
+    ASSERT_TRUE(std::filesystem::exists(events_file));
+  }
+
+  EventRPCContext restarted(temp_dir());
+  EventMempoolRpc rpc(restarted);
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(1, one)().has_value());
+
+  // A fresh empty block at the next height closes to the same root, loses its
+  // nomination, and is abandoned.
+  ASSERT_EQ(rpc.eventsched_open_block(56)(), RPCError::kRPCNone);
+  EventBlockResult closed = rpc.eventsched_close_block(56, 2)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ASSERT_EQ(EventBlockContext::final_events_filename(temp_dir(),
+                                                     closed.root_hash()),
+            events_file);
+  ASSERT_EQ(rpc.eventsched_abandon_block(56)(), RPCError::kRPCNone);
+
+  // The record's claim, seeded at reconciliation, kept the file alive.
+  EXPECT_TRUE(std::filesystem::exists(events_file));
+  EXPECT_TRUE(restarted.indexer_outbox_store().load_committed(1)().has_value());
+}
+
 TEST_F(EventRpcTest, StaleTempFileFromAReusedBlockIdIsDiscarded)
 {
   // Block ids are process-local, so a crash can leave <block_id>.events_temp
@@ -3014,10 +3053,14 @@ TEST_F(EventRpcTest, EmptyBlocksShareOneEventsFileAcrossHeights)
       make_consensus_value(2, second.root_hash(), ProposalTxs{});
   two.prev_hash = sha256(one);
   ASSERT_EQ(rpc.eventsched_commit_block(52, two)(), RPCError::kRPCNone);
-  EXPECT_FALSE(std::filesystem::exists(events_file));
+  // Both committed records reference this one file as their payload, so it
+  // outlives both block contexts.
+  EXPECT_TRUE(std::filesystem::exists(events_file));
 
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value());
+  EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(1)().has_value());
+  EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(2)().has_value());
 }
 
 TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
@@ -3063,7 +3106,9 @@ TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
   two.prev_hash = sha256(one);
   EXPECT_EQ(rpc.eventsched_commit_block(63, two)(), RPCError::kRPCNone);
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value());
-  EXPECT_FALSE(std::filesystem::exists(events_file));
+  // The two committed records keep the file alive as their payload.
+  EXPECT_TRUE(std::filesystem::exists(events_file));
+  EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(2)().has_value());
 }
 
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
