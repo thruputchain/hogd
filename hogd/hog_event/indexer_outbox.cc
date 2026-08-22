@@ -329,12 +329,29 @@ encode_file(const Payload &payload)
   x23::serialize_to(&file_bytes, payload);
   CHECK_EQ(file_bytes.size() - payload_offset, payload_size);
 
-  header.payload_digest =
-      sha256(x23::BufView(file_bytes.data() + payload_offset, payload_size));
-  x23::Buf final_header_bytes = x23::serialize(header);
-  CHECK_EQ(final_header_bytes.size(), header_bytes.size());
-  std::copy(final_header_bytes.begin(), final_header_bytes.end(),
-            file_bytes.begin() + header_offset);
+  // Candidate records carry no payload digest, so the zero-digest header laid
+  // down above is already final for them.
+  //
+  // A candidate's integrity does not rest on this digest. Promotion selects it
+  // by the finalized ProposalHeader.events_hash and then re-derives both the
+  // event root and every body's transaction hash, load already checks the file
+  // size against payload_byte_length, and malformed XDR is rejected on decode.
+  // What the digest uniquely covered is the SignedTransaction signature
+  // wrapper -- deliberately outside both roots, and verified by nothing. So it
+  // bought a full-payload hash at close, and another on every candidate
+  // enumeration, for no detection this path does not already have. At-rest
+  // corruption of a candidate is now caught at promotion instead of at load:
+  // one step later, still fail-closed.
+  //
+  // Committed and epoch-origin records are archival and keep their digest.
+  if constexpr (!std::same_as<Payload, IndexerOutboxCandidatePayload>) {
+    header.payload_digest =
+        sha256(x23::BufView(file_bytes.data() + payload_offset, payload_size));
+    x23::Buf final_header_bytes = x23::serialize(header);
+    CHECK_EQ(final_header_bytes.size(), header_bytes.size());
+    std::copy(final_header_bytes.begin(), final_header_bytes.end(),
+              file_bytes.begin() + header_offset);
+  }
 
   if (auto valid = validate_indexer_outbox_file_size(file_bytes.size());
       !valid) {
@@ -643,16 +660,13 @@ IndexerOutboxStore::publish_candidate_encoded(
     payload_pieces.push_back(std::as_bytes(std::span(buf)));
   }
 
-  // Hashing walks the payload but never copies it, so the digest costs one
-  // memory-bandwidth pass rather than another encode.
-  SHA256Hasher hasher;
-  for (const auto &piece : payload_pieces) {
-    hasher.update(piece);
-  }
+  // No payload digest for candidates -- see encode_file. This is what keeps
+  // close off a full memory-bandwidth pass over the block.
+  //
   // make_header reads only the scalar identity fields, so the empty-vector
   // shape yields the same header the structured path would produce.
   IndexerOutboxRecordHeader header =
-      make_header(shape, payload_size, hasher.finalize());
+      make_header(shape, payload_size, SHA256Hash{});
   x23::Buf header_bytes = x23::serialize(header);
   if (header_bytes.size() > kMaxIndexerOutboxHeaderBytes) {
     return std::unexpected("indexer outbox header exceeds bounded limit");
@@ -735,9 +749,10 @@ IndexerOutboxStore::enumerate_candidate_records_raw() const
         header->record_identity.candidate_block_id() != *block_id) {
       return std::unexpected("candidate outbox filename/header mismatch");
     }
-    if (auto valid = validate_payload_digest(name, *header); !valid) {
-      return std::unexpected(valid.error());
-    }
+    // Candidates carry no digest, so enumeration no longer streams and hashes
+    // every candidate file. This ran from find_canonical_candidate() and
+    // remove_resolved_candidates(), putting a full-payload hash per retained
+    // candidate on the commit path.
     records.push_back({.block_id = header->record_identity.candidate_block_id(),
                        .block_height = header->block_height,
                        .protocol = std::string(header->protocol),
@@ -1918,7 +1933,12 @@ IndexerOutboxStore::load_payload(std::string_view filename,
     offset += static_cast<size_t>(read_size);
     file_offset += read_size;
   }
-  if (sha256(x23::BufView(payload)) != header.payload_digest) {
+  // Candidates carry no digest (see encode_file); the size check above plus
+  // decode and the event-root comparison in load_candidate() are what validate
+  // them, and promotion re-derives the roots.
+  if (header.record_identity.kind() !=
+          IndexerOutboxRecordKind::IndexerOutboxCandidate &&
+      sha256(x23::BufView(payload)) != header.payload_digest) {
     return std::unexpected("indexer outbox payload digest mismatch");
   }
   return payload;

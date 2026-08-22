@@ -1176,18 +1176,44 @@ TEST_F(IndexerOutboxTest, RemoveCandidateIsDurableAndIdempotent)
 
 TEST_F(IndexerOutboxTest, CorruptPayloadDigestIsRejected)
 {
+  // Committed records are archival, so they keep a payload digest and a
+  // corrupted one is fatal on load.
+  IndexerOutboxStore store = open_store(dir_);
+  auto committed = make_committed(12, {}, {});
+  initialize_test_origin(store, committed);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  const std::string filename = IndexerOutboxStore::committed_filename(12);
+  TestOutboxFile envelope = read_envelope(dir_, filename);
+  envelope.payload_digest[0] ^= 0x01;
+  write_envelope(dir_, filename, envelope);
+
+  auto result = store.load_committed(12)();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("digest mismatch"), std::string::npos);
+}
+
+TEST_F(IndexerOutboxTest, CandidateCarriesNoPayloadDigest)
+{
+  // Candidates deliberately carry no payload digest. Promotion selects one by
+  // the finalized events root and then re-derives that root and every body's
+  // transaction hash, so hashing the payload at close -- and again on every
+  // candidate enumeration, on the commit path -- bought no detection this path
+  // did not already have. Pin both halves: the published digest is zero, and a
+  // garbage digest does not fail the load.
   IndexerOutboxStore store = open_store(dir_);
   auto candidate = make_candidate(45, 12, {}, {});
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(45);
   TestOutboxFile envelope = read_envelope(dir_, filename);
+  EXPECT_EQ(envelope.payload_digest, SHA256Hash{});
   envelope.payload_digest[0] ^= 0x01;
   write_envelope(dir_, filename, envelope);
 
   auto result = store.load_candidate(45)();
 
-  ASSERT_FALSE(result.has_value());
-  EXPECT_NE(result.error().find("digest mismatch"), std::string::npos);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  expect_xdr_equal(*result, candidate);
 }
 
 TEST_F(IndexerOutboxTest, EnvelopeAndPayloadVersionsAreRejected)
