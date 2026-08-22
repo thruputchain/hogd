@@ -1,6 +1,7 @@
 #include "hogd/hog_db/block_tx.h"
 
 #include <cassert>
+#include <exception>
 #include <mutex>
 #include <optional>
 #include <utility>
