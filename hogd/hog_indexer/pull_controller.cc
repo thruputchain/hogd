@@ -3,6 +3,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <mutex>
 #include <optional>
@@ -22,6 +24,7 @@
 #include "indexer.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/fastclock.h"
 #include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
@@ -250,8 +253,12 @@ IndexerPullController::run(const std::stop_token &stop)
             pulled.block.payload.consensus_value.proposal_header.block_height;
         const IndexerCommittedBlockIdentity pulled_identity =
             pulled.block.identity;
+        const std::size_t pulled_event_logs =
+            pulled.block.payload.event_logs.size();
+        const auto apply_start_ns = x23::fastclock::get_ns();
         IndexerBlockApplyResult applied =
             db_.apply_committed_block(pulled.origin, std::move(pulled.block))();
+        const auto apply_end_ns = x23::fastclock::get_ns();
         if (applied.outcome() !=
                 IndexerBlockApplyOutcome::IndexerBlockApplied &&
             applied.outcome() !=
@@ -268,6 +275,21 @@ IndexerPullController::run(const std::stop_token &stop)
             applied.progress().last_consensus_hash !=
                 pulled_identity.consensus_hash) {
           panic("applied event block disagrees with durable indexer progress");
+        }
+        // The strict-ingest path is otherwise silent while healthy, so an idle
+        // pull loop and an ingesting one look identical from the log. CI and
+        // metrics-history log analysis key on this line to prove the indexer
+        // consumed committed blocks (metrics_history#1061).
+        if (applied.outcome() ==
+            IndexerBlockApplyOutcome::IndexerBlockApplied) {
+          info("applied committed block {} ({} event logs) in {} ns ({:.3f} s)",
+               static_cast<std::int64_t>(pulled_height), pulled_event_logs,
+               apply_end_ns - apply_start_ns,
+               static_cast<double>(apply_end_ns - apply_start_ns) / 1e9);
+        }
+        else {
+          info("skipped duplicate committed block {}",
+               static_cast<std::int64_t>(pulled_height));
         }
         const bool advanced =
             before_apply.state() !=
