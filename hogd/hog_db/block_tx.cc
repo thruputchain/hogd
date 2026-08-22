@@ -299,67 +299,88 @@ BlockTX::commit(WorkerPool &pool)
                           ? HogDbCode::kInvalidExecutorBehavior
                           : HogDbCode::kInternal);
   }
-  if (auto r = db_.apply(*changeset_, pool); !r) {
-    return r.error();
+  // apply() is the point of no return: it mutates RAMDB in place with no
+  // rollback, and once it succeeds the changeset is consumed. An exception
+  // escaping commit() (e.g. std::bad_alloc while copying auth notifications
+  // after the apply) would unwind into the RPC dispatch layer, which turns it
+  // into an ordinary error reply — leaving this process alive with RAMDB ahead
+  // of the published DbTip and no auth/balance fanout for the applied block
+  // (issue #2378). Fail stop instead: the durable commit has not run yet, so a
+  // restart recovers cleanly at the parent block.
+  try {
+    if (auto r = db_.apply(*changeset_, pool); !r) {
+      return r.error();
+    }
+    changeset_.reset();
+
+    // Extract auth/balance data (parallel destructive, no DAO writes).
+    PerThread<KeyChangeBatch> key_changes;
+
+    item_locks_.for_each_parallel_destructive_among_workers(
+        [&key_changes, this](std::pair<const ItemKey &, const ItemLock &> v) {
+          if (!v.second.is_finalized()) {
+            return;
+          }
+
+          if (v.first.is_address_auth_data()) {
+            if (auto const *inner =
+                    v.second.get_inner<PointerLock<AuthLock>>()) {
+              key_changes->emplace_back(
+                  v.first.to_contract_address(),
+                  x23::Ptr<AddressAuthData>(new AddressAuthData(
+                      inner->get()->build_result(block_height_))));
+            }
+            else if (v.second.get_inner<DeletionLock>()) {
+              key_changes->emplace_back(v.first.to_contract_address(), nullptr);
+            }
+            else {
+              panic("unsupported type at auth data key: {}", v.first);
+            }
+          }
+        },
+        pool);
+
+    PerThread<std::vector<Delta>> balance_deltas;
+
+    addr_balance_locks_.for_each_parallel_destructive_among_workers(
+        [&balance_deltas,
+         this](std::pair<const Address &, const ItemLock &> v) {
+          if (!v.second.is_finalized()) {
+            return;
+          }
+
+          auto const *inner = v.second.get_inner<BalanceLock>();
+          CHECK(inner != nullptr);
+
+          // Forward the committed delta (which accounts for the storage cost
+          // charged when a balance is created for the first time), not the raw
+          // delta — otherwise the scheduler would observe a value larger than
+          // the balance actually committed to the DB by the balance creation
+          // cost.
+          auto value = inner->get_committed_delta(
+              LockContext(&db_, block_height_,
+                          make_address_balance_item_key(v.first),
+                          &cost_model_));
+
+          if (value == 0) {
+            return;
+          }
+
+          balance_deltas->push_back(
+              Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
+        },
+        pool);
+
+    background_commit_worker_.submit_job(block_height_, std::move(key_changes),
+                                         std::move(balance_deltas));
+  } catch (const std::exception &e) {
+    panic("exception during BlockTX::commit(); RAMDB has no rollback and may "
+          "be ahead of the published DB tip: {}",
+          e.what());
+  } catch (...) {
+    panic("exception during BlockTX::commit(); RAMDB has no rollback and may "
+          "be ahead of the published DB tip");
   }
-  changeset_.reset();
-
-  // Extract auth/balance data (parallel destructive, no DAO writes).
-  PerThread<KeyChangeBatch> key_changes;
-
-  item_locks_.for_each_parallel_destructive_among_workers(
-      [&key_changes, this](std::pair<const ItemKey &, const ItemLock &> v) {
-        if (!v.second.is_finalized()) {
-          return;
-        }
-
-        if (v.first.is_address_auth_data()) {
-          if (auto const *inner = v.second.get_inner<PointerLock<AuthLock>>()) {
-            key_changes->emplace_back(
-                v.first.to_contract_address(),
-                x23::Ptr<AddressAuthData>(new AddressAuthData(
-                    inner->get()->build_result(block_height_))));
-          }
-          else if (v.second.get_inner<DeletionLock>()) {
-            key_changes->emplace_back(v.first.to_contract_address(), nullptr);
-          }
-          else {
-            panic("unsupported type at auth data key: {}", v.first);
-          }
-        }
-      },
-      pool);
-
-  PerThread<std::vector<Delta>> balance_deltas;
-
-  addr_balance_locks_.for_each_parallel_destructive_among_workers(
-      [&balance_deltas, this](std::pair<const Address &, const ItemLock &> v) {
-        if (!v.second.is_finalized()) {
-          return;
-        }
-
-        auto const *inner = v.second.get_inner<BalanceLock>();
-        CHECK(inner != nullptr);
-
-        // Forward the committed delta (which accounts for the storage cost
-        // charged when a balance is created for the first time), not the raw
-        // delta — otherwise the scheduler would observe a value larger than the
-        // balance actually committed to the DB by the balance creation cost.
-        auto value = inner->get_committed_delta(
-            LockContext(&db_, block_height_,
-                        make_address_balance_item_key(v.first), &cost_model_));
-
-        if (value == 0) {
-          return;
-        }
-
-        balance_deltas->push_back(
-            Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
-      },
-      pool);
-
-  background_commit_worker_.submit_job(block_height_, std::move(key_changes),
-                                       std::move(balance_deltas));
 
   return {};
 }
