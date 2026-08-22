@@ -237,7 +237,8 @@ enable_syscall_logging(int32_t level) noexcept
 
 CreateDBResult
 make_new_db(const uint8_t *serialized_cost_model,
-            uint32_t serialized_cost_model_len) noexcept
+            uint32_t serialized_cost_model_len,
+            const uint8_t *serialized_network_hash) noexcept
 {
   // First-use init can fail (allocation failure); return a structured error
   // rather than letting it cross this noexcept boundary (issue #2575).
@@ -246,6 +247,14 @@ make_new_db(const uint8_t *serialized_cost_model,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
   try {
+    static_assert(sizeof(NetworkHash) == 32);
+    NetworkHash network_hash{};
+    if (serialized_network_hash == nullptr) {
+      return {.db = nullptr, .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    }
+    std::memcpy(network_hash.data(), serialized_network_hash,
+                network_hash.size());
+
     StorageCostModelXdr cost_model_xdr =
         StorageCostModel::default_cost_model().to_xdr();
     if (serialized_cost_model != nullptr) {
@@ -259,7 +268,7 @@ make_new_db(const uint8_t *serialized_cost_model,
                 .ffi_error_code = kTestFFIErrorCodeDeserializeError};
       }
     }
-    auto *db = new DBContext(cost_model_xdr);
+    auto *db = new DBContext(cost_model_xdr, network_hash);
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
@@ -1281,18 +1290,24 @@ extern "C" {
 
 CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
-          uint32_t serialized_cost_model_len)
+          uint32_t serialized_cost_model_len,
+          const uint8_t *serialized_network_hash)
 {
-  hogd::do_ffi_trace("FFI (start): create_db(serialized_cost_model={}, "
-                     "serialized_cost_model_len={})",
-                     static_cast<const void *>(serialized_cost_model),
-                     serialized_cost_model_len);
+  hogd::do_ffi_trace(
+      "FFI (start): create_db(serialized_cost_model={}, "
+      "serialized_cost_model_len={}, serialized_network_hash={})",
+      static_cast<const void *>(serialized_cost_model),
+      serialized_cost_model_len,
+      static_cast<const void *>(serialized_network_hash));
   auto result =
-      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
-  hogd::do_ffi_trace("FFI (end): create_db(serialized_cost_model={}, "
-                     "serialized_cost_model_len={}) -> {}",
-                     static_cast<const void *>(serialized_cost_model),
-                     serialized_cost_model_len, result);
+      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len,
+                        serialized_network_hash);
+  hogd::do_ffi_trace(
+      "FFI (end): create_db(serialized_cost_model={}, "
+      "serialized_cost_model_len={}, serialized_network_hash={}) -> {}",
+      static_cast<const void *>(serialized_cost_model),
+      serialized_cost_model_len,
+      static_cast<const void *>(serialized_network_hash), result);
   return result;
 }
 
