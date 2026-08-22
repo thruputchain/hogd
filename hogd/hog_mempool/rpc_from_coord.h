@@ -199,7 +199,15 @@ public:
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
-    CHECK(initialized_.load(std::memory_order_acquire));
+    // A coordinator RPC peer can reach this method before intro/registration
+    // publishes [initialized_] (the listener starts accepting connections
+    // before [finish_runtime_init()] completes). Treat the pre-intro state as
+    // a recoverable "no committed block yet" rather than terminating the
+    // process on a peer-controlled request sequence.
+    if (!initialized_.load(std::memory_order_acquire)) {
+      co_return SchedulerGetTipResult(
+          SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
+    }
 
     // [last_committed_block_] is updated by [schedulercoord_commit_block()]
     // under the [commit_lock_] lock.

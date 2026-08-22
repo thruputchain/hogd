@@ -160,6 +160,20 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   EXPECT_FALSE(result[1]);
 }
 
+TEST(Mempool, GetTipBeforeIntroReturnsNoGenesisBlock)
+{
+  // A coordinator RPC peer can invoke schedcoord_get_tip() before intro
+  // publishes initialized_. It must return a recoverable outcome rather than
+  // crashing the process on a fatal invariant.
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+
+  auto result = coordinator.schedcoord_get_tip()();
+
+  EXPECT_EQ(result.outcome(),
+            SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
+}
+
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
 {
   Registration &registration = Registration::registration();
