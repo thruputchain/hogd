@@ -2934,6 +2934,50 @@ TEST_F(EventRpcTest, ReconciliationDoesNotRepromoteArchivalCommittedTip)
   EXPECT_TRUE(std::filesystem::exists(events_file));
 }
 
+TEST_F(EventRpcTest, StaleTempFileFromAReusedBlockIdIsDiscarded)
+{
+  // Block ids are process-local, so a crash can leave <block_id>.events_temp
+  // behind for a name a later run reuses. Opening it without truncating would
+  // write the new block from offset zero and publish whatever stale tail was
+  // longer -- for an empty block, the entire stale file. The published events
+  // file would then fail root validation at commit.
+  constexpr BlockID kReusedBlockId = 71;
+  {
+    ProposedTransaction stale_body = make_body(71);
+    x23::Buf stale;
+    x23::serialize_to(&stale, make_event(stale_body, 71));
+    x23::serialize_to(&stale, stale_body);
+    std::ofstream leftover(
+        EventBlockContext::temp_events_filename(temp_dir(), kReusedBlockId),
+        std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(leftover.write(reinterpret_cast<const char *>(stale.data()),
+                               static_cast<std::streamsize>(stale.size())));
+  }
+
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc rpc(ctx);
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  ASSERT_EQ(rpc.eventsched_open_block(kReusedBlockId)(), RPCError::kRPCNone);
+  EventBlockResult closed = rpc.eventsched_close_block(kReusedBlockId, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+
+  // The block is empty, so its events file must be too -- not the stale pair.
+  auto pairs = read_final_events_file(temp_dir(), closed.root_hash());
+  ASSERT_TRUE(pairs.has_value()) << pairs.error();
+  EXPECT_TRUE(pairs->event_logs.empty());
+  EXPECT_TRUE(pairs->tx_bodies.empty());
+
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  value.prev_hash = sha256(genesis);
+  EXPECT_EQ(rpc.eventsched_commit_block(kReusedBlockId, value)(),
+            RPCError::kRPCNone);
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
+}
+
 TEST_F(EventRpcTest, EmptyBlocksShareOneEventsFileAcrossHeights)
 {
   // Every empty block has the same event root -- the empty trie's -- so they

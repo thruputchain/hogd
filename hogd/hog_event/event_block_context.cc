@@ -56,8 +56,14 @@ EventBlockContext::open_events_file()
     panic("failed to open work directory: {}", dir.error());
   }
   auto filename = temp_events_filename(work_directory_, block_id_);
+  // O_TRUNC because the name is only unique among live blocks.  Block ids are
+  // process-local, so a crash can leave a temp file that a later run reuses
+  // the name of; writing into it from offset zero would leave any longer stale
+  // tail in place.  That tail then travels into the published events file and
+  // fails root validation at commit -- an empty block after a crash would
+  // publish the whole stale file.
   // NOLINTNEXTLINE(misc-include-cleaner)
-  auto fd = open(filename.c_str(), O_CREAT | O_WRONLY, 0666);
+  auto fd = open(filename.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
   if (fd == -1) {
     panic("failed to open events file: {}", strerror(errno));
   }
