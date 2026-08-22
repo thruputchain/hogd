@@ -25,6 +25,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -37,6 +38,8 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
+#include "hogd/hog_mempool/shared.h"
+#include "hogd/hog_mempool/test/coordinator.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
@@ -158,6 +161,61 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   ASSERT_EQ(result.size(), hashes.size());
   EXPECT_FALSE(result[0]);
   EXPECT_FALSE(result[1]);
+}
+
+// The coordinator RPC listener is exposed before a legitimate coordinator has
+// introduced itself, so the first caller controls the callback address. An
+// unreachable callback must be reported as a recoverable registration failure
+// rather than aborting the mempool. Regression test for issue #3548.
+TEST(Mempool, IntroCoordWithUnreachableCallbackIsRecoverable)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  RpcServer<MempoolCoordinatorRpc> mempool_coord_server(
+      /*db_rpc=*/nullptr, /*auth_rpc=*/nullptr, NetworkHash{},
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+  mempool_coord_server.start_server(uint16_t{0});
+
+  // Bind a server only to reserve an ephemeral port, then let it close so the
+  // address reliably refuses connections.
+  uint16_t dead_port = 0;
+  {
+    RpcServer<CoordinatorSchedRpc> dead_callback_server;
+    dead_port = dead_callback_server.start_server(uint16_t{0});
+  }
+  const std::string dead_address = "127.0.0.1:" + std::to_string(dead_port);
+
+  auto client = create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                               mempool_coord_server.port())()
+                    .value();
+  const CoordCard card{.protocol = version::kHogdProtocol(),
+                       .address_for_sched = dead_address.c_str()};
+
+  // The mempool survives the refused callback and reports it recoverably
+  // instead of aborting...
+  EXPECT_EQ(
+      client.schedulercoord_intro_coord(card)(),
+      CoordinatorRegistrationOutcome::CoordinatorRegistrationAlreadyRegistered);
+  // ...without publishing the caller's card or holding the single coordinator
+  // slot, so a legitimate coordinator is not permanently locked out. Repeating
+  // the attempt still fails the same way rather than succeeding, confirming the
+  // slot was released rather than consumed.
+  EXPECT_FALSE(registration.coordinator_registered(/*card=*/nullptr));
+  EXPECT_EQ(
+      client.schedulercoord_intro_coord(card)(),
+      CoordinatorRegistrationOutcome::CoordinatorRegistrationAlreadyRegistered);
+
+  // A malformed callback address (here, one with no port) must likewise be
+  // rejected recoverably rather than aborting inside address parsing.
+  const CoordCard malformed_card{.protocol = version::kHogdProtocol(),
+                                 .address_for_sched =
+                                     "malformed-coordinator-address"};
+  EXPECT_EQ(
+      client.schedulercoord_intro_coord(malformed_card)(),
+      CoordinatorRegistrationOutcome::CoordinatorRegistrationAlreadyRegistered);
+  EXPECT_FALSE(registration.coordinator_registered(/*card=*/nullptr));
 }
 
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)

@@ -130,21 +130,6 @@ public:
     ready_waiters_.broadcast(&default_threadpool());
   }
 
-  static x23::Async<coord_sched_client_t> get_client()
-  {
-    CoordCard card;
-    CHECK(Registration::registration().coordinator_registered(&card));
-
-    auto ret = co_await create_client<CoordScheduler1>(
-        server_address_to_sockaddr(card.address_for_sched),
-        /*retry=*/false,
-        /*max_message_size=*/kBulkRpcMaxMessageSize);
-    if (!ret)
-      panic("rpc_from_coord get_client connect failed: {}",
-            ret.error().error_code().message());
-    co_return std::move(*ret);
-  }
-
   static x23::Async<void> schedulercoord_null() { co_return; }
 
   x23::Async<CoordinatorRegistrationOutcome>
@@ -168,8 +153,22 @@ public:
     }
     CHECK(!ready());
 
+    // Preflight the coordinator callback before publishing the card. The card
+    // and its callback address are caller-controlled input, so a malformed
+    // address, a failed DNS resolution, or a refused/unreachable callback must
+    // all yield a recoverable registration failure rather than aborting the
+    // mempool. Release the reserved slot and leave the card unpublished so a
+    // legitimate coordinator can still register (and retry), reporting the
+    // attempt as not-accepted.
+    auto client = co_await try_connect_coordinator(card.address_for_sched);
+    if (!client) {
+      num_coordinators_registered_.store(0, std::memory_order_relaxed);
+      co_return CoordinatorRegistrationOutcome::
+          CoordinatorRegistrationAlreadyRegistered;
+    }
+
     Registration::registration().register_coordinator(card);
-    co_await finish_init();
+    co_await finish_init(std::move(*client));
     CHECK(initialized_.load(std::memory_order_acquire));
 
     co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
@@ -496,10 +495,32 @@ private:
     bool validated = true;
   };
 
-  x23::Async<void> finish_init()
+  // Connect to a caller-supplied coordinator callback address without aborting
+  // on malformed input, failed DNS resolution, or a refused connection.
+  // Returns nullopt on any failure so the RPC handler can report a recoverable
+  // outcome instead of crashing the mempool.
+  static x23::Async<std::optional<coord_sched_client_t>>
+  try_connect_coordinator(std::string_view address)
+  {
+    // [try_server_address_to_sockaddr] tolerates untrusted input, unlike
+    // [server_address_to_sockaddr], whose CHECKs terminate the process.
+    auto addr = try_server_address_to_sockaddr(address);
+    if (!addr) {
+      co_return std::nullopt;
+    }
+    auto client = co_await create_client<CoordScheduler1>(
+        *addr, /*retry=*/false,
+        /*max_message_size=*/kBulkRpcMaxMessageSize);
+    if (!client) {
+      co_return std::nullopt;
+    }
+    co_return std::move(*client);
+  }
+
+  x23::Async<void> finish_init(coord_sched_client_t coord_client)
   {
     coord_client_ =
-        std::make_unique<coord_sched_client_t>(co_await get_client());
+        std::make_unique<coord_sched_client_t>(std::move(coord_client));
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?

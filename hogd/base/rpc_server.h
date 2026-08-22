@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
@@ -163,6 +164,24 @@ server_address_to_sockaddr(std::string_view server_address)
   std::expected<sockaddr_storage, x23::GaiError> addr =
       helper.to_addr(/*dns=*/true);
   CHECK(addr.has_value());
+  return *addr;
+}
+
+// Recoverable variant of [server_address_to_sockaddr]: returns nullopt instead
+// of aborting when [server_address] is malformed or cannot be resolved. Use
+// this when the address originates from untrusted RPC input.
+inline std::optional<sockaddr_storage>
+try_server_address_to_sockaddr(std::string_view server_address)
+{
+  x23::HostPort helper;
+  if (!helper.parse(server_address)) {
+    return std::nullopt;
+  }
+  std::expected<sockaddr_storage, x23::GaiError> addr =
+      helper.to_addr(/*dns=*/true);
+  if (!addr.has_value()) {
+    return std::nullopt;
+  }
   return *addr;
 }
 
