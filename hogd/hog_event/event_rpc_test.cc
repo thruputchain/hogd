@@ -2882,6 +2882,42 @@ TEST_F(EventRpcTest, IndexerPullsBlockRecoveredAfterCrashBetweenCloseAndCommit)
   expect_xdr_equal(payload.tx_bodies[0], body);
 }
 
+TEST_F(EventRpcTest, ReconciliationDoesNotRepromoteArchivalCommittedTip)
+{
+  // The events file is retained after commit -- unlike the candidate record it
+  // replaces, which was removed at commit -- so its presence must never be read
+  // as "this height still needs promoting".
+  //
+  // A committed record tagged with an archival protocol is not the
+  // current-protocol tip, so a promotion gate keyed on that would fire here and
+  // try to commit the height a second time off its retained events file.
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue block;
+  std::string events_file;
+  {
+    // Scoped: the outbox directory takes an exclusive lock, so the first
+    // context has to go away before the restarted one can open it.
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    block = commit_empty_block(ctx, 861, 1, sha256(genesis));
+    events_file = EventBlockContext::final_events_filename(
+        temp_dir(), block.proposal_header.events_hash);
+    ASSERT_TRUE(std::filesystem::exists(events_file));
+  }
+
+  rewrite_outbox_protocol(temp_dir(), IndexerOutboxStore::committed_filename(1),
+                          "hogp/archival");
+  ASSERT_TRUE(std::filesystem::remove(
+      std::filesystem::path(temp_dir()) / "indexer-outbox" /
+      IndexerOutboxStore::current_epoch_origin_filename()));
+  write_epoch_origin_header(temp_dir(), "hogp/archival", 1, sha256(genesis), 0);
+
+  EventRPCContext restarted(temp_dir());
+  EXPECT_TRUE(restarted.reconcile_outbox_tip(1, block)().has_value());
+  EXPECT_TRUE(std::filesystem::exists(events_file));
+}
+
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
 {
   EventRPCContext ctx(temp_dir());

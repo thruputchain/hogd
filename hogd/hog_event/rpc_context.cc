@@ -406,20 +406,28 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   auto *records = &history->records;
   auto *origins = &history->origins;
   auto *current_origin = &history->current_origin;
-  bool committed_tip_present =
+  // Whether this consensus value has been committed at all, under any protocol.
+  //
+  // Protocol is deliberately not part of this test. Promotion has to key off
+  // "has this been committed", because the events file cannot answer it: unlike
+  // the candidate record it replaces, the events file is retained after commit
+  // rather than removed, so its presence says nothing about commit state.
+  // Matching on the current protocol as well would re-promote every
+  // already-committed height whose record is tagged with an archival protocol.
+  const bool committed_under_any_protocol =
       std::ranges::any_of(*records, [&](const auto &record) {
-        return record.protocol == current_protocol &&
-               record.block_height == tip_height &&
+        return record.block_height == tip_height &&
                record.consensus_hash == tip_hash;
       });
-  // When the scheduler's tip is not yet in the committed outbox, the block's
+
+  // When the scheduler's tip is not in the committed outbox at all, the block's
   // events file is what recovers it: the file is content-addressed by the event
   // root, and the finalized ConsensusValue carries exactly that root. A missing
   // file simply means there is nothing to promote. A file that exists but does
   // not parse is fatal, and is rejected here in the validation phase so that no
   // durable state changes first; commit_block() re-reads it to promote.
   bool promotion_needed = false;
-  if (!committed_tip_present && tip_height >= 0) {
+  if (!committed_under_any_protocol && tip_height >= 0) {
     const std::string events_file = EventBlockContext::final_events_filename(
         work_directory_, consensus_value.proposal_header.events_hash);
     if (std::filesystem::exists(events_file)) {
