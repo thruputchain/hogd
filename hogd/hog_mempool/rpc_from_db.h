@@ -48,6 +48,21 @@ public:
     co_await (*cg)(scheduler_lock_);
 
     if (scheduler_) {
+      // A hog-transfer callback carries the balance deltas for a single
+      // committed block and must advance the proposal-height barrier by exactly
+      // one height, mirroring the monotonic guard in
+      // [MempoolCoordinatorRpc::auth_data_changed()]. Storing a stale, skipped,
+      // or future height into [transfer_finished_] would move the barrier off
+      // the committed tip and abort the next proposal in
+      // [wait_for_transfer_data()], so drop an out-of-order callback instead of
+      // processing it.
+      const int64_t expected_block = scheduler_->transfer_finished_.load() + 1;
+      if (static_cast<int64_t>(transfers.block) != expected_block) {
+        warn("[MempoolDbRpc::scheddb_hogs_transferred] ignoring out-of-order "
+             "transfer for block {}; expected block {}.",
+             transfers.block, expected_block);
+        co_return;
+      }
       // See the comment above if you change this.
       handle_transfer(transfers, std::move(cg));
     }

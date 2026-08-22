@@ -35,6 +35,7 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/rpc_from_db.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/test/infra.h"
@@ -50,6 +51,7 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_db.hh"
 #include "sched_event.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -2501,6 +2503,32 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->tx_cache_size(), 0UL);
   EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(included_hash));
   EXPECT_FALSE(server.mempool_coord_rpc().scheduler()->find_tx(sibling_hash));
+}
+
+TEST(Mempool, OutOfOrderHogTransferCallbackIgnored)
+{
+  // A DB-facing hog-transfer callback must advance the proposal-height barrier
+  // ([transfer_finished_]) by exactly one height. Storing an out-of-order
+  // height would move the barrier off the committed tip and abort the next
+  // proposal in [wait_for_transfer_data()], so the handler drops such a
+  // callback instead of processing it.
+  MempoolTestInfra server;
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const int64_t barrier = scheduler->transfer_finished_.load();
+
+  MempoolDbRpc db_rpc;
+  db_rpc.register_scheduler(scheduler)();
+
+  // A stale/duplicate callback for an already-reported height would otherwise
+  // move the barrier backward; it is ignored.
+  db_rpc.scheddb_hogs_transferred(
+      HogsTransferred{.block = barrier, .deltas = {}})();
+  EXPECT_EQ(scheduler->transfer_finished_.load(), barrier);
+
+  // A future height more than one block ahead is ignored.
+  db_rpc.scheddb_hogs_transferred(
+      HogsTransferred{.block = barrier + 5, .deltas = {}})();
+  EXPECT_EQ(scheduler->transfer_finished_.load(), barrier);
 }
 
 } // namespace hogd
