@@ -1,12 +1,15 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <unordered_set>
 #include <utility>
 
 #include "contract.hh"
@@ -115,6 +118,19 @@ private:
       std::allocator<std::pair<const AddressAndKey, SnapshotStorageItem>>,
       std::shared_mutex>
       snapshot_item_cache_;
+
+  // Single-flight coordination for cold contract fills. get_contract_entry
+  // does the database fetch and (expensive) eager rv32 translation outside the
+  // cache shard lock; without coordination, concurrent cold lookups of the
+  // same hash would each repeat that work before one insertion wins. A caller
+  // that finds a fill already in progress for its hash waits here and then
+  // reads the shared cached result instead of duplicating the work. Held only
+  // for the brief bookkeeping around each fill, never across the fetch itself,
+  // so distinct hashes still fill concurrently.
+  std::mutex contract_fill_mutex_;
+  std::condition_variable contract_fill_cv_;
+  std::unordered_set<SHA256Hash, SipHash24Hasher, std::equal_to<>>
+      contract_fills_in_progress_;
 
   BlockID block_id_;
   DatabaseProxy &db_proxy_;

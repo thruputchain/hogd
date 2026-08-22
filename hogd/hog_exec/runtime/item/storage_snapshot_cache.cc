@@ -4,10 +4,12 @@
 #include <cassert>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -42,6 +44,31 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
       return obj->has_value() ? &**obj : nullptr;
     }
   }
+
+  // Single-flight: coalesce concurrent cold fills so the database fetch and
+  // eager rv32 translation happen once per hash. A contender that arrives while
+  // a fill for this hash is in progress waits and then reads the shared cached
+  // result rather than repeating the (bounded but attacker-triggerable) work.
+  {
+    std::unique_lock fill_lock(contract_fill_mutex_);
+    contract_fill_cv_.wait(fill_lock, [&] {
+      return !contract_fills_in_progress_.contains(hash);
+    });
+    // The fill we waited on may have populated the cache; re-check before
+    // starting our own.
+    auto [obj, sl] = contract_cache_.find_shared(hash);
+    if (obj) {
+      return obj->has_value() ? &**obj : nullptr;
+    }
+    contract_fills_in_progress_.insert(hash);
+  }
+  // Clear the in-progress marker and wake waiters on every exit path, including
+  // errors (in which case a waiter retries the fill).
+  Defer clear_in_progress([&]() noexcept {
+    std::unique_lock fill_lock(contract_fill_mutex_);
+    contract_fills_in_progress_.erase(hash);
+    contract_fill_cv_.notify_all();
+  });
 
   auto db_res = db_proxy_.get_contract(block_id_, hash);
   if (!db_res) {

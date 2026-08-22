@@ -11,6 +11,7 @@ target_include_directories(item_objects PRIVATE ${CMAKE_BINARY_DIR})
 add_library(item_test_objects OBJECT
   item_view_test.cc
   snapshot_storage_item_test.cc
+  storage_snapshot_cache_test.cc
 )
 target_link_libraries(item_test_objects GTest::gtest hogd_interface)
 target_include_directories(item_test_objects PRIVATE ${CMAKE_BINARY_DIR})
