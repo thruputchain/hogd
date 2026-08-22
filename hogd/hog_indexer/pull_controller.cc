@@ -266,9 +266,7 @@ IndexerPullController::run(const std::stop_token &stop)
             !xdr_equal(applied.progress().origin, pulled.origin) ||
             applied.progress().contiguous_height != pulled_height ||
             applied.progress().last_consensus_hash !=
-                pulled_identity.consensus_hash ||
-            applied.progress().last_payload_digest !=
-                pulled_identity.payload_digest) {
+                pulled_identity.consensus_hash) {
           panic("applied event block disagrees with durable indexer progress");
         }
         const bool advanced =

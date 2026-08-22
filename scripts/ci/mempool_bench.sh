@@ -124,6 +124,7 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --num-accts 10000 \
   --txs-per-block 1000000 \
   --num-blocks 1000 \
+  --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
   --storage-dir $WORK_DIR/chuckd-storage \
   --out-addr :50000 \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \

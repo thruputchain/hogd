@@ -63,6 +63,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_mempool/shared.h"
@@ -971,14 +972,13 @@ make_empty_outbox_append(BlockHeight height, ConsensusValueHash prev_hash)
   value.prev_hash = std::move(prev_hash);
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_logs);
+      compute_indexer_outbox_event_root(event_logs, {});
   auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
   return {.format_version = kIndexerOutboxFormatVersion,
           .consensus_value = std::move(value),
-          .proposal_txs = std::move(proposal_txs),
           .event_logs = std::move(event_logs),
           .tx_bodies = {}};
 }
@@ -1053,14 +1053,14 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfiguration
+GenesisConfigurationV2
 build_test_data_dir_genesis(LocalBootstrapConfig const &config)
 {
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration.storage_cost_model =
+  artifact.genesis_configuration_v2.storage_cost_model =
       StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration);
+  return std::move(artifact.genesis_configuration_v2);
 }
 
 void
@@ -1068,7 +1068,7 @@ write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              LocalBootstrapConfig const &config,
                              std::int64_t schema_version = 2)
 {
-  const GenesisConfiguration genesis = build_test_data_dir_genesis(config);
+  const GenesisConfigurationV2 genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", schema_version);
@@ -1156,7 +1156,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 
   BootstrapAccountArtifact artifact =
       build_local_bootstrap_account_artifact({});
-  GenesisConfiguration genesis = std::move(artifact.genesis_configuration);
+  GenesisConfigurationV2 genesis = std::move(artifact.genesis_configuration_v2);
   EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
             hex_string(sha256(genesis)));
 
@@ -1644,7 +1644,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
       build_local_bootstrap_account_artifact(config);
 
   ASSERT_EQ(first.accounts.size(), 4UL);
-  ASSERT_EQ(first.initialization_txs.size(), 4UL);
+  ASSERT_EQ(first.initialization_txs.size(), 1UL);
   ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 
@@ -2486,7 +2486,7 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
         .format_version = kIndexerOutboxFormatVersion,
         .block_id = 91,
         .block_height = 1,
-        .event_root = compute_indexer_outbox_event_root({}),
+        .event_root = compute_indexer_outbox_event_root({}, {}),
     };
     ASSERT_TRUE(store->publish_candidate(candidate)().has_value());
   }
@@ -2538,7 +2538,7 @@ TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
                          "required");
 }
 
-TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
+TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2549,10 +2549,13 @@ TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
   std::filesystem::copy(data_dir, ahead_data_dir,
                         std::filesystem::copy_options::recursive);
   advance_persistent_data_dir(ahead_data_dir);
-  ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
-            0UL);
-  std::filesystem::copy(ahead_data_dir / "events" / "indexer-outbox",
-                        data_dir / "events" / "indexer-outbox",
+  // Carry the event service's whole durable directory, not just the outbox
+  // inside it: a committed record stores its payload as the content-addressed
+  // <event_root>.events file next to the outbox, and on a real node that file
+  // is durable before the record that references it, so an outbox that is
+  // ahead always brings its events files along.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "events"), 0UL);
+  std::filesystem::copy(ahead_data_dir / "events", data_dir / "events",
                         std::filesystem::copy_options::recursive);
   ASSERT_GT(std::filesystem::remove_all(data_dir / "indexer" / "indexer-db"),
             0UL);
@@ -2560,15 +2563,107 @@ TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
                         data_dir / "indexer" / "indexer-db",
                         std::filesystem::copy_options::recursive);
 
-  expect_startup_failure(
+  HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--dev-accounts", "1",
        "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
-       "1000000000"},
-      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
-      "chain tip 1");
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  expect_clean_exit(process);
 }
 
-TEST(HogDevnode, DataDirPullDoesNotReplayOutboxOneAheadOfHogDb)
+TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::path finalized_data_dir = make_test_data_dir();
+  Defer cleanup_finalized_data_dir(
+      [&] { std::filesystem::remove_all(finalized_data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::filesystem::copy(data_dir, finalized_data_dir,
+                        std::filesystem::copy_options::recursive);
+  advance_persistent_data_dir(finalized_data_dir);
+
+  // Model a stop after HogDB finalized height two but before event promoted
+  // the already-durable events file it wrote at close, or the indexer observed
+  // that height.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "ramdb"), 0UL);
+  std::filesystem::copy(finalized_data_dir / "ramdb", data_dir / "ramdb",
+                        std::filesystem::copy_options::recursive);
+
+  constexpr BlockID kClosedCandidate = 900;
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value()) << tip.error();
+    ASSERT_EQ(tip->value.proposal_header.block_height, 2);
+    ASSERT_NE(tip->id, kClosedCandidate);
+  }
+  ConsensusValue finalized;
+  {
+    auto finalized_store = IndexerOutboxStore::open(
+        (finalized_data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(finalized_store.has_value()) << finalized_store.error();
+    auto committed = finalized_store->load_committed(2)();
+    ASSERT_TRUE(committed.has_value()) << committed.error();
+    finalized = committed->consensus_value;
+
+    // Model what closing left behind: the block's events file, content
+    // addressed by its event root, with the height never promoted to a
+    // committed record. The finalized run retains it -- its committed record
+    // references it as its payload -- so copy it from there.
+    std::filesystem::copy_file(
+        EventBlockContext::final_events_filename(
+            (finalized_data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        EventBlockContext::final_events_filename(
+            (data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        std::filesystem::copy_options::overwrite_existing);
+
+    auto recovering_store = IndexerOutboxStore::open(
+        (data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(recovering_store.has_value()) << recovering_store.error();
+    EXPECT_FALSE(recovering_store->has_committed(2).value());
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  expect_clean_exit(process);
+
+  auto recovered_store = IndexerOutboxStore::open(
+      (data_dir / "events" / "indexer-outbox").string());
+  ASSERT_TRUE(recovered_store.has_value()) << recovered_store.error();
+  auto committed = recovered_store->load_committed(2)();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(committed->consensus_value, finalized);
+  // The promoted committed record references this file as its payload, so it
+  // is retained for as long as the record lives.
+  EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
+      (data_dir / "events").string(), finalized.proposal_header.events_hash)));
+}
+
+TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2589,7 +2684,7 @@ TEST(HogDevnode, DataDirPullDoesNotReplayOutboxOneAheadOfHogDb)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 1);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
   expect_clean_exit(process);
 }
 
@@ -2614,8 +2709,8 @@ TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)
       {"--data-dir", data_dir.string(), "--dev-accounts", "1",
        "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
        "1000000000"},
-      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
-      "chain tip 1");
+      "recovered hog-devnode indexer is ahead of finalized event outbox: "
+      "indexed height 2, finalized height 1");
 }
 
 TEST(HogDevnode, DataDirAcceptsMatchingOutboxIndexerAndHogDb)

@@ -25,7 +25,6 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -126,7 +125,7 @@ protected:
 
     // We use [block_id] as the height as well.
     auto event_close_res =
-        event_client_.eventsched_close_block(block_id, block_id, ProposalTxs{});
+        event_client_.eventsched_close_block(block_id, block_id);
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
@@ -158,7 +157,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration(
+  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
@@ -171,10 +170,9 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Run initialization transactions
-  const auto &init_blocks = result.success().initialization_txs;
   BlockID current_block_id = 1;
 
-  for (const InitializationBlock &init_block : init_blocks) {
+  auto run_initialization_block = [&](const InitializationBlock &init_block) {
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
@@ -187,6 +185,12 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
     // Finish the initialization block
     close_block(current_block_id);
     current_block_id++;
+  };
+
+  run_initialization_block(result.success().genesis_ceremony_txs);
+  for (const InitializationBlock &init_block :
+       result.success().initialization_txs) {
+    run_initialization_block(init_block);
   }
 
   // Now open the test block for work transactions
@@ -254,7 +258,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration(
+  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
@@ -267,10 +271,9 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Run initialization transactions
-  const auto &init_blocks = result.success().initialization_txs;
   BlockID current_block_id = 1;
 
-  for (const InitializationBlock &init_block : init_blocks) {
+  auto run_initialization_block = [&](const InitializationBlock &init_block) {
     open_block(current_block_id, current_block_id - 1);
 
     // Propose all transactions in this initialization block
@@ -283,6 +286,12 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
     // Finish the initialization block
     close_block(current_block_id);
     current_block_id++;
+  };
+
+  run_initialization_block(result.success().genesis_ceremony_txs);
+  for (const InitializationBlock &init_block :
+       result.success().initialization_txs) {
+    run_initialization_block(init_block);
   }
 
   // Now open the test block for work transactions

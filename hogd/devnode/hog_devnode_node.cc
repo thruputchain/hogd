@@ -26,6 +26,7 @@
 #include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
@@ -46,6 +47,7 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/manifest_parse.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -69,7 +71,7 @@
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
-#include "proposal_hash.h"
+#include "parallel.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
@@ -167,19 +169,20 @@ metadata_path(std::filesystem::path const &data_dir)
   return data_dir / kDataDirMetadataFile;
 }
 
-GenesisConfiguration
+GenesisConfigurationV2
 build_genesis_configuration(LocalBootstrapConfig const &config,
+                            NetworkHash const &network_hash,
                             StorageCostModel const &cost_model)
 {
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration.storage_cost_model = cost_model.to_xdr();
-  return std::move(artifact.genesis_configuration);
+      build_local_bootstrap_account_artifact(config, network_hash, cost_model);
+  return std::move(artifact.genesis_configuration_v2);
 }
 
 std::string
-build_data_dir_metadata_json(LocalBootstrapConfig const &config,
-                             GenesisConfiguration const &genesis_configuration)
+build_data_dir_metadata_json(
+    LocalBootstrapConfig const &config,
+    GenesisConfigurationV2 const &genesis_configuration)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -308,7 +311,7 @@ require_string_value(std::string_view actual, std::string_view expected,
 }
 
 LocalBootstrapConfig
-parse_data_dir_metadata(std::string_view bytes)
+parse_data_dir_metadata(std::string_view bytes, NetworkHash const &network_hash)
 {
   std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
   if (!parsed.has_value()) {
@@ -389,8 +392,8 @@ parse_data_dir_metadata(std::string_view bytes)
   resolve_dev_wallet_profile(config.dev_wallet_profile);
 
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
-  const GenesisConfiguration genesis =
-      build_genesis_configuration(config, cost_model);
+  const GenesisConfigurationV2 genesis =
+      build_genesis_configuration(config, network_hash, cost_model);
   const std::string expected_genesis_hash = hex_string(sha256(genesis));
   require_string_value(require_string_field(*parsed, "genesisHash", "root"),
                        expected_genesis_hash, "genesisHash");
@@ -428,7 +431,8 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
 void
 preflight_data_dir_metadata(
     std::optional<std::filesystem::path> const &data_dir,
-    LocalBootstrapConfig const &requested_config)
+    LocalBootstrapConfig const &requested_config,
+    NetworkHash const &network_hash)
 {
   if (!data_dir.has_value()) {
     return;
@@ -444,7 +448,7 @@ preflight_data_dir_metadata(
     return;
   }
   LocalBootstrapConfig persisted_config =
-      parse_data_dir_metadata(read_metadata_file(path));
+      parse_data_dir_metadata(read_metadata_file(path), network_hash);
   require_matching_bootstrap_config(persisted_config, requested_config);
 }
 
@@ -525,7 +529,7 @@ HogDevnodeNode::HogDevnodeNode(
     indexer_dir_(data_dir, kIndexerSubdir), opened_db_([this] {
       // Reject incompatible bootstrap intent before opening or migrating any
       // persisted chain state.
-      preflight_data_dir_metadata(data_dir_, bootstrap_config_);
+      preflight_data_dir_metadata(data_dir_, bootstrap_config_, network_hash_);
       return open_db_backend();
     }()),
     event_ctx_(event_dir_.directory()), event_sched_server_(event_ctx_),
@@ -586,7 +590,8 @@ HogDevnodeNode::HogDevnodeNode(
       panic("devnode connect to dbauth failed: {}",
             dbauth_res.error().error_code().message());
     dbauth_client_t dbauth_client = std::move(*dbauth_res);
-    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+    auth_server_ =
+        std::make_unique<AuthServer>(std::move(dbauth_client), network_hash_);
 
     auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
     auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -642,8 +647,12 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Now have all of the subsystems register themselves with the mempool.
     register_db_with_mempool();
-    register_auth_with_mempool();
+    AuthCard auth_card = register_auth_with_mempool();
     register_coordinator_with_mempool()();
+    // finish_init() installs the mempool's auth-data callback. Subscribe only
+    // after that callback exists, because a recovered DB immediately reports
+    // its current height through auth_data_changed().
+    auth_server_->subscribe_to_auth_data_changes(std::move(auth_card))();
     if (recovered_existing_chain_) {
       register_event_with_mempool();
       start_indexer_pull();
@@ -806,9 +815,8 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
   if (*latest && tip_height != std::numeric_limits<BlockHeight>::max() &&
       (*latest)->block_height == tip_height + 1 &&
       (*latest)->prev_hash == sha256(tip.value)) {
-    // Event publication and HogDB commit are concurrent. Preserve the expected
-    // crash window, but reconciliation keeps this record above the admissible
-    // delivery tail until the scheduler catches up with the exact value.
+    // Event publication and HogDB commit are concurrent. The event commit is
+    // called only after finalization, so this expected crash window is safe.
     return;
   }
   if (*latest && (*latest)->block_height > tip_height) {
@@ -848,11 +856,18 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
   const DbTip tip = ctx_->get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
   const BlockHeight indexed_height = indexer_db_->latest_block();
-  if (indexed_height > tip_height) {
+  auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
+  if (!latest) {
+    throw std::runtime_error(
+        "failed to inspect recovered event outbox latest record");
+  }
+  const BlockHeight finalized_height =
+      *latest ? std::max(tip_height, (*latest)->block_height) : tip_height;
+  if (indexed_height > finalized_height) {
     throw std::runtime_error(std::format(
-        "recovered hog-devnode indexer is ahead of chain tip: indexed height "
-        "{}, chain tip {}",
-        indexed_height, tip_height));
+        "recovered hog-devnode indexer is ahead of finalized event outbox: "
+        "indexed height {}, finalized height {}",
+        indexed_height, finalized_height));
   }
 }
 
@@ -878,7 +893,8 @@ HogDevnodeNode::validate_fresh_data_dir(
   std::error_code ec;
   if (std::filesystem::exists(metadata_path(*data_dir_), ec)) {
     LocalBootstrapConfig persisted_config =
-        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
+        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
+                                network_hash_);
     require_matching_bootstrap_config(persisted_config, requested_config);
     return persisted_config;
   }
@@ -911,7 +927,8 @@ HogDevnodeNode::validate_recovered_data_dir(
   }
 
   LocalBootstrapConfig persisted_config =
-      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
+      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)),
+                              network_hash_);
   require_matching_bootstrap_config(persisted_config, requested_config);
   return persisted_config;
 }
@@ -927,7 +944,7 @@ HogDevnodeNode::write_data_dir_metadata() const
       metadata_path(*data_dir_),
       build_data_dir_metadata_json(
           bootstrap_config_,
-          build_genesis_configuration(bootstrap_config_,
+          build_genesis_configuration(bootstrap_config_, network_hash_,
                                       ctx_->get_cost_model())));
 }
 
@@ -936,9 +953,13 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
     LocalBootstrapConfig const &config)
 {
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config);
+      build_local_bootstrap_account_artifact(config, network_hash_,
+                                             ctx_->get_cost_model());
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
+  genesis_configuration_v2_ = std::move(artifact.genesis_configuration_v2);
+  genesis_configuration_v2_.storage_cost_model =
+      ctx_->get_cost_model().to_xdr();
   bootstrap_accounts_ = std::move(artifact.accounts);
   if (ctx_->get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
@@ -960,10 +981,12 @@ HogDevnodeNode::materialize_bootstrap_accounts(
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
   BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config);
+      build_local_bootstrap_account_artifact(config, network_hash_,
+                                             ctx_->get_cost_model());
   genesis_configuration_ = artifact.genesis_configuration;
-  CHECK_EQ(client.schedcoord_load_genesis_configuration(
-               std::move(artifact.genesis_configuration))(),
+  genesis_configuration_v2_ = artifact.genesis_configuration_v2;
+  CHECK_EQ(client.schedcoord_load_genesis_configuration_v2(
+               std::move(artifact.genesis_configuration_v2))(),
            DbSchedResult::DbSchedResultOK);
   co_await initialize_fresh_event_outbox_origin();
   register_event_with_mempool();
@@ -1003,10 +1026,6 @@ HogDevnodeNode::initialize_fresh_event_outbox_origin()
 void
 HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
 {
-  if (txs.empty()) {
-    return;
-  }
-
   auto client_res =
       create_client<SchedulerCoord1>(bind_host_,
                                      mempool_coord_server_.port())();
@@ -1014,22 +1033,18 @@ HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
     panic("devnode commit_initialization_batch connect failed: {}",
           client_res.error().error_code().message());
   auto client = std::move(*client_res);
-  client.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
-
   SchedulerGetTipResult tip = client.schedcoord_get_tip()();
   CHECK_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-
-  SchedulerProposalResult proposal =
-      client.schedulercoord_propose_block(tip.db_tip().id, ProposalContext{})();
-  CHECK_EQ(proposal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
-  ConsensusValue value{};
-  value.prev_hash = sha256(tip.db_tip().value);
-  value.proposal_header = proposal.proposed_block().proposal.header;
-  value.proposal_txs_hash = proposal_txs_compatibility_hash(
-      proposal.proposed_block().proposal.transactions);
-  CHECK_EQ(client.schedulercoord_commit_block(
-               proposal.proposed_block().block_id, value)(),
-           SchedulerCommitOutcome::SchedulerCommitOK);
+  ParallelSignedTransactionBatch parallel = t_to_parallel_batch(txs)();
+  GenesisCeremonyRequest request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(tip.db_tip().value),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = std::move(parallel),
+  };
+  GenesisCeremonyResult result =
+      client.schedulercoord_commit_genesis_ceremony(std::move(request))();
+  CHECK_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
 }
 
 void
@@ -1103,7 +1118,12 @@ HogDevnodeNode::open_db_backend() const
   if (RPCContext::has_committed_tip(*recovered_tip) &&
       recovered_tip->value.proposal_header.network_hash != network_hash_) {
     ProposalHeader &header = recovered_tip->value.proposal_header;
-    if (header.block_height == 0 && header.network_hash == NetworkHash{}) {
+    HogDbStatus<DeployedContractHash> root =
+        db.read_address_metadata(kGenesisRootContractAddress);
+    const bool is_legacy_genesis =
+        root && root->contract_type == ContractType::kNative;
+    if (header.block_height <= 1 && header.network_hash == NetworkHash{} &&
+        is_legacy_genesis) {
       header.network_hash = network_hash_;
       if (HogDbStatus<void> status = db.write_dbtip(*recovered_tip); !status) {
         status.error().raise("failed to migrate genesis network hash");
@@ -1209,7 +1229,7 @@ HogDevnodeNode::register_event_with_mempool()
   }
 }
 
-void
+AuthCard
 HogDevnodeNode::register_auth_with_mempool()
 {
   auto client_res =
@@ -1228,7 +1248,7 @@ HogDevnodeNode::register_auth_with_mempool()
               .c_str()};
   client.mempoolauth_intro_auth(auth_card)();
   auth_server_->set_mempool_client(std::move(client));
-  auth_server_->subscribe_to_auth_data_changes(auth_card)();
+  return auth_card;
 }
 
 void

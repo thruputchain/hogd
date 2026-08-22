@@ -44,6 +44,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   info("NETWORK HASH={}", format_network_hash(network_hash));
 
+  registration.set_network_hash(network_hash);
+
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.
   HttpServer metrics_server;
@@ -54,6 +56,11 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
+  // HogDb sends one block-wide HogsTransferred RPC with the bulk cap (see
+  // hog_db.cc create_sched_db_client); a committed block's aggregated balance
+  // deltas can exceed x23's 16 MiB default, so the receiver must match it or
+  // the record is rejected at the framing layer before dispatch.
+  db->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_db_port =
       db.start_server(make_bind_host_port(bind_ip, db_port));
   CHECK(actual_db_port == db_port || db_port == 0);

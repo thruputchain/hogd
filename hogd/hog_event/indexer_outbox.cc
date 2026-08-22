@@ -17,7 +17,6 @@
 #include <optional>
 #include <span>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <stdio.h>
 #include <string>
 #include <string_view>
 #include <sys/file.h>
@@ -33,12 +32,13 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_event/event_block_context.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
-#include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -174,8 +174,8 @@ validate_payload_sizes(const Payload &payload)
     consensus_value_size = x23::detail::xdr_size_bounds<ConsensusValue>().max_;
   }
   auto response_size = indexer_event_pull_rpc_record_size_for_parts(
-      consensus_value_size, x23::xdr_size(payload.proposal_txs),
-      x23::xdr_size(payload.event_logs), x23::xdr_size(payload.tx_bodies));
+      consensus_value_size, x23::xdr_size(payload.event_logs),
+      x23::xdr_size(payload.tx_bodies));
   if (!response_size) {
     return std::unexpected(response_size.error());
   }
@@ -200,14 +200,8 @@ validate_candidate(const IndexerOutboxCandidatePayload &payload)
   if (auto sizes = validate_payload_sizes(payload); !sizes) {
     co_return sizes;
   }
-  if (compute_indexer_outbox_event_root(payload.event_logs) !=
-      payload.event_root) {
-    co_return std::unexpected("event root differs from payload identity");
-  }
-  if (auto mapping = co_await validate_indexer_canonical_proposal_mapping(
-          payload.proposal_txs, payload.event_logs, payload.tx_bodies);
-      !mapping) {
-    co_return std::unexpected(mapping.error());
+  if (payload.event_logs.size() != payload.tx_bodies.size()) {
+    co_return std::unexpected("event/body batch cardinalities differ");
   }
   co_return IndexerOutboxStatus<void>{};
 }
@@ -242,8 +236,6 @@ make_header(const IndexerOutboxCandidatePayload &payload, size_t payload_size,
       .payload_byte_length = payload_size,
       .payload_digest = digest,
       .event_root = payload.event_root,
-      .proposal_txs_hash =
-          proposal_txs_compatibility_hash(payload.proposal_txs),
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCandidate);
   header.record_identity.candidate_block_id() = payload.block_id;
@@ -251,8 +243,8 @@ make_header(const IndexerOutboxCandidatePayload &payload, size_t payload_size,
 }
 
 IndexerOutboxRecordHeader
-make_header(const IndexerOutboxCommittedPayload &payload, size_t payload_size,
-            SHA256Hash digest)
+make_header(const IndexerOutboxCommittedStoredPayload &payload,
+            size_t payload_size, SHA256Hash digest)
 {
   IndexerOutboxRecordHeader header{
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
@@ -263,7 +255,6 @@ make_header(const IndexerOutboxCommittedPayload &payload, size_t payload_size,
       .consensus_hash = sha256(payload.consensus_value),
       .prev_hash = payload.consensus_value.prev_hash,
       .event_root = payload.consensus_value.proposal_header.events_hash,
-      .proposal_txs_hash = payload.consensus_value.proposal_txs_hash,
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCommitted);
   return header;
@@ -276,9 +267,9 @@ committed_record_info_from_header(const IndexerOutboxRecordHeader &header)
       .block_height = header.block_height,
       .protocol = std::string(header.protocol),
       .payload_byte_length = header.payload_byte_length,
-      .payload_digest = header.payload_digest,
       .consensus_hash = header.consensus_hash,
       .prev_hash = header.prev_hash,
+      .event_root = header.event_root,
   };
 }
 
@@ -309,18 +300,54 @@ encode_file(const Payload &payload)
     return std::unexpected(size.error());
   }
 
-  x23::Buf payload_bytes = x23::serialize(payload);
+  // Encode the payload straight into its final offset in the file buffer
+  // rather than serializing it standalone and then appending it. A full
+  // block's candidate payload carries every event log and every transaction
+  // body, which runs to hundreds of megabytes; the append cost a second copy
+  // of all of it and doubled peak memory, both on the close_block() critical
+  // path.
+  //
+  // This works because the encoded header size does not depend on the payload:
+  // payload_byte_length is a fixed-width hyper, payload_digest and the other
+  // identity fields are fixed-width, and protocol is fixed for a given binary.
+  // So we can lay the header down with a placeholder digest, append the
+  // payload, and then rewrite the header in place once we can hash it. The
+  // CHECK_EQ below pins that size invariance -- if a future header field makes
+  // the encoding content-dependent this fails loudly instead of silently
+  // writing a corrupt record.
   IndexerOutboxRecordHeader header =
-      make_header(payload, payload_bytes.size(),
-                  sha256(x23::BufView(payload_bytes)));
+      make_header(payload, payload_size, SHA256Hash{});
   x23::Buf header_bytes = x23::serialize(header);
   if (header_bytes.size() > kMaxIndexerOutboxHeaderBytes) {
     return std::unexpected("indexer outbox header exceeds bounded limit");
   }
   x23::Buf file_bytes =
       x23::serialize(static_cast<uint32_t>(header_bytes.size()));
+  const size_t header_offset = file_bytes.size();
   file_bytes.append_range(header_bytes);
-  file_bytes.append_range(payload_bytes);
+  const size_t payload_offset = file_bytes.size();
+  file_bytes.reserve(payload_offset + payload_size);
+  x23::serialize_to(&file_bytes, payload);
+  CHECK_EQ(file_bytes.size() - payload_offset, payload_size);
+
+  // Only epoch-origin records carry a payload digest; candidate and committed
+  // headers keep the zero digest laid down above.
+  //
+  // A committed record's integrity does not rest on a digest: its stored
+  // payload is only {format_version, consensus_value}, checked against the
+  // header's consensus_hash on load, and the event logs and transaction bodies
+  // it references are reassembled from the content-addressed events file and
+  // revalidated against both consensus roots. What a digest would uniquely
+  // cover is the SignedTransaction signature wrapper -- deliberately outside
+  // both roots, and any wrapper satisfying the auth claim is equally valid.
+  if constexpr (std::same_as<Payload, IndexerOutboxEpochOrigin>) {
+    header.payload_digest =
+        sha256(x23::BufView(file_bytes.data() + payload_offset, payload_size));
+    x23::Buf final_header_bytes = x23::serialize(header);
+    CHECK_EQ(final_header_bytes.size(), header_bytes.size());
+    std::ranges::copy(final_header_bytes, file_bytes.begin() + header_offset);
+  }
+
   if (auto valid = validate_indexer_outbox_file_size(file_bytes.size());
       !valid) {
     return std::unexpected(valid.error());
@@ -392,7 +419,6 @@ validate_indexer_outbox_file_size(size_t file_size)
 
 IndexerOutboxStatus<size_t>
 indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
-                                             size_t proposal_txs_xdr_size,
                                              size_t event_logs_xdr_size,
                                              size_t tx_bodies_xdr_size)
 {
@@ -409,8 +435,6 @@ indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
   size = size.and_then([&](size_t value) {
     return checked_add(value, consensus_value_xdr_size);
   });
-  size = size.and_then(
-      [&](size_t value) { return checked_add(value, proposal_txs_xdr_size); });
   size = size.and_then(
       [&](size_t value) { return checked_add(value, event_logs_xdr_size); });
   size = size.and_then(
@@ -506,7 +530,16 @@ IndexerOutboxStore::finish_opening(UniqueFd directory_fd)
         system_error("lock indexer outbox directory", error));
   }
 
-  IndexerOutboxStore store(std::move(directory_fd));
+  // The store lives at <events directory>/indexer-outbox, and committed
+  // records reference <event_root>.events files in that parent directory.
+  const int events_fd =
+      openat(directory_fd.get(), "..", O_DIRECTORY | O_RDONLY | O_CLOEXEC);
+  if (events_fd < 0) {
+    return std::unexpected(
+        system_error("open events directory above indexer outbox", errno));
+  }
+
+  IndexerOutboxStore store(std::move(directory_fd), UniqueFd(events_fd));
   if (auto cleaned = store.cleanup_stale_temp_files(); !cleaned) {
     return std::unexpected(cleaned.error());
   }
@@ -561,6 +594,100 @@ IndexerOutboxStore::publish_candidate(
                           std::as_bytes(std::span(*bytes)));
 }
 
+IndexerOutboxStatus<void>
+IndexerOutboxStore::publish_candidate_encoded(
+    BlockID block_id, BlockHeight block_height, SHA256Hash event_root,
+    uint32_t pair_count, std::span<const x23::Buf> event_bufs,
+    std::span<const x23::Buf> body_bufs) const
+{
+  // Publishes byte-for-byte the record publish_candidate() would write for the
+  // equivalent structured payload. The difference is only in how it gets there:
+  // the element bytes were already encoded on the ingest path, so nothing here
+  // re-serializes them, and the scatter-list publish means nothing concatenates
+  // them either. For a full block that is the difference between touching every
+  // event log and transaction body again at close and not touching them at all.
+  //
+  // The payload's fixed prefix comes from encoding the same struct with empty
+  // vectors. XDR lays a variable-length vector down as a u32 count followed by
+  // its elements, and event_logs/tx_bodies are the struct's last two fields, so
+  // that encoding is exactly [prefix][0u32][0u32]. Dropping those two counts
+  // and emitting the real ones keeps this tied to the generated XDR rather than
+  // to a hand-rolled field layout.
+  IndexerOutboxCandidatePayload shape{
+      .format_version = kIndexerOutboxFormatVersion,
+      .block_id = block_id,
+      .block_height = block_height,
+      .event_root = event_root,
+  };
+  x23::Buf head = x23::serialize(shape);
+  CHECK_GE(head.size(), 2 * sizeof(uint32_t));
+  head.resize(head.size() - (2 * sizeof(uint32_t)));
+
+  size_t event_bytes = 0;
+  for (const x23::Buf &buf : event_bufs) {
+    event_bytes += buf.size();
+  }
+  size_t body_bytes = 0;
+  for (const x23::Buf &buf : body_bufs) {
+    body_bytes += buf.size();
+  }
+
+  // The checks validate_candidate() would have run. Batch cardinalities cannot
+  // differ here: both vectors are emitted with the same count by construction.
+  if (block_height < 0) {
+    return std::unexpected("candidate outbox height is negative");
+  }
+  auto response_size = indexer_event_pull_rpc_record_size_for_parts(
+      x23::detail::xdr_size_bounds<ConsensusValue>().max_,
+      sizeof(uint32_t) + event_bytes, sizeof(uint32_t) + body_bytes);
+  if (!response_size) {
+    return std::unexpected(response_size.error());
+  }
+
+  // [prefix][event count][event elements][body count][body elements]
+  x23::serialize_to(&head, pair_count);
+  const x23::Buf body_count = x23::serialize(pair_count);
+  const size_t payload_size =
+      head.size() + event_bytes + body_count.size() + body_bytes;
+  if (auto size = indexer_outbox_file_size_for_payload(payload_size); !size) {
+    return std::unexpected(size.error());
+  }
+
+  std::vector<std::span<const std::byte>> payload_pieces;
+  payload_pieces.reserve(2 + event_bufs.size() + body_bufs.size());
+  payload_pieces.push_back(std::as_bytes(std::span(head)));
+  for (const x23::Buf &buf : event_bufs) {
+    payload_pieces.push_back(std::as_bytes(std::span(buf)));
+  }
+  payload_pieces.push_back(std::as_bytes(std::span(body_count)));
+  for (const x23::Buf &buf : body_bufs) {
+    payload_pieces.push_back(std::as_bytes(std::span(buf)));
+  }
+
+  // No payload digest for candidates -- see encode_file. This is what keeps
+  // close off a full memory-bandwidth pass over the block.
+  //
+  // make_header reads only the scalar identity fields, so the empty-vector
+  // shape yields the same header the structured path would produce.
+  IndexerOutboxRecordHeader header =
+      make_header(shape, payload_size, SHA256Hash{});
+  x23::Buf header_bytes = x23::serialize(header);
+  if (header_bytes.size() > kMaxIndexerOutboxHeaderBytes) {
+    return std::unexpected("indexer outbox header exceeds bounded limit");
+  }
+  const x23::Buf length_prefix =
+      x23::serialize(static_cast<uint32_t>(header_bytes.size()));
+
+  std::vector<std::span<const std::byte>> file_pieces;
+  file_pieces.reserve(2 + payload_pieces.size());
+  file_pieces.push_back(std::as_bytes(std::span(length_prefix)));
+  file_pieces.push_back(std::as_bytes(std::span(header_bytes)));
+  file_pieces.insert(file_pieces.end(), payload_pieces.begin(),
+                     payload_pieces.end());
+
+  return publish_bytes(candidate_filename(block_id), file_pieces);
+}
+
 x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
 IndexerOutboxStore::load_candidate(BlockID block_id) const
 {
@@ -588,9 +715,7 @@ IndexerOutboxStore::load_candidate(BlockID block_id) const
   }
   if (payload->block_id != header->record_identity.candidate_block_id() ||
       payload->block_height != header->block_height ||
-      payload->event_root != header->event_root ||
-      proposal_txs_compatibility_hash(payload->proposal_txs) !=
-          header->proposal_txs_hash) {
+      payload->event_root != header->event_root) {
     co_return std::unexpected(
         "candidate outbox header/payload metadata mismatch");
   }
@@ -628,16 +753,16 @@ IndexerOutboxStore::enumerate_candidate_records_raw() const
         header->record_identity.candidate_block_id() != *block_id) {
       return std::unexpected("candidate outbox filename/header mismatch");
     }
-    if (auto valid = validate_payload_digest(name, *header); !valid) {
-      return std::unexpected(valid.error());
-    }
+    // Candidates carry no digest, so enumeration no longer streams and hashes
+    // every candidate file. This ran from find_canonical_candidate() and
+    // remove_resolved_candidates(), putting a full-payload hash per retained
+    // candidate on the commit path.
     records.push_back({.block_id = header->record_identity.candidate_block_id(),
                        .block_height = header->block_height,
                        .protocol = std::string(header->protocol),
                        .payload_byte_length = header->payload_byte_length,
                        .payload_digest = header->payload_digest,
-                       .event_root = header->event_root,
-                       .proposal_txs_hash = header->proposal_txs_hash});
+                       .event_root = header->event_root});
   }
   std::ranges::sort(records, [](const auto &lhs, const auto &rhs) {
     return lhs.block_id < rhs.block_id;
@@ -673,13 +798,71 @@ IndexerOutboxStore::publish_committed(
   if (auto valid = co_await validate_committed(payload, height); !valid) {
     co_return valid;
   }
-  auto bytes = encode_file(payload);
+  const IndexerOutboxCommittedStoredPayload stored{
+      .format_version = payload.format_version,
+      .consensus_value = payload.consensus_value,
+  };
+  co_return co_await publish_committed_stored(stored, &payload);
+}
+
+x23::Async<IndexerOutboxStatus<void>>
+IndexerOutboxStore::publish_committed_reference(
+    const IndexerOutboxCommittedStoredPayload &stored) const
+{
+  if (stored.consensus_value.proposal_header.block_height < 0) {
+    co_return std::unexpected("committed outbox height is negative");
+  }
+  co_return co_await publish_committed_stored(stored, nullptr);
+}
+
+x23::Async<IndexerOutboxStatus<void>>
+IndexerOutboxStore::publish_committed_stored(
+    const IndexerOutboxCommittedStoredPayload &stored,
+    const IndexerOutboxCommittedPayload *payload_for_ensure) const
+{
+  const BlockHeight height =
+      stored.consensus_value.proposal_header.block_height;
+  auto bytes = encode_file(stored);
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
 
   x23::CoroGuard publication_guard;
   co_await publication_guard(*committed_publication_lock_);
+  // The record stores only {format_version, consensus_value}; the event logs
+  // and transaction bodies live once, in the content-addressed events file the
+  // header's event_root names. It is durable before the record that references
+  // it is published, and under the publication lock so concurrent publishes of
+  // one root cannot interleave writes to its temp file.
+  if (payload_for_ensure != nullptr) {
+    // The caller holds the full payload (restart promotion, synthetic
+    // publishers): a missing file is written from it, first writer wins.
+    if (auto ensured = ensure_events_file(*payload_for_ensure); !ensured) {
+      co_return ensured;
+    }
+  }
+  else {
+    // Reference publication: the live commit path, whose block streamed and
+    // fsynced the file at close. It must exist -- a record must never
+    // reference a payload that is not durable -- and it must fit the pull
+    // RPC's replay record, so an unservable block fails at commit rather than
+    // at first pull. The two batch counts (4 bytes each) are the only
+    // reassembly bytes not in the file.
+    auto file_size = probe_events_file_size(
+        stored.consensus_value.proposal_header.events_hash);
+    if (!file_size) {
+      co_return std::unexpected(file_size.error());
+    }
+    auto batches_size = checked_add(static_cast<size_t>(*file_size), 8);
+    if (!batches_size) {
+      co_return std::unexpected("events file size overflows replay record");
+    }
+    if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
+            x23::xdr_size(stored.consensus_value), *batches_size, 0);
+        !rpc_size) {
+      co_return std::unexpected(rpc_size.error());
+    }
+  }
   auto exists = has_committed(height);
   if (!exists) {
     co_return std::unexpected(exists.error());
@@ -720,7 +903,7 @@ IndexerOutboxStore::publish_committed(
   if (!current_epoch_started) {
     if (cache.current_origin) {
       if (height != cache.current_origin->origin.first_height ||
-          payload.consensus_value.prev_hash !=
+          stored.consensus_value.prev_hash !=
               cache.current_origin->origin.first_prev_hash) {
         co_return std::unexpected(
             "first committed record does not match current outbox epoch "
@@ -759,7 +942,7 @@ IndexerOutboxStore::publish_committed(
       co_return std::unexpected(
           "new committed outbox height is not the next canonical height");
     }
-    if (payload.consensus_value.prev_hash != cache.latest->consensus_hash) {
+    if (stored.consensus_value.prev_hash != cache.latest->consensus_hash) {
       co_return std::unexpected(
           "new committed outbox record does not link to previous consensus "
           "value");
@@ -826,11 +1009,13 @@ IndexerOutboxStore::load_committed_record(
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
-  auto payload =
-      decode_payload<IndexerOutboxCommittedPayload>(*bytes, "committed");
+  auto payload = assemble_committed_payload(*header, *bytes);
   if (!payload) {
     co_return std::unexpected(payload.error());
   }
+  // validate_committed recomputes both consensus roots over the reassembled
+  // pairs; with the record now referencing the events file rather than
+  // embedding a digested copy, this is what validates the payload at rest.
   if (auto valid = co_await validate_committed(*payload, block_height);
       !valid) {
     co_return std::unexpected(valid.error());
@@ -838,8 +1023,7 @@ IndexerOutboxStore::load_committed_record(
   if (sha256(payload->consensus_value) != header->consensus_hash ||
       payload->consensus_value.prev_hash != header->prev_hash ||
       payload->consensus_value.proposal_header.events_hash !=
-          header->event_root ||
-      payload->consensus_value.proposal_txs_hash != header->proposal_txs_hash) {
+          header->event_root) {
     co_return std::unexpected(
         "committed outbox header/payload metadata mismatch");
   }
@@ -1133,16 +1317,16 @@ IndexerOutboxStore::validate_committed_history_unlocked(
         co_return std::unexpected("committed outbox chain is discontinuous");
       }
       if (record.protocol == current_protocol) {
-        auto loaded = co_await load_committed_record(record.block_height,
-                                                     current_protocol);
-        if (!loaded) {
+        // Continuity was established from the headers above. The record's own
+        // stored payload is decoded and cross-checked (it is a few hundred
+        // bytes), and the referenced events file is probed for existence and
+        // replay size -- but its pairs are not read back here. They are
+        // validated fail-closed wherever they are loaded, so restart-to-ready
+        // scales with record count, not retained transaction bytes.
+        if (auto valid = validate_committed_record_reference(record); !valid) {
           co_return std::unexpected(
               std::format("invalid current committed outbox record at {}: {}",
-                          record.block_height, loaded.error()));
-        }
-        if (loaded->info != record) {
-          co_return std::unexpected(
-              "current committed outbox header/payload metadata mismatch");
+                          record.block_height, valid.error()));
         }
       }
       previous = record;
@@ -1320,9 +1504,6 @@ IndexerOutboxStore::load_committed_record_info_raw(
       header->block_height != block_height) {
     return std::unexpected("committed outbox filename/header mismatch");
   }
-  if (auto valid = validate_payload_digest(filename, *header); !valid) {
-    return std::unexpected(valid.error());
-  }
   return committed_record_info_from_header(*header);
 }
 
@@ -1348,9 +1529,6 @@ IndexerOutboxStore::enumerate_committed_records_raw() const
             IndexerOutboxRecordKind::IndexerOutboxCommitted ||
         header->block_height != *height) {
       return std::unexpected("committed outbox filename/header mismatch");
-    }
-    if (auto valid = validate_payload_digest(name, *header); !valid) {
-      return std::unexpected(valid.error());
     }
     records.push_back(committed_record_info_from_header(*header));
   }
@@ -1491,7 +1669,24 @@ IndexerOutboxStatus<void>
 IndexerOutboxStore::publish_bytes(std::string_view filename,
                                   std::span<const std::byte> bytes) const
 {
-  if (auto valid = validate_indexer_outbox_file_size(bytes.size()); !valid) {
+  const std::array<std::span<const std::byte>, 1> pieces{bytes};
+  return publish_bytes(filename, pieces);
+}
+
+// Scatter-list form. Callers whose record is already laid out across several
+// buffers publish it without first concatenating them, which for a candidate
+// record means not copying a whole block's event logs and transaction bodies
+// just to hand them to write().
+IndexerOutboxStatus<void>
+IndexerOutboxStore::publish_bytes(
+    std::string_view filename,
+    std::span<const std::span<const std::byte>> pieces) const
+{
+  size_t total_bytes = 0;
+  for (const auto &piece : pieces) {
+    total_bytes += piece.size();
+  }
+  if (auto valid = validate_indexer_outbox_file_size(total_bytes); !valid) {
     return valid;
   }
 
@@ -1521,9 +1716,11 @@ IndexerOutboxStore::publish_bytes(std::string_view filename,
   });
 
   File temp_file(temp_fd.release());
-  if (auto written = write_full(temp_file, bytes); !written) {
-    return std::unexpected(
-        std::format("write indexer outbox temp file: {}", written.error()));
+  for (const auto &piece : pieces) {
+    if (auto written = write_full(temp_file, piece); !written) {
+      return std::unexpected(
+          std::format("write indexer outbox temp file: {}", written.error()));
+    }
   }
   if (auto synced = temp_file.sync(); !synced) {
     return std::unexpected(
@@ -1555,7 +1752,16 @@ IndexerOutboxStore::publish_bytes(std::string_view filename,
     if (!existing) {
       return std::unexpected(existing.error());
     }
-    if (!std::ranges::equal(std::as_bytes(std::span(*existing)), bytes)) {
+    std::span<const std::byte> remaining = std::as_bytes(std::span(*existing));
+    bool identical = remaining.size() == total_bytes;
+    for (const auto &piece : pieces) {
+      if (!identical) {
+        break;
+      }
+      identical = std::ranges::equal(remaining.first(piece.size()), piece);
+      remaining = remaining.subspan(piece.size());
+    }
+    if (!identical) {
       return std::unexpected(
           "refusing to replace mismatched indexer outbox file");
     }
@@ -1785,10 +1991,214 @@ IndexerOutboxStore::load_payload(std::string_view filename,
     offset += static_cast<size_t>(read_size);
     file_offset += read_size;
   }
-  if (sha256(x23::BufView(payload)) != header.payload_digest) {
+  // Only epoch origins carry a digest (see encode_file). Candidate and
+  // committed payloads are validated structurally: the size check above,
+  // bounds-checked decode, and -- for committed records -- the consensus_hash
+  // comparison plus root revalidation of the reassembled events-file pairs.
+  if (header.record_identity.kind() ==
+          IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
+      sha256(x23::BufView(payload)) != header.payload_digest) {
     return std::unexpected("indexer outbox payload digest mismatch");
   }
   return payload;
+}
+
+namespace {
+
+std::string
+events_file_basename(const EventsHash &event_root)
+{
+  return encode_hex(std::as_bytes(std::span(event_root))) + ".events";
+}
+
+} // namespace
+
+IndexerOutboxStatus<IndexerOutboxCommittedPayload>
+IndexerOutboxStore::assemble_committed_payload(
+    const IndexerOutboxRecordHeader &header,
+    std::span<const uint8_t> stored_bytes) const
+{
+  auto stored =
+      decode_payload<IndexerOutboxCommittedStoredPayload>(stored_bytes,
+                                                          "committed");
+  if (!stored) {
+    return std::unexpected(stored.error());
+  }
+
+  const std::string name = events_file_basename(header.event_root);
+  const int fd = openat(events_directory_fd_.get(), name.c_str(),
+                        O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    return std::unexpected(
+        system_error(std::format("open events file {}", name), errno));
+  }
+  UniqueFd file(fd);
+  struct stat file_stat{};
+  if (fstat(file.get(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode) ||
+      file_stat.st_size < 0) {
+    return std::unexpected(system_error("stat events file", errno));
+  }
+  // A record's pairs were bounded to the pull RPC's replay limit at
+  // publication, so anything larger is not this record's file.
+  if (std::cmp_greater(file_stat.st_size, kMaxIndexerOutboxPayloadBytes)) {
+    return std::unexpected(
+        std::format("events file {} exceeds replayable payload size", name));
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(file_stat.st_size));
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const ssize_t read_size =
+        pread(file.get(), bytes.data() + offset, bytes.size() - offset,
+              static_cast<off_t>(offset));
+    if (read_size < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return std::unexpected(system_error("read events file", errno));
+    }
+    if (read_size == 0) {
+      return std::unexpected(std::format("truncated events file {}", name));
+    }
+    offset += static_cast<size_t>(read_size);
+  }
+
+  auto pairs = parse_events_file_pairs(bytes, name);
+  if (!pairs) {
+    return std::unexpected(pairs.error());
+  }
+  return IndexerOutboxCommittedPayload{
+      .format_version = stored->format_version,
+      .consensus_value = std::move(stored->consensus_value),
+      .event_logs = std::move(pairs->event_logs),
+      .tx_bodies = std::move(pairs->tx_bodies),
+  };
+}
+
+IndexerOutboxStatus<uint64_t>
+IndexerOutboxStore::probe_events_file_size(const EventsHash &event_root) const
+{
+  const std::string name = events_file_basename(event_root);
+  struct stat file_stat{};
+  if (fstatat(events_directory_fd_.get(), name.c_str(), &file_stat,
+              AT_SYMLINK_NOFOLLOW) != 0) {
+    return std::unexpected(
+        system_error(std::format("probe events file {}", name), errno));
+  }
+  if (!S_ISREG(file_stat.st_mode) || file_stat.st_size < 0) {
+    return std::unexpected(
+        std::format("events file {} is not a regular file", name));
+  }
+  return static_cast<uint64_t>(file_stat.st_size);
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::validate_committed_record_reference(
+    const IndexerOutboxCommittedRecordInfo &record) const
+{
+  const std::string filename = committed_filename(record.block_height);
+  auto header = load_header(filename);
+  if (!header) {
+    return std::unexpected(header.error());
+  }
+  auto bytes = load_payload(filename, *header);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  auto stored =
+      decode_payload<IndexerOutboxCommittedStoredPayload>(*bytes, "committed");
+  if (!stored) {
+    return std::unexpected(stored.error());
+  }
+  if (sha256(stored->consensus_value) != header->consensus_hash ||
+      stored->consensus_value.prev_hash != header->prev_hash ||
+      stored->consensus_value.proposal_header.events_hash !=
+          header->event_root ||
+      stored->consensus_value.proposal_header.block_height !=
+          header->block_height) {
+    return std::unexpected("committed outbox header/payload metadata mismatch");
+  }
+  if (committed_record_info_from_header(*header) != record) {
+    return std::unexpected(
+        "committed outbox header does not match enumerated record");
+  }
+  auto file_size = probe_events_file_size(header->event_root);
+  if (!file_size) {
+    return std::unexpected(file_size.error());
+  }
+  auto batches_size = checked_add(static_cast<size_t>(*file_size), 8);
+  if (!batches_size) {
+    return std::unexpected("events file size overflows replay record");
+  }
+  if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
+          x23::xdr_size(stored->consensus_value), *batches_size, 0);
+      !rpc_size) {
+    return std::unexpected(rpc_size.error());
+  }
+  return {};
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::ensure_events_file(
+    const IndexerOutboxCommittedPayload &payload) const
+{
+  const std::string name =
+      events_file_basename(payload.consensus_value.proposal_header.events_hash);
+  if (faccessat(events_directory_fd_.get(), name.c_str(), F_OK,
+                AT_SYMLINK_NOFOLLOW) == 0) {
+    // The common case: close_block streamed and fsynced this file before the
+    // block could commit. An existing file under this event root carries pairs
+    // that validate against the same roots, so it is kept, first writer wins.
+    return {};
+  }
+  if (errno != ENOENT) {
+    return std::unexpected(system_error("probe events file", errno));
+  }
+
+  x23::Buf bytes;
+  CHECK_EQ(payload.event_logs.size(), payload.tx_bodies.size());
+  for (size_t i = 0; i < payload.event_logs.size(); ++i) {
+    x23::serialize_to(&bytes, payload.event_logs[i]);
+    x23::serialize_to(&bytes, payload.tx_bodies[i]);
+  }
+
+  const std::string temp_name = name + "_outbox_temp";
+  const int temp_fd =
+      openat(events_directory_fd_.get(), temp_name.c_str(),
+             O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0666);
+  if (temp_fd < 0) {
+    return std::unexpected(system_error("create events temp file", errno));
+  }
+  UniqueFd temp(temp_fd);
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const ssize_t written =
+        write(temp.get(), bytes.data() + offset, bytes.size() - offset);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return std::unexpected(system_error("write events file", errno));
+    }
+    offset += static_cast<size_t>(written);
+  }
+  if (fsync(temp.get()) != 0) {
+    return std::unexpected(system_error("fsync events file", errno));
+  }
+  // First writer wins, exactly as close_block publishes: the name is shared by
+  // every block with this event root, so an existing file must not be
+  // replaced.
+  if (linkat(events_directory_fd_.get(), temp_name.c_str(),
+             events_directory_fd_.get(), name.c_str(), 0) != 0 &&
+      errno != EEXIST) {
+    return std::unexpected(system_error("link events file", errno));
+  }
+  if (unlinkat(events_directory_fd_.get(), temp_name.c_str(), 0) != 0) {
+    return std::unexpected(system_error("unlink events temp file", errno));
+  }
+  if (fsync(events_directory_fd_.get()) != 0) {
+    return std::unexpected(system_error("fsync events directory", errno));
+  }
+  return {};
 }
 
 IndexerOutboxStatus<void>

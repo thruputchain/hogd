@@ -30,7 +30,7 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext(StorageCostModelXdr const &cost_model);
+  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash);
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);

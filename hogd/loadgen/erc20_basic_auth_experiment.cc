@@ -157,10 +157,6 @@ ERC20BasicAuthExperimentState::generate_experiment()
                                wallet_initial_hogs);
   }
 
-  // make unfurl txs
-  x23::Vec<SignedTransaction> unfurl_txs;
-  unfurl_txs.append_range(builder.make_unfurl_genesis_transactions());
-
   // make mint txs
   x23::Vec<SignedTransaction> mint_txs;
   mint_txs.reserve(config_.num_addresses);
@@ -190,7 +186,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                 .uniquifier =
                     Uniquifier{.block_expiry_height =
                                    make_init_mint_expiry_height(i - 1),
-                               .nonce = unfurl_txs.size() + i},
+                               .nonce = i},
                 .auth_claim = self_auth_claim,
             },
     };
@@ -199,13 +195,21 @@ ERC20BasicAuthExperimentState::generate_experiment()
   }
 
   x23::Vec<InitializationBlock> initialization_txs;
-  initialization_txs.reserve(2);
-  initialization_txs.emplace_back(std::move(unfurl_txs));
+  initialization_txs.reserve(1);
   initialization_txs.emplace_back(std::move(mint_txs));
+
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto root_contract = load_stock_genesis_root_contract();
+  assert(root_contract);
+
+  InitializationBlock genesis_ceremony_txs;
+  genesis_ceremony_txs.append_range(
+      builder.make_genesis_ceremony_transactions(cost_model));
 
   co_return LoadgenSuccessResult{
       .genesis_configuration =
-          builder.build_or_panic(StorageCostModel::default_cost_model()),
+          builder.build_v2(config_.network_hash, cost_model, *root_contract),
+      .genesis_ceremony_txs = std::move(genesis_ceremony_txs),
       .initialization_txs = std::move(initialization_txs),
   };
 }

@@ -111,11 +111,11 @@ public:
     if (ready()) {
       co_return;
     }
-    co_await default_threadpool().bg();
+    // Both waits suspend rather than block a pool worker; see [Registration].
     while (!initialized_.load(std::memory_order_acquire)) {
-      initialized_.wait(false, std::memory_order_acquire);
+      co_await initialized_waiters_.wait(false);
     }
-    std::ignore = MempoolEventRpc::wait_for_registration();
+    std::ignore = co_await MempoolEventRpc::wait_for_registration();
     event_sched_client_ = std::make_unique<event_sched_client_t>(
         co_await MempoolEventRpc::get_client());
     for (size_t i = 0; i < kNumClientsPerExecutor; ++i) {
@@ -193,6 +193,9 @@ public:
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block(BlockID block_id, ConsensusValue value);
 
+  x23::Async<GenesisCeremonyResult>
+  schedulercoord_commit_genesis_ceremony(GenesisCeremonyRequest request);
+
   // Returns the db tip of the last committed block.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
@@ -245,6 +248,8 @@ public:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     genesis_value.proposal_header.network_hash = network_hash_;
+    genesis_value.proposal_header.genesis_configuration_hash =
+        sha256(genesis_configuration);
     DbSchedResult ret =
         co_await db_sched_client_->dbsched_load_genesis_configuration(
             genesis_configuration, genesis_value);
@@ -273,6 +278,60 @@ public:
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
 
+    co_return ret;
+  }
+
+  x23::Async<DbSchedResult> schedcoord_load_genesis_configuration_v2(
+      GenesisConfigurationV2 genesis_configuration)
+  {
+    CHECK(initialized_.load(std::memory_order_acquire));
+
+    DbSchedResult ret;
+    {
+      x23::CoroGuard commit_cg;
+      co_await commit_cg(commit_lock_);
+
+      if (last_committed_block_.value.proposal_header.block_height != -1 ||
+          genesis_configuration.network_hash != network_hash_) {
+        co_return DbSchedResult::DbSchedResultError;
+      }
+      CHECK_EQ(auth_data_height(), -1);
+      CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
+
+      ConsensusValue genesis_value{};
+      genesis_value.proposal_header.block_height = 0;
+      genesis_value.proposal_header.network_hash = network_hash_;
+      genesis_value.proposal_header.genesis_configuration_hash =
+          sha256(genesis_configuration);
+      ret = co_await db_sched_client_->dbsched_load_genesis_configuration_v2(
+          genesis_configuration, genesis_value);
+      if (ret != DbSchedResult::DbSchedResultOK) {
+        co_return ret;
+      }
+
+      DbTipResult db_res = co_await db_sched_client_->dbsched_get_tip();
+      CHECK_EQ(db_res.result(), DbSchedResult::DbSchedResultOK);
+      last_committed_block_ = db_res.db_tip();
+      CHECK_EQ(last_committed_block_.value.proposal_header.block_height, 0);
+      CHECK_EQ(last_committed_block_.id, 0UL);
+      Registration::registration().publish_event_canonical_tip(
+          EventCanonicalTip{.block_id = last_committed_block_.id,
+                            .consensus_value = last_committed_block_.value});
+      scheduler_->set_current_block(0);
+      co_await Health::instance().set_current_block_height(0);
+      MempoolMetrics::instance().current_block_height.record(0);
+      MempoolMetrics::instance().scheduler_pending_tx_count.record(
+          scheduler_->size());
+      MempoolMetrics::instance().scheduler_tx_cache_size.record(
+          scheduler_->tx_cache_size());
+      scheduler_->transfer_finished_.store(0);
+    }
+
+    // The database's height-0 notification reaches us through the auth server,
+    // whose callback also takes commit_lock_.  Release that lock explicitly
+    // before waiting, and do not acknowledge the genesis load until the
+    // downstream auth state is usable by the ceremony RPC.
+    co_await wait_for_auth_data(/*expected_height=*/0);
     co_return ret;
   }
 
@@ -416,7 +475,6 @@ private:
   struct JointCommitResult {
     DbBlockResult db;
     RPCError event_commit = RPCError::kRPCUnrecoverable;
-    RPCError event_confirmation = RPCError::kRPCUnrecoverable;
   };
 
   struct NominationTelemetry {
@@ -502,7 +560,8 @@ private:
         co_await MempoolAuthRpc::get_client());
 
     initialized_.store(true, std::memory_order_release);
-    initialized_.notify_all();
+    initialized_waiters_.store(true);
+    initialized_waiters_.broadcast(&default_threadpool());
   }
 
   x23::Async<DbSchedResult> create_snapshot(BlockID prev_block_id,
@@ -512,13 +571,10 @@ private:
   x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
   x23::Async<RPCError> eventsched_commit_block(BlockID block_id,
                                                const ConsensusValue &value);
-  x23::Async<RPCError>
-  eventsched_confirm_committed_block(const ConsensusValue &value);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
-                                                      BlockHeight block_height,
-                                                      const ProposalTxs &txs);
+                                                      BlockHeight block_height);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
                                             ConsensusValue value);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
@@ -566,6 +622,7 @@ private:
   struct FinishNominationNodes {
     x23::Vec<x23::DagNode<void>> finish_executors;
     x23::DagNode<DbBlockResult> close_snapshot;
+    x23::DagNode<ProposalTxsHash> proposal_txs_hash;
     x23::DagNode<EventBlockResult> close_event;
     x23::DagNode<SHA256Hash> txset_hash;
     x23::DagNode<void> build_header;
@@ -588,6 +645,10 @@ private:
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
   x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
+
+  x23::Async<SchedulerCommitOutcome>
+  schedulercoord_commit_block_impl(BlockID block_id,
+                                   ConsensusValue expected_value);
 
   x23::Async<bool>
   validate_batch_chunk(BlockID block_id,
@@ -770,7 +831,6 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-
   using FailedAuthenticationTxSet =
       SynchronizedMap<TransactionHash, char, SipHash24Hasher>;
   SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
@@ -785,6 +845,7 @@ private:
   std::atomic<bool> ready_ = false;
   x23::CoroFutex<bool> ready_waiters_{false};
   std::atomic<bool> initialized_ = false;
+  x23::CoroFutex<bool> initialized_waiters_{false};
 
   std::chrono::steady_clock::time_point last_commit_ =
       std::chrono::steady_clock::now();

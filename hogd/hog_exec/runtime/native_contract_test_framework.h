@@ -587,6 +587,10 @@ public:
       GenesisConfiguration const &genesis_configuration,
       BlockExecutionMode mode =
           BlockExecutionMode::kBlockExecutionModeProposal);
+  void run_genesis_initialization(
+      GenesisConfigurationV2 const &genesis_configuration,
+      BlockExecutionMode mode =
+          BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto &get_coord_client() { return coord_wrapper_->client(); }
 

@@ -25,7 +25,8 @@ public:
 private:
   void handle_balance_change(HogDbStatus<DBItem> const &before,
                              HogDbStatus<DBItem> const &after);
-  void handle_contract_data_item_change(HogDbStatus<DBItem> const &before,
+  void handle_contract_data_item_change(std::span<const std::byte> key,
+                                        HogDbStatus<DBItem> const &before,
                                         HogDbStatus<DBItem> const &after);
   void handle_address_metadata_item_change(HogDbStatus<DBItem> const &before,
                                            HogDbStatus<DBItem> const &after);

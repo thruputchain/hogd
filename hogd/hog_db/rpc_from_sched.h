@@ -64,6 +64,9 @@ public:
   dbsched_load_genesis_configuration(GenesisConfiguration genesis_configuration,
                                      ConsensusValue value);
 
+  x23::Async<DbSchedResult> dbsched_load_genesis_configuration_v2(
+      GenesisConfigurationV2 genesis_configuration, ConsensusValue value);
+
   static x23::Async<DbShardResult> dbsched_shard_restore(BlockHeight height);
 
   x23::Async<DbTipResult> dbsched_get_tip()

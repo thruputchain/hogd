@@ -204,11 +204,31 @@ public:
     return get_db().read_address_metadata(address);
   }
 
+  HogDbStatus<ReplayCacheMetadata>
+  read_address_replay_cache_meta(const ContractAddress &address)
+  {
+    return get_db().read_address_replay_cache_meta(address);
+  }
+
+  HogDbStatus<int128_t> read_nnint128(const ItemKey &key)
+  {
+    return get_db().read_nnint128(key);
+  }
+
   // This getter is used by [auth_test.cc].
   MempoolCoordinatorRpc &mempool_coord_rpc()
   {
     // XXX should we return a shared_ptr?
     return *mempool_coord_server_->impl();
+  }
+
+  sched_coord_client_t mempool_coord_client()
+  {
+    auto client =
+        create_client<SchedulerCoord1>(MempoolTestInfra::kAddress,
+                                       mempool_coord_server_.port())();
+    CHECK(client.has_value());
+    return std::move(*client);
   }
 
   // This getter is used by [mempool_test.cc].

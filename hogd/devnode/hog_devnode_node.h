@@ -86,6 +86,10 @@ public:
   {
     return genesis_configuration_;
   }
+  GenesisConfigurationV2 const &genesis_configuration_v2() const
+  {
+    return genesis_configuration_v2_;
+  }
   bool recovered_existing_chain() const noexcept
   {
     return recovered_existing_chain_;
@@ -107,7 +111,7 @@ private:
   void start_indexer_pull();
   void register_db_with_mempool();
   void register_event_with_mempool();
-  void register_auth_with_mempool();
+  AuthCard register_auth_with_mempool();
   void register_executor_with_mempool();
   x23::Async<void> register_coordinator_with_mempool();
   LocalBootstrapConfig
@@ -129,6 +133,7 @@ private:
   LocalBootstrapConfig bootstrap_config_;
   const std::size_t ramdb_bytes_;
   GenesisConfiguration genesis_configuration_;
+  GenesisConfigurationV2 genesis_configuration_v2_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;
 

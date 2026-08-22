@@ -53,7 +53,7 @@ public:
       }
       framework_->run_genesis_initialization(
           init_result.value().genesis_configuration);
-      for (auto const &init_block : init_result.value().initialization_txs) {
+      auto run_initialization_block = [&](auto const &init_block) {
         for (auto const &tx : init_block) {
           auto handler =
               framework_->make_new_system_call_handler(tx.tx, *context_);
@@ -73,6 +73,10 @@ public:
           }
         }
         framework_->advance_block();
+      };
+      run_initialization_block(init_result.value().genesis_ceremony_txs);
+      for (auto const &init_block : init_result.value().initialization_txs) {
+        run_initialization_block(init_block);
       }
 
       auto extend_result = exp.extend_experiment(kPoolTxs, 1'000'000)();

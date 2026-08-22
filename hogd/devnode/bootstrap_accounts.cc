@@ -81,10 +81,12 @@ append_bootstrap_account(GenesisConfigurationBuilder &builder,
 
 BootstrapAccountArtifact
 finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
-                          std::vector<BootstrapAccountMetadata> accounts)
+                          std::vector<BootstrapAccountMetadata> accounts,
+                          NetworkHash const &network_hash,
+                          StorageCostModel const &cost_model)
 {
   std::optional<GenesisConfiguration> genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
+      builder.build(cost_model);
   if (!genesis_configuration) {
     throw std::runtime_error("bootstrap accounts allocate more hogs than the "
                              "initial hog token supply");
@@ -92,7 +94,11 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
 
   return BootstrapAccountArtifact{
       .genesis_configuration = std::move(*genesis_configuration),
-      .initialization_txs = builder.make_unfurl_genesis_transactions(),
+      .genesis_configuration_v2 =
+          builder.build_v2(network_hash, cost_model,
+                           *load_stock_genesis_root_contract()),
+      .initialization_txs =
+          builder.make_genesis_ceremony_transactions(cost_model),
       .accounts = std::move(accounts),
   };
 }
@@ -107,13 +113,16 @@ derive_bootstrap_account_keypair(std::string_view seed, std::uint32_t index)
 }
 
 BootstrapAccountArtifact
-build_bootstrap_account_artifact(BootstrapAccountConfig const &config)
+build_bootstrap_account_artifact(BootstrapAccountConfig const &config,
+                                 NetworkHash const &network_hash,
+                                 StorageCostModel const &cost_model)
 {
   GenesisConfigurationBuilder builder;
   std::vector<BootstrapAccountMetadata> accounts =
       append_bootstrap_accounts(builder, config);
 
-  return finish_bootstrap_artifact(builder, std::move(accounts));
+  return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
+                                   cost_model);
 }
 
 std::vector<BootstrapAccountMetadata>
@@ -141,7 +150,9 @@ append_bootstrap_accounts(GenesisConfigurationBuilder &builder,
 }
 
 BootstrapAccountArtifact
-build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config)
+build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config,
+                                       NetworkHash const &network_hash,
+                                       StorageCostModel const &cost_model)
 {
   CHECK_LE(config.user_account_count, kMaxBootstrapAccounts);
   auto wallet_contract = load_dev_wallet_contract(
@@ -159,7 +170,8 @@ build_local_bootstrap_account_artifact(LocalBootstrapConfig const &config)
                                  config.user_storage_tokens,
                                  BootstrapAccountRole::kLocalUser));
   }
-  return finish_bootstrap_artifact(builder, std::move(accounts));
+  return finish_bootstrap_artifact(builder, std::move(accounts), network_hash,
+                                   cost_model);
 }
 
 } // namespace hogd

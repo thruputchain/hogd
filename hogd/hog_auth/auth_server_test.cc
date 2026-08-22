@@ -18,14 +18,18 @@
 #include <utility>
 
 #include "auth_card.hh"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "rpc_types.hh"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
 private:
@@ -370,7 +374,7 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
   const uint16_t db_port = db_server.start_server(0);
   const std::string db_address = std::format("localhost:{}", db_port);
   dbauth_client_t dbauth_client = make_dbauth_client(db_address)().value();
-  AuthServer race_auth_server(std::move(dbauth_client), 16);
+  AuthServer race_auth_server(std::move(dbauth_client), NetworkHash{}, 16);
 
   AuthCard auth_card{.protocol = {},
                      .upid = {},
@@ -448,7 +452,53 @@ private:
 
 static_assert(is_DBAuth1<SimpleDBAuthRpc *, x23::Async>);
 
+class RecordingMempoolAuthRpc {
+public:
+  using rpc_service = MempoolAuth1;
+
+  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  {
+    co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
+  }
+
+  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
+                                                 KeyChangeBatch key_changes)
+  {
+    height_ = height;
+    batch_size_ = key_changes.size();
+    co_return;
+  }
+
+  std::optional<BlockHeight> height_;
+  std::optional<size_t> batch_size_;
+};
+
+static_assert(is_MempoolAuth1<RecordingMempoolAuthRpc *, x23::Async>);
+
 } // namespace
+
+TEST(AuthServerSubscribeTest, SynchronizesMempoolToIntroHeight)
+{
+  constexpr BlockHeight kIntroHeight = 5;
+  RpcServer<SimpleDBAuthRpc> db_server(kIntroHeight);
+  const uint16_t db_port = db_server.start_server(0);
+  dbauth_client_t db_client =
+      make_dbauth_client(std::format("localhost:{}", db_port))().value();
+
+  RpcServer<RecordingMempoolAuthRpc> mempool_server;
+  const uint16_t mempool_port = mempool_server.start_server(0);
+  x23::HostPort mempool_address;
+  ASSERT_TRUE(mempool_address.parse(std::format("localhost:{}", mempool_port)));
+  sched_auth_client_t mempool_client =
+      make_rpc_client<MempoolAuth1>(mempool_address)().value();
+
+  AuthServer auth_server(std::move(db_client), NetworkHash{}, 16);
+  auth_server.set_mempool_client(std::move(mempool_client));
+  auth_server.subscribe_to_auth_data_changes(AuthCard{})();
+
+  ASSERT_EQ(mempool_server->impl()->height_, kIntroHeight);
+  ASSERT_EQ(mempool_server->impl()->batch_size_, 0U);
+}
 
 // Regression test for #1448: lookup_auth_data waiters stranded when
 // subscribe_to_auth_data_changes stores the initial height without broadcast.
@@ -461,7 +511,7 @@ TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
   uint16_t port = db_server.start_server(0);
   std::string db_address = std::format("localhost:{}", port);
   dbauth_client_t dbauth_client = make_dbauth_client(db_address)().value();
-  AuthServer auth_server(std::move(dbauth_client), 16);
+  AuthServer auth_server(std::move(dbauth_client), NetworkHash{}, 16);
 
   std::atomic<bool> lookup_started = false;
   std::atomic<bool> lookup_finished = false;

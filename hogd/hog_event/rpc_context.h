@@ -16,10 +16,10 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_event/status.h"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -45,18 +45,12 @@ public:
   // Returns the root hash of the block if successful.
   // Returns an error if the block is not open.
   x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
-                                                  BlockHeight block_height,
-                                                  ProposalTxs proposal_txs);
+                                                  BlockHeight block_height);
 
   // Durably publishes a closed block and GCs the block context.
   // Returns the block height on success.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
-
-  // Makes a durably published block pullable only after the scheduler has also
-  // completed its durable commit.
-  x23::Async<EventStatus<BlockHeight>>
-  confirm_committed_block(ConsensusValue consensus_value);
 
   x23::Async<EventStatus<void>>
   reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
@@ -92,22 +86,21 @@ public:
 private:
   enum class BlockOperation { kClosing, kCommitting, kAbandoning };
 
-  struct CandidatePromotion {
-    IndexerOutboxCommittedPayload committed;
-  };
-
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
   void gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
           it);
 
+  // Records that a block published its events file under [hash].  Caller holds
+  // lock_.
+  void retain_events_file(SHA256Hash const &hash);
+  // Drops one block's claim on [hash], unlinking the file when the last one
+  // goes away.  Caller holds lock_.
+  void release_events_file(SHA256Hash const &hash);
+
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
-  x23::Async<IndexerOutboxStatus<void>>
-  remove_resolved_candidates(BlockHeight committed_height);
-  x23::Async<IndexerOutboxStatus<std::optional<CandidatePromotion>>>
-  find_canonical_candidate(const ConsensusValue &consensus_value) const;
   x23::Async<void>
   finish_block_operation(BlockID block_id,
                          PerThreadARC<EventBlockContext> *context,
@@ -137,9 +130,22 @@ private:
   std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>
       event_block_contexts_;
   std::unordered_map<BlockID, BlockOperation> block_operations_;
-  // Guarded by outbox_commit_lock_. Records above this scheduler-confirmed
-  // height may be durable after crash reconciliation but are not pullable.
-  std::optional<BlockHeight> admissible_indexer_tail_;
+  // Live claims on each published <event root>.events file, guarded by lock_.
+  //
+  // The name is content-addressed, so it is shared by every block with the
+  // same event root -- all empty blocks, at every height, and any two
+  // identical nominations.  A block therefore cannot reclaim "its" file on its
+  // own: abandoning an empty block at one height would delete the file a
+  // closed-but-uncommitted empty block at another height still has to read at
+  // commit.  A claim is taken when a block publishes the file and dropped when
+  // its context is torn down, whether that is via commit or via abandonment.
+  //
+  // In-memory only.  Files that survive a crash have no claims, and reclaiming
+  // those is startup reconciliation's job.
+  std::unordered_map<SHA256Hash, size_t, SipHash24Hasher> events_file_refs_;
+  // Guarded by outbox_commit_lock_. Every record through this finalized
+  // height is pullable, including a crash-window record one ahead of HogDB.
+  std::optional<BlockHeight> finalized_indexer_tail_;
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
 

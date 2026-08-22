@@ -112,25 +112,14 @@ public:
 
   void advance_block();
 
-  void set_event_proposal_transactions(
-      std::span<const SignedTransaction> transactions)
-  {
-    x23::XdrVec<TransactionHash> hashes;
-    x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
-    hashes.reserve(transactions.size());
-    nondeterministic_data.resize(transactions.size());
-    for (const SignedTransaction &transaction : transactions) {
-      hashes.push_back(sha256(transaction.tx));
-    }
-    event_proposal_txs_.hash = t_to_parallel_batch(hashes)();
-    event_proposal_txs_.nondeterministic_data =
-        t_to_parallel_batch(nondeterministic_data)();
-  }
-
   void run_genesis_configuration(
       GenesisConfigurationBuilder const &genesis_configuration_builder);
   void run_genesis_configuration(
       GenesisConfiguration const &genesis_configuration,
+      x23::XdrVec<InitializationBlock> const &initialization_txs);
+  void run_genesis_configuration(
+      GenesisConfigurationV2 const &genesis_configuration,
+      InitializationBlock const &genesis_ceremony_txs,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
 
   TransactionID allocate_txid()
@@ -263,8 +252,7 @@ private:
     }
     // We use [block_number] as the height as well.
     auto r =
-        event_sched_client_->eventsched_close_block(block_number, block_number,
-                                                    event_proposal_txs_);
+        event_sched_client_->eventsched_close_block(block_number, block_number);
     if (r.error() != RPCError::kRPCNone) {
       panic("Failed to close event block");
     }
@@ -285,7 +273,6 @@ private:
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
-  ProposalTxs event_proposal_txs_;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
@@ -318,15 +305,11 @@ CommonBenchState::advance_block()
 
   ConsensusValue value{};
   value.proposal_header.block_height = block_number_;
-  value.proposal_txs_hash =
-      proposal_txs_compatibility_hash(event_proposal_txs_);
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot for block {}: {}", block_number_,
           r2.result());
   }
-  event_proposal_txs_ = {};
-
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
@@ -401,6 +384,52 @@ CommonBenchState::run_genesis_configuration(
       }
     }
     advance_block();
+  }
+}
+
+inline void
+CommonBenchState::run_genesis_configuration(
+    GenesisConfigurationV2 const &genesis_configuration,
+    InitializationBlock const &genesis_ceremony_txs,
+    x23::XdrVec<InitializationBlock> const &initialization_txs)
+{
+  assert(block_number_ == 0);
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
+  auto r = coord_client_->dbsched_load_genesis_configuration_v2(
+      genesis_configuration, genesis_value);
+  if (r != DbSchedResult::DbSchedResultOK) {
+    panic("Failed to write genesis configuration");
+  }
+
+  auto create_result = coord_client_->dbsched_create_snapshot(
+      0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
+  if (create_result != DbSchedResult::DbSchedResultOK) {
+    panic("Failed to create snapshot");
+  }
+
+  block_number_++;
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+  open_event_block(block_number_);
+
+  auto runtime_context = make_hog_exec_context();
+  auto run_block = [&](InitializationBlock const &block) {
+    for (auto const &tx : block) {
+      auto handler = make_handler(tx, allocate_txid(), *runtime_context);
+      if (!handler.root_invoke().is_root_success()) {
+        panic("Failed to invoke transaction");
+      }
+      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+        panic("failed to perform commit operation");
+      }
+    }
+    advance_block();
+  };
+
+  run_block(genesis_ceremony_txs);
+  for (auto const &block : initialization_txs) {
+    run_block(block);
   }
 }
 

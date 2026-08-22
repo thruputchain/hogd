@@ -16,10 +16,6 @@ void set_contract_artifact_directories(
 // Directories searched for contract artifacts, in priority order.
 std::vector<std::filesystem::path> contract_search_directories();
 
-// Loads a WASM contract from the contract artifact search path. Panics if the
-// file cannot be loaded.
-std::shared_ptr<Contract> load_contract(std::string_view filename);
-
 // Loads a compiled RV32 artifact (.rv32a) from the contract artifact search
 // path as a kRv32 contract. Panics if the file cannot be loaded.
 std::shared_ptr<Contract> load_rv32_contract(std::string_view filename);

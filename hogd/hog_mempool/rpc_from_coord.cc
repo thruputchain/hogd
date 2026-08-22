@@ -40,6 +40,7 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "parallel.hh"
@@ -535,22 +536,12 @@ MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
                                                                   value);
 }
 
-x23::Async<RPCError>
-MempoolCoordinatorRpc::eventsched_confirm_committed_block(
-    const ConsensusValue &value)
-{
-  co_return co_await event_sched_client_->eventsched_confirm_committed_block(
-      value);
-}
-
 x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
-                                              BlockHeight block_height,
-                                              const ProposalTxs &txs)
+                                              BlockHeight block_height)
 {
   co_return co_await event_sched_client_->eventsched_close_block(block_id,
-                                                                 block_height,
-                                                                 txs);
+                                                                 block_height);
 }
 
 x23::Async<DbBlockResult>
@@ -1200,14 +1191,16 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
                                  co_return co_await close_snapshot(
                                      cache.block_id);
                                });
+  nodes.proposal_txs_hash = dag.cpu<ProposalTxsHash>(
+      "compute proposal txs hash", proposal_txs_deps, [&cache] {
+        return proposal_txs_compatibility_hash(
+            cache.proposal_result.proposed_block().proposal.transactions);
+      });
   nodes.close_event = dag.async<EventBlockResult>(
-      "close event block", proposal_txs_deps,
+      "close event block", proposal_deps,
       [&]() -> x23::Async<EventBlockResult> {
-        const ProposalTxs &proposal_txs =
-            cache.proposal_result.proposed_block().proposal.transactions;
         co_return co_await eventsched_close_block(
-            cache.block_id, db_tip.value.proposal_header.block_height + 1,
-            proposal_txs);
+            cache.block_id, db_tip.value.proposal_header.block_height + 1);
       });
   nodes.txset_hash =
       dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
@@ -1237,6 +1230,8 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         proposal.header = ProposalHeader{
             .ext = {},
             .network_hash = network_hash_,
+            .genesis_configuration_hash =
+                db_tip.value.proposal_header.genesis_configuration_hash,
             .proposer = context.proposer,
             .block_timepoint = context.block_timepoint,
             .block_height = db_tip.value.proposal_header.block_height + 1,
@@ -1292,11 +1287,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  if (result.db.result() == DbSchedResult::DbSchedResultOK &&
-      result.event_commit == RPCError::kRPCNone) {
-    result.event_confirmation =
-        co_await eventsched_confirm_committed_block(cache.db_tip.value);
-  }
   co_return result;
 }
 
@@ -1323,6 +1313,13 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   co_await cg(nominated_block_cache_lock_);
 
   if (last_committed_block_.id != parent_id) {
+    info("schedulercoord_nominate ret");
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
+  }
+  if (last_committed_block_.value.proposal_header.block_height < 1) {
+    // Heights 0 and 1 are reserved for genesis initialization and the genesis
+    // ceremony. Ordinary nomination starts at height 2.
     info("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
@@ -1438,7 +1435,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                               auth_data_node,
                                               prepare_cache_node),
                          nomination_dag.after(check_initialize_block_node));
-  add_finish_nominating_block_nodes(
+  FinishNominationNodes finish_nodes = add_finish_nominating_block_nodes(
       nomination_dag, last_committed_block_, context, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
       dag_deps_from_nodes(schedule_nodes.serialize_chunks), executor_cleanups,
@@ -1501,8 +1498,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .ext = {},
                        .prev_hash = sha256(last_committed_block_.value),
                        .proposal_header = proposal.header,
-                       .proposal_txs_hash = proposal_txs_compatibility_hash(
-                           proposal.transactions),
+                       .proposal_txs_hash =
+                           finish_nodes.proposal_txs_hash.get(),
                        .upgrades = {}};
   // default_wallet comes from the committed parent tip: the cache's db_tip
   // only ever receives storage/event hashes from the scheduler's close
@@ -1514,6 +1511,251 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       .default_wallet = last_committed_block_.default_wallet};
   info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
+}
+
+x23::Async<GenesisCeremonyResult>
+MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
+    GenesisCeremonyRequest request)
+{
+  // Loading height 0 can complete before the event server and executors have
+  // registered.  The coordinator is allowed to submit the ceremony as soon as
+  // it observes that tip, so wait for the runtime just like ordinary block
+  // proposal does instead of treating this startup race as a fatal invariant.
+  while (!ready()) {
+    co_await ready_waiters_.wait(false);
+  }
+  auto result = [](GenesisCeremonyOutcome outcome) {
+    return GenesisCeremonyResult(outcome);
+  };
+
+  if (request.context.protocol != 0 || request.expected_parent_height != 0) {
+    co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
+  }
+  x23::XdrVec<SignedTransaction> txs;
+  if (!(co_await parallel_batch_to_t(request.transactions, txs)) ||
+      txs.size() > kMaxBlockSize) {
+    co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
+  }
+  for (const SignedTransaction &tx : txs) {
+    if (tx.tx.invocation.invoked_address != kGenesisRootContractAddress) {
+      co_return result(
+          GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
+    }
+  }
+
+  // Wait for the height-0 auth update and verify the transactions without
+  // holding either coordinator lock. The auth_data_changed() callback needs
+  // commit_lock_. Check the parent before waiting, then check it again under
+  // the nomination lock below so a concurrent ceremony cannot make this stale
+  // verification usable.
+  {
+    x23::CoroGuard cache_guard;
+    co_await cache_guard(nominated_block_cache_lock_);
+    const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
+    if (last_committed_block_.value.proposal_header.block_height != 0 ||
+        parent_hash != request.expected_parent_value_hash) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+    }
+    if (nominated_block_cache_.block_id != 0) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+  }
+
+  co_await wait_for_auth_data(/*expected_height=*/0);
+
+  AuthErrorCodeBatch auth_results =
+      co_await auth_client_->authmempool_verify_transactions(0, txs);
+  if (auth_results.size() != txs.size() ||
+      std::ranges::any_of(auth_results, [](AuthErrorCode auth_result) {
+        return auth_result != AuthErrorCode::kAuthSuccess;
+      })) {
+    co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
+  }
+
+  BlockID block_id = 0;
+  ProposalTxs committed_proposal_txs;
+  ConsensusValue value;
+  {
+    x23::CoroGuard cache_guard;
+    co_await cache_guard(nominated_block_cache_lock_);
+
+    // Ordinary commits hold the nomination-cache lock while updating
+    // last_committed_block_. Revalidate after acquiring that same lock, so a
+    // height-1 commit that completed while this request was being decoded
+    // cannot be overwritten by a second height-1 block. Keeping cache_guard
+    // until the ceremony nomination is ready prevents another commit from
+    // advancing the tip after this check and before the block is reserved in
+    // the cache. Do not also take commit_lock_ here: the asynchronous height-0
+    // auth callback can hold it while genesis ceremony execution is pending.
+    const ConsensusValueHash parent_hash = sha256(last_committed_block_.value);
+    if (last_committed_block_.value.proposal_header.block_height != 0 ||
+        parent_hash != request.expected_parent_value_hash) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyParentMismatch);
+    }
+
+    if (nominated_block_cache_.block_id != 0) {
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+
+    block_id = generate_block_id();
+    {
+      x23::CoroGuard scheduler_guard;
+      co_await scheduler_guard(scheduler_->global_lock_);
+      scheduler_->start_pending_nomination(block_id);
+    }
+
+    bool snapshot_open = false;
+    bool event_open = false;
+    size_t executors_open = 0;
+    auto cleanup = [&]() -> x23::Async<void> {
+      for (size_t i = 0; i < executors_open; ++i) {
+        co_await finish_block(block_id, i);
+      }
+      if (event_open) {
+        CHECK_EQ(co_await eventsched_abandon_block(block_id),
+                 RPCError::kRPCNone);
+      }
+      if (snapshot_open) {
+        CHECK_EQ(co_await abandon_snapshot(block_id),
+                 DbSchedResult::DbSchedResultOK);
+      }
+      {
+        x23::CoroGuard scheduler_guard;
+        co_await scheduler_guard(scheduler_->global_lock_);
+        scheduler_->abandon_pending_nomination(block_id);
+      }
+      nominated_block_cache_.block_id = 0;
+      co_return;
+    };
+
+    if (co_await create_snapshot(
+            last_committed_block_.id, block_id,
+            BlockExecutionMode::kBlockExecutionModeProposal) !=
+        DbSchedResult::DbSchedResultOK) {
+      co_await cleanup();
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+    snapshot_open = true;
+    if (co_await eventsched_open_block(block_id) != RPCError::kRPCNone) {
+      co_await cleanup();
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+    event_open = true;
+    for (size_t i = 0; i < exec_clients_.size(); ++i) {
+      if (co_await open_proposal_block(block_id, i) !=
+          ExecResult::ExecResultOK) {
+        co_await cleanup();
+        co_return result(
+            GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+      }
+      ++executors_open;
+    }
+
+    PendingBlock &cache = nominated_block_cache_;
+    cache.block_id = block_id;
+    cache.txs = std::move(txs);
+    cache.tx_hashes.clear();
+    cache.tx_hashes.reserve(cache.txs.size());
+    for (const SignedTransaction &tx : cache.txs) {
+      cache.tx_hashes.push_back(sha256(tx.tx));
+    }
+    cache.result_tx_hashes = cache.tx_hashes;
+    cache.result_tx_nominations.clear();
+    x23::span<bool> ceremony_statuses(cache.statuses.begin(), cache.txs.size());
+    std::ranges::fill(ceremony_statuses, false);
+    co_await propose_batch_in_chunks(block_id, cache.txs,
+                                     cache.result_tx_nominations,
+                                     ceremony_statuses);
+    if (std::ranges::contains(ceremony_statuses, false) ||
+        cache.result_tx_nominations.size() != cache.txs.size()) {
+      co_await cleanup();
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+
+    co_await finish_all_executors(block_id);
+    executors_open = 0;
+    ProposalTxs ceremony_proposal_txs;
+    co_await t_to_parallel_batch(cache.result_tx_hashes,
+                                 ceremony_proposal_txs.hash);
+    co_await t_to_parallel_batch(cache.result_tx_nominations,
+                                 ceremony_proposal_txs.nondeterministic_data);
+    const DbBlockResult db_close = co_await close_snapshot(block_id);
+    const EventBlockResult event_close =
+        co_await eventsched_close_block(block_id, 1);
+    if (db_close.result() != DbSchedResult::DbSchedResultOK ||
+        event_close.error() != RPCError::kRPCNone) {
+      co_await cleanup();
+      co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
+    }
+
+    cache.proposal_result.outcome(
+        SchedulerProposalOutcome::SchedulerProposalOK);
+    SchedulerProposedBlock &proposed = cache.proposal_result.proposed_block();
+    proposed.block_id = block_id;
+    co_await t_to_parallel_batch(cache.txs, proposed.txs);
+    // ParallelBatch contains nested x23::Vec members.  Keep each owner valid
+    // until its normal destructor runs: GCC's optimized coroutine lowering can
+    // otherwise reuse the moved-from frame slot before emitting its cleanup.
+    // This path runs only once at genesis, so the copies are immaterial.
+    proposed.proposal.transactions = ceremony_proposal_txs;
+    proposed.proposal.header = ProposalHeader{
+        .ext = {},
+        .network_hash = network_hash_,
+        .genesis_configuration_hash =
+            last_committed_block_.value.proposal_header
+                .genesis_configuration_hash,
+        .proposer = request.context.proposer,
+        .block_timepoint = request.context.block_timepoint,
+        .block_height = 1,
+        .txs_hash = get_txset_hash(cache.result_tx_hashes),
+        .storage_hash = db_close.block().storage_hash,
+        .events_hash = event_close.root_hash(),
+    };
+    committed_proposal_txs = proposed.proposal.transactions;
+    value = ConsensusValue{
+        .protocol = 0,
+        .ext = {},
+        .prev_hash = parent_hash,
+        .proposal_header = proposed.proposal.header,
+        .proposal_txs_hash =
+            proposal_txs_compatibility_hash(committed_proposal_txs),
+        .upgrades = {},
+    };
+    cache.db_tip = DbTip{
+        .id = block_id,
+        .storage_long_hash = db_close.block().storage_long_hash,
+        .value = value,
+        .default_wallet = last_committed_block_.default_wallet,
+    };
+    // These transactions intentionally never entered Scheduler::tx_cache_.
+    // The ordinary commit path uses tx_hashes only to evict nominated mempool
+    // entries; leave that eviction set empty while retaining the committed
+    // hashes in ProposalTxs above.
+    cache.tx_hashes.clear();
+  }
+
+  // A joint DB/event commit may already have succeeded in one subsystem when
+  // the other reports failure. It is not safe to abandon or retry that block
+  // in-process; fail-stop so startup recovery can reconcile durable state.
+  SchedulerCommitOutcome commit_outcome;
+  try {
+    commit_outcome = co_await schedulercoord_commit_block_impl(block_id, value);
+  } catch (const std::exception &e) {
+    panic("genesis ceremony commit failed: {}", e.what());
+  } catch (...) {
+    panic("genesis ceremony commit failed with an unknown exception");
+  }
+  if (commit_outcome != SchedulerCommitOutcome::SchedulerCommitOK) {
+    panic("genesis ceremony commit returned {}", commit_outcome);
+  }
+  GenesisCeremonyResult committed(
+      GenesisCeremonyOutcome::GenesisCeremonyCommitted);
+  // Assign the generated union arm's members directly and copy the nested
+  // ParallelBatch vectors.  Moving the enclosing generated type can leave an
+  // optimized GCC coroutine cleanup referring to a reused frame slot.
+  committed.commit().db_tip = last_committed_block_;
+  committed.commit().proposal_txs = committed_proposal_txs;
+  co_return committed;
 }
 
 x23::Async<bool>
@@ -1728,6 +1970,13 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                 validation_tx_count);
     });
   });
+  if (proposal.header.block_height <= 1) {
+    // Heights 0 and 1 are established outside ordinary validation.
+    validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
   while (true) {
     while (!(co_await increment_num_validations_in_progress())) {
       co_await wait_for_validation_gate_open();
@@ -2099,13 +2348,17 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       [&]() -> x23::Async<DbBlockResult> {
         co_return co_await close_snapshot(validation_block_id);
       });
+  auto proposal_txs_hash_node = validation_dag.cpu<ProposalTxsHash>(
+      "compute proposal txs hash", validation_dag.after(check_validation_node),
+      [&proposal] {
+        return proposal_txs_compatibility_hash(proposal.transactions);
+      });
   auto close_event_node = validation_dag.async<EventBlockResult>(
       "close event block", validation_dag.after(check_validation_node),
       [&]() -> x23::Async<EventBlockResult> {
         co_return co_await eventsched_close_block(validation_block_id,
                                                   scheduler_->current_block() +
-                                                      1,
-                                                  proposal.transactions);
+                                                      1);
       });
   x23::DagDeps close_validation_deps =
       merge_dag_deps(validation_dag.after(close_snapshot_node, close_event_node,
@@ -2158,15 +2411,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       });
 
   validation_dag.async<void>(
-      "build validation result", validation_dag.after(check_closed_node),
+      "build validation result",
+      validation_dag.after(check_closed_node, proposal_txs_hash_node),
       [&]() -> x23::Async<void> {
         ConsensusValue value{.protocol = 0,
                              .ext = {},
                              .prev_hash = sha256(last_committed_block_.value),
                              .proposal_header = proposal.header,
-                             .proposal_txs_hash =
-                                 proposal_txs_compatibility_hash(
-                                     proposal.transactions),
+                             .proposal_txs_hash = proposal_txs_hash_node.get(),
                              .upgrades = {}};
         // default_wallet comes from the committed parent tip (see the
         // nomination-path comment).
@@ -2228,6 +2480,20 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
   if (!ready()) {
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
+  if (expected_value.proposal_header.block_height <= 1) {
+    // Heights 0 and 1 are committed by genesis initialization and the genesis
+    // ceremony, not through the ordinary coordinator commit RPC.
+    co_return SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
+  }
+  co_return co_await schedulercoord_commit_block_impl(block_id,
+                                                      std::move(
+                                                          expected_value));
+}
+
+x23::Async<SchedulerCommitOutcome>
+MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
+    BlockID block_id, ConsensusValue expected_value)
+{
   MempoolMetrics::instance().commit_attempt_count.increment();
 
   const std::chrono::steady_clock::time_point commit_started_at =
@@ -2571,7 +2837,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
         const JointCommitResult &joint_commit = commit_block_node.get();
         CHECK_EQ(joint_commit.db.result(), DbSchedResult::DbSchedResultOK);
         CHECK_EQ(joint_commit.event_commit, RPCError::kRPCNone);
-        CHECK_EQ(joint_commit.event_confirmation, RPCError::kRPCNone);
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later
@@ -2646,7 +2911,17 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   });
 
   CHECK(initialized_.load(std::memory_order_acquire));
-  CHECK_EQ(height, auth_data_height_.load() + 1);
+  const BlockHeight current_height = auth_data_height_.load();
+  if (height <= current_height) {
+    // An auth server that subscribes after the database has committed its
+    // current tip sends an empty synchronization callback for that tip.  A
+    // restarted mempool may already have initialized its watermark from the
+    // same database tip, so this notification is intentionally idempotent.
+    warn("Ignoring stale auth-data update for height {} at current height {}",
+         height, current_height);
+    co_return;
+  }
+  CHECK_EQ(height, current_height + 1);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);

@@ -29,6 +29,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
@@ -45,7 +46,6 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "hogd/storage_item/replay_cache.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -119,16 +119,9 @@ SystemCallHandler::to_exec_result(SystemErrorCode error_code)
 }
 
 bool
-SystemCallHandler::replay_uniquifier_expired(
-    Uniquifier const &uniquifier, ContractAddress const &root_address,
-    BlockHeight executing_height)
+SystemCallHandler::replay_uniquifier_expired(Uniquifier const &uniquifier,
+                                             BlockHeight executing_height)
 {
-  // The initial-token-claim precompile is exempt from the replay cache (it
-  // provides its own replay protection), so add_replay_nonce_delta consumes no
-  // uniquifier for it -- and an expiry check makes no sense here.
-  if (root_address == kInitialTokenClaimPrecompileAddress) {
-    return false;
-  }
   // ReplayCacheLock rejects a uniquifier whose block_expiry_height is strictly
   // less than the executing block's height.
   return uniquifier.block_expiry_height < executing_height;
@@ -142,7 +135,13 @@ SystemCallHandler::replay_uniquifier_expired()
   if (!tx_uniquifier_.has_value()) {
     return false;
   }
-  assert(root_invoked_address_.has_value());
+  auto legacy_claim = root_is_legacy_initial_token_claim();
+  if (!legacy_claim.has_value()) {
+    return std::unexpected(legacy_claim.error());
+  }
+  if (*legacy_claim) {
+    return false;
+  }
   // get_block_height() returns the executing block height (parent tip + 1),
   // which is exactly the height ReplayCacheLock validates expiry against. A
   // tip-read failure is propagated.
@@ -150,8 +149,23 @@ SystemCallHandler::replay_uniquifier_expired()
   if (!height.has_value()) {
     return std::unexpected(height.error());
   }
-  return replay_uniquifier_expired(*tx_uniquifier_, *root_invoked_address_,
-                                   *height);
+  return replay_uniquifier_expired(*tx_uniquifier_, *height);
+}
+
+SystemStatus<bool>
+SystemCallHandler::root_is_legacy_initial_token_claim()
+{
+  if (!root_invoked_address_.has_value() ||
+      *root_invoked_address_ != kGenesisRootContractAddress) {
+    return false;
+  }
+  auto deployed =
+      snapshot_cache_.try_get_deployed_contract(*root_invoked_address_);
+  if (!deployed.has_value()) {
+    return std::unexpected(deployed.error());
+  }
+  return *deployed != nullptr &&
+         (*deployed)->hash.contract_type == ContractType::kNative;
 }
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -663,13 +677,13 @@ SystemCallHandler::add_replay_nonce_delta()
   // Transaction constructor; a uniquifier without a root address would make the
   // access below undefined. Make that invariant explicit.
   assert(root_invoked_address_.has_value());
-  // The replay cache is disabled for the initial token claim precompile (it
-  // provides its own replay protection and a replay cache there is a DoS
-  // vector); consume no uniquifier for transactions rooted at it. HogDb rejects
-  // a replay-cache delta keyed here (kInvalidExecutorBehavior), so this skip is
-  // load-bearing, not an optimization. See kInitialTokenClaimPrecompileAddress.
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  if (root_invoked_address_.value() == kInitialTokenClaimPrecompileAddress) {
+  // V1 deployed the native InitialTokenClaim precompile at address 2 and gave
+  // it contract-internal replay protection. V2 deliberately reuses address 2
+  // for an RV32 root contract, so the compatibility exception must be based on
+  // the deployed contract type rather than the address alone.
+  auto legacy_claim = root_is_legacy_initial_token_claim();
+  CHECK(legacy_claim.has_value());
+  if (*legacy_claim) {
     return;
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)

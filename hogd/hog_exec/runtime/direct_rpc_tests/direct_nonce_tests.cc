@@ -8,7 +8,6 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/replay_cache.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -105,32 +104,6 @@ TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
       << "ConsumeUniquifier with exclusive lock should be rejected as "
          "executor misbehavior, not as a conflict";
   EXPECT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
-  ASSERT_TRUE(tx.abort_transaction().has_value());
-}
-
-// The initial token claim precompile is exempt from the replay cache (it
-// manages replay protection itself, via the exclusive deletes of its stored
-// claim entries). The executor consumes no uniquifier for it, so a
-// replay-nonce delta keyed at its address can only come from a buggy executor:
-// HogDb must reject it as invalid executor behavior rather than record it.
-TEST_P(DirectNonceTests, ConsumeUniquifierOnInitialTokenClaimPrecompileRejected)
-{
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
-  auto tx = make_new_per_tx_db_proxy();
-  tx.add_delta(make_replay_cache_addrkey(kInitialTokenClaimPrecompileAddress),
-               make_nonce_delta(
-                   Uniquifier{.block_expiry_height = 1000, .nonce = 1}),
-               std::to_underlying(StorageDeltaFlags::None));
-
-  auto r = tx.try_push_current_subtransaction();
-  ASSERT_FALSE(r.has_value())
-      << "a replay-nonce delta on the initial token claim precompile must be "
-         "rejected, not recorded";
-  EXPECT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
-
   ASSERT_TRUE(tx.abort_transaction().has_value());
 }
 

@@ -33,7 +33,8 @@ public:
         make_dbauth_client(address_for_auth)().value();
 
     // Create AuthServer
-    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client), 16);
+    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client),
+                                                NetworkHash{}, 16);
   }
 
   AuthServer &auth_server() { return *auth_server_; }
