@@ -349,8 +349,7 @@ encode_file(const Payload &payload)
         sha256(x23::BufView(file_bytes.data() + payload_offset, payload_size));
     x23::Buf final_header_bytes = x23::serialize(header);
     CHECK_EQ(final_header_bytes.size(), header_bytes.size());
-    std::copy(final_header_bytes.begin(), final_header_bytes.end(),
-              file_bytes.begin() + header_offset);
+    std::ranges::copy(final_header_bytes, file_bytes.begin() + header_offset);
   }
 
   if (auto valid = validate_indexer_outbox_file_size(file_bytes.size());
