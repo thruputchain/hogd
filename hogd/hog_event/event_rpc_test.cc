@@ -187,6 +187,24 @@ rewrite_outbox_protocol(std::string_view directory, std::string_view filename,
   ASSERT_TRUE(file->close().has_value());
 }
 
+// Truncate a block's events file so reading it back fails. Dropping a byte
+// leaves the final value short of a whole XDR word, which the bounds-checked
+// pair walk rejects.
+void
+corrupt_events_file(std::string_view work_directory, SHA256Hash const &hash)
+{
+  const std::string path =
+      EventBlockContext::final_events_filename(work_directory, hash);
+  auto bytes = x23::readfile<x23::Buf>(path);
+  ASSERT_TRUE(bytes.has_value());
+  ASSERT_GT(bytes->size(), 1U);
+  bytes->resize(bytes->size() - 1);
+  auto file = File::open(path, O_TRUNC | O_WRONLY, 0600);
+  ASSERT_TRUE(file.has_value());
+  ASSERT_TRUE(write_full(*file, std::as_bytes(std::span(*bytes))).has_value());
+  ASSERT_TRUE(file->close().has_value());
+}
+
 void
 corrupt_outbox_payload(std::string_view directory, std::string_view filename)
 {
@@ -1353,7 +1371,7 @@ TEST_F(EventRpcTest, CommitBlockKeepsFinalFile)
   EXPECT_TRUE(std::filesystem::exists(final_file));
 }
 
-TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
+TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
 {
   ProposedTransaction body = make_body(41);
   TxEventLog event = make_event(body, 41);
@@ -1373,15 +1391,15 @@ TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
 
     EventBlockResult close_result = mempool_rpc.eventsched_close_block(41, 9)();
     ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
-    auto candidate = ctx.indexer_outbox_store().load_candidate(41)();
-    ASSERT_TRUE(candidate.has_value()) << candidate.error();
-    EXPECT_EQ(candidate->block_id, 41);
-    EXPECT_EQ(candidate->block_height, 9);
-    EXPECT_EQ(candidate->event_root, close_result.root_hash());
-    ASSERT_EQ(candidate->event_logs.size(), 1);
-    ASSERT_EQ(candidate->tx_bodies.size(), 1);
-    expect_xdr_equal(candidate->event_logs[0], event);
-    expect_xdr_equal(candidate->tx_bodies[0], body);
+    // Close leaves exactly one durable artifact: the events file, content
+    // addressed by the event root it just returned, holding every event log
+    // paired with the body that produced it.
+    auto pairs = read_final_events_file(temp_dir(), close_result.root_hash());
+    ASSERT_TRUE(pairs.has_value()) << pairs.error();
+    ASSERT_EQ(pairs->event_logs.size(), 1);
+    ASSERT_EQ(pairs->tx_bodies.size(), 1);
+    expect_xdr_equal(pairs->event_logs[0], event);
+    expect_xdr_equal(pairs->tx_bodies[0], body);
 
     consensus_value =
         make_consensus_value(9, close_result.root_hash(), proposal_txs);
@@ -1390,7 +1408,10 @@ TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(41, consensus_value)(),
               RPCError::kRPCNone);
 
-    EXPECT_FALSE(ctx.indexer_outbox_store().load_candidate(41)().has_value());
+    // The events file outlives commit; reclaiming it belongs to a later GC
+    // pass, not to promotion.
+    EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
+        temp_dir(), close_result.root_hash())));
     auto committed = ctx.indexer_outbox_store().load_committed(9)();
     ASSERT_TRUE(committed.has_value()) << committed.error();
     expect_xdr_equal(committed->consensus_value, consensus_value);
@@ -1405,7 +1426,7 @@ TEST_F(EventRpcTest, ClosePublishesCandidateAndCommitPromotesIt)
   expect_xdr_equal(committed->consensus_value, consensus_value);
 }
 
-TEST_F(EventRpcTest, AbandonClosedBlockRetainsCandidateForReconciliation)
+TEST_F(EventRpcTest, AbandonClosedBlockRetainsEventsFileForReconciliation)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1419,155 +1440,21 @@ TEST_F(EventRpcTest, AbandonClosedBlockRetainsCandidateForReconciliation)
                                               body)(),
             RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_close_block(42)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_close_block(42, 10)().error(),
-            RPCError::kRPCNone);
-  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(42)().has_value());
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(42, 10)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  const std::string events_file =
+      EventBlockContext::final_events_filename(temp_dir(), closed.root_hash());
+  ASSERT_TRUE(std::filesystem::exists(events_file));
 
+  // Abandoning a block that already closed must keep its events file: the
+  // block may still be finalized, and that file is the only copy of its events
+  // until commit promotes them.
   ASSERT_EQ(mempool_rpc.eventsched_abandon_block(42)(), RPCError::kRPCNone);
-  EXPECT_TRUE(ctx.indexer_outbox_store().load_candidate(42)().has_value());
+  EXPECT_TRUE(std::filesystem::exists(events_file));
   EXPECT_FALSE(ctx.indexer_outbox_store().load_committed(10)().has_value());
 }
 
-TEST_F(EventRpcTest, CommitRemovesPreviouslyAbandonedCandidateAtSameHeight)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(50)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(51)(), RPCError::kRPCNone);
-  EventBlockResult selected = mempool_rpc.eventsched_close_block(50, 10)();
-  EventBlockResult abandoned = mempool_rpc.eventsched_close_block(51, 10)();
-  ASSERT_EQ(selected.error(), RPCError::kRPCNone);
-  ASSERT_EQ(abandoned.error(), RPCError::kRPCNone);
-  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(50)().has_value());
-  ASSERT_TRUE(ctx.indexer_outbox_store().load_candidate(51)().has_value());
-
-  // Models the old candidate leaving mempool's commit cache. There is
-  // deliberately no second abandon after the competing candidate commits.
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(51)(), RPCError::kRPCNone);
-  EXPECT_FALSE(ctx.get_context(51)());
-  ASSERT_TRUE(ctx.indexer_outbox_store().has_candidate(51).value());
-
-  ConsensusValue value =
-      make_consensus_value(10, selected.root_hash(), ProposalTxs{});
-  initialize_test_origin(ctx, value);
-  ASSERT_EQ(mempool_rpc.eventsched_commit_block(50, value)(),
-            RPCError::kRPCNone);
-
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(51).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(10)().has_value());
-  EXPECT_TRUE(std::filesystem::exists(
-      EventBlockContext::final_events_filename(temp_dir(),
-                                               abandoned.root_hash())));
-}
-
-TEST_F(EventRpcTest,
-       CommitRemovesArchivalCandidateByHeaderAndPreservesFutureCandidate)
-{
-  EventRPCContext ctx(temp_dir());
-  EventExecRpc exec_rpc(ctx);
-  EventMempoolRpc mempool_rpc(ctx);
-  ProposedTransaction archival_body = make_body(52);
-  ProposedTransaction future_body = make_body(53);
-  ProposedTransaction selected_body = make_body(54);
-  ProposalTxs archival_txs = make_proposal_txs({archival_body});
-  ProposalTxs future_txs = make_proposal_txs({future_body});
-  ProposalTxs selected_txs = make_proposal_txs({selected_body});
-
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(52)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(53)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(54)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_open_block(52)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_open_block(53)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_open_block(54)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(52, 1,
-                                              make_event(archival_body, 52),
-                                              archival_body)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(53, 1,
-                                              make_event(future_body, 53),
-                                              future_body)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(54, 1,
-                                              make_event(selected_body, 54),
-                                              selected_body)(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_close_block(52)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_close_block(53)(), RPCError::kRPCNone);
-  ASSERT_EQ(exec_rpc.eventexecutor_close_block(54)(), RPCError::kRPCNone);
-  EventBlockResult archival = mempool_rpc.eventsched_close_block(52, 9)();
-  EventBlockResult future = mempool_rpc.eventsched_close_block(53, 11)();
-  EventBlockResult selected = mempool_rpc.eventsched_close_block(54, 10)();
-  ASSERT_EQ(archival.error(), RPCError::kRPCNone);
-  ASSERT_EQ(future.error(), RPCError::kRPCNone);
-  ASSERT_EQ(selected.error(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(52)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(53)(), RPCError::kRPCNone);
-
-  rewrite_outbox_protocol(temp_dir(),
-                          IndexerOutboxStore::candidate_filename(52),
-                          "hogp/archival");
-  replace_outbox_payload(temp_dir(), IndexerOutboxStore::candidate_filename(52),
-                         x23::Buf{0xff, 0xff, 0xff, 0xff});
-  const std::filesystem::path archival_events =
-      EventBlockContext::final_events_filename(temp_dir(),
-                                               archival.root_hash());
-  const std::filesystem::path future_events =
-      EventBlockContext::final_events_filename(temp_dir(), future.root_hash());
-
-  ConsensusValue value =
-      make_consensus_value(10, selected.root_hash(), selected_txs);
-  initialize_test_origin(ctx, value);
-  ASSERT_EQ(mempool_rpc.eventsched_commit_block(54, value)(),
-            RPCError::kRPCNone);
-
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(52).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(53).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(10).value());
-  EXPECT_TRUE(std::filesystem::exists(
-      std::filesystem::path(temp_dir()) / "indexer-outbox" /
-      IndexerOutboxStore::current_epoch_origin_filename()));
-  EXPECT_TRUE(std::filesystem::exists(archival_events));
-  EXPECT_TRUE(std::filesystem::exists(future_events));
-}
-
-TEST_F(EventRpcTest, CommitCleanupFailsClosedOnCorruptCurrentCandidate)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
-
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(55)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(56)(), RPCError::kRPCNone);
-  EventBlockResult stale = mempool_rpc.eventsched_close_block(55, 10)();
-  EventBlockResult selected = mempool_rpc.eventsched_close_block(56, 10)();
-  ASSERT_EQ(stale.error(), RPCError::kRPCNone);
-  ASSERT_EQ(selected.error(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(55)(), RPCError::kRPCNone);
-  corrupt_outbox_payload(temp_dir(),
-                         IndexerOutboxStore::candidate_filename(55));
-  ConsensusValue value =
-      make_consensus_value(10, selected.root_hash(), proposal_txs);
-  initialize_test_origin(ctx, value);
-
-  EXPECT_EQ(mempool_rpc.eventsched_commit_block(56, value)(),
-            RPCError::kRPCUnrecoverable);
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(55).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(56).value());
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(10).value());
-
-  rewrite_outbox_protocol(temp_dir(),
-                          IndexerOutboxStore::candidate_filename(55),
-                          "hogp/archival");
-  replace_outbox_payload(temp_dir(), IndexerOutboxStore::candidate_filename(55),
-                         x23::Buf{0xff, 0xff, 0xff, 0xff});
-  EXPECT_EQ(mempool_rpc.eventsched_commit_block(56, value)(),
-            RPCError::kRPCNone);
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(55).value());
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(56).value());
-}
-
-TEST_F(EventRpcTest, EmptyBlockPublishesCandidateAndCommittedRecords)
+TEST_F(EventRpcTest, EmptyBlockWritesEventsFileAndCommittedRecord)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
@@ -1576,10 +1463,10 @@ TEST_F(EventRpcTest, EmptyBlockPublishesCandidateAndCommittedRecords)
   ASSERT_EQ(mempool_rpc.eventsched_open_block(43)(), RPCError::kRPCNone);
   EventBlockResult close_result = mempool_rpc.eventsched_close_block(43, 11)();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
-  auto candidate = ctx.indexer_outbox_store().load_candidate(43)();
-  ASSERT_TRUE(candidate.has_value()) << candidate.error();
-  EXPECT_TRUE(candidate->event_logs.empty());
-  EXPECT_TRUE(candidate->tx_bodies.empty());
+  auto pairs = read_final_events_file(temp_dir(), close_result.root_hash());
+  ASSERT_TRUE(pairs.has_value()) << pairs.error();
+  EXPECT_TRUE(pairs->event_logs.empty());
+  EXPECT_TRUE(pairs->tx_bodies.empty());
 
   ConsensusValue value =
       make_consensus_value(11, close_result.root_hash(), proposal_txs);
@@ -1697,13 +1584,13 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
       make_consensus_value(13, close_result.root_hash(), proposal_txs);
-  auto candidate = ctx.indexer_outbox_store().load_candidate(45)();
-  ASSERT_TRUE(candidate.has_value()) << candidate.error();
+  auto pairs = read_final_events_file(temp_dir(), close_result.root_hash());
+  ASSERT_TRUE(pairs.has_value()) << pairs.error();
   IndexerOutboxCommittedPayload committed{
       .format_version = kIndexerOutboxFormatVersion,
       .consensus_value = value,
-      .event_logs = candidate->event_logs,
-      .tx_bodies = candidate->tx_bodies,
+      .event_logs = pairs->event_logs,
+      .tx_bodies = pairs->tx_bodies,
   };
   initialize_test_origin(ctx, value);
   ASSERT_TRUE(
@@ -1715,13 +1602,12 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
             RPCError::kRPCNone);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(45, value)(),
             RPCError::kRPCNone);
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(45).value());
   auto loaded = ctx.indexer_outbox_store().load_committed(13)();
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
   expect_xdr_equal(*loaded, committed);
 }
 
-TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresCandidatePayload)
+TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresEventsFile)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1739,7 +1625,7 @@ TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresCandidatePayload)
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
       make_consensus_value(13, closed.root_hash(), proposal_txs);
-  auto original = ctx.indexer_outbox_store().load_candidate(451)();
+  auto original = read_final_events_file(temp_dir(), closed.root_hash());
   ASSERT_TRUE(original.has_value()) << original.error();
   IndexerOutboxCommittedPayload committed{
       .format_version = kIndexerOutboxFormatVersion,
@@ -1750,40 +1636,39 @@ TEST_F(EventRpcTest, PrepublishedConsensusRetryIgnoresCandidatePayload)
   initialize_test_origin(ctx, value);
   ASSERT_TRUE(
       ctx.indexer_outbox_store().publish_committed(committed)().has_value());
-  ASSERT_TRUE(ctx.indexer_outbox_store().remove_candidate(451).has_value());
 
-  IndexerOutboxCandidatePayload changed = *original;
-  changed.block_id = 452;
-  changed.tx_bodies[0].signed_tx.signatures.push_back(DecoratedSignature{});
-  ASSERT_TRUE(
-      ctx.indexer_outbox_store().publish_candidate(changed)().has_value());
+  // Once a committed record exists for the height, commit returns it and never
+  // consults the events file. Corrupt the file to prove that: a retry must
+  // still succeed and must still yield the originally published record.
+  corrupt_events_file(temp_dir(), closed.root_hash());
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(452, value)(),
             RPCError::kRPCNone);
-  EXPECT_FALSE(ctx.indexer_outbox_store().has_candidate(452).value());
   auto retained = ctx.indexer_outbox_store().load_committed(13)();
   ASSERT_TRUE(retained.has_value()) << retained.error();
   expect_xdr_equal(*retained, committed);
 }
 
-TEST_F(EventRpcTest, DuplicateCloseReturnsDurableCandidateWithoutReinitializing)
+using EventRpcDeathTest = EventRpcTest;
+
+TEST_F(EventRpcDeathTest, DuplicateCloseFailStops)
 {
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
-
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(46)(), RPCError::kRPCNone);
-  EventBlockResult first = mempool_rpc.eventsched_close_block(46, 14)();
-  ASSERT_EQ(first.error(), RPCError::kRPCNone);
-  EventBlockResult retry = mempool_rpc.eventsched_close_block(46, 14)();
-  ASSERT_EQ(retry.error(), RPCError::kRPCNone);
-  EXPECT_EQ(retry.root_hash(), first.root_hash());
-
-  EXPECT_EQ(mempool_rpc.eventsched_close_block(46, 15)().error(),
-            RPCError::kRPCBadBlockID);
-  EXPECT_EQ(mempool_rpc.eventsched_abandon_block(46)(), RPCError::kRPCNone);
+  // The scheduler closes each block exactly once, so a second close is a
+  // scheduler bug rather than a retry to absorb. It must fail stop, not
+  // quietly re-answer from durable state: silently tolerating it would hide
+  // the caller's bug and let two different heights be attributed to one block.
+  EXPECT_DEATH(
+      {
+        EventRPCContext ctx(temp_dir());
+        EventMempoolRpc mempool_rpc(ctx);
+        CHECK(mempool_rpc.eventsched_open_block(46)() == RPCError::kRPCNone);
+        CHECK(mempool_rpc.eventsched_close_block(46, 14)().error() ==
+              RPCError::kRPCNone);
+        std::ignore = mempool_rpc.eventsched_close_block(46, 14)();
+      },
+      "");
 }
 
-TEST_F(EventRpcTest, CommitPromotesRetainedCandidateAfterContextRestart)
+TEST_F(EventRpcTest, CommitPromotesEventsFileAfterContextRestart)
 {
   ProposalTxs proposal_txs;
   ConsensusValue value;
@@ -1805,10 +1690,15 @@ TEST_F(EventRpcTest, CommitPromotesRetainedCandidateAfterContextRestart)
     ASSERT_TRUE(std::filesystem::exists(final_file));
   }
 
+  // This is the crash window the durable outbox exists for: consensus has
+  // finalized the block and chuckd has persisted the ConsensusValue, but the
+  // event service died before commit promoted it. On restart the block's
+  // events must still be recoverable, or the indexer outbox has a permanent
+  // hole. The events file is what recovers them -- promotion finds it by the
+  // finalized ProposalHeader.events_hash, which is its name.
   EventRPCContext restarted(temp_dir());
   EXPECT_TRUE(restarted.reconcile_outbox_tip(47, value)().has_value());
   EXPECT_TRUE(std::filesystem::exists(final_file));
-  EXPECT_FALSE(restarted.indexer_outbox_store().has_candidate(47).value());
   auto committed = restarted.indexer_outbox_store().load_committed(1)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   expect_xdr_equal(committed->consensus_value, value);
@@ -1890,76 +1780,6 @@ TEST_F(EventRpcTest, EmptyChainReconciliationDoesNotInferOrigin)
   EXPECT_FALSE(origin->has_value());
 }
 
-TEST_F(EventRpcTest,
-       PreReconciliationCommitAndPromotionCannotDeriveCurrentOrigin)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-
-  constexpr BlockID kHeightOneBlock = 780;
-  constexpr BlockID kMidchainBlock = 781;
-  ConsensusValue height_one;
-  ConsensusValue midchain;
-  for (const auto &[block_id, height] :
-       {std::pair{kHeightOneBlock, BlockHeight{1}},
-        std::pair{kMidchainBlock, BlockHeight{37}}}) {
-    ASSERT_EQ(mempool_rpc.eventsched_open_block(block_id)(),
-              RPCError::kRPCNone);
-    EventBlockResult closed =
-        mempool_rpc.eventsched_close_block(block_id, height)();
-    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    ConsensusValue value =
-        make_consensus_value(height, closed.root_hash(), ProposalTxs{});
-    if (height == 1) {
-      value.prev_hash = sha256(genesis);
-      height_one = value;
-    }
-    else {
-      value.prev_hash[0] = 0x37;
-      midchain = value;
-    }
-
-    EXPECT_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
-              RPCError::kRPCUnrecoverable);
-    EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(height).value());
-    EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(block_id).value());
-    auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
-    ASSERT_TRUE(origin.has_value()) << origin.error();
-    EXPECT_FALSE(origin->has_value());
-
-    EXPECT_FALSE(ctx.reconcile_outbox_tip(block_id, value)().has_value());
-    EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(height).value());
-    EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(block_id).value());
-    origin = ctx.indexer_outbox_store().load_current_epoch_origin();
-    ASSERT_TRUE(origin.has_value()) << origin.error();
-    EXPECT_FALSE(origin->has_value());
-  }
-
-  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
-  ASSERT_TRUE(origin.has_value()) << origin.error();
-  ASSERT_TRUE(origin->has_value());
-  const auto &origin_value = origin.value();
-  const auto *current_origin =
-      origin_value.has_value() ? &origin_value.value() : nullptr;
-  ASSERT_NE(current_origin, nullptr);
-  EXPECT_EQ(current_origin->origin.first_height, 1);
-  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
-  EXPECT_TRUE(
-      ctx.indexer_outbox_store().has_candidate(kHeightOneBlock).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(kMidchainBlock).value());
-
-  EXPECT_EQ(mempool_rpc.eventsched_commit_block(kHeightOneBlock, height_one)(),
-            RPCError::kRPCNone);
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
-  EXPECT_FALSE(
-      ctx.indexer_outbox_store().has_candidate(kHeightOneBlock).value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(kMidchainBlock).value());
-  EXPECT_EQ(midchain.proposal_header.block_height, 37);
-}
-
 TEST_F(EventRpcTest, ReconciliationDoesNotInitializeEmptyOriginAboveGenesis)
 {
   EventRPCContext ctx(temp_dir());
@@ -1970,30 +1790,6 @@ TEST_F(EventRpcTest, ReconciliationDoesNotInitializeEmptyOriginAboveGenesis)
   auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
   ASSERT_TRUE(origin.has_value()) << origin.error();
   EXPECT_FALSE(origin->has_value());
-}
-
-TEST_F(EventRpcTest, GenesisReconciliationAllowsNoncanonicalCandidateResidue)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(0)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_close_block(0, 0)().error(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(0)(), RPCError::kRPCNone);
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-
-  EXPECT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-  auto origin = ctx.indexer_outbox_store().load_current_epoch_origin();
-  ASSERT_TRUE(origin.has_value()) << origin.error();
-  ASSERT_TRUE(origin->has_value());
-  const auto &origin_value = origin.value();
-  const auto *current_origin =
-      origin_value.has_value() ? &origin_value.value() : nullptr;
-  ASSERT_NE(current_origin, nullptr);
-  EXPECT_EQ(current_origin->origin.first_height, 1);
-  EXPECT_EQ(current_origin->origin.first_prev_hash, sha256(genesis));
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(0).value());
 }
 
 TEST_F(EventRpcTest, GenesisReconciliationRejectsCleanedTempResidue)
@@ -2234,49 +2030,6 @@ TEST_F(EventRpcTest, ChangedStartupTipReconcilesAgainBeforeActivation)
   EXPECT_TRUE(registration.event_registered(nullptr));
 }
 
-TEST_F(EventRpcTest,
-       GenesisOriginRejectsMismatchedFirstCommitWithoutResolvingCandidate)
-{
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ProposalTxs proposal_txs;
-  ConsensusValue correct;
-  constexpr BlockID kBlock = 600;
-  {
-    EventRPCContext ctx(temp_dir());
-    EventMempoolRpc mempool_rpc(ctx);
-    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-    ASSERT_EQ(mempool_rpc.eventsched_open_block(kBlock)(), RPCError::kRPCNone);
-    EventBlockResult closed = mempool_rpc.eventsched_close_block(kBlock, 1)();
-    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    correct = make_consensus_value(1, closed.root_hash(), proposal_txs);
-    correct.prev_hash = sha256(genesis);
-    ConsensusValue mismatched = correct;
-    mismatched.prev_hash[0] ^= 0xff;
-
-    EXPECT_EQ(mempool_rpc.eventsched_commit_block(kBlock, mismatched)(),
-              RPCError::kRPCUnrecoverable);
-    EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
-    EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(kBlock).value());
-  }
-
-  {
-    EventRPCContext restarted(temp_dir());
-    EventMempoolRpc mempool_rpc(restarted);
-    ASSERT_TRUE(restarted.reconcile_outbox_tip(0, genesis)().has_value());
-    EXPECT_FALSE(restarted.indexer_outbox_store().has_committed(1).value());
-    EXPECT_TRUE(restarted.indexer_outbox_store().has_candidate(kBlock).value());
-    EXPECT_EQ(mempool_rpc.eventsched_commit_block(kBlock, correct)(),
-              RPCError::kRPCNone);
-    EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(1).value());
-    EXPECT_FALSE(
-        restarted.indexer_outbox_store().has_candidate(kBlock).value());
-  }
-
-  EventRPCContext reconciled(temp_dir());
-  EXPECT_TRUE(reconciled.reconcile_outbox_tip(kBlock, correct)().has_value());
-}
-
 TEST_F(EventRpcTest, GenesisRegistrationRestartCommitsAndReconcilesHeightOne)
 {
   Registration &registration = Registration::registration();
@@ -2369,44 +2122,6 @@ TEST_F(EventRpcTest, ContiguousGenesisOutboxReopensAndReconciles)
   EventRPCContext restarted(temp_dir());
   EXPECT_TRUE(
       restarted.reconcile_outbox_tip(kSecondBlock, previous)().has_value());
-}
-
-TEST_F(EventRpcTest, ReconciliationIgnoresArchivalNoncanonicalCandidate)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(300)(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_close_block(300, 30)().error(),
-            RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(300)(), RPCError::kRPCNone);
-  rewrite_outbox_protocol(temp_dir(),
-                          IndexerOutboxStore::candidate_filename(300),
-                          "hogp/archival");
-
-  ConsensusValue no_blocks{};
-  no_blocks.proposal_header.block_height = -1;
-  EXPECT_TRUE(
-      ctx.reconcile_outbox_tip(std::numeric_limits<BlockID>::max(), no_blocks)()
-          .has_value());
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(300).value());
-}
-
-TEST_F(EventRpcTest, ReconciliationRejectsArchivalCanonicalCandidate)
-{
-  EventRPCContext ctx(temp_dir());
-  EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
-  ASSERT_EQ(mempool_rpc.eventsched_open_block(301)(), RPCError::kRPCNone);
-  EventBlockResult closed = mempool_rpc.eventsched_close_block(301, 31)();
-  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-  ASSERT_EQ(mempool_rpc.eventsched_abandon_block(301)(), RPCError::kRPCNone);
-  rewrite_outbox_protocol(temp_dir(),
-                          IndexerOutboxStore::candidate_filename(301),
-                          "hogp/archival");
-  ConsensusValue canonical =
-      make_consensus_value(31, closed.root_hash(), proposal_txs);
-
-  EXPECT_FALSE(ctx.reconcile_outbox_tip(301, canonical)().has_value());
 }
 
 TEST_F(EventRpcTest,
@@ -2629,36 +2344,6 @@ TEST_F(EventRpcTest, MalformedAllEmptyEpochBoundaryIsRejected)
       current.indexer_outbox_store().load_current_epoch_origin()->has_value());
 }
 
-TEST_F(EventRpcTest, AllEmptyEpochBoundaryRejectsDisconnectedCandidatePromotion)
-{
-  constexpr BlockID kCandidate = 771;
-  ConsensusValue candidate_tip;
-  {
-    EventRPCContext candidate_context(temp_dir());
-    EventMempoolRpc mempool_rpc(candidate_context);
-    ASSERT_EQ(mempool_rpc.eventsched_open_block(kCandidate)(),
-              RPCError::kRPCNone);
-    EventBlockResult closed =
-        mempool_rpc.eventsched_close_block(kCandidate, 1)();
-    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    candidate_tip = make_consensus_value(1, closed.root_hash(), ProposalTxs{});
-    candidate_tip.prev_hash[0] = 0x55;
-  }
-
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  write_epoch_origin_header(temp_dir(), "hogp/a", 1, sha256(genesis), 0);
-
-  EventRPCContext restarted(temp_dir());
-  EXPECT_FALSE(
-      restarted.reconcile_outbox_tip(kCandidate, candidate_tip)().has_value());
-  EXPECT_TRUE(
-      restarted.indexer_outbox_store().has_candidate(kCandidate).value());
-  EXPECT_FALSE(restarted.indexer_outbox_store()
-                   .load_current_epoch_origin()
-                   ->has_value());
-}
-
 TEST_F(EventRpcTest, MultipleEmptyArchivalEpochsPreserveCanonicalBoundary)
 {
   auto archival = make_empty_committed(20, ConsensusValueHash{});
@@ -2717,111 +2402,6 @@ TEST_F(EventRpcTest, MalformedEmptyArchivalEpochOriginIsRejected)
                    .has_value());
   EXPECT_FALSE(
       epoch_c.indexer_outbox_store().load_current_epoch_origin()->has_value());
-}
-
-TEST_F(EventRpcTest,
-       InvalidArchivalPrefixPreservesCandidateAndCreatesNoCurrentOrigin)
-{
-  auto verify = [&](bool corrupt_payload) {
-    TmpDir dir;
-    auto first = make_empty_committed(20, ConsensusValueHash{});
-    auto tip = make_empty_committed(21, sha256(first.consensus_value));
-    constexpr BlockID kCandidate = 712;
-    {
-      EventRPCContext ctx(dir.directory());
-      initialize_test_origin(ctx, first.consensus_value);
-      ASSERT_TRUE(
-          ctx.indexer_outbox_store().publish_committed(first)().has_value());
-      ASSERT_TRUE(
-          ctx.indexer_outbox_store().publish_committed(tip)().has_value());
-      EventMempoolRpc mempool_rpc(ctx);
-      ASSERT_EQ(mempool_rpc.eventsched_open_block(kCandidate)(),
-                RPCError::kRPCNone);
-      ASSERT_EQ(mempool_rpc.eventsched_close_block(kCandidate, 22)().error(),
-                RPCError::kRPCNone);
-      ASSERT_EQ(mempool_rpc.eventsched_abandon_block(kCandidate)(),
-                RPCError::kRPCNone);
-    }
-    if (corrupt_payload) {
-      corrupt_outbox_payload(dir.directory(),
-                             IndexerOutboxStore::committed_filename(20));
-    }
-    else {
-      ConsensusValueHash disconnected = tip.consensus_value.prev_hash;
-      disconnected[0] ^= 0xff;
-      tip.consensus_value.prev_hash = disconnected;
-      rewrite_committed_prev_hash(dir.directory(),
-                                  IndexerOutboxStore::committed_filename(21),
-                                  disconnected);
-    }
-    rewrite_outbox_protocol(dir.directory(),
-                            IndexerOutboxStore::committed_filename(20),
-                            "hogp/archival_bad");
-    rewrite_outbox_protocol(dir.directory(),
-                            IndexerOutboxStore::committed_filename(21),
-                            "hogp/archival_bad");
-    ASSERT_TRUE(std::filesystem::remove(
-        std::filesystem::path(dir.directory()) / "indexer-outbox" /
-        IndexerOutboxStore::current_epoch_origin_filename()));
-    write_epoch_origin_header(dir.directory(), "hogp/archival_bad", 20,
-                              first.consensus_value.prev_hash);
-
-    EventRPCContext restarted(dir.directory());
-    EXPECT_FALSE(
-        restarted.reconcile_outbox_tip(711, tip.consensus_value)().has_value());
-    auto current = restarted.indexer_outbox_store().load_current_epoch_origin();
-    ASSERT_TRUE(current.has_value()) << current.error();
-    EXPECT_FALSE(current->has_value());
-    EXPECT_TRUE(
-        restarted.indexer_outbox_store().has_candidate(kCandidate).value());
-  };
-
-  verify(/*corrupt_payload=*/false);
-  verify(/*corrupt_payload=*/true);
-}
-
-TEST_F(EventRpcTest,
-       InvalidArchivalPrefixDoesNotPromoteCanonicalRetainedCandidate)
-{
-  auto archival = make_empty_committed(20, ConsensusValueHash{});
-  constexpr BlockID kCandidate = 721;
-  ConsensusValue canonical;
-  {
-    EventRPCContext ctx(temp_dir());
-    initialize_test_origin(ctx, archival.consensus_value);
-    ASSERT_TRUE(
-        ctx.indexer_outbox_store().publish_committed(archival)().has_value());
-    EventMempoolRpc mempool_rpc(ctx);
-    ASSERT_EQ(mempool_rpc.eventsched_open_block(kCandidate)(),
-              RPCError::kRPCNone);
-    EventBlockResult closed =
-        mempool_rpc.eventsched_close_block(kCandidate, 21)();
-    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    canonical = make_consensus_value(21, closed.root_hash(), ProposalTxs{});
-    canonical.prev_hash = sha256(archival.consensus_value);
-    ASSERT_EQ(mempool_rpc.eventsched_abandon_block(kCandidate)(),
-              RPCError::kRPCNone);
-  }
-  rewrite_outbox_protocol(temp_dir(),
-                          IndexerOutboxStore::committed_filename(20),
-                          "hogp/archival_corrupt");
-  corrupt_outbox_payload(temp_dir(),
-                         IndexerOutboxStore::committed_filename(20));
-  ASSERT_TRUE(std::filesystem::remove(
-      std::filesystem::path(temp_dir()) / "indexer-outbox" /
-      IndexerOutboxStore::current_epoch_origin_filename()));
-  write_epoch_origin_header(temp_dir(), "hogp/archival_corrupt", 20,
-                            archival.consensus_value.prev_hash);
-
-  EventRPCContext restarted(temp_dir());
-  EXPECT_FALSE(
-      restarted.reconcile_outbox_tip(kCandidate, canonical)().has_value());
-  EXPECT_FALSE(restarted.indexer_outbox_store().has_committed(21).value());
-  EXPECT_TRUE(
-      restarted.indexer_outbox_store().has_candidate(kCandidate).value());
-  auto current = restarted.indexer_outbox_store().load_current_epoch_origin();
-  ASSERT_TRUE(current.has_value()) << current.error();
-  EXPECT_FALSE(current->has_value());
 }
 
 TEST_F(EventRpcTest, ReconciliationRejectsArchivalProtocolReentry)
@@ -3086,95 +2666,6 @@ TEST_F(EventRpcTest, ReconciliationRejectsTruncatedArchivalEpochPrefix)
       ctx.reconcile_outbox_tip(338, current.consensus_value)().has_value());
 }
 
-TEST_F(EventRpcTest,
-       ReconciliationPromotesRetainedCandidateWithRegeneratedBlockId)
-{
-  constexpr BlockID kCompetingBlock = 209;
-  constexpr BlockID kCanonicalBlock = 210;
-  constexpr BlockID kRecoveredBlock = 310;
-  ProposedTransaction canonical_body = make_body(210);
-  ProposedTransaction competing_body = canonical_body;
-  competing_body.nondeterministic_proposal_data.nondeterministic_bits[0] ^=
-      0xff;
-  ProposalTxs canonical_txs = make_proposal_txs({canonical_body});
-  ProposalTxs competing_txs = make_proposal_txs({competing_body});
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ConsensusValue ahead;
-  x23::Buf expected_bytes;
-  SHA256Hash expected_payload_digest;
-  {
-    EventRPCContext ctx(temp_dir());
-    EventExecRpc exec_rpc(ctx);
-    EventMempoolRpc mempool_rpc(ctx);
-    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-    for (const auto &[block_id, body, proposal_txs] :
-         std::array<std::tuple<BlockID, ProposedTransaction, ProposalTxs>, 2>{
-             {{kCompetingBlock, competing_body, competing_txs},
-              {kCanonicalBlock, canonical_body, canonical_txs}}}) {
-      ASSERT_EQ(mempool_rpc.eventsched_open_block(block_id)(),
-                RPCError::kRPCNone);
-      ASSERT_EQ(exec_rpc.eventexecutor_open_block(block_id)(),
-                RPCError::kRPCNone);
-      ASSERT_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1,
-                                                  make_event(body, 0x21),
-                                                  body)(),
-                RPCError::kRPCNone);
-      ASSERT_EQ(exec_rpc.eventexecutor_close_block(block_id)(),
-                RPCError::kRPCNone);
-      EventBlockResult closed =
-          mempool_rpc.eventsched_close_block(block_id, 1)();
-      ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-      if (block_id == kCanonicalBlock) {
-        ahead = make_consensus_value(1, closed.root_hash(), proposal_txs);
-      }
-    }
-    ahead.prev_hash = sha256(genesis);
-    auto competing =
-        ctx.indexer_outbox_store().load_candidate(kCompetingBlock)();
-    auto candidate =
-        ctx.indexer_outbox_store().load_candidate(kCanonicalBlock)();
-    ASSERT_TRUE(competing.has_value()) << competing.error();
-    ASSERT_TRUE(candidate.has_value()) << candidate.error();
-    EXPECT_NE(competing->event_root, candidate->event_root);
-    IndexerOutboxCommittedPayload expected{
-        .format_version = kIndexerOutboxFormatVersion,
-        .consensus_value = ahead,
-        .event_logs = candidate->event_logs,
-        .tx_bodies = candidate->tx_bodies,
-    };
-    expected_bytes = x23::serialize(expected);
-    expected_payload_digest = sha256(expected);
-    EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
-  }
-
-  EventRPCContext restarted(temp_dir());
-  EXPECT_TRUE(
-      restarted.indexer_outbox_store().has_candidate(kCompetingBlock).value());
-  EXPECT_TRUE(
-      restarted.indexer_outbox_store().has_candidate(kCanonicalBlock).value());
-  EXPECT_FALSE(
-      restarted.indexer_outbox_store().has_candidate(kRecoveredBlock).value());
-  EXPECT_FALSE(restarted.indexer_outbox_store().has_committed(1).value());
-  EXPECT_TRUE(
-      restarted.reconcile_outbox_tip(kRecoveredBlock, ahead)().has_value());
-  auto committed = restarted.indexer_outbox_store().load_committed(1)();
-  ASSERT_TRUE(committed.has_value()) << committed.error();
-  EXPECT_EQ(x23::serialize(*committed), expected_bytes);
-  EXPECT_EQ(sha256(*committed), expected_payload_digest);
-  auto records =
-      restarted.indexer_outbox_store().enumerate_committed_records_raw();
-  ASSERT_TRUE(records.has_value()) << records.error();
-  ASSERT_EQ(records->size(), 1UL);
-  EXPECT_EQ(records->front().payload_digest, expected_payload_digest);
-  EXPECT_FALSE(
-      restarted.indexer_outbox_store().has_candidate(kCompetingBlock).value());
-  EXPECT_FALSE(
-      restarted.indexer_outbox_store().has_candidate(kCanonicalBlock).value());
-  EXPECT_FALSE(
-      restarted.indexer_outbox_store().has_candidate(kRecoveredBlock).value());
-}
-
 TEST_F(EventRpcTest, ReconciliationRejectsCorruptCurrentEpochPayload)
 {
   EventRPCContext ctx(temp_dir());
@@ -3246,7 +2737,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsTwoCommittedRecordsAhead)
 
 // Regression for #1960: closing may retain a durable candidate for recovery,
 // but indexers must not be able to pull it unless it is committed.
-TEST_F(EventRpcTest, CloseDoesNotMakeCandidatePullableBeforeCommit)
+TEST_F(EventRpcTest, CloseDoesNotMakeEventsPullableBeforeCommit)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -3267,16 +2758,174 @@ TEST_F(EventRpcTest, CloseDoesNotMakeCandidatePullableBeforeCommit)
 
   auto result = mempool_rpc.eventsched_close_block(1, 1)();
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(1).value());
+  const std::string events_file =
+      EventBlockContext::final_events_filename(temp_dir(), result.root_hash());
+  // Closing makes the block durable but must not make it visible: commit is
+  // the publication barrier, so nothing is pullable until then.
+  EXPECT_TRUE(std::filesystem::exists(events_file));
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
   EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
 
   EXPECT_EQ(mempool_rpc.eventsched_abandon_block(1)(), RPCError::kRPCNone);
-  EXPECT_TRUE(ctx.indexer_outbox_store().has_candidate(1).value());
+  // Abandoning a closed block keeps the events file, so a later commit of the
+  // same consensus value can still promote it.
+  EXPECT_TRUE(std::filesystem::exists(events_file));
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
   EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+}
+
+TEST_F(EventRpcTest, RecoveryPicksCanonicalEventsFileAmongCompetingBlocks)
+{
+  // Two blocks close at the same height with different nondeterministic data,
+  // so they have different event roots and therefore different events files.
+  // After a restart the scheduler's BlockID is regenerated, so recovery cannot
+  // match on it. It matches the finalized ProposalHeader.events_hash, which is
+  // exactly the canonical file's name.
+  ProposedTransaction canonical_body = make_body(210);
+  ProposedTransaction competing_body = canonical_body;
+  competing_body.nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
+  ProposalTxs canonical_txs = make_proposal_txs({canonical_body});
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue canonical_value;
+  SHA256Hash competing_root;
+
+  {
+    EventRPCContext ctx(temp_dir());
+    EventExecRpc exec_rpc(ctx);
+    EventMempoolRpc mempool_rpc(ctx);
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    auto close_one = [&](BlockID block_id, const ProposedTransaction &body) {
+      EXPECT_EQ(mempool_rpc.eventsched_open_block(block_id)(),
+                RPCError::kRPCNone);
+      EXPECT_EQ(exec_rpc.eventexecutor_open_block(block_id)(),
+                RPCError::kRPCNone);
+      EXPECT_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1,
+                                                  make_event(body, 0x21),
+                                                  body)(),
+                RPCError::kRPCNone);
+      EXPECT_EQ(exec_rpc.eventexecutor_close_block(block_id)(),
+                RPCError::kRPCNone);
+      EventBlockResult closed =
+          mempool_rpc.eventsched_close_block(block_id, 1)();
+      EXPECT_EQ(closed.error(), RPCError::kRPCNone);
+      return closed.root_hash();
+    };
+    competing_root = close_one(209, competing_body);
+    const SHA256Hash canonical_root = close_one(210, canonical_body);
+    ASSERT_NE(competing_root, canonical_root);
+    canonical_value = make_consensus_value(1, canonical_root, canonical_txs);
+    canonical_value.prev_hash = sha256(genesis);
+  }
+
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(
+      restarted.reconcile_outbox_tip(310, canonical_value)().has_value());
+
+  auto committed = restarted.indexer_outbox_store().load_committed(1)();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  expect_xdr_equal(committed->consensus_value, canonical_value);
+  ASSERT_EQ(committed->tx_bodies.size(), 1);
+  expect_xdr_equal(committed->tx_bodies[0], canonical_body);
+  // The losing block's events file is inert, not promoted.
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir(), competing_root)));
+}
+
+TEST_F(EventRpcTest, IndexerPullsBlockRecoveredAfterCrashBetweenCloseAndCommit)
+{
+  // The data loss this whole durable path exists to prevent: a block closes,
+  // consensus finalizes it and chuckd persists the ConsensusValue, and the
+  // event service dies before commit promotes it. After restart the indexer
+  // must still be able to pull that block's events and bodies.
+  ProposedTransaction body = make_body(77);
+  TxEventLog event = make_event(body, 0x77);
+  ProposalTxs proposal_txs = make_proposal_txs({body});
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue value;
+
+  {
+    EventRPCContext ctx(temp_dir());
+    EventExecRpc exec_rpc(ctx);
+    EventMempoolRpc mempool_rpc(ctx);
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    ASSERT_EQ(mempool_rpc.eventsched_open_block(77)(), RPCError::kRPCNone);
+    ASSERT_EQ(exec_rpc.eventexecutor_open_block(77)(), RPCError::kRPCNone);
+    ASSERT_EQ(exec_rpc.eventexecutor_emit_event(77, 1, event, body)(),
+              RPCError::kRPCNone);
+    ASSERT_EQ(exec_rpc.eventexecutor_close_block(77)(), RPCError::kRPCNone);
+    EventBlockResult closed = mempool_rpc.eventsched_close_block(77, 1)();
+    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+    value = make_consensus_value(1, closed.root_hash(), proposal_txs);
+    value.prev_hash = sha256(genesis);
+    // Deliberately no commit: this is the crash.
+  }
+
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(177, value)().has_value());
+
+  auto pulled = restarted.pull_indexer_next(pull_request())();
+  ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  const auto &payload = pulled.pulled_block().block.payload;
+  expect_xdr_equal(payload.consensus_value, value);
+  ASSERT_EQ(payload.event_logs.size(), 1);
+  ASSERT_EQ(payload.tx_bodies.size(), 1);
+  expect_xdr_equal(payload.event_logs[0], event);
+  expect_xdr_equal(payload.tx_bodies[0], body);
+}
+
+TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
+{
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc mempool_rpc(ctx);
+  ProposalTxs proposal_txs;
+
+  ASSERT_EQ(mempool_rpc.eventsched_open_block(88)(), RPCError::kRPCNone);
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(88, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), proposal_txs);
+  initialize_test_origin(ctx, value);
+  ASSERT_TRUE(std::filesystem::remove(
+      EventBlockContext::final_events_filename(temp_dir(),
+                                               closed.root_hash())));
+
+  // Losing the events file must fail the commit. Publishing an empty or
+  // partial record instead would put a silent hole in the indexer's history.
+  EXPECT_NE(mempool_rpc.eventsched_commit_block(88, value)(),
+            RPCError::kRPCNone);
+  EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
+}
+
+TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsCorrupt)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+  ProposedTransaction body = make_body(99);
+  ProposalTxs proposal_txs = make_proposal_txs({body});
+
+  ASSERT_EQ(mempool_rpc.eventsched_open_block(99)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_open_block(99)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(99, 1, make_event(body, 0x99),
+                                              body)(),
+            RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_close_block(99)(), RPCError::kRPCNone);
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(99, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), proposal_txs);
+  initialize_test_origin(ctx, value);
+  corrupt_events_file(temp_dir(), closed.root_hash());
+
+  // A truncated events file must fail the commit rather than promote whatever
+  // pairs happened to parse.
+  EXPECT_NE(mempool_rpc.eventsched_commit_block(99, value)(),
+            RPCError::kRPCNone);
+  EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
 }
 
 } // namespace hogd

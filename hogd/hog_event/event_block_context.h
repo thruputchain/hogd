@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <fcntl.h>
 #include <memory>
 #include <span>
@@ -37,19 +38,6 @@ namespace detail {
 struct EventContext {
   std::vector<uint8_t> buf;
   uint32_t event_count = 0;
-
-  // Canonical XDR of this thread's TxEventLogs and of their ProposedTransaction
-  // bodies, accumulated on the ingest path so that closing the block does not
-  // have to serialize the whole payload a second time.
-  //
-  // Both live in this one PerThread struct, and add_event() appends to both with
-  // no suspend in between, so the two are always flattened in one shared
-  // traversal order and stay index-aligned. Two separate PerThread containers
-  // would not: PerThread<T> registers threads in a type-local order that can
-  // differ between T's, which let the body/event association cross (#2826).
-  x23::Buf candidate_event_bytes;
-  x23::Buf candidate_body_bytes;
-  uint32_t candidate_pair_count = 0;
 };
 
 // An event log paired with the transaction body that produced it.  The two are
@@ -85,6 +73,23 @@ struct ReusableEventBlockContextData {
   ReusableEventBlockContextData &
   operator=(ReusableEventBlockContextData const &) = delete;
 };
+
+// The event logs and transaction bodies a block streamed to its events file.
+struct EventBlockPairs {
+  TxEventLogBatch event_logs;
+  ProposedTransactionBatch tx_bodies;
+};
+
+// Reads back a finalized events file, which is a flat sequence of
+// [TxEventLog][ProposedTransaction] pairs.
+//
+// The file is content-addressed by the block's event root, which is exactly
+// the finalized ProposalHeader.events_hash, so promotion can open the right
+// file directly instead of searching. Pair order follows whichever per-thread
+// buffer flushed first and is not significant: the indexer does not depend on
+// it, and promotion re-derives the event and transaction roots from the pairs.
+std::expected<EventBlockPairs, std::string>
+read_final_events_file(std::string_view work_directory, SHA256Hash const &hash);
 
 class EventBlockContext {
 public:
@@ -128,24 +133,6 @@ public:
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
-  // The block's already-encoded candidate payload vectors, moved out of the
-  // per-thread ingest buffers.
-  //
-  // The buffers are moved (a pointer swap each, not a copy of the bytes) while
-  // the PerThread lock is held, so the caller can do I/O without holding it --
-  // a pointer into per-thread storage must not outlive lock_threads(), because
-  // a departing thread's slot can be reclaimed.
-  //
-  // event_bufs and body_bufs are in the same per-thread order, so concatenating
-  // each list yields two index-aligned XDR vectors (#2826).
-  struct CandidatePayloadBuffers {
-    std::vector<x23::Buf> event_bufs;
-    std::vector<x23::Buf> body_bufs;
-    uint32_t pair_count = 0;
-    size_t event_bytes = 0;
-    size_t body_bytes = 0;
-  };
-  CandidatePayloadBuffers take_candidate_payload_buffers();
 
   x23::Async<void> wait_file_done();
   void delete_events_file();

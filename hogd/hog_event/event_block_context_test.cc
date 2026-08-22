@@ -47,10 +47,20 @@ public:
     TxEventLog log;
     auto data = std::span(*buf);
 
+    // The events file is a flat run of [TxEventLog][ProposedTransaction]
+    // pairs. Both halves have to be walked to stay aligned, even though only
+    // the logs are returned here.
     while (offset < buf->size()) {
       size_t n =
           x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
       offset += n;
+      EXPECT_LT(offset, buf->size());
+      if (offset >= buf->size()) {
+        break;
+      }
+      ProposedTransaction body;
+      offset +=
+          x23::deserialize_from(&body, x23::BufView(data.subspan(offset)));
       auto it = event_logs.insert({log.tx_hash, log});
       EXPECT_TRUE(it.second);
       if (!it.second) {

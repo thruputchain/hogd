@@ -9,6 +9,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <expected>
+#include <fstream>
+#include <ios>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -75,9 +78,6 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
     buffers_.for_each(ul, [](detail::EventContext &ctx) {
       ctx.buf.clear();
       ctx.event_count = 0;
-      ctx.candidate_event_bytes.clear();
-      ctx.candidate_body_bytes.clear();
-      ctx.candidate_pair_count = 0;
     });
   }
   open_events_file();
@@ -116,20 +116,22 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
   // memory.
   CHECK(trie_->insert(key, value));
 
-  // Accumulate this block's candidate payload as canonical XDR here, on the
-  // ingest path, instead of re-serializing the whole batch at close. The event
-  // half is free: serialize_buf already holds exactly its canonical encoding.
-  // The body is encoded once here rather than once here and again at close.
+  // Stream the event log and its body to the events file as one pair. The pair
+  // is what the indexer consumes and what restart promotion reads back, so this
+  // one file is the block's whole durable record.
   //
-  // This must precede write_event(), for the same reason the trie insert does:
-  // write_event() co_awaits, and after a resume buffers_-> may resolve to a
-  // different thread's slot while serialize_buf is this thread's static
-  // scratch. Appending to both buffers with no suspend in between is also what
-  // keeps the two vectors index-aligned (#2826).
-  buffers_->candidate_event_bytes.append_range(
-      std::span(*serialize_buf).first(event_xdr_size));
-  x23::serialize_to(&buffers_->candidate_body_bytes, body);
-  buffers_->candidate_pair_count++;
+  // Both halves go out in a single write_event() call. The staging buffer is
+  // only ever flushed between calls, so a flushed chunk always holds whole
+  // pairs -- which is what keeps each body associated with its event even
+  // though chunks from different threads interleave in the file (#2826).
+  //
+  // The event half costs nothing to produce: serialize_buf already holds its
+  // canonical encoding. The body is encoded once, here, rather than again when
+  // the block closes.
+  static PerThread<x23::Buf> pair_buf;
+  pair_buf->resize_uninitialized(0);
+  pair_buf->append_range(std::span(*serialize_buf).first(event_xdr_size));
+  x23::serialize_to(&*pair_buf, body);
 
   using write_event_result_t =
       decltype(std::declval<EventBlockContext &>().write_event(
@@ -138,7 +140,7 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
       std::same_as<decltype(std::declval<write_event_result_t::promise_type &>()
                                 .initial_suspend()),
                    std::suspend_never>);
-  co_await write_event(std::span(*serialize_buf).first(event_xdr_size));
+  co_await write_event(std::span(*pair_buf));
   co_return true;
 }
 
@@ -344,32 +346,6 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   file_done_.broadcast(pool);
 }
 
-EventBlockContext::CandidatePayloadBuffers
-EventBlockContext::take_candidate_payload_buffers()
-{
-  // add_event() already encoded every event log and body, so there is nothing
-  // to serialize here: just hand the per-thread buffers over. Moving each one
-  // is a pointer swap, so this stays O(threads) rather than O(events) even
-  // though the buffers hold the whole block.
-  //
-  // The move happens under lock_threads() because a pointer into per-thread
-  // storage must not outlive the lock -- a departing thread's slot can be
-  // reclaimed -- and taking ownership here is what lets the caller write
-  // without holding it.
-  CandidatePayloadBuffers out;
-  std::unique_lock ul = buffers_.lock_threads();
-  buffers_.for_each(ul, [&out](detail::EventContext &ctx) {
-    out.pair_count += ctx.candidate_pair_count;
-    out.event_bytes += ctx.candidate_event_bytes.size();
-    out.body_bytes += ctx.candidate_body_bytes.size();
-    out.event_bufs.push_back(std::move(ctx.candidate_event_bytes));
-    out.body_bufs.push_back(std::move(ctx.candidate_body_bytes));
-    ctx.candidate_event_bytes.clear();
-    ctx.candidate_body_bytes.clear();
-    ctx.candidate_pair_count = 0;
-  });
-  return out;
-}
 
 x23::Async<void>
 EventBlockContext::wait_file_done()
@@ -465,6 +441,58 @@ EventBlockContext::await_all_executors_closed()
     }
   }
   co_return true; // All executors closed normally
+}
+
+std::expected<EventBlockPairs, std::string>
+read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
+{
+  const std::string name =
+      EventBlockContext::final_events_filename(work_directory, hash);
+  std::ifstream file(name, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return std::unexpected(std::format("failed to open events file {}", name));
+  }
+  const std::streamoff size = file.tellg();
+  if (size < 0) {
+    return std::unexpected(std::format("failed to size events file {}", name));
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(size));
+  file.seekg(0);
+  if (size > 0 &&
+      !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
+    return std::unexpected(std::format("failed to read events file {}", name));
+  }
+
+  // The file is a flat run of [TxEventLog][ProposedTransaction] pairs with no
+  // count: deserialize_from() reports how much each value consumed, so the run
+  // is walked to the end. It is bounds-checked, so a truncated or corrupt file
+  // throws rather than over-reading.
+  EventBlockPairs pairs;
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    TxEventLog event;
+    ProposedTransaction body;
+    try {
+      offset += x23::deserialize_from(
+          &event, x23::BufViewEnd(x23::BufView(bytes.data() + offset,
+                                               bytes.size() - offset)));
+      if (offset >= bytes.size()) {
+        return std::unexpected(
+            std::format("events file {} ends with an event log that has no "
+                        "transaction body",
+                        name));
+      }
+      offset += x23::deserialize_from(
+          &body, x23::BufViewEnd(x23::BufView(bytes.data() + offset,
+                                              bytes.size() - offset)));
+    } catch (const x23::XdrException &e) {
+      return std::unexpected(
+          std::format("malformed events file {}: {}", name, e.what()));
+    }
+    pairs.event_logs.push_back(std::move(event));
+    pairs.tx_bodies.push_back(std::move(body));
+  }
+  return pairs;
 }
 
 } // namespace hogd

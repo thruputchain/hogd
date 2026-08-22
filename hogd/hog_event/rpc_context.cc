@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <exception>
 #include <expected>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <iterator>
@@ -53,13 +54,6 @@ xdr_equal(const T &lhs, const T &rhs)
   return x23::serialize(lhs) == x23::serialize(rhs);
 }
 
-bool
-candidate_matches(const IndexerOutboxCandidatePayload &candidate,
-                  BlockID block_id, BlockHeight block_height)
-{
-  return candidate.block_id == block_id &&
-         candidate.block_height == block_height;
-}
 
 IndexerOutboxStore
 open_indexer_outbox_store(std::string_view work_directory)
@@ -128,16 +122,6 @@ EventRPCContext::EventRPCContext(std::string_view work_directory)
 x23::Async<EventStatus<void>>
 EventRPCContext::open_block(BlockID block_id)
 {
-  auto candidate_exists = indexer_outbox_store_.has_candidate(block_id);
-  if (!candidate_exists) {
-    error("failed to inspect candidate indexer outbox record for block {}: {}",
-          block_id, candidate_exists.error());
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  if (*candidate_exists) {
-    co_return EventError{EventErrorCode::kExists};
-  }
-
   info("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
   x23::CoroGuard g;
   co_await g(lock_);
@@ -181,29 +165,8 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     close_reserved_test_hook_(block_id);
   }
 
-  auto candidate_exists = indexer_outbox_store_.has_candidate(block_id);
-  if (!candidate_exists) {
-    error("failed to inspect candidate indexer outbox record for block {}: {}",
-          block_id, candidate_exists.error());
-    co_await finish_block_operation(block_id, nullptr, false);
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  if (*candidate_exists) {
-    auto candidate = co_await indexer_outbox_store_.load_candidate(block_id);
-    if (!candidate) {
-      error("failed to load candidate indexer outbox record for block {}: {}",
-            block_id, candidate.error());
-      co_await finish_block_operation(block_id, nullptr, false);
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (!candidate_matches(*candidate, block_id, block_height)) {
-      co_await finish_block_operation(block_id, nullptr, false);
-      co_return EventError{EventErrorCode::kBadBlockID};
-    }
-    SHA256Hash root = candidate->event_root;
-    co_await finish_block_operation(block_id, nullptr, false);
-    co_return root;
-  }
+  // The scheduler closes a block exactly once. A second close is a scheduler
+  // bug, not a retry to absorb: set_block_height() below fail-stops on it.
 
   ElapsedTimer timer;
   double last_stage_ts = 0.0;
@@ -282,17 +245,15 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
       std::rethrow_exception(hash_ex);
     }
 
-    // add_event() encoded the candidate payload as it ingested each event, so
-    // closing takes ownership of those buffers and writes them. It does not
-    // walk the block's event logs or transaction bodies again.
-    auto payload = context->get().take_candidate_payload_buffers();
-    if (auto published = indexer_outbox_store_.publish_candidate_encoded(
-            block_id, block_height, out_hash, payload.pair_count,
-            payload.event_bufs, payload.body_bufs);
-        !published) {
-      panic("failed to publish candidate indexer outbox record: {}",
-            published.error());
-    }
+    // add_event() streamed every event/body pair as it ingested them, so by now
+    // the block's payload is already on disk. All that is left is to make it
+    // durable and give it its content-addressed name: finish_file_write() above
+    // fsynced the bytes, and finish_file() renames to <event root>.events and
+    // fsyncs the directory.
+    //
+    // That file is the block's durable record. Promotion at commit opens it by
+    // the finalized ProposalHeader.events_hash, which is exactly this name, so
+    // a crash between close and commit loses nothing.
     co_await context->get().finish_file(out_hash);
   } catch (const std::exception &e) {
     panic("failed to durably close event block {}: {}", block_id, e.what());
@@ -362,20 +323,24 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     committed = std::move(*loaded);
   }
   else {
-    auto promotion = co_await find_canonical_candidate(consensus_value);
-    if (!promotion) {
-      error("failed to identify canonical candidate for height {}: {}",
-            block_height, promotion.error());
+    // Promotion reads the block's events file directly. That file is
+    // content-addressed by the event root and the finalized ConsensusValue
+    // carries exactly that root, so there is nothing to search for -- and
+    // nothing had to be written a second time at close to make this possible.
+    auto pairs = read_final_events_file(
+        work_directory_, consensus_value.proposal_header.events_hash);
+    if (!pairs) {
+      error("failed to read events file for committed height {}: {}",
+            block_height, pairs.error());
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
-    if (!*promotion) {
-      error("no canonical candidate exists for committed height {}",
-            block_height);
-      co_await finish_block_operation(block_id, context_ptr, false);
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    committed = std::move((*promotion)->committed);
+    committed = IndexerOutboxCommittedPayload{
+        .format_version = kIndexerOutboxFormatVersion,
+        .consensus_value = consensus_value,
+        .event_logs = std::move(pairs->event_logs),
+        .tx_bodies = std::move(pairs->tx_bodies),
+    };
     if (auto published =
             co_await indexer_outbox_store_.publish_committed(committed);
         !published) {
@@ -385,14 +350,6 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
-  }
-  if (auto removed = co_await remove_resolved_candidates(block_height);
-      !removed) {
-    error("failed to remove resolved candidate indexer outbox records through "
-          "height {}: {}",
-          block_height, removed.error());
-    co_await finish_block_operation(block_id, context_ptr, false);
-    co_return EventError{EventErrorCode::kInternal};
   }
   // Startup recovery can durably receive a finalized commit before HogDB's
   // tip has been reconciled. Keep it invisible until reconciliation installs
@@ -436,7 +393,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
       tip_height == INT64_MAX ? INT64_MAX : tip_height + 1;
 
   // Validation phase. No durable state is changed until every retained origin
-  // and committed record, the protocol sequence, candidate promotion boundary,
+  // and committed record, the protocol sequence, the promotion boundary,
   // and scheduler-tip relationship have passed.
   auto history =
       co_await indexer_outbox_store_
@@ -449,40 +406,32 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   auto *records = &history->records;
   auto *origins = &history->origins;
   auto *current_origin = &history->current_origin;
-  auto candidates = indexer_outbox_store_.enumerate_candidate_records_raw();
-  if (!candidates) {
-    error("failed to enumerate candidate indexer outbox records: {}",
-          candidates.error());
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  const auto is_canonical_candidate = [&](const auto &candidate) {
-    return candidate.block_height == tip_height &&
-           candidate.event_root == consensus_value.proposal_header.events_hash;
-  };
   bool committed_tip_present =
       std::ranges::any_of(*records, [&](const auto &record) {
         return record.protocol == current_protocol &&
                record.block_height == tip_height &&
                record.consensus_hash == tip_hash;
       });
-  const bool archival_candidate_matches =
-      std::ranges::any_of(*candidates, [&](const auto &candidate) {
-        return candidate.protocol != current_protocol &&
-               is_canonical_candidate(candidate);
-      });
-  auto promotion = co_await find_canonical_candidate(consensus_value);
-  if (!promotion) {
-    error("failed to validate canonical retained candidate: {}",
-          promotion.error());
-    co_return EventError{EventErrorCode::kInternal};
-  }
-  const bool promotion_needed =
-      promotion->has_value() && !committed_tip_present;
-  if (archival_candidate_matches && !committed_tip_present &&
-      !promotion_needed) {
-    error("canonical candidate uses an archival outbox protocol; migration is "
-          "required");
-    co_return EventError{EventErrorCode::kInternal};
+  // When the scheduler's tip is not yet in the committed outbox, the block's
+  // events file is what recovers it: the file is content-addressed by the event
+  // root, and the finalized ConsensusValue carries exactly that root. A missing
+  // file simply means there is nothing to promote. A file that exists but does
+  // not parse is fatal, and is rejected here in the validation phase so that no
+  // durable state changes first; commit_block() re-reads it to promote.
+  bool promotion_needed = false;
+  if (!committed_tip_present && tip_height >= 0) {
+    const std::string events_file = EventBlockContext::final_events_filename(
+        work_directory_, consensus_value.proposal_header.events_hash);
+    if (std::filesystem::exists(events_file)) {
+      if (auto pairs = read_final_events_file(
+              work_directory_, consensus_value.proposal_header.events_hash);
+          !pairs) {
+        error("canonical events file for tip height {} is unreadable: {}",
+              tip_height, pairs.error());
+        co_return EventError{EventErrorCode::kInternal};
+      }
+      promotion_needed = true;
+    }
   }
 
   std::optional<IndexerOutboxCommittedRecordInfo> previous_current;
@@ -499,7 +448,6 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
 
   std::optional<std::pair<BlockHeight, ConsensusValueHash>> planned_origin;
   if (promotion_needed) {
-    CHECK(promotion->has_value());
     if (tip_height < 0 ||
         (canonical_boundary &&
          (tip_height != canonical_boundary->height ||
@@ -508,7 +456,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
          (previous_record->block_height == INT64_MAX ||
           tip_height != previous_record->block_height + 1 ||
           consensus_value.prev_hash != previous_record->consensus_hash))) {
-      error("canonical retained candidate does not append to validated outbox "
+      error("recovered events file does not append to validated outbox "
             "history");
       co_return EventError{EventErrorCode::kInternal};
     }
@@ -521,12 +469,12 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
         if ((*current_origin)->origin.first_height != tip_height ||
             (*current_origin)->origin.first_prev_hash !=
                 consensus_value.prev_hash) {
-          error("current outbox origin does not match retained candidate");
+          error("current outbox origin does not match recovered block");
           co_return EventError{EventErrorCode::kInternal};
         }
       }
       else {
-        error("retained candidate promotion requires an established current "
+        error("recovered block promotion requires an established current "
               "outbox origin");
         co_return EventError{EventErrorCode::kInternal};
       }
@@ -611,7 +559,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     co_return EventError{EventErrorCode::kInternal};
   }
 
-  // Mutation phase. Every rejection above preserves candidates and committed
+  // Mutation phase. Every rejection above preserves events files and committed
   // records byte-for-byte.
   if (planned_origin) {
     auto initialized =
@@ -639,7 +587,6 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   }
 
   if (promotion_needed) {
-    CHECK(promotion->has_value());
     auto promoted = co_await commit_block(block_id, consensus_value);
     if (!promoted) {
       co_return promoted.error();
@@ -651,7 +598,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
         (**promoted_record).protocol != current_protocol ||
         (**promoted_record).consensus_hash != tip_hash ||
         (**promoted_record).prev_hash != consensus_value.prev_hash) {
-      error("promoted retained candidate is not the committed outbox tip");
+      error("promoted recovered block is not the committed outbox tip");
       co_return EventError{EventErrorCode::kInternal};
     }
     previous_record = std::move(**promoted_record);
@@ -675,16 +622,6 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
     error("committed indexer outbox advanced during reconciliation: {}",
           stable.error());
     co_return EventError{EventErrorCode::kInternal};
-  }
-
-  if (previous_record) {
-    auto removed =
-        co_await remove_resolved_candidates(previous_record->block_height);
-    if (!removed) {
-      error("failed to clean reconciled candidates through height {}: {}",
-            previous_record->block_height, removed.error());
-      co_return EventError{EventErrorCode::kInternal};
-    }
   }
 
   // eventsched_commit_block is called only after finalization, so a retained
@@ -1000,50 +937,6 @@ EventRPCContext::abandon_block(BlockID block_id)
                                         BlockOperation::kAbandoning)) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
-  const auto clean_redundant_candidate =
-      [&]() -> x23::Async<EventStatus<bool>> {
-    auto candidate_exists = indexer_outbox_store_.has_candidate(block_id);
-    if (!candidate_exists) {
-      error("failed to inspect candidate indexer outbox record for block {}: "
-            "{}",
-            block_id, candidate_exists.error());
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (!*candidate_exists) {
-      co_return false;
-    }
-    auto candidate = co_await indexer_outbox_store_.load_candidate(block_id);
-    if (!candidate) {
-      error("failed to load abandoned candidate {}: {}", block_id,
-            candidate.error());
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    auto committed_exists =
-        indexer_outbox_store_.has_committed(candidate->block_height);
-    if (!committed_exists) {
-      error("failed to inspect committed outbox record at height {}: {}",
-            candidate->block_height, committed_exists.error());
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (!*committed_exists) {
-      co_return true;
-    }
-    auto committed =
-        co_await indexer_outbox_store_.load_committed(candidate->block_height);
-    if (!committed) {
-      error("failed to validate committed outbox record at height {}: {}",
-            candidate->block_height, committed.error());
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    if (auto removed = indexer_outbox_store_.remove_candidate(block_id);
-        !removed) {
-      error("failed to remove redundant abandoned candidate {}: {}", block_id,
-            removed.error());
-      co_return EventError{EventErrorCode::kInternal};
-    }
-    co_return true;
-  };
-
   info("EventRPCContext::abandon_block: block_id={} acquiring lock", block_id);
 
   PerThreadARC<EventBlockContext> *context_ptr = nullptr;
@@ -1066,17 +959,8 @@ EventRPCContext::abandon_block(BlockID block_id)
   }
 
   if (context_ptr == nullptr) {
-    auto candidate = co_await clean_redundant_candidate();
-    if (!candidate) {
-      co_await finish_block_operation(block_id, nullptr, false);
-      co_return candidate.error();
-    }
-    if (!*candidate) {
-      co_await finish_block_operation(block_id, nullptr, false);
-      co_return EventError{EventErrorCode::kBadBlockID};
-    }
     co_await finish_block_operation(block_id, nullptr, false);
-    co_return EventStatus<void>();
+    co_return EventError{EventErrorCode::kBadBlockID};
   }
 
   if (closing) {
@@ -1092,10 +976,6 @@ EventRPCContext::abandon_block(BlockID block_id)
   info("EventRPCContext::abandon_block: block_id={} done (post-close), gc",
        block_id);
   co_await finish_block_operation(block_id, context_ptr, true);
-  auto candidate = co_await clean_redundant_candidate();
-  if (!candidate) {
-    co_return candidate.error();
-  }
   co_return EventStatus<void>();
 }
 
@@ -1108,83 +988,7 @@ EventRPCContext::reserve_block_operation(BlockID block_id,
   co_return block_operations_.try_emplace(block_id, operation).second;
 }
 
-x23::Async<IndexerOutboxStatus<void>>
-EventRPCContext::remove_resolved_candidates(BlockHeight committed_height)
-{
-  auto candidates = indexer_outbox_store_.enumerate_candidate_records_raw();
-  if (!candidates) {
-    co_return std::unexpected(candidates.error());
-  }
 
-  for (const auto &candidate : *candidates) {
-    if (candidate.block_height > committed_height) {
-      continue;
-    }
-    if (candidate.protocol == std::string_view(version::kHogdProtocol())) {
-      auto payload =
-          co_await indexer_outbox_store_.load_candidate(candidate.block_id);
-      if (!payload) {
-        co_return std::unexpected(
-            std::format("failed to validate current candidate {}: {}",
-                        candidate.block_id, payload.error()));
-      }
-    }
-    if (auto removed =
-            indexer_outbox_store_.remove_candidate(candidate.block_id);
-        !removed) {
-      co_return std::unexpected(std::format("failed to remove candidate {}: {}",
-                                            candidate.block_id,
-                                            removed.error()));
-    }
-  }
-  co_return IndexerOutboxStatus<void>{};
-}
-
-x23::Async<
-    IndexerOutboxStatus<std::optional<EventRPCContext::CandidatePromotion>>>
-EventRPCContext::find_canonical_candidate(
-    const ConsensusValue &consensus_value) const
-{
-  auto records = indexer_outbox_store_.enumerate_candidate_records_raw();
-  if (!records) {
-    co_return std::unexpected(records.error());
-  }
-  const BlockHeight height = consensus_value.proposal_header.block_height;
-  // BlockID is process-local and may be regenerated after restart. Match
-  // retained candidates by height and finalized events root: the root commits
-  // each TxEventLog with its nondeterministic proposal data, independent of
-  // candidate pair order and signature wrappers. Committed publication
-  // validates the event and transaction roots against ConsensusValue, so
-  // recovery does not match on BlockID and needs no ProposalTxsHash in
-  // candidate state.
-  std::optional<CandidatePromotion> selected;
-  for (const auto &record : *records) {
-    if (record.protocol != std::string_view(version::kHogdProtocol()) ||
-        record.block_height != height ||
-        record.event_root != consensus_value.proposal_header.events_hash) {
-      continue;
-    }
-    // Candidate enumeration is deterministic. One matching candidate is
-    // sufficient; validation during committed publication binds its events and
-    // transactions to the finalized consensus value.
-    auto candidate =
-        co_await indexer_outbox_store_.load_candidate(record.block_id);
-    if (!candidate) {
-      co_return std::unexpected(
-          std::format("failed to validate candidate {}: {}", record.block_id,
-                      candidate.error()));
-    }
-    IndexerOutboxCommittedPayload committed{
-        .format_version = kIndexerOutboxFormatVersion,
-        .consensus_value = consensus_value,
-        .event_logs = std::move(candidate->event_logs),
-        .tx_bodies = std::move(candidate->tx_bodies),
-    };
-    selected = CandidatePromotion{.committed = std::move(committed)};
-    break;
-  }
-  co_return selected;
-}
 
 x23::Async<void>
 EventRPCContext::finish_block_operation(

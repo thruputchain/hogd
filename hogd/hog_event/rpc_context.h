@@ -85,10 +85,6 @@ public:
 private:
   enum class BlockOperation { kClosing, kCommitting, kAbandoning };
 
-  struct CandidatePromotion {
-    IndexerOutboxCommittedPayload committed;
-  };
-
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
   void gc_context_internal(
@@ -97,10 +93,6 @@ private:
 
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
-  x23::Async<IndexerOutboxStatus<void>>
-  remove_resolved_candidates(BlockHeight committed_height);
-  x23::Async<IndexerOutboxStatus<std::optional<CandidatePromotion>>>
-  find_canonical_candidate(const ConsensusValue &consensus_value) const;
   x23::Async<void>
   finish_block_operation(BlockID block_id,
                          PerThreadARC<EventBlockContext> *context,
