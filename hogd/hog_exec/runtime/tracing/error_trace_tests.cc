@@ -132,6 +132,11 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
       << x23::show(handler.get_trace()->system_calls);
 }
 
+// The gas figures below sit 10 under their pre-#2973 values: renaming this
+// entrypoint moved its record one slot later in the rv32 entrypoint table, and
+// the guest dispatcher scans that table linearly, so every syscall in the frame
+// starts 10 gas lower. Measured rather than predicted -- the table order does
+// not follow the method name.
 TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
@@ -147,13 +152,13 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'370, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'360, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kGetCurrentAddress);
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(99'336, 99'336, std::move(body),
+        make_entry(99'326, 99'326, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
@@ -170,10 +175,10 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .flags = 0,
     };
     expected.push_back(make_entry(
-        99'302, 99'302, std::move(body),
+        99'292, 99'292, std::move(body),
         status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(99'264));
+  expected.push_back(empty_return_entry(99'254));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
