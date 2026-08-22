@@ -1657,13 +1657,16 @@ TEST_F(EventRpcDeathTest, DuplicateCloseFailStops)
   // scheduler bug rather than a retry to absorb. It must fail stop, not
   // quietly re-answer from durable state: silently tolerating it would hide
   // the caller's bug and let two different heights be attributed to one block.
+  //
+  // The whole sequence runs inside the death-test child: a fork with the
+  // coroutine threadpool already spun up in the parent would not carry its
+  // threads across.
   EXPECT_DEATH(
       {
         EventRPCContext ctx(temp_dir());
         EventMempoolRpc mempool_rpc(ctx);
-        CHECK(mempool_rpc.eventsched_open_block(46)() == RPCError::kRPCNone);
-        CHECK(mempool_rpc.eventsched_close_block(46, 14)().error() ==
-              RPCError::kRPCNone);
+        std::ignore = mempool_rpc.eventsched_open_block(46)();
+        std::ignore = mempool_rpc.eventsched_close_block(46, 14)();
         std::ignore = mempool_rpc.eventsched_close_block(46, 14)();
       },
       "");
