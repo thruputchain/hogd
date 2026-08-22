@@ -1572,15 +1572,17 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  // Transaction-attached contracts are verified in
-  // perform_initial_validation(); a contract resolved by hash from the database
-  // has not been. Apply the same check here so a persisted-but-untranslatable
-  // row (e.g. a legacy rv32 blob that no longer translates under the current
-  // loader) is rejected as contract-attributable invalid input at deploy time.
-  // Without this the deployment commits and a later invocation reaches
-  // make_new_runtime() with an empty cached translation, which escalates to
-  // Unrecoverable.
-  if (runtime_context_.verify_contract(contract) != InvokeErrorCode::None) {
+  // A contract resolved by hash from the database has not been verified, unlike
+  // transaction-attached contracts (checked in perform_initial_validation()
+  // before the body runs). Verify a db-resolved row here so a persisted-but-
+  // untranslatable row (e.g. a legacy rv32 blob that no longer translates under
+  // the current loader) is rejected as contract-attributable invalid input at
+  // deploy time; without this the deployment commits and a later invocation
+  // reaches make_new_runtime() with an empty cached translation, which
+  // escalates to Unrecoverable. Skip attached contracts: they already passed
+  // verify_contract, and re-checking would repeat a full rv32 translation.
+  if (!newly_created_contracts_.contains(contract_hash) &&
+      runtime_context_.verify_contract(contract) != InvokeErrorCode::None) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
