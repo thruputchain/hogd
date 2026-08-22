@@ -63,6 +63,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_mempool/shared.h"
@@ -2548,10 +2549,13 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
   std::filesystem::copy(data_dir, ahead_data_dir,
                         std::filesystem::copy_options::recursive);
   advance_persistent_data_dir(ahead_data_dir);
-  ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
-            0UL);
-  std::filesystem::copy(ahead_data_dir / "events" / "indexer-outbox",
-                        data_dir / "events" / "indexer-outbox",
+  // Carry the event service's whole durable directory, not just the outbox
+  // inside it: a committed record stores its payload as the content-addressed
+  // <event_root>.events file next to the outbox, and on a real node that file
+  // is durable before the record that references it, so an outbox that is
+  // ahead always brings its events files along.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "events"), 0UL);
+  std::filesystem::copy(ahead_data_dir / "events", data_dir / "events",
                         std::filesystem::copy_options::recursive);
   ASSERT_GT(std::filesystem::remove_all(data_dir / "indexer" / "indexer-db"),
             0UL);
@@ -2576,7 +2580,7 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, DataDirPromotesFinalizedCandidateAfterRestart)
+TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2589,7 +2593,8 @@ TEST(HogDevnode, DataDirPromotesFinalizedCandidateAfterRestart)
   advance_persistent_data_dir(finalized_data_dir);
 
   // Model a stop after HogDB finalized height two but before event promoted
-  // its already-durable closed candidate or indexer observed that height.
+  // the already-durable events file it wrote at close, or the indexer observed
+  // that height.
   ASSERT_GT(std::filesystem::remove_all(data_dir / "ramdb"), 0UL);
   std::filesystem::copy(finalized_data_dir / "ramdb", data_dir / "ramdb",
                         std::filesystem::copy_options::recursive);
@@ -2611,18 +2616,22 @@ TEST(HogDevnode, DataDirPromotesFinalizedCandidateAfterRestart)
     ASSERT_TRUE(committed.has_value()) << committed.error();
     finalized = committed->consensus_value;
 
+    // Model what closing left behind: the block's events file, content
+    // addressed by its event root, with the height never promoted to a
+    // committed record. The finalized run retains it -- its committed record
+    // references it as its payload -- so copy it from there.
+    std::filesystem::copy_file(
+        EventBlockContext::final_events_filename(
+            (finalized_data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        EventBlockContext::final_events_filename(
+            (data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        std::filesystem::copy_options::overwrite_existing);
+
     auto recovering_store = IndexerOutboxStore::open(
         (data_dir / "events" / "indexer-outbox").string());
     ASSERT_TRUE(recovering_store.has_value()) << recovering_store.error();
-    IndexerOutboxCandidatePayload candidate{
-        .format_version = kIndexerOutboxFormatVersion,
-        .block_id = kClosedCandidate,
-        .block_height = finalized.proposal_header.block_height,
-        .event_root = finalized.proposal_header.events_hash,
-        .event_logs = committed->event_logs,
-        .tx_bodies = committed->tx_bodies,
-    };
-    ASSERT_TRUE(recovering_store->publish_candidate(candidate)().has_value());
     EXPECT_FALSE(recovering_store->has_committed(2).value());
   }
 
@@ -2648,7 +2657,10 @@ TEST(HogDevnode, DataDirPromotesFinalizedCandidateAfterRestart)
   auto committed = recovered_store->load_committed(2)();
   ASSERT_TRUE(committed.has_value()) << committed.error();
   EXPECT_EQ(committed->consensus_value, finalized);
-  EXPECT_FALSE(recovered_store->has_candidate(kClosedCandidate).value());
+  // The promoted committed record references this file as its payload, so it
+  // is retained for as long as the record lives.
+  EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
+      (data_dir / "events").string(), finalized.proposal_header.events_hash)));
 }
 
 TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)

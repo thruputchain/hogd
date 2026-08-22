@@ -143,7 +143,6 @@ make_indexer_committed_block(const IndexerCommittedBlockPayload &payload)
       .identity =
           IndexerCommittedBlockIdentity{
               .consensus_hash = sha256(payload.consensus_value),
-              .payload_digest = sha256(payload),
           },
   };
 }
@@ -155,8 +154,7 @@ validate_indexer_committed_block(const IndexerCommittedBlock &block)
       !valid) {
     co_return valid;
   }
-  if (block.identity.consensus_hash != sha256(block.payload.consensus_value) ||
-      sha256(block.payload) != block.identity.payload_digest) {
+  if (block.identity.consensus_hash != sha256(block.payload.consensus_value)) {
     co_return std::unexpected(
         "committed block identity differs from canonical payload");
   }

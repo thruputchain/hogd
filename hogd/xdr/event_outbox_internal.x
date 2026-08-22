@@ -45,6 +45,9 @@ struct IndexerOutboxRecordHeader {
   BlockHeight block_height;
   ProtocolCommit protocol;
   unsigned hyper payload_byte_length;
+  // Epoch-origin records only. Candidate and committed records write zeros:
+  // a committed record's integrity is the consensus roots recomputed on load,
+  // and the slot is retained to keep the stable envelope's wire shape.
   SHA256Hash payload_digest;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
@@ -64,5 +67,15 @@ struct IndexerOutboxCandidatePayload {
 };
 
 typedef IndexerCommittedBlockPayload IndexerOutboxCommittedPayload;
+
+// What a committed record actually stores. The event logs and transaction
+// bodies live once, in the block's content-addressed events file named by
+// consensus_value.proposal_header.events_hash (the header's event_root);
+// loading a committed record reassembles the full IndexerOutboxCommittedPayload
+// from that file and revalidates both consensus roots against the header.
+struct IndexerOutboxCommittedStoredPayload {
+  unsigned int format_version;
+  ConsensusValue consensus_value;
+};
 
 } // namespace hogd

@@ -1,5 +1,6 @@
 #include "hogd/hog_event/event_block_context.h"
-#include "event_outbox_internal.hh"
+
+#include "hogd/hog_event/indexer_outbox.h"
 
 #include <atomic>
 #include <cassert>
@@ -9,8 +10,11 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <expected>
+#include <format>
+#include <fstream>
+#include <ios>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
@@ -28,7 +32,6 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -39,6 +42,7 @@
 #include "x23/debug.h"
 #include "x23/fastclock.h"
 #include "x23/fileio.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -54,8 +58,25 @@ EventBlockContext::open_events_file()
     panic("failed to open work directory: {}", dir.error());
   }
   auto filename = temp_events_filename(work_directory_, block_id_);
+  // The temp name is only unique among live blocks: block ids are
+  // process-local, so a crash can leave a temp file behind under a name a
+  // later run reuses.  Worse than a stale tail, that leftover can be a hard
+  // link to a PUBLISHED events file -- publish_file() links the final name
+  // before unlinking the temp name, and a crash between the two leaves both
+  // names on one inode -- so opening it in place (with O_TRUNC or otherwise)
+  // would corrupt the published file through the shared inode.  Unlinking the
+  // stale name first breaks any such link, and O_EXCL guarantees this block
+  // writes a fresh, empty inode of its own.
   // NOLINTNEXTLINE(misc-include-cleaner)
-  auto fd = open(filename.c_str(), O_CREAT | O_WRONLY, 0666);
+  int fd = open(filename.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0666);
+  if (fd == -1 && errno == EEXIST) {
+    if (unlink(filename.c_str()) != 0) {
+      panic("failed to unlink stale temp events file '{}': {}", filename,
+            strerror(errno));
+    }
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    fd = open(filename.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0666);
+  }
   if (fd == -1) {
     panic("failed to open events file: {}", strerror(errno));
   }
@@ -66,9 +87,7 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
                                      BlockID block_id,
                                      ReusableEventBlockContextData data)
   : trie_(std::move(data.trie)), work_directory_(work_directory),
-    block_id_(block_id),
-    events_with_bodies_(std::move(data.events_with_bodies)),
-    buffers_(std::move(data.buffers))
+    block_id_(block_id), buffers_(std::move(data.buffers))
 {
   trie_->clear();
   {
@@ -78,21 +97,13 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
       ctx.event_count = 0;
     });
   }
-  {
-    auto ul = events_with_bodies_.lock_threads();
-    events_with_bodies_.for_each(ul, [](EventWithBodyBatch &batch) {
-      batch.clear();
-    });
-  }
   open_events_file();
 }
 
 ReusableEventBlockContextData
 EventBlockContext::extract_data()
 {
-  return ReusableEventBlockContextData(std::move(trie_),
-                                       std::move(events_with_bodies_),
-                                       std::move(buffers_));
+  return ReusableEventBlockContextData(std::move(trie_), std::move(buffers_));
 }
 
 x23::Async<bool>
@@ -121,6 +132,24 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
   // could overwrite serialize_buf, leaving key/value pointing at stale or freed
   // memory.
   CHECK(trie_->insert(key, value));
+
+  // Stream the event log and its body to the events file as one pair. The pair
+  // is what the indexer consumes and what restart promotion reads back, so this
+  // one file is the block's whole durable record.
+  //
+  // Both halves go out in a single write_event() call. The staging buffer is
+  // only ever flushed between calls, so a flushed chunk always holds whole
+  // pairs -- which is what keeps each body associated with its event even
+  // though chunks from different threads interleave in the file (#2826).
+  //
+  // The event half costs nothing to produce: serialize_buf already holds its
+  // canonical encoding. The body is encoded once, here, rather than again when
+  // the block closes.
+  static PerThread<x23::Buf> pair_buf;
+  pair_buf->resize_uninitialized(0);
+  pair_buf->append_range(std::span(*serialize_buf).first(event_xdr_size));
+  x23::serialize_to(&*pair_buf, body);
+
   using write_event_result_t =
       decltype(std::declval<EventBlockContext &>().write_event(
           std::declval<std::span<const uint8_t>>()));
@@ -128,14 +157,7 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
       std::same_as<decltype(std::declval<write_event_result_t::promise_type &>()
                                 .initial_suspend()),
                    std::suspend_never>);
-  co_await write_event(std::span(*serialize_buf).first(event_xdr_size));
-
-  // Preserve each event/body pair when the durable candidate is snapshotted at
-  // close. The event trie commits to the body's nondeterministic data but not
-  // its signature wrapper.
-  events_with_bodies_->emplace_back(
-      detail::EventWithBody{.event = std::move(event),
-                            .body = std::move(body)});
+  co_await write_event(std::span(*pair_buf));
   co_return true;
 }
 
@@ -156,14 +178,21 @@ EventBlockContext::sync_file(x23::CoroGuard const & /*unused*/)
 }
 
 void
-EventBlockContext::rename_file(x23::CoroGuard const & /*unused*/,
-                               SHA256Hash const &hash)
+EventBlockContext::publish_file(x23::CoroGuard const & /*unused*/,
+                                SHA256Hash const &hash)
 {
   auto old_name = temp_events_filename(work_directory_, block_id_);
   auto new_name = final_events_filename(work_directory_, hash);
-  int rc = std::rename(old_name.c_str(), new_name.c_str());
-  if (rc != 0) {
-    panic("failed to rename events file '{}' to '{}': {}", old_name, new_name,
+  // link() rather than rename(): rename would clobber, and the destination
+  // name is shared between blocks (see publish_file's declaration).  EEXIST
+  // means another block already published an equally valid file under this
+  // root, so keep theirs and drop ours.
+  if (link(old_name.c_str(), new_name.c_str()) != 0 && errno != EEXIST) {
+    panic("failed to link events file '{}' to '{}': {}", old_name, new_name,
+          strerror(errno));
+  }
+  if (std::remove(old_name.c_str()) != 0) {
+    panic("failed to remove temp events file '{}': {}", old_name,
           strerror(errno));
   }
 }
@@ -322,9 +351,9 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   root_hash_ = hash;
   has_root_hash_ = true;
   auto ts4 = x23::fastclock::now();
-  rename_file(g, hash);
+  publish_file(g, hash);
   auto ts5 = x23::fastclock::now();
-  info("time to rename file: {} ns", ts5 - ts4);
+  info("time to publish file: {} ns", ts5 - ts4);
   auto directory = Directory::open(work_directory_, /*create=*/false);
   if (!directory) {
     panic("failed to open events directory after rename: {}",
@@ -341,36 +370,6 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   file_done_.broadcast(pool);
 }
 
-x23::Async<IndexerOutboxCandidatePayload>
-EventBlockContext::snapshot_indexer_outbox_candidate(BlockHeight block_height,
-                                                     SHA256Hash event_root)
-{
-  IndexerOutboxCandidatePayload payload{
-      .format_version = kIndexerOutboxFormatVersion,
-      .block_id = block_id_,
-      .block_height = block_height,
-      .event_root = event_root,
-  };
-
-  // Each EventWithBody was created as one pair by add_event. Flatten the
-  // per-thread batches in lockstep; the indexer is insensitive to pair order.
-  std::unique_lock ul = events_with_bodies_.lock_threads();
-  size_t pair_count = 0;
-  events_with_bodies_.for_each(ul,
-                               [&pair_count](const EventWithBodyBatch &batch) {
-                                 pair_count += batch.size();
-                               });
-  payload.event_logs.reserve(pair_count);
-  payload.tx_bodies.reserve(pair_count);
-  events_with_bodies_.for_each(ul, [&payload](EventWithBodyBatch &batch) {
-    for (detail::EventWithBody &pair : batch) {
-      payload.event_logs.push_back(std::move(pair.event));
-      payload.tx_bodies.push_back(std::move(pair.body));
-    }
-  });
-  co_return payload;
-}
-
 x23::Async<void>
 EventBlockContext::wait_file_done()
 {
@@ -383,19 +382,14 @@ void
 EventBlockContext::delete_events_file()
 {
   events_file_.reset();
-  if (has_root_hash_) {
-    auto name = final_events_filename(work_directory_, root_hash_);
-    if (std::remove(name.c_str()) != 0) {
-      warn("delete_events_file: failed to remove final file '{}': {}", name,
-           strerror(errno));
-    }
-  }
-  else {
-    auto name = temp_events_filename(work_directory_, block_id_);
-    if (std::remove(name.c_str()) != 0) {
-      warn("delete_events_file: failed to remove temp file '{}': {}", name,
-           strerror(errno));
-    }
+  // Only the temp file is this block's to remove.  Once published, the name is
+  // content-addressed and shared with any other block that produced the same
+  // event root, so it is reclaimed by refcount in EventRPCContext.
+  CHECK(!has_root_hash_);
+  auto name = temp_events_filename(work_directory_, block_id_);
+  if (std::remove(name.c_str()) != 0) {
+    warn("delete_events_file: failed to remove temp file '{}': {}", name,
+         strerror(errno));
   }
 }
 
@@ -465,6 +459,72 @@ EventBlockContext::await_all_executors_closed()
     }
   }
   co_return true; // All executors closed normally
+}
+
+std::expected<EventBlockPairs, std::string>
+parse_events_file_pairs(std::span<const uint8_t> bytes, std::string_view name)
+{
+  // The file is a flat run of [TxEventLog][ProposedTransaction] pairs with no
+  // count: deserialize_from() reports how much each value consumed, so the run
+  // is walked to the end. It is bounds-checked, so a truncated or corrupt file
+  // throws rather than over-reading.
+  EventBlockPairs pairs;
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    TxEventLog event;
+    ProposedTransaction body;
+    try {
+      offset += x23::deserialize_from(&event,
+                                      x23::BufViewEnd(
+                                          x23::BufView(bytes.data() + offset,
+                                                       bytes.size() - offset)));
+      if (offset >= bytes.size()) {
+        return std::unexpected(
+            std::format("events file {} ends with an event log that has no "
+                        "transaction body",
+                        name));
+      }
+      offset += x23::deserialize_from(&body,
+                                      x23::BufViewEnd(
+                                          x23::BufView(bytes.data() + offset,
+                                                       bytes.size() - offset)));
+    } catch (const x23::XdrException &e) {
+      return std::unexpected(
+          std::format("malformed events file {}: {}", name, e.what()));
+    }
+    pairs.event_logs.push_back(std::move(event));
+    pairs.tx_bodies.push_back(std::move(body));
+  }
+  return pairs;
+}
+
+std::expected<EventBlockPairs, std::string>
+read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
+{
+  const std::string name =
+      EventBlockContext::final_events_filename(work_directory, hash);
+  std::ifstream file(name, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return std::unexpected(std::format("failed to open events file {}", name));
+  }
+  const std::streamoff size = file.tellg();
+  if (size < 0) {
+    return std::unexpected(std::format("failed to size events file {}", name));
+  }
+  // A block's pairs were bounded to the pull RPC's replay limit at
+  // publication, so a larger file cannot be a valid events file.  Rejecting
+  // before the allocation keeps a corrupt or sparse file a clean fail-closed
+  // error instead of an unbounded allocation.
+  if (std::cmp_greater(size, kMaxIndexerOutboxPayloadBytes)) {
+    return std::unexpected(
+        std::format("events file {} exceeds replayable payload size", name));
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(size));
+  file.seekg(0);
+  if (size > 0 && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
+    return std::unexpected(std::format("failed to read events file {}", name));
+  }
+  return parse_events_file_pairs(bytes, name);
 }
 
 } // namespace hogd

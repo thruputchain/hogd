@@ -24,6 +24,7 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
+#include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -260,10 +261,26 @@ make_committed_payload_golden_fixture()
   return payload;
 }
 
+// The store must not sit at the TmpDir root: a committed record keeps its
+// event logs and transaction bodies in a content-addressed <event_root>.events
+// file in the store's PARENT directory, and TmpDirs live directly under /tmp,
+// so a store rooted at the TmpDir would share its events namespace with every
+// other test and every prior run. Nesting one level keeps each test's events
+// files inside its own TmpDir.
+std::string
+store_path(const TmpDir &dir)
+{
+  return dir.directory() + "/outbox";
+}
+
 IndexerOutboxStore
 open_store(const TmpDir &dir)
 {
-  auto store = IndexerOutboxStore::open(dir.directory());
+  std::filesystem::create_directory(store_path(dir));
+  std::filesystem::permissions(store_path(dir),
+                               std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace);
+  auto store = IndexerOutboxStore::open(store_path(dir));
   CHECK(store.has_value());
   return std::move(*store);
 }
@@ -282,7 +299,7 @@ initialize_test_origin(IndexerOutboxStore &store,
 std::string
 path_for(const TmpDir &dir, std::string_view filename)
 {
-  return dir.directory() + "/" + std::string(filename);
+  return store_path(dir) + "/" + std::string(filename);
 }
 
 x23::Buf
@@ -307,6 +324,30 @@ write_bytes(const TmpDir &dir, std::string_view filename,
 struct TestOutboxFile : IndexerOutboxRecordHeader {
   x23::Buf payload;
 };
+
+// The store treats its parent directory -- here the TmpDir itself -- as the
+// events directory holding the <event_root>.events files committed records
+// reference. Rewrites a file's pairs in place; first-writer-wins publication
+// applies only to the store's own link step, not to this test override.
+void
+rewrite_events_file(const TmpDir &dir, const EventsHash &event_root,
+                    const TxEventLogBatch &event_logs,
+                    const ProposedTransactionBatch &tx_bodies)
+{
+  CHECK_EQ(event_logs.size(), tx_bodies.size());
+  x23::Buf bytes;
+  for (size_t i = 0; i < event_logs.size(); ++i) {
+    x23::serialize_to(&bytes, event_logs[i]);
+    x23::serialize_to(&bytes, tx_bodies[i]);
+  }
+  const std::string name = dir.directory() + "/" +
+                           encode_hex(std::as_bytes(std::span(event_root))) +
+                           ".events";
+  auto file = File::open(name, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+  CHECK(file.has_value());
+  CHECK(write_full(*file, std::as_bytes(std::span(bytes))).has_value());
+  CHECK(file->close().has_value());
+}
 
 TestOutboxFile
 read_envelope(const TmpDir &dir, std::string_view filename)
@@ -492,11 +533,15 @@ TEST_F(IndexerOutboxTest, OpenCleansOnlyRecognizedRegularStaleTemps)
       IndexerOutboxStore::candidate_filename(2) + ".tmp.not-recognized";
   const std::string final = IndexerOutboxStore::candidate_filename(3);
   const std::vector<uint8_t> bytes = {0, 0, 0, 0};
+  std::filesystem::create_directory(store_path(dir_));
+  std::filesystem::permissions(store_path(dir_),
+                               std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace);
   write_bytes(dir_, stale, bytes);
   write_bytes(dir_, unknown, bytes);
   write_bytes(dir_, final, bytes);
 
-  auto store = IndexerOutboxStore::open(dir_.directory());
+  auto store = IndexerOutboxStore::open(store_path(dir_));
 
   ASSERT_TRUE(store.has_value()) << store.error();
   ASSERT_TRUE(store->recognized_namespace_empty().has_value());
@@ -509,14 +554,13 @@ TEST_F(IndexerOutboxTest, OpenCleansOnlyRecognizedRegularStaleTemps)
 TEST_F(IndexerOutboxTest, StoreOwnershipIsExclusiveUntilClose)
 {
   {
-    auto first = IndexerOutboxStore::open(dir_.directory());
-    ASSERT_TRUE(first.has_value()) << first.error();
-    auto second = IndexerOutboxStore::open(dir_.directory());
+    IndexerOutboxStore first = open_store(dir_);
+    auto second = IndexerOutboxStore::open(store_path(dir_));
     ASSERT_FALSE(second.has_value());
     EXPECT_NE(second.error().find("locked"), std::string::npos);
   }
 
-  auto later = IndexerOutboxStore::open(dir_.directory());
+  auto later = IndexerOutboxStore::open(store_path(dir_));
   ASSERT_TRUE(later.has_value()) << later.error();
 }
 
@@ -1009,7 +1053,7 @@ TEST_F(IndexerOutboxTest, EmptyBlocksRoundTrip)
   EXPECT_TRUE(loaded_committed->tx_bodies.empty());
 }
 
-TEST_F(IndexerOutboxTest, WireBlockUsesExactDurablePayloadDigest)
+TEST_F(IndexerOutboxTest, WireBlockIdentityIsTheConsensusHash)
 {
   IndexerOutboxStore store = open_store(dir_);
   IndexerOutboxCommittedPayload committed = make_committed(17, {}, {});
@@ -1020,7 +1064,6 @@ TEST_F(IndexerOutboxTest, WireBlockUsesExactDurablePayloadDigest)
   auto wire = make_indexer_committed_block(*loaded)();
   ASSERT_TRUE(wire.has_value()) << wire.error();
   EXPECT_EQ(x23::serialize(wire->payload), x23::serialize(*loaded));
-  EXPECT_EQ(wire->identity.payload_digest, sha256(*loaded));
   EXPECT_EQ(wire->identity.consensus_hash, sha256(loaded->consensus_value));
   EXPECT_TRUE(validate_indexer_committed_block(*wire)().has_value());
 }
@@ -1106,6 +1149,64 @@ TEST_F(IndexerOutboxTest, ConflictingRepublishIsRejected)
   EXPECT_NE(result.error().find("mismatched"), std::string::npos);
 }
 
+TEST_F(IndexerOutboxTest, EncodedCandidateMatchesStructuredByteForByte)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  ProposedTransaction body_a = make_body(1);
+  ProposedTransaction body_b = make_body(2);
+  ProposedTransaction body_c = make_body(3);
+  ProposedTransactionBatch bodies{body_a, body_b, body_c};
+  TxEventLogBatch events{make_event(body_a, 0x21), make_event(body_b, 0x22),
+                         make_event(body_c, 0x23)};
+  const auto candidate = make_candidate(42, 7, bodies, events);
+
+  // Encode the payload's two vectors the way add_event() does: one buffer per
+  // ingest thread, appended in lockstep. Splitting contiguously keeps each
+  // concatenation in the payload's own element order.
+  std::vector<x23::Buf> event_bufs(2);
+  std::vector<x23::Buf> body_bufs(2);
+  const size_t split = candidate.event_logs.size() / 2;
+  for (size_t i = 0; i < candidate.event_logs.size(); ++i) {
+    const size_t slot = i < split ? 0 : 1;
+    x23::serialize_to(&event_bufs[slot], candidate.event_logs[i]);
+    x23::serialize_to(&body_bufs[slot], candidate.tx_bodies[i]);
+  }
+
+  auto encoded =
+      store.publish_candidate_encoded(42, 7, candidate.event_root,
+                                      static_cast<uint32_t>(
+                                          candidate.event_logs.size()),
+                                      event_bufs, body_bufs);
+  ASSERT_TRUE(encoded.has_value()) << encoded.error();
+
+  // publish_bytes() replaces an existing record only when it is byte-identical,
+  // so a structured publish succeeding on top of the encoded one is the
+  // equivalence assertion: closing a block may skip re-encoding the payload
+  // only for as long as these two agree exactly.
+  auto structured = store.publish_candidate(candidate)();
+  ASSERT_TRUE(structured.has_value()) << structured.error();
+
+  auto loaded = store.load_candidate(42)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  expect_xdr_equal(*loaded, candidate);
+}
+
+TEST_F(IndexerOutboxTest, EncodedEmptyCandidateMatchesStructuredByteForByte)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  const auto candidate = make_candidate(43, 9, {}, {});
+
+  auto encoded =
+      store.publish_candidate_encoded(43, 9, candidate.event_root, 0, {}, {});
+  ASSERT_TRUE(encoded.has_value()) << encoded.error();
+  auto structured = store.publish_candidate(candidate)();
+  ASSERT_TRUE(structured.has_value()) << structured.error();
+
+  auto loaded = store.load_candidate(43)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  expect_xdr_equal(*loaded, candidate);
+}
+
 TEST_F(IndexerOutboxTest, RemoveCandidateIsDurableAndIdempotent)
 {
   IndexerOutboxStore store = open_store(dir_);
@@ -1117,20 +1218,68 @@ TEST_F(IndexerOutboxTest, RemoveCandidateIsDurableAndIdempotent)
   EXPECT_TRUE(store.remove_candidate(441).has_value());
 }
 
-TEST_F(IndexerOutboxTest, CorruptPayloadDigestIsRejected)
+TEST_F(IndexerOutboxTest, CommittedCarriesNoPayloadDigest)
 {
+  // Committed records store only {format_version, consensus_value} and
+  // reference the content-addressed events file; their integrity is the
+  // header's consensus_hash plus both consensus roots recomputed over the
+  // reassembled pairs on every load. Pin both halves: the published digest
+  // slot is zero, and a garbage digest does not fail the load.
+  IndexerOutboxStore store = open_store(dir_);
+  auto committed = make_committed(12, {}, {});
+  initialize_test_origin(store, committed);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  const std::string filename = IndexerOutboxStore::committed_filename(12);
+  TestOutboxFile envelope = read_envelope(dir_, filename);
+  EXPECT_EQ(envelope.payload_digest, SHA256Hash{});
+  envelope.payload_digest[0] ^= 0x01;
+  write_envelope(dir_, filename, envelope);
+
+  auto result = store.load_committed(12)();
+
+  ASSERT_TRUE(result.has_value()) << result.error();
+  expect_xdr_equal(*result, committed);
+}
+
+TEST_F(IndexerOutboxTest, CorruptEpochOriginDigestIsRejected)
+{
+  // Epoch origins are the one record kind that keeps a payload digest.
+  IndexerOutboxStore store = open_store(dir_);
+  auto committed = make_committed(12, {}, {});
+  initialize_test_origin(store, committed);
+  const std::string filename =
+      IndexerOutboxStore::current_epoch_origin_filename();
+  TestOutboxFile envelope = read_envelope(dir_, filename);
+  envelope.payload_digest[0] ^= 0x01;
+  write_envelope(dir_, filename, envelope);
+
+  auto result = store.load_current_epoch_origin();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("digest mismatch"), std::string::npos);
+}
+
+TEST_F(IndexerOutboxTest, CandidateCarriesNoPayloadDigest)
+{
+  // Candidates deliberately carry no payload digest. Promotion selects one by
+  // the finalized events root and then re-derives that root and every body's
+  // transaction hash, so hashing the payload at close -- and again on every
+  // candidate enumeration, on the commit path -- bought no detection this path
+  // did not already have. Pin both halves: the published digest is zero, and a
+  // garbage digest does not fail the load.
   IndexerOutboxStore store = open_store(dir_);
   auto candidate = make_candidate(45, 12, {}, {});
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(45);
   TestOutboxFile envelope = read_envelope(dir_, filename);
+  EXPECT_EQ(envelope.payload_digest, SHA256Hash{});
   envelope.payload_digest[0] ^= 0x01;
   write_envelope(dir_, filename, envelope);
 
   auto result = store.load_candidate(45)();
 
-  ASSERT_FALSE(result.has_value());
-  EXPECT_NE(result.error().find("digest mismatch"), std::string::npos);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  expect_xdr_equal(*result, candidate);
 }
 
 TEST_F(IndexerOutboxTest, EnvelopeAndPayloadVersionsAreRejected)
@@ -1220,8 +1369,13 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
   EXPECT_EQ(archival->first_prev_hash, committed.consensus_value.prev_hash);
 }
 
-TEST_F(IndexerOutboxTest, EnumerationRejectsSparseRecordWithInvalidDigest)
+TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
 {
+  // Enumeration is on the reconciliation path for every retained record, so it
+  // must not read payload bytes: a sparse half-gigabyte payload behind a valid
+  // header enumerates from the header alone. The payload is only read -- and
+  // then structurally validated against the consensus roots -- when the record
+  // is actually loaded.
   IndexerOutboxStore store = open_store(dir_);
   auto committed = make_committed(151, {}, {});
   initialize_test_origin(store, committed);
@@ -1234,8 +1388,10 @@ TEST_F(IndexerOutboxTest, EnumerationRejectsSparseRecordWithInvalidDigest)
   write_sparse_record(dir_, filename, std::move(record), kSparsePayloadBytes);
 
   auto records = store.enumerate_committed_records_raw();
-  ASSERT_FALSE(records.has_value());
-  EXPECT_NE(records.error().find("digest mismatch"), std::string::npos);
+  ASSERT_TRUE(records.has_value()) << records.error();
+  ASSERT_EQ(records->size(), 1UL);
+  EXPECT_EQ(records->front().block_height, 151);
+  EXPECT_EQ(records->front().protocol, "hogp/archival");
 }
 
 TEST_F(IndexerOutboxTest,
@@ -1260,13 +1416,13 @@ TEST_F(IndexerOutboxTest,
       make_committed(16, {body}, {make_event(body, /*marker=*/0x66)});
   initialize_test_origin(store, committed);
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  const std::string committed_filename =
-      IndexerOutboxStore::committed_filename(16);
-  mutate_payload<IndexerOutboxCommittedPayload>(dir_, committed_filename,
-                                                [](auto &payload) {
-                                                  payload.tx_bodies[0] =
-                                                      make_body(6);
-                                                });
+  // The pairs live in the events file the record references, so a substituted
+  // body is a mutation of that file.
+  IndexerOutboxCommittedPayload mutated = committed;
+  mutated.tx_bodies[0] = make_body(6);
+  rewrite_events_file(dir_,
+                      committed.consensus_value.proposal_header.events_hash,
+                      mutated.event_logs, mutated.tx_bodies);
 
   auto body_mismatch = store.load_committed(16)();
   ASSERT_FALSE(body_mismatch.has_value());
@@ -1282,12 +1438,12 @@ TEST_F(IndexerOutboxTest,
       make_committed(161, {body}, {make_event(body, /*marker=*/0x77)});
   initialize_test_origin(store, committed);
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
-  const std::string filename = IndexerOutboxStore::committed_filename(161);
-  mutate_payload<IndexerOutboxCommittedPayload>(
-      dir_, filename, [](auto &payload) {
-        payload.tx_bodies[0]
-            .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
-      });
+  IndexerOutboxCommittedPayload mutated = committed;
+  mutated.tx_bodies[0]
+      .nondeterministic_proposal_data.nondeterministic_bits[0] ^= 0xff;
+  rewrite_events_file(dir_,
+                      committed.consensus_value.proposal_header.events_hash,
+                      mutated.event_logs, mutated.tx_bodies);
 
   auto result = store.load_committed(161)();
 
@@ -1349,7 +1505,9 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
   initialize_test_origin(store, committed);
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(18);
-  mutate_payload<IndexerOutboxCommittedPayload>(
+  const EventsHash original_root =
+      committed.consensus_value.proposal_header.events_hash;
+  mutate_payload<IndexerOutboxCommittedStoredPayload>(
       dir_, filename, [](auto &payload) {
         payload.consensus_value.proposal_header.events_hash[0] ^= 0x01;
       });
@@ -1357,18 +1515,16 @@ TEST_F(IndexerOutboxTest, CandidateAndCommittedIdentityMismatchesAreRejected)
   ASSERT_FALSE(root_mismatch.has_value());
   EXPECT_NE(root_mismatch.error().find("event root"), std::string::npos);
 
-  mutate_payload<IndexerOutboxCommittedPayload>(
-      dir_, filename, [](auto &payload) {
-        payload.consensus_value.proposal_header.events_hash =
-            compute_indexer_outbox_event_root(payload.event_logs,
-                                              payload.tx_bodies);
+  mutate_payload<IndexerOutboxCommittedStoredPayload>(
+      dir_, filename, [&](auto &payload) {
+        payload.consensus_value.proposal_header.events_hash = original_root;
         payload.consensus_value.proposal_header.block_height = 19;
       });
   auto height_mismatch = store.load_committed(18)();
   ASSERT_FALSE(height_mismatch.has_value());
   EXPECT_NE(height_mismatch.error().find("filename height"), std::string::npos);
 
-  mutate_payload<IndexerOutboxCommittedPayload>(
+  mutate_payload<IndexerOutboxCommittedStoredPayload>(
       dir_, filename, [](auto &payload) {
         payload.consensus_value.proposal_header.block_height = -1;
       });
