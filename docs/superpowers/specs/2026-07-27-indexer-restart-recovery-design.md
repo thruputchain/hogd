@@ -4,6 +4,10 @@
 **Status:** Implemented
 **Issue:** #3149
 
+The broader component and operator boundaries are defined in
+[hogd Component Failure Model](../../component-failure-model.md). This design
+provides the indexer-specific mechanism and test detail for that contract.
+
 ## Problem
 
 Before this change, the event service sent committed transaction logs and bodies
