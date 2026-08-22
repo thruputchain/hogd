@@ -2549,10 +2549,13 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
   std::filesystem::copy(data_dir, ahead_data_dir,
                         std::filesystem::copy_options::recursive);
   advance_persistent_data_dir(ahead_data_dir);
-  ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
-            0UL);
-  std::filesystem::copy(ahead_data_dir / "events" / "indexer-outbox",
-                        data_dir / "events" / "indexer-outbox",
+  // Carry the event service's whole durable directory, not just the outbox
+  // inside it: a committed record stores its payload as the content-addressed
+  // <event_root>.events file next to the outbox, and on a real node that file
+  // is durable before the record that references it, so an outbox that is
+  // ahead always brings its events files along.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "events"), 0UL);
+  std::filesystem::copy(ahead_data_dir / "events", data_dir / "events",
                         std::filesystem::copy_options::recursive);
   ASSERT_GT(std::filesystem::remove_all(data_dir / "indexer" / "indexer-db"),
             0UL);
