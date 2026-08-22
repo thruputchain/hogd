@@ -31,6 +31,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/control_client.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
@@ -244,10 +245,14 @@ open_block(db_sched_client_t &db_sched_client,
                done_time - create_time);
 };
 
+// [prev_value] chains the committed ConsensusValues: it enters holding the
+// previous block's committed value (the mock scheduler's genesis tip before
+// the first block) and leaves holding this block's.
 void
 close_block(db_sched_client_t &db_sched_client,
             event_sched_client_t &event_sched_client,
-            std::vector<exec_client_t> &exec_clients, uint64_t block_number)
+            std::vector<exec_client_t> &exec_clients, uint64_t block_number,
+            ConsensusValue &prev_value)
 {
   auto start_time = x23::fastclock::get_ns();
   info("closing block {}", block_number);
@@ -283,12 +288,33 @@ close_block(db_sched_client_t &db_sched_client,
   // It's ok for finish_block to overlap with db.close_block, because we already
   // synchronized waiting for all pending txs on the block to finish.
   async();
-  event_async();
+  auto event_result = event_async();
+  if (event_result.error() != RPCError::kRPCNone) {
+    panic("Failed to close event block");
+  }
   auto done_time = x23::fastclock::get_ns();
-  std::println(
-      "closing: issue_time {} close_time {} commit_time {} done_time {}",
-      issue_time - start_time, close_time - issue_time,
-      commit_time - close_time, done_time - commit_time);
+  // Commit the event block the way a real finalization does, so the measured
+  // lifecycle covers the durable indexer publication and not just close. The
+  // finalized value chains prev_hash off the previous committed value and
+  // carries the event root close returned; the event server validated its
+  // origin against the mock scheduler's genesis tip at registration.
+  ConsensusValue event_value{};
+  event_value.prev_hash = sha256(prev_value);
+  event_value.proposal_header.block_height =
+      static_cast<BlockHeight>(block_number);
+  event_value.proposal_header.events_hash = event_result.root_hash();
+  auto event_commit_res =
+      event_sched_client.eventsched_commit_block(block_number, event_value)();
+  if (event_commit_res != RPCError::kRPCNone) {
+    panic("Failed to commit event block");
+  }
+  prev_value = event_value;
+  auto event_commit_time = x23::fastclock::get_ns();
+  std::println("closing: issue_time {} close_time {} commit_time {} "
+               "done_time {} event_commit_time {}",
+               issue_time - start_time, close_time - issue_time,
+               commit_time - close_time, done_time - commit_time,
+               event_commit_time - done_time);
 };
 
 x23::Detached
@@ -338,7 +364,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           std::vector<exec_client_t> &exec_clients,
           size_t n_coros_per_connection, size_t n_connections,
           size_t batch_size, uint64_t parent_block_number,
-          uint64_t current_block_number)
+          uint64_t current_block_number, ConsensusValue &prev_value)
 {
   auto start_time = x23::fastclock::get_ns();
 
@@ -366,7 +392,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   double elapsed_time = end_coros_time - start_coros_time;
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
   close_block(db_sched_client, event_sched_client, exec_clients,
-              current_block_number);
+              current_block_number, prev_value);
 
   auto end_block_time = x23::fastclock::get_ns();
   std::println("open_time {} middle_time {} close_time {} inner tps: {}",
@@ -486,6 +512,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   uint64_t parent_block_number = 0;
   uint64_t current_block_number = 1;
+  ConsensusValue prev_value = MockSchedEvent::bench_genesis_tip();
 
   ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
   config.erc20_payments() = {
@@ -513,14 +540,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
-            current_block_number);
+            current_block_number, prev_value);
   parent_block_number = current_block_number;
   current_block_number++;
 
   for (auto const &init_block : loadgen_result.success().initialization_txs) {
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
-              batch_size, parent_block_number, current_block_number);
+              batch_size, parent_block_number, current_block_number,
+              prev_value);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -564,7 +592,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     auto ts = x23::fastclock::get_ns();
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
-              parent_block_number, current_block_number);
+              parent_block_number, current_block_number, prev_value);
     auto end_time = x23::fastclock::get_ns();
     double elapsed_time = end_time - ts;
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;

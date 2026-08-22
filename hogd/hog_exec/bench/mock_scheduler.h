@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "consensus.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/bench/control_client.h"
 #include "rpc_types.hh"
@@ -24,6 +25,19 @@ public:
 
   MockSchedEvent() = default;
 
+  // The canonical tip the mock hands the event server at registration: the
+  // same shape the runner writes as the DB genesis. Reconciling against a
+  // height-0 tip establishes the current outbox epoch origin at
+  // {first_height = 1, first_prev_hash = sha256(this value)}, which is what
+  // lets the runner commit event blocks -- its first committed value chains
+  // its prev_hash off this exact value, so the two definitions must not drift.
+  static ConsensusValue bench_genesis_tip()
+  {
+    ConsensusValue value{};
+    value.proposal_header.block_height = 0;
+    return value;
+  }
+
   // Disable copy and move.
   MockSchedEvent(const MockSchedEvent &) = delete;
   MockSchedEvent &operator=(const MockSchedEvent &) = delete;
@@ -37,7 +51,7 @@ public:
     cv_.notify_all();
     EventPrepareResult result{EventPrepareOutcome::EventPrepareOK};
     result.snapshot().tip.block_id = std::numeric_limits<BlockID>::max();
-    result.snapshot().tip.consensus_value.proposal_header.block_height = -1;
+    result.snapshot().tip.consensus_value = bench_genesis_tip();
     result.snapshot().token = 1;
     return result;
   }
