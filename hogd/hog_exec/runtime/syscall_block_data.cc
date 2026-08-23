@@ -14,13 +14,13 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
                              BlockHeight &output_result)
 {
-  auto status = syscall_handler.get_block_height();
+  auto status = co_await syscall_handler.get_block_height();
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   output_result = *status;
   if (auto *trace_data =
@@ -29,7 +29,7 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetBlockHeightOutputs{.result = output_result});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

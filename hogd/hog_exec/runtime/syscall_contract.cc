@@ -38,20 +38,20 @@ syscall_GetDeployAddress_inner(
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_nonce,
                              const SHA256Hash &input_contract_hash,
                              ContractAddress &output_deployed_address)
 {
-  auto status =
+  auto status = co_await
       syscall_handler.deploy_contract(input_nonce, input_contract_hash);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &deploy_status = *status;
   if (!deploy_status) {
-    return {deploy_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{deploy_status.error().code(), WrappedGasAmount{0}};
   }
   output_deployed_address = *deploy_status;
 
@@ -62,7 +62,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
         .deployed_address = output_deployed_address});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

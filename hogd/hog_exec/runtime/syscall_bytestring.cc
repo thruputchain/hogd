@@ -19,18 +19,18 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<std::byte> output_bytestring,
                             RuntimeMemoryLength &output_written_len)
 {
-  auto status = syscall_handler.get_bytestring(input_key);
+  auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    return {status->error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status->error().code(), WrappedGasAmount{0}};
   }
 
   auto const *bs = (*(*status));
@@ -45,21 +45,21 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
                                RuntimeMemoryLength &output_length)
 {
-  auto status = syscall_handler.get_bytestring(input_key);
+  auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &get_status = *status;
   if (!get_status) {
-    return {get_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{get_status.error().code(), WrappedGasAmount{0}};
   }
 
   output_length = (*get_status)->size();
@@ -71,30 +71,30 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
         SyscallBytestringGetLenOutputs{.length = output_length});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,
                             StorageDeltaFlagSet input_flags)
 {
   if (input_bytestring.size() > kBytestringMaxLen) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
-  auto status =
+  auto status = co_await
       syscall_handler.set_bytestring(input_key, input_bytestring, input_flags);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &set_status = *status;
   if (!set_status) {
-    return {set_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{set_status.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

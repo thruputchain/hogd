@@ -29,7 +29,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
     const int32_t *optional_input_key_scheme,
@@ -84,37 +84,37 @@ syscall_ChangePublicKeyRegistration_inner(
   }();
 
   if (!new_key) {
-    return {new_key.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{new_key.error().code(), WrappedGasAmount{0}};
   }
 
-  auto status =
+  auto status = co_await
       syscall_handler.change_public_key_registration(input_key_index,
                                                      std::move(*new_key));
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &registration_status = *status;
   if (!registration_status) {
-    return {registration_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{registration_status.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_WriteAddressRequiredWeight_inner(SystemCallHandler &syscall_handler,
                                          Weight input_required_weight)
 {
-  auto status =
+  auto status = co_await
       syscall_handler.set_address_required_weight(input_required_weight);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   auto &weight_status = *status;
   if (!weight_status) {
-    return {weight_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{weight_status.error().code(), WrappedGasAmount{0}};
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -132,7 +132,7 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_MintAuthToken_inner(
     SystemCallHandler &syscall_handler, const BlockHeight &input_expiry_height,
     std::span<const std::byte> input_serialized_auth_token,
@@ -142,12 +142,12 @@ syscall_MintAuthToken_inner(
                        .expiry_height = input_expiry_height};
 
   // Check expiry height is in the future
-  auto height = syscall_handler.get_block_height();
+  auto height = co_await syscall_handler.get_block_height();
   if (!height) {
-    return {height.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{height.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (input_expiry_height < *height) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
 
@@ -155,19 +155,19 @@ syscall_MintAuthToken_inner(
     x23::deserialize(&auth_token.root_node,
                      x23::BufView{input_serialized_auth_token});
   } catch (x23::XdrException &e) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
 
   if (!AuthTokenRegistry::node_within_depth(auth_token.root_node,
                                             kAuthTokenMaxDepth)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.mint_auth_token(auth_token);
   if (!status) {
-    return {status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }
   output_token_id = *status;
 
@@ -177,10 +177,10 @@ syscall_MintAuthToken_inner(
         SyscallMintAuthTokenOutputs{.token_id = output_token_id});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_ConsumeAuthToken_inner(
     SystemCallHandler &syscall_handler, uint32_t input_token_id,
     std::span<std::byte> output_auth_payload,
@@ -189,14 +189,14 @@ syscall_ConsumeAuthToken_inner(
     uint32_t &output_unwrapped_token_id_start,
     uint32_t &output_unwrapped_token_id_count)
 {
-  auto height = syscall_handler.get_block_height();
+  auto height = co_await syscall_handler.get_block_height();
   if (!height) {
-    return {height.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{height.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.consume_auth_token(input_token_id, *height);
   if (!status) {
-    return {status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }
 
   auto const &result = *status;
@@ -222,7 +222,7 @@ syscall_ConsumeAuthToken_inner(
         .unwrapped_token_id_count = result.new_token_id_count});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

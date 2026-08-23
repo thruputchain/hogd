@@ -77,6 +77,9 @@ ASYNC_SYSCALLS = frozenset({
     "GetBlockHeight",
     "ChangePublicKeyRegistration",
     "WriteAddressRequiredWeight",
+    # Both read the executing block height, which comes from the db tip.
+    "MintAuthToken",
+    "ConsumeAuthToken",
     # Invoke recurses into Runtime::invoke, so it suspends wherever the child
     # invocation does.
     "Invoke",
