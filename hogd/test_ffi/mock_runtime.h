@@ -18,6 +18,7 @@
 namespace hogd {
 
 class MockRuntime;
+class SyscallHandlerContext;
 
 // Context for a runtime that has been mocked out to some function pointer.
 // Returns a MockRuntime when the input to make_new_runtime is an appropriate
@@ -53,6 +54,18 @@ public:
     return mocked_contracts_.contains(id);
   }
 
+  // The handler context currently executing against this runtime context, or
+  // nullptr between transactions. Set by SyscallHandlerContext::push_context()
+  // on the thread entering the FFI call, and read back by make_new_runtime()
+  // from inside the coroutine, where a thread_local would be empty.
+  void set_handler_context(SyscallHandlerContext *ctx)
+  {
+    // Exactly one handler runs against a runtime context at a time: a clear
+    // must follow a set, and a set must not overwrite a live one.
+    CHECK((ctx == nullptr) != (handler_context_ == nullptr));
+    handler_context_ = ctx;
+  }
+
   std::unique_ptr<MockRuntimeContext> clone() const
   {
     return std::make_unique<MockRuntimeContext>(base_context_,
@@ -62,6 +75,7 @@ public:
 private:
   std::map<int32_t, MockContract> mocked_contracts_;
   std::shared_ptr<RuntimeContext> base_context_;
+  SyscallHandlerContext *handler_context_ = nullptr;
 };
 
 // One instance of a mock contract.
@@ -133,7 +147,14 @@ private:
 
 class MockRuntime : public MockGasRuntime {
 public:
-  MockRuntime(MockContract contract) : backing_contract_(std::move(contract)) {}
+  // [owner] is the handler context this runtime executes under. It is captured
+  // here rather than read from the thread_local slot inside invoke_internal,
+  // which runs on whichever thread the coroutine resumed on.
+  MockRuntime(MockContract contract, SyscallHandlerContext *owner)
+    : backing_contract_(std::move(contract)), owner_(owner)
+  {
+    CHECK(owner_ != nullptr);
+  }
 
   ~MockRuntime() override = default;
 
@@ -142,6 +163,7 @@ private:
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   MockContract backing_contract_;
+  SyscallHandlerContext *owner_;
 };
 
 class EmptyRuntime : public MockGasRuntime {

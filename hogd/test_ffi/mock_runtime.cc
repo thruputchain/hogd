@@ -34,8 +34,13 @@ x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   reset_gas(gas_limit);
-  auto *context = SyscallHandlerContext::get_context();
-  assert(context != nullptr);
+  // Reinstall the handler context on this thread for the guest call below: the
+  // coroutine may have resumed on a different thread than the one that entered
+  // the FFI call and wrote the thread_local slot. Everything the mock contract
+  // reaches -- mock_syscall_parser, the nested FFI entry points, a nested
+  // invoke coming back through here -- reads it through get_context().
+  SyscallHandlerContext *context = owner_;
+  SyscallHandlerContext::ScopedContext scoped_context(context);
   context->push_mock_runtime(this);
   // Pop on every exit path. MockContract::invoke() now catches the foreign
   // callback's exceptions and returns Unrecoverable instead of letting them
@@ -80,7 +85,8 @@ MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
     int32_t mock_contract = contract.value()->mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
-      co_return std::make_unique<MockRuntime>(it->second);
+      CHECK(handler_context_ != nullptr);
+      co_return std::make_unique<MockRuntime>(it->second, handler_context_);
     }
     co_return nullptr;
   }
