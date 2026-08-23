@@ -8,6 +8,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -68,12 +69,29 @@ public:
   {}
 
 protected:
-  // Not a coroutine: Machine::run() has no way to yield, so this whole path is
-  // synchronous and always answers in MaybeAsync's value arm (the syscall
-  // bridge blocks on syscall_entry for the same reason). Test-only, and only
-  // ever driven from a thread that is not an x23 ThreadPool worker.
   x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
+  {
+    return invoke_off_pool(method_id, gas_limit);
+  }
+
+private:
+  // Machine::run() has no way to yield, and the syscall bridge beneath it
+  // blocks on syscall_entry for the same reason. Blocking is illegal on a
+  // thread pool worker, and this is reached from root_invoke(), whose
+  // coroutine resumes onto one -- so hand the machine to a thread outside the
+  // pool and await it.
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  invoke_off_pool(MethodID method_id, uint64_t gas_limit)
+  {
+    co_return co_await default_coropoll().pool_.async(
+        [this, method_id, gas_limit] {
+          return run_machine(method_id, gas_limit);
+        });
+  }
+
+  std::pair<InvokeStatus<void>, GasAmount> run_machine(MethodID method_id,
+                                                       uint64_t gas_limit)
   {
     using result_t = std::pair<InvokeStatus<void>, GasAmount>;
     if (!image_is_valid_) {
@@ -137,7 +155,6 @@ protected:
     return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
   }
 
-private:
   RuntimeContractImage image_;
   const bool image_is_valid_;
 };

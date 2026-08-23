@@ -17,6 +17,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -293,6 +294,24 @@ private:
 
   x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
+  {
+    return invoke_off_pool(method_id, gas_limit);
+  }
+
+  // The machine loop cannot yield and its host calls block, which a thread
+  // pool worker may not do; run it outside the pool. See
+  // rv32::RuntimeContext's Runtime::invoke_off_pool.
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  invoke_off_pool(MethodID method_id, uint64_t gas_limit)
+  {
+    co_return co_await default_coropoll().pool_.async(
+        [this, method_id, gas_limit] {
+          return run_machine(method_id, gas_limit);
+        });
+  }
+
+  std::pair<InvokeStatus<void>, GasAmount> run_machine(MethodID method_id,
+                                                       uint64_t gas_limit)
   {
     using result_t = std::pair<InvokeStatus<void>, GasAmount>;
     rv32::Machine machine(image_.program, image_.memory_bytes, gas_limit);
