@@ -506,6 +506,74 @@ TEST(IndexerPullController,
   EXPECT_EQ(record->height, 1);
 }
 
+// The deployed topology in one process: the indexer connects to a freshly
+// reconciled event server and catches up at the genesis epoch boundary before
+// any block exists, and blocks then commit while it sits in its caught-up
+// poll loop. Every other test here replays an outbox that was committed
+// before the controller connected (or while it was disconnected), so a pull
+// loop that catches up once and then never ingests anything would still pass
+// them (metrics_history#1061).
+TEST(IndexerPullController, IngestsLiveCommitsAfterCatchingUpAtGenesis)
+{
+  TmpDir event_dir;
+  TmpDir indexer_dir;
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  EventRPCContext event(event_dir.directory());
+  ASSERT_TRUE(event.reconcile_outbox_tip(0, genesis)().has_value());
+  EventIndexerServer event_server(event);
+  const std::uint16_t event_port =
+      event_server.start_server(x23::HostPort{"127.0.0.1", 0});
+
+  auto db = IndexDB::make_new(std::filesystem::path(indexer_dir.directory()) /
+                              "indexer-db");
+  ASSERT_TRUE(db.has_value()) << db.error();
+  RecentTxFailureCache failures;
+  IndexerPullControllerOptions options;
+  options.retry_delay = std::chrono::milliseconds(1);
+  options.caught_up_poll_delay = std::chrono::milliseconds(1);
+  IndexerPullController controller(
+      std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
+      options);
+  controller.wait_until_caught_up();
+  EXPECT_EQ(db->latest_block(), 0);
+
+  // The first commit is the regression case: the caught-up poll loop must
+  // pick it up on its own, not just find it on a later startup replay.
+  const ProposedTransaction first_body = make_body(101);
+  ConsensusValue tip = commit_block(event, 1, 1, sha256(genesis), first_body);
+  ASSERT_TRUE(
+      wait_for_condition([&] { return db->latest_block() == BlockHeight{1}; },
+                         std::chrono::seconds(5)))
+      << "indexer never ingested the first live commit";
+
+  // Keep committing without waiting per block, as the running network does.
+  std::vector<ProposedTransaction> bodies{first_body};
+  constexpr BlockHeight kLastHeight = 4;
+  for (BlockHeight height = 2; height <= kLastHeight; ++height) {
+    bodies.push_back(make_body(100 + static_cast<std::uint64_t>(height)));
+    tip = commit_block(event, height, height, sha256(tip), bodies.back());
+  }
+  ASSERT_TRUE(
+      wait_for_condition([&] { return db->latest_block() == kLastHeight; },
+                         std::chrono::seconds(5)))
+      << "indexer stalled at block " << db->latest_block();
+  EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
+
+  const IndexerProgress progress = db->durable_progress();
+  ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
+  EXPECT_EQ(progress.initialized().contiguous_height, kLastHeight);
+  EXPECT_EQ(progress.initialized().last_consensus_hash, sha256(tip));
+  for (BlockHeight height = 1; height <= kLastHeight; ++height) {
+    const ProposedTransaction &body =
+        bodies[static_cast<std::size_t>(height - 1)];
+    auto record = db->get_tx_record(sha256(body.signed_tx.tx));
+    ASSERT_TRUE(record.has_value()) << record.error();
+    EXPECT_EQ(record->height, height);
+    expect_xdr_equal(record->tx, body);
+  }
+}
+
 TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
 {
   TmpDir event_dir;

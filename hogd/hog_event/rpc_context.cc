@@ -421,7 +421,8 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     retain_events_file(consensus_value.proposal_header.events_hash);
   }
 
-  info("EventRPCContext::commit_block: block_id={} done, gc", block_id);
+  info("EventRPCContext::commit_block: block_id={} height={} done, gc",
+       block_id, static_cast<std::int64_t>(block_height));
   co_await finish_block_operation(block_id, context_ptr,
                                   context_ptr != nullptr);
   co_return block_height;
