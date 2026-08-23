@@ -10,6 +10,7 @@
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "x23/async.h"
 
 namespace hogd {
 

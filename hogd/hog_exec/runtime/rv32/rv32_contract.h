@@ -8,6 +8,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

@@ -30,6 +30,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 //
 // Comprehensive tests for manual frame revert functionality.

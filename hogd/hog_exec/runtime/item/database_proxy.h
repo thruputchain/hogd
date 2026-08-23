@@ -1,10 +1,7 @@
 #pragma once
 
-#include <algorithm>
 #include <cassert>
 #include <optional>
-#include <random>
-#include <set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -157,32 +154,11 @@ public:
 
   // Coroutine: the staged batch stays owned by this object across the
   // suspension, and is cleared only once hog_db has answered.
-  x23::Async<SystemStatus<bool>> try_push_current_subtransaction()
-  {
-    if constexpr (is_debug_build()) {
-      // Invariant: hog_exec sends at most one delta per key per subtransaction.
-      std::set<AddressAndKey> seen_keys;
-      for (auto const &d : current_subtransaction_batch_) {
-        auto [_, inserted] = seen_keys.insert(d.addrkey);
-        CHECK(inserted);
-      }
-
-      // Shuffle the batch of deltas before sending to the database because
-      // the order of deltas in a batch is supposed to not affect the result
-      // of the call.  Shuffling in tests helps catch bugs in the database
-      // delta handling logic.
-      std::shuffle(current_subtransaction_batch_.begin(),
-                   current_subtransaction_batch_.end(),
-                   std::mt19937{std::random_device{}()});
-    }
-
-    last_push_conflict_ =
-        DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
-    auto r = co_await db_proxy_.try_push_new_subtransaction(
-        block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
-    current_subtransaction_batch_.clear();
-    co_return r;
-  }
+  //
+  // Defined out of line: GCC emits an inline coroutine's ramp even where it is
+  // unused, so a header definition would make every includer's link need
+  // DatabaseProxy.
+  x23::Async<SystemStatus<bool>> try_push_current_subtransaction();
 
   x23::Async<SystemStatus<void>> pop_subtransactions(uint32_t count)
   {

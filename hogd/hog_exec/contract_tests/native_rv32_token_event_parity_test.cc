@@ -36,6 +36,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 //
 // Side-by-side event-parity test: runs the canonical rv32 `itc_erc20` contract

@@ -16,6 +16,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

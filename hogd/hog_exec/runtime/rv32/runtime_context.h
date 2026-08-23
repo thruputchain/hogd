@@ -10,6 +10,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
+#include "x23/async.h"
 
 namespace hogd::rv32 {
 

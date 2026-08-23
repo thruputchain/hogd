@@ -28,6 +28,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include <tuple>
 #include <unordered_map>

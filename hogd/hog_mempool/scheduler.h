@@ -18,6 +18,7 @@
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/x23/async.h"
 #include "x23/x23/corosync.h"
 #include "x23/x23/vec.h"

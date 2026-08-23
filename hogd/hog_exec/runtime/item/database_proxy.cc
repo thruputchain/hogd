@@ -1,10 +1,13 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <exception>
 #include <format>
 #include <optional>
+#include <random>
+#include <set>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -27,6 +30,7 @@
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
@@ -517,6 +521,33 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
   auto res = co_await client_.close_viewing_snapshot(block_id);
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
+x23::Async<SystemStatus<bool>>
+PerTransactionDatabaseProxy::try_push_current_subtransaction()
+{
+  if constexpr (is_debug_build()) {
+    // Invariant: hog_exec sends at most one delta per key per subtransaction.
+    std::set<AddressAndKey> seen_keys;
+    for (auto const &d : current_subtransaction_batch_) {
+      auto [_, inserted] = seen_keys.insert(d.addrkey);
+      CHECK(inserted);
+    }
+
+    // Shuffle the batch of deltas before sending to the database because the
+    // order of deltas in a batch is supposed to not affect the result of the
+    // call.  Shuffling in tests helps catch bugs in the database delta
+    // handling logic.
+    std::shuffle(current_subtransaction_batch_.begin(),
+                 current_subtransaction_batch_.end(),
+                 std::mt19937{std::random_device{}()});
+  }
+
+  last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
+  auto r = co_await db_proxy_.try_push_new_subtransaction(
+      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
+  current_subtransaction_batch_.clear();
+  co_return r;
 }
 
 } // namespace hogd

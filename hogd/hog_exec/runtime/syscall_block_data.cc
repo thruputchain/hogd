@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstring>
-#include <utility>
 
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"

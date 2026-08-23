@@ -20,6 +20,7 @@
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
+#include "x23/async.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 

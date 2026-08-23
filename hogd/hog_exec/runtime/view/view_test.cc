@@ -43,6 +43,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
 

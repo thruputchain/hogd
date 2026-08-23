@@ -21,6 +21,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

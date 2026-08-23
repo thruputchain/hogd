@@ -24,6 +24,7 @@
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
