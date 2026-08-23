@@ -101,7 +101,7 @@ TEST(TestBindingsFirstCallTest,
   VerifyAuthResult result = verify_signed_transaction_auth(
       {.data = serialized_stx.data(),
        .len = static_cast<uint32_t>(serialized_stx.size())},
-      make_source_auth_data(serialized_auth_data), kTestNetworkHash);
+      make_source_auth_data(serialized_auth_data), kTestNetworkHash.data());
 
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.auth_error_code,

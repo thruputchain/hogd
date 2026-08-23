@@ -608,7 +608,7 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
     VerifyAuthResult result = verify_signed_transaction_auth(
         {.data = serialized_stx.data(),
          .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_auth), kTestNetworkHash);
+        make_source_auth_data(serialized_auth), kTestNetworkHash.data());
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code, 0);
@@ -627,7 +627,7 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
     VerifyAuthResult result = verify_signed_transaction_auth(
         {.data = serialized_stx.data(),
          .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_wrong_auth), kTestNetworkHash);
+        make_source_auth_data(serialized_wrong_auth), kTestNetworkHash.data());
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code,
@@ -666,7 +666,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   VerifyAuthResult success = verify_signed_transaction_auth(
       {.data = serialized_stx.data(),
        .len = static_cast<uint32_t>(serialized_stx.size())},
-      {.data = nullptr, .len = 0}, kTestNetworkHash);
+      {.data = nullptr, .len = 0}, kTestNetworkHash.data());
   EXPECT_EQ(success.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(success.auth_error_code, 0);
 
@@ -676,7 +676,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   VerifyAuthResult result = verify_signed_transaction_auth(
       {.data = serialized_stx.data(),
        .len = static_cast<uint32_t>(serialized_stx.size())},
-      make_source_auth_data(serialized_auth), kTestNetworkHash);
+      make_source_auth_data(serialized_auth), kTestNetworkHash.data());
 
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.auth_error_code,
