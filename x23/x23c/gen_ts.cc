@@ -308,8 +308,9 @@ GenTs::show_def(const Typedef &d)
       string ts_type = map_type(base);
       string factory = to_camel_case(d.id);
 
-      prtop("export type {} = {} & {{ readonly __brand: \"{}\" }};\n", d.id,
-            ts_type, d.id);
+      prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: true "
+            "}} }};\n",
+            d.id, ts_type, d.id);
       prtop("export function {}(val: {}): {} {{\n", factory, ts_type, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -323,12 +324,16 @@ GenTs::show_def(const Typedef &d)
       prbottom("}};\n");
     }
     else {
-      // Branded alias of user type — intersect with base type, delegate codec
+      // Branded alias of user type — intersect with base type, delegate
+      // codec.  The base may itself be a nullable (pointer) typedef, possibly
+      // from another file, so brand only the non-null part and carry the
+      // base's null arm (Extract yields never for non-nullable bases).
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      prtop("export type {} = {} & {{ readonly __brand: \"{}\" }};\n", d.id,
-            tref, d.id);
+      prtop("export type {} = (NonNullable<{}> & {{ readonly __brand: {{ "
+            "readonly {}: true }} }}) | Extract<{}, null>;\n",
+            d.id, tref, d.id, tref);
       prtop("export function {}(val: {}): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -348,7 +353,8 @@ GenTs::show_def(const Typedef &d)
       // Fixed-size opaque: branded Uint8Array with length check
       string factory = to_camel_case(d.id);
 
-      prtop("export type {} = Uint8Array & {{ readonly __brand: \"{}\" }};\n",
+      prtop("export type {} = Uint8Array & {{ readonly __brand: {{ readonly "
+            "{}: true }} }};\n",
             d.id, d.id);
       prtop("export function {}(data: Uint8Array): {} {{\n", factory, d.id);
       prtop("  if (data.length !== {}) throw new Error(`{} must be exactly {} "
@@ -370,8 +376,9 @@ GenTs::show_def(const Typedef &d)
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      prtop("export type {} = {}[] & {{ readonly __brand: \"{}\" }};\n", d.id,
-            tref, d.id);
+      prtop("export type {} = {}[] & {{ readonly __brand: {{ readonly {}: "
+            "true }} }};\n",
+            d.id, tref, d.id);
       prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -390,7 +397,8 @@ GenTs::show_def(const Typedef &d)
       string factory = to_camel_case(d.id);
       string bound_str = map_bound(d.bound);
 
-      prtop("export type {} = Uint8Array & {{ readonly __brand: \"{}\" }};\n",
+      prtop("export type {} = Uint8Array & {{ readonly __brand: {{ readonly "
+            "{}: true }} }};\n",
             d.id, d.id);
       prtop("export function {}(data: Uint8Array): {} {{\n", factory, d.id);
       if (!d.bound.empty()) {
@@ -414,8 +422,9 @@ GenTs::show_def(const Typedef &d)
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      prtop("export type {} = {}[] & {{ readonly __brand: \"{}\" }};\n", d.id,
-            tref, d.id);
+      prtop("export type {} = {}[] & {{ readonly __brand: {{ readonly {}: "
+            "true }} }};\n",
+            d.id, tref, d.id);
       prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -432,8 +441,9 @@ GenTs::show_def(const Typedef &d)
     string factory = to_camel_case(d.id);
     string bound_str = map_bound(d.bound);
 
-    prtop("export type {} = string & {{ readonly __brand: \"{}\" }};\n", d.id,
-          d.id);
+    prtop("export type {} = string & {{ readonly __brand: {{ readonly {}: "
+          "true }} }};\n",
+          d.id, d.id);
     prtop("export function {}(val: string): {} {{\n", factory, d.id);
     prtop("  return val as {};\n", d.id);
     prtop("}}\n");
@@ -453,7 +463,8 @@ GenTs::show_def(const Typedef &d)
     string tref = ts_ref(base);
     string cref = proc_codec_ref(base);
     string factory = to_camel_case(d.id);
-    prtop("export type {} = ({} | null) & {{ readonly __brand: \"{}\" }};\n",
+    prtop("export type {} = ({} & {{ readonly __brand: {{ readonly {}: true "
+          "}} }}) | null;\n",
           d.id, tref, d.id);
     prtop("export function {}(val: {} | null): {} {{\n", factory, tref, d.id);
     prtop("  return val as {};\n", d.id);
