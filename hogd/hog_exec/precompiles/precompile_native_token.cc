@@ -269,7 +269,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   if (!event_buf) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
+  if (auto emitted = co_await emit_event<3>(ctx, *event_buf); !emitted) {
     co_return emitted.error();
   }
   co_return {Result<void, ERC20Exception>::make_ok()};
@@ -357,7 +357,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   if (!event_buf) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
+  if (auto emitted = co_await emit_event<3>(ctx, *event_buf); !emitted) {
     co_return emitted.error();
   }
   co_return {Result<void, ERC20Exception>::make_ok()};
@@ -431,7 +431,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
+  if (auto err = co_await emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log transfer event in native token transfer");
     co_return err.error();
   }
@@ -519,7 +519,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
+  if (auto err = co_await emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log transfer_from event in native token transfer_from");
     co_return err.error();
   }
@@ -569,7 +569,7 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
   if (!event_buf)
     co_return InvokeError{InvokeErrorCode::Deterministic};
 
-  if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
+  if (auto err = co_await emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log adjust_allowance event in native token "
          "adjust_allowance");
     co_return err.error();
