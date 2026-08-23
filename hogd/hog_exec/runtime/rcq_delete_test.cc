@@ -15,6 +15,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -334,7 +335,15 @@ protected:
 
           // The main thread inserts consume_b concurrently, in its own
           // transaction, while this frame is parked here.
-          wait_flag_2_.wait(false);
+          //
+          // Park on a thread outside the pool. The consume above resumes this
+          // body by symmetric transfer straight from the RPC reply, so this
+          // frame runs on the thread pool worker that drains that stream.
+          // Blocking it there stalls the transport, so the concurrent insert
+          // never completes and never sets the flag -- a deadlock, not just a
+          // parked worker.
+          co_await default_coropoll().pool_.async(
+              [] { wait_flag_2_.wait(false); });
 
           // That entry was never observed by this transaction, so the delete
           // above must not have removed it.
