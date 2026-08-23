@@ -324,13 +324,16 @@ GenTs::show_def(const Typedef &d)
       prbottom("}};\n");
     }
     else {
-      // Branded alias of user type — intersect with base type, delegate codec
+      // Branded alias of user type — intersect with base type, delegate
+      // codec.  The base may itself be a nullable (pointer) typedef, possibly
+      // from another file, so brand only the non-null part and carry the
+      // base's null arm (Extract yields never for non-nullable bases).
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: true "
-            "}} }};\n",
-            d.id, tref, d.id);
+      prtop("export type {} = (NonNullable<{}> & {{ readonly __brand: {{ "
+            "readonly {}: true }} }}) | Extract<{}, null>;\n",
+            d.id, tref, d.id, tref);
       prtop("export function {}(val: {}): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
