@@ -118,8 +118,8 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
-          auto res = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)))();
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              key, std::as_bytes(std::span(&val, 1)));
           if (!res.has_value())
             co_return res.error().to_invoke_error();
         }
@@ -128,7 +128,8 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
       [&observed_values](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -139,10 +140,10 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         observed_values.push_back(entry[0]);
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("result"),
             std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -238,8 +239,8 @@ TEST_F(RCQObservationByValueTest,
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
-          auto res = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)))();
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              key, std::as_bytes(std::span(&val, 1)));
           if (!res.has_value())
             co_return res.error().to_invoke_error();
         }
@@ -249,7 +250,7 @@ TEST_F(RCQObservationByValueTest,
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto consume_res =
-            ctx.handler().retrocausal_queue_consume(key, false)();
+            co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!consume_res.has_value())
           co_return consume_res.error().to_invoke_error();
         if (!consume_res.value().has_value())
@@ -260,10 +261,10 @@ TEST_F(RCQObservationByValueTest,
           co_return InvokeError{InvokeErrorCode::Deterministic};
         consumed_values.push_back(entry[0]);
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("result"),
             std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -346,7 +347,8 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
 
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -357,16 +359,16 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t entry = kEntry;
-        auto insert_res = ctx.handler().retrocausal_queue_insert(
-            key, std::as_bytes(std::span(&entry, 1)))();
+        auto insert_res = co_await ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&entry, 1)));
         if (!insert_res.has_value())
           co_return insert_res.error().to_invoke_error();
 
         auto marker = std::string_view("ok");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker"),
             std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -434,17 +436,18 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
       // method 0: peek and write what we see
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = peek_res.value().value();
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("saw"),
             std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -455,8 +458,8 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
-          auto res = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)))();
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              key, std::as_bytes(std::span(&val, 1)));
           if (!res.has_value())
             co_return res.error().to_invoke_error();
         }

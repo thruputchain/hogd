@@ -523,9 +523,10 @@ TEST_F(DirectStalenessTest,
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto observed = ctx.handler().retrocausal_queue_consume(
-                    NativeContractTestFramework::make_storage_key("rcq0"),
-                    true)();
+                auto observed =
+                    co_await ctx.handler().retrocausal_queue_consume(
+                        NativeContractTestFramework::make_storage_key("rcq0"),
+                        true);
                 if (!observed.has_value()) {
                   co_return observed.error().to_invoke_error();
                 }

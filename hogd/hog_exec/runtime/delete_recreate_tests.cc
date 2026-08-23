@@ -73,9 +73,8 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
           // Read the storage key, expecting it to be empty
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength len = 0;
-          auto [status, _g1] = syscall_BytestringGet_inner(
-              ctx.handler(), key, std::as_writable_bytes(std::span(buf)),
-              len)();
+          auto [status, _g1] = co_await syscall_BytestringGet_inner(
+              ctx.handler(), key, std::as_writable_bytes(std::span(buf)), len);
           if (!status.has_value()) {
             ADD_FAILURE() << "Failed to get bytestring: " << status.error();
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -89,9 +88,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
 
           // Write a bytestring to the storage key
           Bytestring bytestring = make_bytestring("hello");
-          auto [write_status, _g2] = syscall_BytestringSet_inner(
+          auto [write_status, _g2] = co_await syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None))();
+              std::to_underlying(StorageDeltaFlags::None));
           if (!write_status.has_value()) {
             ADD_FAILURE() << "Failed to write bytestring: "
                           << write_status.error();
@@ -269,9 +268,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
 
           // Write a nonnegative integer to the storage key
           int128_t set_value = 42;
-          auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
-              ctx.handler(), key, &set_value, 0,
-              std::to_underlying(StorageDeltaFlags::None))();
+          auto [write_status, _g2] =
+              co_await syscall_NonnegativeIntSetAdd_inner(
+                  ctx.handler(), key, &set_value, 0,
+                  std::to_underlying(StorageDeltaFlags::None));
           if (!write_status.has_value()) {
             ADD_FAILURE() << "Failed to write nnint: " << write_status.error();
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -433,9 +433,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           // Consume from the storage key, expecting it to be empty
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength written_len = 0;
-          auto [status, _g1] = syscall_RetrocausalQueueConsume_inner(
+          auto [status, _g1] = co_await syscall_RetrocausalQueueConsume_inner(
               ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
-              written_len)();
+              written_len);
           if (!status.has_value()) {
             ADD_FAILURE() << "Failed to consume from queue: " << status.error();
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -449,8 +449,9 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 
           // Insert an item into the queue
           QueueEntry entry = make_bytestring("item");
-          auto [insert_status, _g2] = syscall_RetrocausalQueueInsert_inner(
-              ctx.handler(), key, std::as_bytes(std::span(entry)))();
+          auto [insert_status, _g2] =
+              co_await syscall_RetrocausalQueueInsert_inner(
+                  ctx.handler(), key, std::as_bytes(std::span(entry)));
           if (!insert_status.has_value()) {
             ADD_FAILURE() << "Failed to insert into queue: "
                           << insert_status.error();
@@ -606,17 +607,17 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength written_len = 0;
           // First consume should succeed
-          auto [status1, _g1] = syscall_RetrocausalQueueConsume_inner(
+          auto [status1, _g1] = co_await syscall_RetrocausalQueueConsume_inner(
               ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
-              written_len)();
+              written_len);
           if (!status1.has_value() ||
               status1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Second consume should fail (queue empty)
-          auto [status2, _g2] = syscall_RetrocausalQueueConsume_inner(
+          auto [status2, _g2] = co_await syscall_RetrocausalQueueConsume_inner(
               ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
-              written_len)();
+              written_len);
           if (!status2.has_value() ||
               status2.value() !=
                   SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {

@@ -72,8 +72,8 @@ public:
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = ctx.handler().retrocausal_queue_insert(
-                key, std::as_bytes(std::span(&val, 1)))();
+            auto res = co_await ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value()) {
               co_return res.error().to_invoke_error();
             }
@@ -84,8 +84,9 @@ public:
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq0");
           // Peek records an observation of a concurrent entry...
-          auto peek = ctx.handler().retrocausal_queue_consume(key,
-                                                              /*peek=*/true)();
+          auto peek =
+              co_await ctx.handler().retrocausal_queue_consume(key,
+                                                               /*peek=*/true);
           if (!peek.has_value()) {
             co_return peek.error().to_invoke_error();
           }

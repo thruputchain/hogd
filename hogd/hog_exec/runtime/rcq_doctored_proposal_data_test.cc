@@ -113,8 +113,8 @@ protected:
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = ctx.handler().retrocausal_queue_insert(
-                key, std::as_bytes(std::span(&val, 1)))();
+            auto res = co_await ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value())
               co_return res.error().to_invoke_error();
           }
@@ -187,11 +187,12 @@ TEST_F(RcqDoctoredProposalDataTest,
         expected_entry.push_back(10);
 
         auto consume_res =
-            ctx.handler().retrocausal_queue_consume(key, false)();
+            co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!consume_res.has_value())
           co_return consume_res.error().to_invoke_error();
 
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
 
@@ -204,10 +205,9 @@ TEST_F(RcqDoctoredProposalDataTest,
         marker_branch_taken = true;
         auto marker_key = make_storage_key("marker");
         uint8_t marker[] = {0xEE};
-        auto ws = ctx.handler().set_bytestring(marker_key,
-                                               std::as_bytes(std::span(marker)),
-                                               std::to_underlying(
-                                                   StorageDeltaFlags::None))();
+        auto ws = co_await ctx.handler().set_bytestring(
+            marker_key, std::as_bytes(std::span(marker)),
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value())
           co_return ws.error().to_invoke_error();
         if (!ws.value().has_value())
@@ -297,10 +297,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_double_consume_fault = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto r1 = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto r1 = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!r1.has_value())
           co_return r1.error().to_invoke_error();
-        auto r2 = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto r2 = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!r2.has_value())
           co_return r2.error().to_invoke_error();
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -336,10 +336,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_consume_peek = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto r1 = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto r1 = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!r1.has_value())
           co_return r1.error().to_invoke_error();
-        auto r2 = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto r2 = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!r2.has_value())
           co_return r2.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -424,10 +424,10 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock))();
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -446,12 +446,12 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   auto b_peek_and_insert = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
           co_return peek.error().to_invoke_error();
         uint8_t val = 10;
-        auto ins = ctx.handler().retrocausal_queue_insert(
-            key, std::as_bytes(std::span(&val, 1)))();
+        auto ins = co_await ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
           co_return ins.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -526,10 +526,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock))();
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -546,7 +546,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_peek_only = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
           co_return peek.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -651,10 +651,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock))();
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -672,7 +672,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_peek = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
           co_return peek.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -758,10 +758,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock))();
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -779,7 +779,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_peek_and_maybe_revert = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
+        auto peek = co_await ctx.handler().retrocausal_queue_consume(key, true);
         if (!peek.has_value())
           co_return peek.error().to_invoke_error();
 
@@ -790,10 +790,10 @@ TEST_F(RcqDoctoredProposalDataTest,
         }
 
         auto marker_key = make_storage_key("marker");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), marker_key,
             std::as_bytes(std::span(std::string_view("honest"))),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1123,10 +1123,10 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_excl_write = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("excl"))),
-            std::to_underlying(StorageDeltaFlags::ExclusiveLock))();
+            std::to_underlying(StorageDeltaFlags::ExclusiveLock));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1142,7 +1142,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto b_consume = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto res = co_await ctx.handler().retrocausal_queue_consume(key, false);
         if (!res.has_value())
           co_return res.error().to_invoke_error();
         co_return InvokeStatus<void>{};
@@ -1339,7 +1339,8 @@ TEST_F(RcqDoctoredProposalDataTest,
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         for (uint32_t i = 0; i < kOverCap; ++i) {
-          auto res = ctx.handler().retrocausal_queue_consume(key, false)();
+          auto res =
+              co_await ctx.handler().retrocausal_queue_consume(key, false);
           if (!res.has_value())
             co_return res.error().to_invoke_error();
           if (!res.value().has_value())

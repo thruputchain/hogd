@@ -690,8 +690,8 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
       10, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto target = NativeContractTestFramework::make_storage_key("target_q");
         for (uint8_t payload : {uint8_t{0xA0}, uint8_t{0xA1}}) {
-          auto res = ctx.handler().retrocausal_queue_insert(
-              target, std::as_bytes(std::span(&payload, 1)))();
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              target, std::as_bytes(std::span(&payload, 1)));
           if (!res.has_value()) {
             co_return res.error().to_invoke_error();
           }
@@ -701,8 +701,8 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         }
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
           auto payload = static_cast<uint8_t>(i);
-          auto res = ctx.handler().retrocausal_queue_insert(
-              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)))();
+          auto res = co_await ctx.handler().retrocausal_queue_insert(
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
           if (!res.has_value()) {
             co_return res.error().to_invoke_error();
           }
@@ -722,7 +722,8 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         auto target = NativeContractTestFramework::make_storage_key("target_q");
 
         auto first =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false)();
+            co_await ctx.handler().retrocausal_queue_consume(target,
+                                                             /*peek=*/false);
         if (!first.has_value()) {
           co_return first.error().to_invoke_error();
         }
@@ -732,8 +733,9 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
 
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
           auto peek =
-              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
-                                                      /*peek=*/true)();
+              co_await ctx.handler().retrocausal_queue_consume(make_obs_cap_key(
+                                                                   i),
+                                                               /*peek=*/true);
           if (!peek.has_value()) {
             co_return peek.error().to_invoke_error();
           }
@@ -743,7 +745,8 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         }
 
         auto capped =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false)();
+            co_await ctx.handler().retrocausal_queue_consume(target,
+                                                             /*peek=*/false);
         if (!capped.has_value()) {
           co_return capped.error().to_invoke_error();
         }

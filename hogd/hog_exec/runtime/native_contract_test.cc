@@ -627,9 +627,9 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
         auto bstring = make_bytestring("bad");
         // comment this set_bytestring to verify that the test framework
         // does, in fact, throw errors if you get_bytestring from the snapshot
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kBadKey, std::as_bytes(std::span(bstring)),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -637,7 +637,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
-        auto r2 = ctx.handler().get_bytestring(kBadKey)();
+        auto r2 = co_await ctx.handler().get_bytestring(kBadKey);
         if (!r2.has_value() || !r2.value().has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -731,31 +731,31 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // get_nnint() with force_load_from_snapshot=false from clean state
           // should not query db
-          auto r0 = ctx.handler().get_nnint(kBadKey, false)();
+          auto r0 = co_await ctx.handler().get_nnint(kBadKey, false);
           if (!r0.has_value() || !r0.value().has_value() ||
               r0.value().value().first.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // add ops shouldn't query db
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, 100,
-              std::to_underlying(StorageDeltaFlags::None))();
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto [r2, _gas2] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r2, _gas2] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, nullptr, -200,
-              std::to_underlying(StorageDeltaFlags::None))();
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // assert that get_nnint() without a load doesn't query db
-          auto r3 = ctx.handler().get_nnint(kBadKey, false)();
+          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
           if (!r3.has_value() || !r3.value().has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -768,9 +768,9 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           int128_t set_value = 100;
-          auto [r, _gas] = syscall_NonnegativeIntSetAdd_inner(
+          auto [r, _gas] = co_await syscall_NonnegativeIntSetAdd_inner(
               ctx.handler(), kBadKey, &set_value, 200,
-              std::to_underlying(StorageDeltaFlags::None))();
+              std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -778,7 +778,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
-          auto r2 = ctx.handler().get_nnint(kBadKey, true)();
+          auto r2 = co_await ctx.handler().get_nnint(kBadKey, true);
           if (!r2.has_value() || !r2.value().has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -788,7 +788,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // get_nnint() after a set with force_load_from_snapshot=false should
           // co_return the set value if it exists
-          auto r3 = ctx.handler().get_nnint(kBadKey, false)();
+          auto r3 = co_await ctx.handler().get_nnint(kBadKey, false);
           if (!r3.has_value() || !r3.value().has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -968,9 +968,9 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("child_write");
         constexpr StorageKeyContractData kKey{};
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kKey, std::as_bytes(std::span(data)),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1106,9 +1106,9 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto value = make_bytestring("12345678"); // 8 bytes
-        auto [set_res, _gas] = syscall_BytestringSet_inner(
+        auto [set_res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kKey, std::as_bytes(std::span(value)),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!set_res.has_value() ||
             set_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "BytestringSet failed";

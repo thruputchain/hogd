@@ -498,15 +498,15 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
         // The public transfer path is strict now; stage the deferred negative
         // delta directly at the handler layer (the surface #1503 guards) to
         // keep the read-side fault and commit-time rejection covered.
-        auto r_debit = ctx.handler().modify_native_token_balance(
-            ctx.handler().get_current_address(), -kTransferAmount)();
+        auto r_debit = co_await ctx.handler().modify_native_token_balance(
+            ctx.handler().get_current_address(), -kTransferAmount);
         if (!r_debit.has_value() || !r_debit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend debit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto r_credit =
-            ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                      kTransferAmount)();
+            co_await ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                               kTransferAmount);
         if (!r_credit.has_value() || !r_credit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend credit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -603,15 +603,15 @@ TEST_F(BalanceCostTrackingTest,
         // The public transfer path is strict now; stage the deferred negative
         // delta directly at the handler layer (the surface #1503 guards) to
         // keep the read-side fault and commit-time rejection covered.
-        auto r_debit = ctx.handler().modify_native_token_balance(
-            ctx.handler().get_current_address(), -kTransferAmount)();
+        auto r_debit = co_await ctx.handler().modify_native_token_balance(
+            ctx.handler().get_current_address(), -kTransferAmount);
         if (!r_debit.has_value() || !r_debit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend debit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto r_credit =
-            ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                      kTransferAmount)();
+            co_await ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                               kTransferAmount);
         if (!r_credit.has_value() || !r_credit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend credit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};

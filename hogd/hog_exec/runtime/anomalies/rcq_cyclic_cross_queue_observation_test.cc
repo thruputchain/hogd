@@ -117,7 +117,8 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       // queue_b
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_a = make_storage_key("queue_a");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true)();
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key_a, true);
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -129,15 +130,15 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
 
         uint8_t val = kValB;
         auto key_b = make_storage_key("queue_b");
-        auto ins = ctx.handler().retrocausal_queue_insert(
-            key_b, std::as_bytes(std::span(&val, 1)))();
+        auto ins = co_await ctx.handler().retrocausal_queue_insert(
+            key_b, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
           co_return ins.error().to_invoke_error();
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_a"),
             std::as_bytes(std::span(std::string_view("a_ok"))),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -147,7 +148,8 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       // queue_a
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_b = make_storage_key("queue_b");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true)();
+        auto peek_res =
+            co_await ctx.handler().retrocausal_queue_consume(key_b, true);
         if (!peek_res.has_value())
           co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -159,15 +161,15 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
 
         uint8_t val = kValA;
         auto key_a = make_storage_key("queue_a");
-        auto ins = ctx.handler().retrocausal_queue_insert(
-            key_a, std::as_bytes(std::span(&val, 1)))();
+        auto ins = co_await ctx.handler().retrocausal_queue_insert(
+            key_a, std::as_bytes(std::span(&val, 1)));
         if (!ins.has_value())
           co_return ins.error().to_invoke_error();
 
-        auto [ws, _wg] = syscall_BytestringSet_inner(
+        auto [ws, _wg] = co_await syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_b"),
             std::as_bytes(std::span(std::string_view("b_ok"))),
-            std::to_underlying(StorageDeltaFlags::None))();
+            std::to_underlying(StorageDeltaFlags::None));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           co_return InvokeError{InvokeErrorCode::Deterministic};

@@ -114,8 +114,8 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
                   // Deploy only the first contract
 
                   auto deploy_result =
-                      ctx.handler().deploy_contract(kDeployNonce,
-                                                    contract_1_hash)();
+                      co_await ctx.handler().deploy_contract(kDeployNonce,
+                                                             contract_1_hash);
                   if (!deploy_result.has_value()) {
                     co_return deploy_result.error().to_invoke_error();
                   }
@@ -305,7 +305,8 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
       [malformed_hash](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto deploy_result =
-            ctx.handler().deploy_contract(kDeployNonce, malformed_hash)();
+            co_await ctx.handler().deploy_contract(kDeployNonce,
+                                                   malformed_hash);
         if (!deploy_result.has_value()) {
           co_return deploy_result.error().to_invoke_error();
         }
@@ -378,7 +379,8 @@ TEST_P(SelectiveDeploymentTest,
       [malformed_hash](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto deploy_result =
-            ctx.handler().deploy_contract(kDeployNonce, malformed_hash)();
+            co_await ctx.handler().deploy_contract(kDeployNonce,
+                                                   malformed_hash);
         if (!deploy_result.has_value()) {
           co_return deploy_result.error().to_invoke_error();
         }
@@ -468,7 +470,7 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
       [fib_hash, entry_id, calldata = inner.calldata](
           NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto deploy_result =
-            ctx.handler().deploy_contract(kDeployNonce, fib_hash)();
+            co_await ctx.handler().deploy_contract(kDeployNonce, fib_hash);
         if (!deploy_result.has_value()) {
           ADD_FAILURE() << "deploy_contract system error";
           co_return deploy_result.error().to_invoke_error();
@@ -624,19 +626,19 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   }();
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
-  fns_0.emplace(0,
-                [big_hash](NativeSyscallContext &ctx)
-                    -> x23::Async<InvokeStatus<void>> {
-                  auto deploy_result =
-                      ctx.handler().deploy_contract(kDeployNonce, big_hash)();
-                  if (!deploy_result.has_value()) {
-                    co_return deploy_result.error().to_invoke_error();
-                  }
-                  if (!deploy_result.value().has_value()) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  co_return InvokeStatus<void>{};
-                });
+  fns_0.emplace(
+      0,
+      [big_hash](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto deploy_result =
+            co_await ctx.handler().deploy_contract(kDeployNonce, big_hash);
+        if (!deploy_result.has_value()) {
+          co_return deploy_result.error().to_invoke_error();
+        }
+        if (!deploy_result.value().has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
@@ -708,7 +710,8 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   fns.emplace(0,
               [blob_hash](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
+                auto res =
+                    co_await ctx.handler().deploy_contract(kNonce, blob_hash);
                 if (!res.has_value()) {
                   co_return res.error().to_invoke_error();
                 }
@@ -721,7 +724,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   fns.emplace(
       1,
       [blob_hash](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
+        auto res = co_await ctx.handler().deploy_contract(kNonce, blob_hash);
         if (!res.has_value()) {
           co_return res.error().to_invoke_error();
         }
@@ -829,7 +832,7 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   auto deploy_then =
       [blob_hash, deployed_addr](NativeSyscallContext &ctx,
                                  bool fault) -> x23::Async<InvokeStatus<void>> {
-    auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
+    auto res = co_await ctx.handler().deploy_contract(kNonce, blob_hash);
     if (!res.has_value()) {
       co_return res.error().to_invoke_error();
     }
@@ -984,7 +987,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   auto leaf_deploy =
       [blob_hash](NativeSyscallContext &ctx,
                   SHA256Hash const &nonce) -> x23::Async<InvokeStatus<void>> {
-    auto res = ctx.handler().deploy_contract(nonce, blob_hash)();
+    auto res = co_await ctx.handler().deploy_contract(nonce, blob_hash);
     if (!res.has_value()) {
       co_return res.error().to_invoke_error();
     }
@@ -1181,7 +1184,7 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto deploy = ctx.handler().deploy_contract(kNonce, blob_hash)();
+        auto deploy = co_await ctx.handler().deploy_contract(kNonce, blob_hash);
         if (!deploy.has_value()) {
           co_return deploy.error().to_invoke_error();
         }
@@ -1256,7 +1259,8 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
                 [limit_hash](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto deploy_result =
-                      ctx.handler().deploy_contract(kDeployNonce, limit_hash)();
+                      co_await ctx.handler().deploy_contract(kDeployNonce,
+                                                             limit_hash);
                   if (!deploy_result.has_value()) {
                     co_return deploy_result.error().to_invoke_error();
                   }

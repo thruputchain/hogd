@@ -92,8 +92,8 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   fns.emplace(0,
               [contract_hash](
                   NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-                auto r = ctx.handler().deploy_contract(kDeployNonce,
-                                                       contract_hash)();
+                auto r = co_await ctx.handler().deploy_contract(kDeployNonce,
+                                                                contract_hash);
                 if (!r.has_value())
                   co_return r.error().to_invoke_error();
                 if (!r.value().has_value())

@@ -69,8 +69,8 @@ protected:
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = ctx.handler().retrocausal_queue_insert(
-                key, std::as_bytes(std::span(&val, 1)))();
+            auto res = co_await ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value())
               co_return res.error().to_invoke_error();
           }
@@ -82,7 +82,8 @@ protected:
           uint8_t count = cd.empty() ? 1 : cd[0];
           auto key = make_storage_key("rcq0");
           for (uint8_t i = 0; i < count; i++) {
-            auto res = ctx.handler().retrocausal_queue_consume(key, false)();
+            auto res =
+                co_await ctx.handler().retrocausal_queue_consume(key, false);
             if (!res.has_value())
               co_return res.error().to_invoke_error();
           }
@@ -92,9 +93,8 @@ protected:
     fns.emplace(
         2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("rcq0");
-          auto res =
-              ctx.handler().delete_object(key, std::to_underlying(
-                                                   StorageDeltaFlags::None))();
+          auto res = co_await ctx.handler().delete_object(
+              key, std::to_underlying(StorageDeltaFlags::None));
           if (!res.has_value())
             co_return res.error().to_invoke_error();
           co_return InvokeStatus<void>{};
@@ -104,10 +104,9 @@ protected:
         3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
-          auto res =
-              ctx.handler().set_bytestring(key, std::as_bytes(std::span(cd)),
-                                           std::to_underlying(
-                                               StorageDeltaFlags::None))();
+          auto res = co_await ctx.handler().set_bytestring(
+              key, std::as_bytes(std::span(cd)),
+              std::to_underlying(StorageDeltaFlags::None));
           if (!res.has_value())
             co_return res.error().to_invoke_error();
           co_return InvokeStatus<void>{};
@@ -117,16 +116,15 @@ protected:
         4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
-          auto del =
-              ctx.handler().delete_object(key, std::to_underlying(
-                                                   StorageDeltaFlags::None))();
+          auto del = co_await ctx.handler().delete_object(
+              key, std::to_underlying(StorageDeltaFlags::None));
           if (!del.has_value())
             co_return del.error().to_invoke_error();
           if (!del.value().has_value())
             co_return InvokeError{InvokeErrorCode::Deterministic};
           for (uint8_t val : cd) {
-            auto ins = ctx.handler().retrocausal_queue_insert(
-                key, std::as_bytes(std::span(&val, 1)))();
+            auto ins = co_await ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)));
             if (!ins.has_value())
               co_return ins.error().to_invoke_error();
           }
