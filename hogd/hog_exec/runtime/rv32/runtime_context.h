@@ -34,7 +34,7 @@ public:
 
   InvokeErrorCode verify_contract(Contract const &contract) const override;
 
-  SystemStatus<std::unique_ptr<hogd::Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) override;
 

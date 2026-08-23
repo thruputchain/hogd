@@ -67,11 +67,16 @@ public:
   {}
 
 protected:
-  std::pair<InvokeStatus<void>, GasAmount>
+  // Not a coroutine: Machine::run() has no way to yield, so this whole path is
+  // synchronous and always answers in MaybeAsync's value arm (the syscall
+  // bridge blocks on syscall_entry for the same reason). Test-only, and only
+  // ever driven from a thread that is not an x23 ThreadPool worker.
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
+    using result_t = std::pair<InvokeStatus<void>, GasAmount>;
     if (!image_is_valid_) {
-      return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+      return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
 
     // v4: enter at PC 0 (_start) and seed the invoked method id into a0/a1;
@@ -80,7 +85,7 @@ protected:
     Machine machine(image_.program, image_.memory_bytes, gas_limit);
     if (!image_.initial_memory.empty() &&
         !machine.view().write_memory(0, image_.initial_memory)) {
-      return {InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+      return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
     }
     machine.seed_method_id(method_id);
 
@@ -93,36 +98,36 @@ protected:
     switch (step_result) {
     case StepResult::kHalted:
       if (machine.halt_code() == 0) {
-        return {{}, gas_consumed};
+        return result_t{{}, gas_consumed};
       }
-      return {InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+      return result_t{InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
     case StepResult::kTrap:
       switch (machine.trap()) {
       case Trap::kOutOfGas:
-        return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
+        return result_t{InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
       case Trap::kHostTrap:
         if (machine.host_trap_kind() == HostTrapKind::kDeterministic) {
-          return {InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+          return result_t{InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
         }
-        return {host_trap_code_to_invoke_status(machine.host_trap_code()),
+        return result_t{host_trap_code_to_invoke_status(machine.host_trap_code()),
                 gas_consumed};
       case Trap::kInvalidInstruction:
       case Trap::kBadPc:
       case Trap::kBadMemory:
       case Trap::kBreakpoint:
-        return {InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+        return result_t{InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
       case Trap::kNone:
         CHECK(false);
-        return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
+        return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
       }
       break;
     case StepResult::kContinue:
     case StepResult::kEcall:
       CHECK(false);
-      return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
+      return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
     }
 
-    return {InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
+    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
   }
 
 private:
@@ -151,7 +156,7 @@ RuntimeContext::verify_contract(Contract const &contract) const
   return InvokeErrorCode::None;
 }
 
-SystemStatus<std::unique_ptr<hogd::Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
 RuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
                                  SystemCallHandler *syscall_handler)
 {
@@ -160,26 +165,26 @@ RuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
     error("Unrecoverable: Attempt made to access a non-mock-test contract from "
           "rv32::RuntimeContext: {}",
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
   assert(syscall_handler != nullptr);
 
-  auto contract =
+  auto contract = co_await
       syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
-    return contract.error();
+    co_return contract.error();
   }
   if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
           show_byte_array(deployed_contract_hash.hash));
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
   if (contract.value()->contract_type() != deployed_contract_hash.contract_type)
       [[unlikely]] {
     error("Unrecoverable: Mismatch in contract type: {} != {}",
           contract.value()->contract_type(),
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   const int32_t contract_id = contract.value()->mock_contract_id();
@@ -187,10 +192,10 @@ RuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
   if (it == contracts_.end()) {
     warn("Attempt made to access an RV32 test contract that is not defined: {}",
          contract_id);
-    return nullptr;
+    co_return nullptr;
   }
 
-  return std::make_unique<Runtime>(it->second, syscall_handler);
+  co_return std::make_unique<Runtime>(it->second, syscall_handler);
 }
 
 } // namespace hogd::rv32

@@ -385,14 +385,14 @@ public:
   std::optional<WireStorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
-    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
+    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey)();
     CHECK(r.has_value());
     return *r;
   }
 
   std::optional<Contract> lookup_contract_from_db(SHA256Hash const &hash)
   {
-    auto r = db_proxy_->get_contract(block_number_, hash);
+    auto r = db_proxy_->get_contract(block_number_, hash)();
     CHECK(r.has_value());
     return std::move(*r);
   }
@@ -400,7 +400,7 @@ public:
   std::optional<DeployedContractHash>
   lookup_deployment_from_db(ContractAddress const &addr)
   {
-    auto r = db_proxy_->get_deployment(block_number_, addr);
+    auto r = db_proxy_->get_deployment(block_number_, addr)();
     CHECK(r.has_value());
     return *r;
   }
@@ -570,7 +570,7 @@ public:
 
   DbTip get_db_tip() const
   {
-    auto r = db_proxy_->get_db_tip(block_number_);
+    auto r = db_proxy_->get_db_tip(block_number_)();
     CHECK(r.has_value());
     return *r;
   }
