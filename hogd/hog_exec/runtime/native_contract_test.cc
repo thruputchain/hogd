@@ -223,7 +223,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder_middle.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         // Invoke consumer method 0 three times, with various gas costs
-        auto r1 = [&]() {
+        auto r1 = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -246,7 +248,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r2 = [&]() {
+        auto r2 = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -269,7 +273,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r3 = [&]() {
+        auto r3 = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -298,7 +304,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   NativeContractBuilder builder_entry;
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
-        auto r = [&]() {
+        auto r = co_await
+            [&]() -> x23::Async<
+                      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>> {
           auto gas_before = ctx.gas_remaining();
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -504,7 +512,8 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
   builder_entry.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         auto invoke_consumer = [&](Runtime::MethodID method,
-                                   CopyableInvokeOutputs &outputs) {
+                                   CopyableInvokeOutputs &outputs)
+            -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = method,
               .gas_limit = kChildGas,
@@ -517,7 +526,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
 
         // Success at exact exhaustion: upgraded to OutOfGas -> frame Fault.
         CopyableInvokeOutputs success_outputs{};
-        auto success = invoke_consumer(0, success_outputs);
+        auto success = co_await invoke_consumer(0, success_outputs);
         if (!success.has_value() ||
             success.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             success_outputs.frame_status != InvocationFrameStatusCode::Fault) {
@@ -529,13 +538,13 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
         // Fatal codes at exact exhaustion stay themselves: the syscall
         // errors, no frame Fault is reported.
         CopyableInvokeOutputs fatal_outputs{};
-        auto abandon = invoke_consumer(1, fatal_outputs);
+        auto abandon = co_await invoke_consumer(1, fatal_outputs);
         if (abandon.has_value() ||
             abandon.error() != HostFnError{HostFnErrorCode::Abandon}) {
           ADD_FAILURE() << "Abandon at exact gas exhaustion must stay Abandon";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto validation = invoke_consumer(2, fatal_outputs);
+        auto validation = co_await invoke_consumer(2, fatal_outputs);
         if (validation.has_value() ||
             validation.error() !=
                 HostFnError{HostFnErrorCode::ValidationFailure}) {
@@ -543,7 +552,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
                            "stay ValidationFailure";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto unrecoverable = invoke_consumer(3, fatal_outputs);
+        auto unrecoverable = co_await invoke_consumer(3, fatal_outputs);
         if (unrecoverable.has_value() ||
             unrecoverable.error() !=
                 HostFnError{HostFnErrorCode::Unrecoverable}) {

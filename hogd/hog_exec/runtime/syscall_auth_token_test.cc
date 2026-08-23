@@ -548,7 +548,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
         EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_EQ(observed_height, executing_height);
 
-        auto try_mint = co_await
+        auto try_mint =
             [&](BlockHeight expiry,
                 uint32_t &id) -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           AuthTokenNode node{.consumer_address = kAddr,
@@ -567,7 +567,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
         // executing block, so mint must be rejected.
         {
           uint32_t id = 0;
-          auto r = try_mint(parent_tip, id);
+          auto r = co_await try_mint(parent_tip, id);
           EXPECT_TRUE(r.has_value());
           EXPECT_EQ(r.value(),
                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
@@ -576,7 +576,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
         // expiry == executing height: still valid, mint and consume succeed.
         {
           uint32_t id = 0;
-          auto r = try_mint(executing_height, id);
+          auto r = co_await try_mint(executing_height, id);
           EXPECT_TRUE(r.has_value());
           EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -640,7 +640,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
         EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_GT(current_height, BlockHeight{0});
 
-        auto make_and_mint = [&](BlockHeight expiry) -> uint32_t {
+        auto make_and_mint = [&](BlockHeight expiry) -> x23::Async<uint32_t> {
           AuthTokenNode node{.consumer_address = kAddr,
                              .payload = x23::serialize(1U),
                              .child_nodes = {}};
@@ -659,7 +659,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
 
         // expiry == block height: token is NOT expired (< is false)
         {
-          uint32_t id = make_and_mint(current_height);
+          uint32_t id = co_await make_and_mint(current_height);
           std::array<std::byte, 256> buf{};
           RuntimeMemoryLength w = 0;
           uint32_t s = 0, c = 0;
@@ -720,7 +720,7 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
         EXPECT_EQ(h_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         EXPECT_GT(current_height, BlockHeight{0});
 
-        auto try_mint = co_await [&](BlockHeight expiry)
+        auto try_mint = [&](BlockHeight expiry)
             -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           AuthTokenNode node{.consumer_address = kAddr,
                              .payload = x23::serialize(1U),
@@ -736,18 +736,18 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
         };
 
         // past expiry: rejected
-        auto past = try_mint(BlockHeight{current_height - 1});
+        auto past = co_await try_mint(BlockHeight{current_height - 1});
         EXPECT_TRUE(past.has_value());
         EXPECT_EQ(past.value(),
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
         // current height: accepted (< is false)
-        auto present = try_mint(current_height);
+        auto present = co_await try_mint(current_height);
         EXPECT_TRUE(present.has_value());
         EXPECT_EQ(present.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         // future height: accepted
-        auto future = try_mint(BlockHeight{current_height + 1});
+        auto future = co_await try_mint(BlockHeight{current_height + 1});
         EXPECT_TRUE(future.has_value());
         EXPECT_EQ(future.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
@@ -3015,7 +3015,7 @@ TEST_F(SyscallAuthTokenTest,
             invoke_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return false;
         }
-        co_return read_last_child_range(range);
+        co_return co_await read_last_child_range(range);
       };
 
       AuthTokenNode child{.consumer_address = kCallerAddress,
@@ -3024,7 +3024,7 @@ TEST_F(SyscallAuthTokenTest,
       AuthTokenNode root{.consumer_address = kChildAddress,
                          .payload = x23::serialize(42U),
                          .child_nodes = {child}};
-      if (!mint_token(root, scenario.root_id)) {
+      if (!co_await mint_token(root, scenario.root_id)) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
       }
 
@@ -3039,7 +3039,7 @@ TEST_F(SyscallAuthTokenTest,
       AuthTokenNode unrelated{.consumer_address = kCallerAddress,
                               .payload = x23::serialize(123U),
                               .child_nodes = {}};
-      if (!mint_token(unrelated, scenario.intervening_token_id)) {
+      if (!co_await mint_token(unrelated, scenario.intervening_token_id)) {
         co_return InvokeError{InvokeErrorCode::Deterministic};
       }
 

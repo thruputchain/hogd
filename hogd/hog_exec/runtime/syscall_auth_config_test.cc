@@ -439,14 +439,15 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationRejectsMalformedArgs)
             reinterpret_cast<const std::byte *>(public_key.data()),
             public_key.size());
 
+        // Not a coroutine: it inspects a status the caller already awaited.
         auto expect_invalid = [&](auto status, const char *what) {
           if (!status.has_value() ||
               status.value() !=
                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
             ADD_FAILURE() << what << " must be kInvalidSyscallInput";
-            co_return false;
+            return false;
           }
-          co_return true;
+          return true;
         };
 
         // scheme != null, weight == null

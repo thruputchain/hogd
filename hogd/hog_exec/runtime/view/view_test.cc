@@ -90,7 +90,7 @@ protected:
             std::numeric_limits<TransactionID>::max()),
         framework_.make_new_per_tx_event_server_proxy(
             std::numeric_limits<TransactionID>::max()),
-        query, context, std::move(ndet));
+        query, context, std::move(ndet))();
   }
 
   static TransactionViewQuery make_query(Invocation invocation,
@@ -126,8 +126,8 @@ protected:
         reinterpret_cast<uint8_t const *>(data.data() + data.size()));
   }
 
-  static InvokeStatus<void> emit_event(NativeSyscallContext &ctx,
-                                       std::string const &payload)
+  static x23::Async<InvokeStatus<void>> emit_event(NativeSyscallContext &ctx,
+                                                   std::string const &payload)
   {
     auto s = co_await ctx.syscall<SyscallNo::kLogEvent>(
         static_cast<SHA256Hash const *>(nullptr),
@@ -135,12 +135,12 @@ protected:
         static_cast<SHA256Hash const *>(nullptr),
         std::as_bytes(std::span(payload)));
     if (!s.has_value()) {
-      return InvokeError{InvokeErrorCode::Unrecoverable};
+      co_return InvokeError{InvokeErrorCode::Unrecoverable};
     }
     if (s.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   }
 
   struct NativeViewSetup {
@@ -898,7 +898,7 @@ TEST_F(ViewTest, ViewSingleFrameEmitsMultipleEvents)
   NativeViewSetup setup(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (auto const *payload : {"first", "second", "third"}) {
-          auto r = emit_event(ctx, std::string(payload));
+          auto r = co_await emit_event(ctx, std::string(payload));
           if (!r.has_value()) {
             co_return r;
           }
@@ -948,11 +948,11 @@ TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        co_return emit_event(ctx, "inner_leaf");
+        co_return co_await emit_event(ctx, "inner_leaf");
       });
   fns_setup.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "outer_before"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "outer_before"); !r.has_value()) {
           co_return r;
         }
         CopyableInvokeInputs inputs{
@@ -969,7 +969,7 @@ TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        co_return emit_event(ctx, "outer_after");
+        co_return co_await emit_event(ctx, "outer_after");
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -1015,11 +1015,11 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        co_return emit_event(ctx, "leaf");
+        co_return co_await emit_event(ctx, "leaf");
       });
   fns_setup.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "middle_pre"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "middle_pre"); !r.has_value()) {
           co_return r;
         }
         CopyableInvokeInputs inputs{
@@ -1036,11 +1036,11 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        co_return emit_event(ctx, "middle_post");
+        co_return co_await emit_event(ctx, "middle_post");
       });
   fns_setup.emplace(
       2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "outer_pre"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "outer_pre"); !r.has_value()) {
           co_return r;
         }
         CopyableInvokeInputs inputs{
@@ -1057,7 +1057,7 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        co_return emit_event(ctx, "outer_post");
+        co_return co_await emit_event(ctx, "outer_post");
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -1106,7 +1106,8 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "child_dropped"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "child_dropped");
+            !r.has_value()) {
           co_return r;
         }
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
@@ -1118,7 +1119,7 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
       });
   fns_setup.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "before"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "before"); !r.has_value()) {
           co_return r;
         }
         CopyableInvokeInputs inputs{
@@ -1139,7 +1140,7 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
         if (r_outputs.frame_status != InvocationFrameStatusCode::Abort) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        co_return emit_event(ctx, "after");
+        co_return co_await emit_event(ctx, "after");
       });
   NativeViewSetup setup(std::move(fns_setup));
 
@@ -1344,7 +1345,7 @@ TEST_F(ViewTest, RootManualRevertOmitsEvents)
 
   NativeViewSetup setup(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "reverted"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "reverted"); !r.has_value()) {
           co_return r;
         }
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
@@ -1378,7 +1379,7 @@ TEST_F(ViewTest, RootFaultOmitsEvents)
 
   NativeViewSetup setup(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = emit_event(ctx, "faulted"); !r.has_value()) {
+        if (auto r = co_await emit_event(ctx, "faulted"); !r.has_value()) {
           co_return r;
         }
         co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1409,7 +1410,7 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
 
   framework_.advance_block();
   auto const expired_height = BlockHeight{
-      framework_.get_db_tip()().value.proposal_header.block_height - 1};
+      framework_.get_db_tip().value.proposal_header.block_height - 1};
 
   NativeViewSetup setup(
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -1495,7 +1496,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {});
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
@@ -1530,7 +1531,7 @@ TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  DbTip tip = framework_.get_db_tip()();
+  DbTip tip = framework_.get_db_tip();
   StorageSnapshotCache snapshot_cache(tip.id, framework_.get_db_proxy());
 
   Invocation invocation{
@@ -1546,7 +1547,7 @@ TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {});
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::InternalError);
 }
@@ -1611,7 +1612,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
                                   std::numeric_limits<TransactionID>::max()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {});
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
 

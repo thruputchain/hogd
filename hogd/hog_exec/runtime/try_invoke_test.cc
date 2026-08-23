@@ -3607,7 +3607,7 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
     fns_o.emplace(
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          auto invoke_target = co_await [&](Runtime::MethodID method)
+          auto invoke_target = [&](Runtime::MethodID method)
               -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = method,
@@ -3619,13 +3619,13 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
                 std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           };
 
-          auto r0 = invoke_target(0);
+          auto r0 = co_await invoke_target(0);
           if (!r0.has_value() ||
               r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r1 = invoke_target(1);
+          auto r1 = co_await invoke_target(1);
           if (!r1.has_value()) {
             if (r1.error().code() == HostFnErrorCode::Unrecoverable) {
               co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -3716,7 +3716,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
     fns_o.emplace(
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          auto invoke_target = co_await [&](Runtime::MethodID method)
+          auto invoke_target = [&](Runtime::MethodID method)
               -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = method,
@@ -3730,7 +3730,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
 
           // insert -> consume -> insert (grow, shrink, grow)
           for (auto method : {0, 1, 0}) {
-            auto r = invoke_target(method);
+            auto r = co_await invoke_target(method);
             if (!r.has_value()) {
               co_return r.error().code() == HostFnErrorCode::Unrecoverable
                   ? InvokeError{InvokeErrorCode::Unrecoverable}
