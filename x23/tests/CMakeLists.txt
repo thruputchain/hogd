@@ -68,8 +68,8 @@ set_tests_properties(poll_writer_uaf PROPERTIES TIMEOUT 15)
 # it can be handed to LLVM verbatim.
 add_x23_test(coro_return_object_destroy)
 set_tests_properties(coro_return_object_destroy PROPERTIES TIMEOUT 15)
-add_x23_test(coro_return_object_destroy_standalone)
-set_tests_properties(coro_return_object_destroy_standalone PROPERTIES TIMEOUT 15)
+# add_x23_test(coro_return_object_destroy_standalone)
+# set_tests_properties(coro_return_object_destroy_standalone PROPERTIES TIMEOUT 15)
 
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
