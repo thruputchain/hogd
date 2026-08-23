@@ -20,6 +20,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -104,7 +105,7 @@ public:
   // snapshot block, this item's self-insert delta, or the proposal/validation
   // observation buffer) and is valid until the next RCQ mutation -- callers
   // copy it into the syscall result before returning to the contract.
-  SystemStatus<const QueueEntry *>
+  x23::Async<SystemStatus<const QueueEntry *>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
 
   SyscallStatus<void> insert_entry(QueueEntry const &entry);
@@ -115,12 +116,19 @@ public:
   }
 
 private:
-  SystemStatus<const RetrocausalQueueBlock *>
+  x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
 
-  SystemStatus<const QueueEntry *>
+  x23::MaybeAsync<SystemStatus<const QueueEntry *>>
   get_next_concurrent_entry(uint32_t index,
                             ExecutionModeData &execution_mode_data) const;
+
+  // Proposal-mode miss path for the above: the only arm that reads the
+  // database.  [proposal_data] aliases the caller's ExecutionModeData and must
+  // outlive the call.
+  x23::Async<SystemStatus<const QueueEntry *>>
+  get_next_concurrent_entry_proposing(uint32_t index,
+                                      ProposalModeData &proposal_data) const;
 
   const QueueEntry *get_next_self_entry(uint32_t index) const;
 
@@ -230,8 +238,22 @@ public:
 
   std::optional<ItemViewType> get_item_type() const;
 
-  SystemStatus<void> load(StorageSnapshotCache &snapshot_cache,
-                          AddressAndKey const &addrkey) const;
+  // Populates base_item_ from the snapshot cache.  Answers with no coroutine
+  // frame on a cache hit; only a miss allocates and suspends on the database.
+  x23::MaybeAsync<SystemStatus<void>>
+  load(StorageSnapshotCache &snapshot_cache,
+       AddressAndKey const &addrkey) const;
+
+private:
+  // Miss path for load(): awaits the pending cache fill, then stores it.
+  x23::Async<SystemStatus<void>>
+  load_slow(x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending)
+      const;
+  // Shared tail of both load() paths.
+  SystemStatus<void>
+  store_loaded(SystemStatus<const SnapshotStorageItem *> const &r) const;
+
+public:
   bool is_loaded() const { return base_item_.has_value(); }
 
   const SnapshotStorageItem &base_item() const

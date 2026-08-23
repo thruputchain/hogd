@@ -24,6 +24,7 @@
 #include "syscall_error.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -235,7 +236,7 @@ RetrocausalQueueItem::construct_consume_delta()
 // and seeing a concurrent entry, and then doing an insert and now peek returns
 // that self entry.  This is less weird of an ordering, because the observed
 // behavior of peek changed in direct response to an action by the contract.
-SystemStatus<const QueueEntry *>
+x23::Async<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
@@ -265,9 +266,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     }
   }
 
-  auto next_block_status = get_next_block(block_index);
+  auto next_block_status = co_await get_next_block(block_index);
   if (!next_block_status.has_value()) {
-    return next_block_status.error();
+    co_return next_block_status.error();
   }
   auto const *next_block = next_block_status.value();
 
@@ -279,7 +280,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
             "entry count {}",
             partial_consume_quantity, next_block->block_number,
             next_block->entries.size());
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
 
     if (advance_cursor) {
@@ -306,7 +307,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     }
 
     // Pointer into the snapshot block, which outlives the transaction.
-    return &next_block->entries[partial_consume_quantity];
+    co_return &next_block->entries[partial_consume_quantity];
   }
 
   // otherwise, nothing in past block to consume.  Try current block.
@@ -325,14 +326,14 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       }
     }
     // Pointer into this item's own self-insert delta.
-    return self_consume_res;
+    co_return self_consume_res;
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
-  auto concurrent_entry =
+  auto concurrent_entry = co_await
       get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
   if (!concurrent_entry.has_value()) {
-    return concurrent_entry.error();
+    co_return concurrent_entry.error();
   }
   const QueueEntry *concurrent_ptr = concurrent_entry.value();
 
@@ -345,18 +346,18 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
       if (queue_delta_.consume->current_block_consumed.size() >=
           kRetrocausalQueueBlockEntriesMaxLen) {
         CHECK(!std::holds_alternative<ProposalModeData>(execution_mode_data));
-        return SystemError{SystemErrorCode::ValidationFailure};
+        co_return SystemError{SystemErrorCode::ValidationFailure};
       }
       // Copies into the consume delta (a distinct buffer from the observation
       // storage the pointer aliases, so this does not invalidate it).
       queue_delta_.consume->current_block_consumed.push_back(*concurrent_ptr);
     }
 
-    return concurrent_ptr;
+    co_return concurrent_ptr;
   }
 
   // Step 4: nothing to consume
-  return nullptr;
+  co_return nullptr;
 }
 
 StorageDelta
@@ -410,14 +411,14 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
   return {};
 }
 
-SystemStatus<const RetrocausalQueueBlock *>
+x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
   assert(base_item_);
   if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
     return base_item_->get_next_rcq_block(search_start_index);
   }
-  return nullptr;
+  return SystemStatus<const RetrocausalQueueBlock *>{nullptr};
 }
 
 // Resolve the next concurrent (non-self, non-past-block) RCQ observation.
@@ -426,7 +427,7 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 // is the single location aware of proposal-vs-validation-vs-viewing for RCQ
 // reads; the get_next_item caller only sees the uniform pointer result. The
 // returned pointer aliases into owned observation storage (see get_next_item).
-SystemStatus<const QueueEntry *>
+x23::MaybeAsync<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
@@ -438,77 +439,93 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     // Once the cap is hit, record nothing further and stop probing the queue
     // (#2894).
     if (proposal_data->observation_cap_exceeded()) {
-      return nullptr;
+      return SystemStatus<const QueueEntry *>{nullptr};
     }
-    auto out = base_item_->get_concurrent_rcq_entry(index);
-    if (!out.has_value()) {
-      return out.error();
-    }
-    // Reference, not a copy: QueueEntry is heap-backed, so this avoids an
-    // allocation the original also avoided.
-    auto const &live_opt = out.value().get();
-    if (!live_opt.has_value()) {
-      proposal_data->log_nondeterministic_bit({false});
-      return nullptr;
-    }
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    QueueEntry const &live = *live_opt;
-    // The entry the caller may consume is exactly what recording hands back: a
-    // pointer to the stored observation, or nullptr iff logging crossed the cap
-    // (nothing recorded). An unrecorded entry is therefore unreturnable, so a
-    // cap-crossing read applies no proposal-only consume that validation replay
-    // would not reproduce (#3043). The bit is logged first because the bit and
-    // observation streams are independent, so their relative append order does
-    // not matter.
-    proposal_data->log_nondeterministic_bit({true});
-    // Unwrap the nondeterministic tag: the nondeterminism was logged above, and
-    // the recorded pointer is nullptr iff logging crossed the cap.
-    auto recorded =
-        proposal_data->log_queue_entry_observation(addrkey, index, live);
-    return recorded.get();
+    // Only proposal mode reads the database here; viewing and validation
+    // replay recorded observations below and never suspend.
+    return get_next_concurrent_entry_proposing(index, *proposal_data);
   }
 
   if (auto *viewing_data = std::get_if<ViewingModeData>(&execution_mode_data)) {
     if (viewing_data->observation_cap_exceeded()) {
-      return nullptr;
+      return SystemStatus<const QueueEntry *>{nullptr};
     }
     // Bind to a local: Nondeterministic::get() takes an lvalue object argument,
     // so it cannot be called on the returned temporary directly.
     auto queue_bit = viewing_data->view_query_queue_observation_bit();
     if (!queue_bit.get()) {
       // no queue entry available
-      return nullptr;
+      return SystemStatus<const QueueEntry *>{nullptr};
     }
     // Bind before .get(): Nondeterministic::get() needs an lvalue.
     auto observed = viewing_data->view_queue_entry_observation(addrkey, index);
     if (const QueueEntry *entry = observed.get()) {
-      return entry;
+      return SystemStatus<const QueueEntry *>{entry};
     }
-    return replay_exhausted_at_cap(viewing_data->observation_cap_exceeded());
+    return SystemStatus<const QueueEntry *>{
+        replay_exhausted_at_cap(viewing_data->observation_cap_exceeded())};
   }
 
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   if (validation_data.observation_cap_exceeded()) {
-    return nullptr;
+    return SystemStatus<const QueueEntry *>{nullptr};
   }
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
     // Bit stream exhausted: a malformed proposal.
-    return SystemError{SystemErrorCode::ValidationFailure};
+    return SystemStatus<const QueueEntry *>{
+        SystemError{SystemErrorCode::ValidationFailure}};
   }
   if (!bit_res->get()) {
-    return nullptr;
+    return SystemStatus<const QueueEntry *>{nullptr};
   }
   // Bind before .get(): Nondeterministic::get() needs an lvalue.
   auto observed =
       validation_data.consume_queue_entry_observation(addrkey, index);
   if (const QueueEntry *entry = observed.get()) {
-    return entry;
+    return SystemStatus<const QueueEntry *>{entry};
   }
-  return replay_exhausted_at_cap(validation_data.observation_cap_exceeded());
+  return SystemStatus<const QueueEntry *>{
+      replay_exhausted_at_cap(validation_data.observation_cap_exceeded())};
 }
+
+// [proposal_data] is borrowed across the suspension: it aliases the caller's
+// ExecutionModeData, which outlives the transaction.
+x23::Async<SystemStatus<const QueueEntry *>>
+RetrocausalQueueItem::get_next_concurrent_entry_proposing(
+    uint32_t index, ProposalModeData &proposal_data) const
+{
+  auto const &addrkey = base_item_->addrkey();
+  auto out = co_await base_item_->get_concurrent_rcq_entry(index);
+  if (!out.has_value()) {
+    co_return out.error();
+  }
+  // Reference, not a copy: QueueEntry is heap-backed, so this avoids an
+  // allocation the original also avoided.
+  auto const &live_opt = out.value().get();
+  if (!live_opt.has_value()) {
+    proposal_data.log_nondeterministic_bit({false});
+    co_return nullptr;
+  }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  QueueEntry const &live = *live_opt;
+  // The entry the caller may consume is exactly what recording hands back: a
+  // pointer to the stored observation, or nullptr iff logging crossed the cap
+  // (nothing recorded). An unrecorded entry is therefore unreturnable, so a
+  // cap-crossing read applies no proposal-only consume that validation replay
+  // would not reproduce (#3043). The bit is logged first because the bit and
+  // observation streams are independent, so their relative append order does
+  // not matter.
+  proposal_data.log_nondeterministic_bit({true});
+  // Unwrap the nondeterministic tag: the nondeterminism was logged above, and
+  // the recorded pointer is nullptr iff logging crossed the cap.
+  auto recorded =
+      proposal_data.log_queue_entry_observation(addrkey, index, live);
+  co_return recorded.get();
+}
+
 
 const QueueEntry *
 RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
@@ -574,11 +591,30 @@ UnmodifiedItem::get_item_type() const
       ->type();
 }
 
-SystemStatus<void>
+x23::MaybeAsync<SystemStatus<void>>
 UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
                      AddressAndKey const &addrkey) const
 {
   auto r = snapshot_cache.try_get_snapshot_item(addrkey);
+  // Cache hit: MaybeAsync's value arm.  operator() does not block here (and
+  // could not suspend anyway) -- it just unwraps the value already in hand.
+  if (r.has_value()) {
+    return store_loaded(r());
+  }
+  return load_slow(std::move(r));
+}
+
+x23::Async<SystemStatus<void>>
+UnmodifiedItem::load_slow(
+    x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending) const
+{
+  co_return store_loaded(co_await pending);
+}
+
+SystemStatus<void>
+UnmodifiedItem::store_loaded(
+    SystemStatus<const SnapshotStorageItem *> const &r) const
+{
   if (!r.has_value()) {
     return r.error();
   }
