@@ -43,7 +43,8 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
   out_1 = 10;
   out_2 = UINT64_MAX;
   out_128 = int128_t{out_1} + int128_t{out_2};
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult
@@ -61,20 +62,23 @@ span_type_test(std::span<const std::byte> span_in,
   span_out[2] = std::byte{3};
   span_out[3] = std::byte{4};
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult
 no_return_test()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult
 signed_i32_type_test(int32_t input_value)
 {
   EXPECT_EQ(input_value, -1);
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult
@@ -83,20 +87,23 @@ unsigned_u32_type_test(uint32_t input_value)
   // The inner syscall is only reached when the (by-value, non-pointer) slot
   // narrows cleanly to a u32; the test passes the largest valid u32.
   EXPECT_EQ(input_value, UINT32_MAX);
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult
 gas_metering_test()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{5}};
 }
 
 AsyncSyscallInnerResult
 error_syscall_test()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
-          WrappedGasAmount{0}};
+  co_return SyscallInnerResult{
+      SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
+      WrappedGasAmount{0}};
 }
 
 // just used to instantiate the mock contract
@@ -208,7 +215,7 @@ TEST(MockSyscallTest, IntTypeTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   uint32_t inp_1 = 100;
@@ -288,7 +295,7 @@ TEST(MockSyscallTest, SpanTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   uint64_t inp = 0x090A;
@@ -325,7 +332,7 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   // Under the wasm32 ABI a value slot is a bare 32-bit word, so int32_t -1 is
@@ -366,7 +373,7 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   // The largest valid u32 fits a 32-bit slot and reaches the inner syscall
@@ -416,7 +423,7 @@ TEST(MockSyscallTest, NoReturnTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   auto res =
@@ -446,7 +453,7 @@ TEST(MockSyscallTest, NoSyscallTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   auto res = mock_syscall_entrypoint(-1, 0, 0, 0, 0, 0, 0, 0);
@@ -473,7 +480,7 @@ TEST(MockSyscallTest, ErrorSyscallTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   auto res = mock_syscall_parser<ErrorSyscallMeta>(SyscallNo::kExit, 0, 0, 0, 0,

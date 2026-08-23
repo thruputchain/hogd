@@ -210,7 +210,8 @@ namespace {
 AsyncSyscallInnerResult
 noreturn_failing_syscall_func()
 {
-  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{1000}};
+  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Unrecoverable},
+                               WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -252,8 +253,9 @@ namespace {
 AsyncSyscallInnerResult
 noerror_syscall_func()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
-          WrappedGasAmount{1000}};
+  co_return SyscallInnerResult{
+      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+      WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -415,7 +417,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   auto [status, gas] =
       syscall_Return_inner(handler,
                            std::span<const std::byte>(oversized_buffer), false,
-                           {});
+                           {})();
 
   // The syscall should fail with Exit
   ASSERT_FALSE(status.has_value());
@@ -443,7 +445,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
   auto [status, gas] =
       syscall_Return_inner(handler, std::span<const std::byte>(valid_buffer),
-                           false, {});
+                           false, {})();
 
   // The syscall should succeed with Return
   ASSERT_FALSE(status.has_value());
@@ -579,7 +581,8 @@ namespace {
 AsyncSyscallInnerResult
 free_success_syscall_func()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 // The shape of syscall_Return_inner: reports no gas, and signals a successful
@@ -587,7 +590,8 @@ free_success_syscall_func()
 AsyncSyscallInnerResult
 free_return_syscall_func()
 {
-  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Return},
+                               WrappedGasAmount{0}};
 }
 
 constexpr GasAmount kFixedSyscallCost = 100;
@@ -596,7 +600,7 @@ AsyncSyscallInnerResult
 fixed_cost_syscall_func()
 {
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{kFixedSyscallCost}};
+                               WrappedGasAmount{kFixedSyscallCost}};
 }
 
 } // namespace

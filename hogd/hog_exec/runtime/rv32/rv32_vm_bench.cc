@@ -896,12 +896,12 @@ artifact_bench_entry(ExternHostCallContext /*context*/,
                      uint32_t /*arg5*/, uint32_t /*arg6*/, uint32_t /*arg7*/)
 {
   if (arg0 == kSyscallReturn) {
-    return SyscallResult{HostFnError{HostFnErrorCode::Return}, 4};
+    co_return SyscallResult{HostFnError{HostFnErrorCode::Return}, 4};
   }
   if (arg0 == kSyscallSha256) {
     if (!range_fits(arg1, arg2, context.memory.size()) ||
         !range_fits(arg3, kSha256DigestBytes, context.memory.size())) {
-      return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
+      co_return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
     }
     const auto input_offset = static_cast<size_t>(arg1);
     const auto input_size = static_cast<size_t>(arg2);
@@ -913,9 +913,9 @@ artifact_bench_entry(ExternHostCallContext /*context*/,
       reinterpret_cast<uint8_t *>(context.memory.data())[output_offset + i] =
           digest[i];
     }
-    return SyscallResult{SyscallErrorCode::kSyscallErrorCodeNone, 4};
+    co_return SyscallResult{SyscallErrorCode::kSyscallErrorCodeNone, 4};
   }
-  return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
+  co_return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
 }
 
 AsyncSyscallResult
@@ -927,7 +927,7 @@ bridge_noop_entry(ExternHostCallContext /*context*/, ExecutionContext context,
   if (context.memory.size() > 0) {
     reinterpret_cast<uint8_t *>(context.memory.data())[0] ^= 0x5aU;
   }
-  return SyscallResult{SyscallErrorCode::kSyscallErrorCodeNone, 0};
+  co_return SyscallResult{SyscallErrorCode::kSyscallErrorCodeNone, 0};
 }
 
 void
