@@ -1154,8 +1154,10 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
 }
 
 VerifyAuthResult
-verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
-                                    FFISourceAuthData source_auth_data) noexcept
+verify_signed_transaction_auth_impl(
+    FFISerializedSignedTransaction signed_tx,
+    FFISourceAuthData source_auth_data,
+    const uint8_t *serialized_network_hash) noexcept
 {
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
@@ -1175,6 +1177,14 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
       return kNullptrError;
     }
 
+    static_assert(sizeof(NetworkHash) == 32);
+    if (serialized_network_hash == nullptr) {
+      return kNullptrError;
+    }
+    NetworkHash network_hash{};
+    std::memcpy(network_hash.data(), serialized_network_hash,
+                network_hash.size());
+
     std::optional<AddressAuthData> source_data;
     if (source_auth_data.data) {
       source_data.emplace();
@@ -1184,7 +1194,7 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
 
     // Perform the appropriate level of verification
     AuthVerifyStatus<void> result =
-        verify_auth(stx, source_data ? &*source_data : nullptr);
+        verify_auth(stx, source_data ? &*source_data : nullptr, network_hash);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -1622,12 +1632,14 @@ enable_syscall_logging(int32_t level)
 
 VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISourceAuthData source_auth_data)
+                               FFISourceAuthData source_auth_data,
+                               const uint8_t *serialized_network_hash)
 {
   hogd::do_ffi_trace(
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
-      "source_auth_data={})",
-      signed_tx, source_auth_data);
+      "source_auth_data={}, serialized_network_hash={})",
+      signed_tx, source_auth_data,
+      static_cast<const void *>(serialized_network_hash));
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
@@ -1641,10 +1653,13 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
                                 kTestFFIErrorCodeUnrecoverableError};
   }
   auto result =
-      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
+      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
+                                                serialized_network_hash);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
-                     "source_auth_data={}) -> {}",
-                     signed_tx, source_auth_data, result);
+                     "source_auth_data={}, serialized_network_hash={}) -> {}",
+                     signed_tx, source_auth_data,
+                     static_cast<const void *>(serialized_network_hash),
+                     result);
   return result;
 }
 

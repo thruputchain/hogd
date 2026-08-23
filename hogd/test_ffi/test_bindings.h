@@ -297,9 +297,12 @@ struct VerifyAuthResult {
 // signed_tx: serialized SignedTransaction
 // source_auth_data: serialized AddressAuthData for the source address, or
 // {nullptr, 0} when the address has no registered auth data
+// serialized_network_hash: 32-byte network hash the signatures were produced
+// against; it is part of every signature preimage. Must not be null.
 struct VerifyAuthResult
 verify_signed_transaction_auth(struct FFISerializedSignedTransaction signed_tx,
-                               struct FFISourceAuthData source_auth_data);
+                               struct FFISourceAuthData source_auth_data,
+                               const uint8_t *serialized_network_hash);
 
 // Note that AuthErrorCode is distinct from AuthVerifyErrorCode.
 // AuthErrorCode includes additional checks, such as missing auth data and block

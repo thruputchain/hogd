@@ -18,6 +18,7 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -51,10 +52,14 @@ namespace hogd {
 
 namespace {
 
+// Non-zero, so a signature preimage that dropped the network hash would still
+// fail to verify against a database built here.
+constexpr NetworkHash kTestNetworkHash{0x5a};
+
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, NetworkHash{}.data());
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -548,7 +553,10 @@ DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+  sig.ed25519() =
+      ed25519_sign(sk.ed25519(),
+                   transaction_signature_preimage(kTestNetworkHash, tx))
+          .value();
   return {.public_key_id = public_key_id, .signature = sig};
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
@@ -597,11 +605,10 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
 
   // Test good verification
   {
-    VerifyAuthResult result =
-        verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                        .len = static_cast<uint32_t>(
-                                            serialized_stx.size())},
-                                       make_source_auth_data(serialized_auth));
+    VerifyAuthResult result = verify_signed_transaction_auth(
+        {.data = serialized_stx.data(),
+         .len = static_cast<uint32_t>(serialized_stx.size())},
+        make_source_auth_data(serialized_auth), kTestNetworkHash);
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code, 0);
@@ -620,7 +627,7 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
     VerifyAuthResult result = verify_signed_transaction_auth(
         {.data = serialized_stx.data(),
          .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_wrong_auth));
+        make_source_auth_data(serialized_wrong_auth), kTestNetworkHash);
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code,
@@ -656,22 +663,20 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   auto serialized_stx = x23::serialize(stx);
 
   // No registered auth data: the pubkey claim succeeds.
-  VerifyAuthResult success =
-      verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                      .len = static_cast<uint32_t>(
-                                          serialized_stx.size())},
-                                     {.data = nullptr, .len = 0});
+  VerifyAuthResult success = verify_signed_transaction_auth(
+      {.data = serialized_stx.data(),
+       .len = static_cast<uint32_t>(serialized_stx.size())},
+      {.data = nullptr, .len = 0}, kTestNetworkHash);
   EXPECT_EQ(success.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(success.auth_error_code, 0);
 
   // Supplying auth data means the address is already registered, so a pubkey
   // claim is no longer valid.
   auto serialized_auth = x23::serialize(auth_data);
-  VerifyAuthResult result =
-      verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                      .len = static_cast<uint32_t>(
-                                          serialized_stx.size())},
-                                     make_source_auth_data(serialized_auth));
+  VerifyAuthResult result = verify_signed_transaction_auth(
+      {.data = serialized_stx.data(),
+       .len = static_cast<uint32_t>(serialized_stx.size())},
+      make_source_auth_data(serialized_auth), kTestNetworkHash);
 
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.auth_error_code,
