@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <utility>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/types.h"
@@ -29,6 +31,10 @@ class AuthClaimTests : public ::testing::Test {
 protected:
   void SetUp() override {}
 
+  // Signatures are bound to a network, so tests sign and verify against a
+  // non-zero hash: a zero one would hide a preimage that dropped the field.
+  static constexpr NetworkHash kTestNetworkHash{0x5a};
+
   static AuthClaim make_claim(uint32_t allowed_keys, Weight required_weight = 1)
   {
     AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
@@ -45,12 +51,16 @@ protected:
   }
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  static DecoratedSignature make_signature(SecretKey sk, Transaction const &tx,
-                                           uint32_t public_key_id)
+  static DecoratedSignature
+  make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id,
+                 NetworkHash const &network_hash = kTestNetworkHash)
   {
     Signature sig(CryptographicScheme::Ed25519);
     assert(sk.scheme() == CryptographicScheme::Ed25519);
-    sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+    sig.ed25519() =
+        ed25519_sign(sk.ed25519(),
+                     transaction_signature_preimage(network_hash, tx))
+            .value();
     return {.public_key_id = public_key_id, .signature = sig};
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
@@ -120,10 +130,61 @@ TEST_F(AuthClaimTests, IndividualKeyClaim)
                                               .max_weight = Weight{1}})},
                       .required_weight = 1};
 
-  EXPECT_TRUE(verify_auth(stx, &good_data).has_value());
-  EXPECT_FALSE(verify_auth(stx, &bad_data).has_value());
-  EXPECT_EQ(verify_auth(stx, &bad_data).error().code(),
+  EXPECT_TRUE(verify_auth(stx, &good_data, kTestNetworkHash).has_value());
+  EXPECT_FALSE(verify_auth(stx, &bad_data, kTestNetworkHash).has_value());
+  EXPECT_EQ(verify_auth(stx, &bad_data, kTestNetworkHash).error().code(),
             AuthVerifyErrorCode::kSignatureVerificationFailed);
+}
+
+// Pins the layout other implementations have to reproduce byte for byte.
+TEST_F(AuthClaimTests, SignaturePreimageLayout)
+{
+  const Transaction tx = make_transaction(make_claim(1 << 0));
+  const x23::Buf preimage =
+      transaction_signature_preimage(kTestNetworkHash, tx);
+  const x23::Buf payload = x23::serialize(tx);
+  const auto &domain_separator = kTransactionSignatureDomainSeparatorCxs;
+
+  ASSERT_EQ(preimage.size(),
+            domain_separator.size() + kTestNetworkHash.size() + payload.size());
+  EXPECT_TRUE(std::equal(domain_separator.begin(), domain_separator.end(),
+                         preimage.begin()));
+  EXPECT_TRUE(std::equal(kTestNetworkHash.begin(), kTestNetworkHash.end(),
+                         preimage.begin() + domain_separator.size()));
+  EXPECT_TRUE(std::equal(payload.begin(), payload.end(),
+                         preimage.end() - payload.size()));
+}
+
+TEST_F(AuthClaimTests, SignatureDoesNotVerifyOnAnotherNetwork)
+{
+  constexpr NetworkHash kOtherNetworkHash{0xa5};
+
+  AuthClaim claim = make_claim(1 << 0);
+
+  auto [pk, sk] = make_key_pair();
+  auto tx = make_transaction(claim);
+  DecoratedSignature sig =
+      make_signature(sk, tx, /*public_key_id=*/0, kOtherNetworkHash);
+
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+
+  AddressAuthData auth_data =
+      AddressAuthData{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk,
+                                              .max_weight = Weight{1}})},
+                      .required_weight = 1};
+
+  // Nothing in the claim names a network, so the checks that do not touch a
+  // signature still pass; only the signature itself is bound.
+  EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
+  EXPECT_TRUE(lightweight_validate_auth_claims(stx, &auth_data).has_value());
+
+  auto result = verify_auth(stx, &auth_data, kTestNetworkHash);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(),
+            AuthVerifyErrorCode::kSignatureVerificationFailed);
+
+  EXPECT_TRUE(verify_auth(stx, &auth_data, kOtherNetworkHash).has_value());
 }
 
 TEST_F(AuthClaimTests, BatchSignatureVerification)
@@ -146,7 +207,9 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   {
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(verify_auth(stx, &good_data, &signature_verifier).has_value());
+    EXPECT_TRUE(
+        verify_auth(stx, &good_data, kTestNetworkHash, &signature_verifier)
+            .has_value());
     EXPECT_TRUE(signature_verifier.verify());
   }
 
@@ -159,7 +222,9 @@ TEST_F(AuthClaimTests, BatchSignatureVerification)
 
   {
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(verify_auth(stx2, &good_data, &signature_verifier).has_value());
+    EXPECT_TRUE(
+        verify_auth(stx2, &good_data, kTestNetworkHash, &signature_verifier)
+            .has_value());
     EXPECT_FALSE(signature_verifier.verify());
   }
 }
@@ -340,7 +405,7 @@ TEST_F(AuthClaimTests, MultiSigHappyPath)
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, &auth_data).has_value());
-  EXPECT_TRUE(verify_auth(stx, &auth_data).has_value());
+  EXPECT_TRUE(verify_auth(stx, &auth_data, kTestNetworkHash).has_value());
 }
 
 TEST_F(AuthClaimTests, InsufficientTotalWeight)
@@ -456,13 +521,13 @@ TEST_F(AuthClaimTests, OverbroadAllowedKeysBitmapAccepted)
   // signature uses the registered slot 0 and meets the required weight.
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, &auth_data).has_value());
-  EXPECT_TRUE(verify_auth(stx, &auth_data).has_value());
+  EXPECT_TRUE(verify_auth(stx, &auth_data, kTestNetworkHash).has_value());
 
   // The unregistered slot grants no authority: a signature that *claims* slot
   // 20 still fails because the slot is not in the auth row.
   DecoratedSignature spoof_sig = make_signature(sk, tx, kUnregisteredSlot);
   SignedTransaction spoof_stx{.tx = tx, .signatures = {spoof_sig}};
-  auto spoof_result = verify_auth(spoof_stx, &auth_data);
+  auto spoof_result = verify_auth(spoof_stx, &auth_data, kTestNetworkHash);
   EXPECT_FALSE(spoof_result.has_value());
   EXPECT_EQ(spoof_result.error().code(),
             AuthVerifyErrorCode::kAuthDataMismatch);
@@ -514,7 +579,7 @@ TEST_F(AuthClaimTests, PubkeyClaimHappyPath)
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, nullptr).has_value());
-  EXPECT_TRUE(verify_auth(stx, nullptr).has_value());
+  EXPECT_TRUE(verify_auth(stx, nullptr, kTestNetworkHash).has_value());
 }
 
 TEST_F(AuthClaimTests, PubkeyClaimNonceBindsAddress)
@@ -589,7 +654,7 @@ TEST_F(AuthClaimTests, PubkeyClaimBadSignatureRejected)
 
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(lightweight_validate_auth_claims(stx, nullptr).has_value());
-  auto result = verify_auth(stx, nullptr);
+  auto result = verify_auth(stx, nullptr, kTestNetworkHash);
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code(),
             AuthVerifyErrorCode::kSignatureVerificationFailed);
@@ -613,7 +678,7 @@ TEST_F(AuthClaimTests, PubkeyClaimRejectedWhenAuthDataExists)
   EXPECT_FALSE(lightweight.has_value());
   EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
-  auto verified = verify_auth(stx, &auth_data);
+  auto verified = verify_auth(stx, &auth_data, kTestNetworkHash);
   EXPECT_FALSE(verified.has_value());
   EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
@@ -630,7 +695,7 @@ TEST_F(AuthClaimTests, SourceClaimRejectedWithoutAuthData)
   EXPECT_FALSE(lightweight.has_value());
   EXPECT_EQ(lightweight.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
-  auto verified = verify_auth(stx, nullptr);
+  auto verified = verify_auth(stx, nullptr, kTestNetworkHash);
   EXPECT_FALSE(verified.has_value());
   EXPECT_EQ(verified.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
@@ -645,7 +710,8 @@ TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
     DecoratedSignature sig = make_signature(sk, tx, /*public_key_id=*/0);
     SignedTransaction stx{.tx = tx, .signatures = {sig}};
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(verify_auth(stx, nullptr, &signature_verifier).has_value());
+    EXPECT_TRUE(verify_auth(stx, nullptr, kTestNetworkHash, &signature_verifier)
+                    .has_value());
     EXPECT_TRUE(signature_verifier.verify());
   }
 
@@ -654,7 +720,8 @@ TEST_F(AuthClaimTests, PubkeyClaimBatchVerifier)
     DecoratedSignature bad_sig = make_signature(sk2, tx, /*public_key_id=*/0);
     SignedTransaction stx{.tx = tx, .signatures = {bad_sig}};
     Ed25519SignatureVerifier signature_verifier;
-    EXPECT_TRUE(verify_auth(stx, nullptr, &signature_verifier).has_value());
+    EXPECT_TRUE(verify_auth(stx, nullptr, kTestNetworkHash, &signature_verifier)
+                    .has_value());
     EXPECT_FALSE(signature_verifier.verify());
   }
 }
@@ -706,11 +773,13 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
   EXPECT_TRUE(auth_claim_is_well_formed(stx).has_value());
   EXPECT_TRUE(
       lightweight_validate_auth_claims(stx, &duplicate_key_slots).has_value());
-  EXPECT_TRUE(verify_auth(stx, &duplicate_key_slots).has_value());
+  EXPECT_TRUE(
+      verify_auth(stx, &duplicate_key_slots, kTestNetworkHash).has_value());
 
   Ed25519SignatureVerifier signature_verifier;
-  EXPECT_TRUE(
-      verify_auth(stx, &duplicate_key_slots, &signature_verifier).has_value());
+  EXPECT_TRUE(verify_auth(stx, &duplicate_key_slots, kTestNetworkHash,
+                          &signature_verifier)
+                  .has_value());
   EXPECT_TRUE(signature_verifier.verify());
 
   // The behavior grants no capability across a trust boundary. The safety rails
@@ -730,7 +799,8 @@ TEST_F(AuthClaimTests, DuplicatePublicKeySlotsReuseOneSignatureForWeightedAuth)
   DecoratedSignature forged1 = forged0;
   forged1.public_key_id = 1;
   SignedTransaction forged_stx{.tx = tx, .signatures = {forged0, forged1}};
-  auto forged_result = verify_auth(forged_stx, &duplicate_key_slots);
+  auto forged_result =
+      verify_auth(forged_stx, &duplicate_key_slots, kTestNetworkHash);
   EXPECT_FALSE(forged_result.has_value());
   EXPECT_EQ(forged_result.error().code(),
             AuthVerifyErrorCode::kSignatureVerificationFailed);

@@ -2041,7 +2041,8 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                             MempoolTestInfra::kNetworkHash));
 
   // Submit the tx — should pass auth (weight 1 >= required 1)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(

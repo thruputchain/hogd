@@ -7,6 +7,7 @@
 
 #include "address_auth.hh"
 #include "built_contracts/fibonacci.h"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -93,13 +94,15 @@ make_sign_claim(uint32_t idx)
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 inline DecoratedSignature
 make_signature(const SecretKey &sk, const Transaction &tx,
-               unsigned int public_key_id)
+               unsigned int public_key_id, const NetworkHash &network_hash)
 {
   DecoratedSignature signature;
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
-      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+      ed25519_sign(sk.ed25519(),
+                   transaction_signature_preimage(network_hash, tx))
+          .value();
   return signature;
 }
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -13,6 +13,7 @@
 #include "auth_claim.hh"
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/simple_wallet_authclaim.h"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
@@ -91,7 +92,8 @@ ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
   Signature sig(CryptographicScheme::Ed25519);
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   sig.ed25519() =
-      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx))
+      ed25519_sign(wallets_[wallet_index].secret_key,
+                   transaction_signature_preimage(config_.network_hash, tx.tx))
           .value();
   // NOLINTEND(bugprone-unchecked-optional-access)
   tx.signatures.push_back(DecoratedSignature{

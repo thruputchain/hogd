@@ -237,6 +237,7 @@ AuthServer::verify_transactions(BlockHeight height,
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     SipHash24Hasher> &auth_data,
+           NetworkHash network_hash,
            AuthErrorCodeBatch &results) -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -253,8 +254,8 @@ AuthServer::verify_transactions(BlockHeight height,
                 account_it->second->second;
 
             AuthVerifyStatus<void> verify_result =
-                verify_auth(tx,
-                            source_auth_data ? &*source_auth_data : nullptr);
+                verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
+                            network_hash);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -264,7 +265,7 @@ AuthServer::verify_transactions(BlockHeight height,
             // write this result to [results] again.
           }
           co_return;
-        }(chunk, txs, auth_data, results));
+        }(chunk, txs, auth_data, network_hash_, results));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -287,7 +288,8 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
         source_addr.value()->second;
 
     auto verify_result =
-        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr);
+        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
+                    network_hash_);
     if (!verify_result.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }

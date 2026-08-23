@@ -15,15 +15,18 @@ namespace hogd {
 // Accumulates a set of signatures and public keys to verify as a batch.
 class Ed25519SignatureVerifier {
 public:
+  // signature_preimage is the message the signature covers, as built by
+  // transaction_signature_preimage. It is copied, so it need not outlive the
+  // call.
   void add_signature(const Ed25519PublicKey &public_key,
                      const Ed25519Signature &signature,
-                     x23::BufView serialized_tx);
+                     x23::BufView signature_preimage);
   bool verify();
 
 private:
   std::vector<Ed25519PublicKey> public_keys_;
   std::vector<Ed25519Signature> signatures_;
-  std::vector<x23::Buf> serialized_txs_;
+  std::vector<x23::Buf> signature_preimages_;
 };
 
 // There are three steps to validating a transaction for scheduling:
@@ -59,9 +62,13 @@ lightweight_validate_auth_claims(const SignedTransaction &stx,
 // transaction in the auth claims field.
 // Equivalent to lightweight_validate_auth_claims + the actual signature
 // verification.
+// network_hash identifies the network the transaction is being verified for;
+// it is part of every signature preimage, so a transaction signed against a
+// different network fails here. See transaction_signature_preimage.
 AuthVerifyStatus<void>
 verify_auth(const SignedTransaction &stx,
             const AddressAuthData *source_auth_data,
+            const NetworkHash &network_hash,
             Ed25519SignatureVerifier *signature_verifier = nullptr);
 
 } // namespace hogd
