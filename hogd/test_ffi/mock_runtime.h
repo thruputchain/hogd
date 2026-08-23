@@ -162,6 +162,13 @@ private:
   x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
+  // Body of invoke_internal(). The guest call it runs is synchronous down to
+  // the mock syscall entry, which blocks on an Async -- illegal on a thread
+  // pool worker, and this coroutine may well be resumed onto one. So the call
+  // goes to a thread outside the pool and this awaits it.
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  invoke_off_pool(MethodID method_id);
+
   MockContract backing_contract_;
   SyscallHandlerContext *owner_;
 };

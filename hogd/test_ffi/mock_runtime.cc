@@ -1,4 +1,6 @@
 #include "hogd/test_ffi/mock_runtime.h"
+
+#include "hogd/base/coropoll.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
@@ -34,27 +36,38 @@ x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   reset_gas(gas_limit);
-  // Reinstall the handler context on this thread for the guest call below: the
-  // coroutine may have resumed on a different thread than the one that entered
-  // the FFI call and wrote the thread_local slot. Everything the mock contract
-  // reaches -- mock_syscall_parser, the nested FFI entry points, a nested
-  // invoke coming back through here -- reads it through get_context().
-  SyscallHandlerContext *context = owner_;
-  SyscallHandlerContext::ScopedContext scoped_context(context);
-  context->push_mock_runtime(this);
-  // Pop on every exit path. MockContract::invoke() now catches the foreign
-  // callback's exceptions and returns Unrecoverable instead of letting them
-  // unwind (issue #2789), so the ordinary return path below does the popping.
-  // Keep the RAII pop anyway: the callback type is not noexcept, and if any
-  // throw ever does reach here the mock-runtime stack must still be restored
-  // -- a leaked entry leaves the handler permanently uncloseable (#2470).
-  x23::Defer pop_runtime([this, context]() {
-    auto *runtime = context->pop_mock_runtime();
-    assert(runtime == this);
-    (void)runtime;
+  return invoke_off_pool(method_id);
+}
+
+x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+MockRuntime::invoke_off_pool(MethodID method_id)
+{
+  // ThreadPool::async() runs this on a thread outside the pool and resumes us
+  // when it returns, so the blocking mock syscall entry underneath the guest
+  // call is legal there. The handler context is installed on that thread
+  // rather than this one for the same reason: the FFI call's thread_local slot
+  // belongs to whichever thread entered the call, and neither this coroutine's
+  // resumption thread nor the one below is necessarily it. Everything the mock
+  // contract reaches -- mock_syscall_parser, the nested FFI entry points, a
+  // nested invoke coming back through here -- reads it through get_context().
+  auto res = co_await default_coropoll().pool_.async([this, method_id] {
+    SyscallHandlerContext *context = owner_;
+    SyscallHandlerContext::ScopedContext scoped_context(context);
+    context->push_mock_runtime(this);
+    // Pop on every exit path. MockContract::invoke() now catches the foreign
+    // callback's exceptions and returns Unrecoverable instead of letting them
+    // unwind (issue #2789), so the ordinary return path below does the popping.
+    // Keep the RAII pop anyway: the callback type is not noexcept, and if any
+    // throw ever does reach here the mock-runtime stack must still be restored
+    // -- a leaked entry leaves the handler permanently uncloseable (#2470).
+    x23::Defer pop_runtime([this, context]() {
+      auto *runtime = context->pop_mock_runtime();
+      assert(runtime == this);
+      (void)runtime;
+    });
+    return backing_contract_.invoke(method_id);
   });
-  auto res = backing_contract_.invoke(method_id);
-  return std::pair<InvokeStatus<void>, GasAmount>{res, gas_consumed()};
+  co_return std::pair<InvokeStatus<void>, GasAmount>{res, gas_consumed()};
 }
 
 x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
