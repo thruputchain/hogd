@@ -115,9 +115,9 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
 
   // rcq_mtx_ is held by our caller across this suspension, so no other
   // coroutine observes the half-updated blocks_/upper-bound state below.
-  auto db_res = co_await
-      db_proxy.get_next_retrocausal_queue_block(block_id, addrkey,
-                                                search_start_index);
+  auto db_res =
+      co_await db_proxy.get_next_retrocausal_queue_block(block_id, addrkey,
+                                                         search_start_index);
   if (!db_res) {
     co_return db_res.error();
   }
@@ -208,9 +208,10 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
   // Deliberately read with the lock released, then reconcile: a racing load of
   // the same index issues a second RPC but must see the same answer, which the
   // mismatch check in record_concurrent_entry enforces.
-  auto db_res = co_await
-      db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey_,
-                                                       index);
+  auto db_res =
+      co_await db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_,
+                                                                addrkey_,
+                                                                index);
   if (!db_res) {
     co_return db_res.error();
   }

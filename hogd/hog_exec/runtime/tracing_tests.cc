@@ -78,9 +78,9 @@ TEST_F(TracingTest, Sha256Repeated)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -146,9 +146,9 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
                         UINT64_MAX, fibonacci_addr),
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -162,9 +162,9 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -231,9 +231,9 @@ TEST_F(TracingTest, NoSyscallTest)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -269,9 +269,9 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_transaction_stats();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto *stats = handler.get_transaction_stats();
@@ -329,9 +329,9 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -428,9 +428,9 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -545,7 +545,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
                   .uniquifier = make_new_uniquifier()},
       *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit — keeps the exclusive lock held
 
@@ -560,7 +560,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
       *context);
   handler2.enable_tracing();
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
   auto const *trace = handler2.get_trace();
@@ -645,7 +645,7 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -736,9 +736,9 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
@@ -875,7 +875,7 @@ TEST_F(TracingTest, Rv32SyscallAtExactlyExhaustedGasIsOutOfGas)
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
     handler.enable_tracing();
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
 
     auto const *trace = handler.get_trace();
@@ -907,7 +907,7 @@ TEST_F(TracingTest, Rv32SyscallAtExactlyExhaustedGasIsOutOfGas)
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
     handler.enable_tracing();
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
 
     // Whatever else happened, the frame must not have completed: the budget
     // stops exactly at this syscall.

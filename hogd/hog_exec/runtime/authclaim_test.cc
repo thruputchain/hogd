@@ -57,11 +57,11 @@ protected:
     stx.tx.uniquifier = make_new_uniquifier();
 
     auto handler = make_new_system_call_handler(stx, *context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxDeterministicError;
     }
-    return handler.try_commit_transaction();
+    return handler.try_commit_transaction()();
   }
 };
 

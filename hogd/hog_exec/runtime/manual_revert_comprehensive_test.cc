@@ -129,12 +129,12 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Error code is the main external difference between root frame revert and
   // normal success
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
@@ -278,10 +278,10 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -382,10 +382,10 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                               .uniquifier = make_new_uniquifier()}},
         *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success()); // Manual revert should succeed
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     // should commit successfully
     ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
@@ -405,10 +405,10 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                               .uniquifier = make_new_uniquifier()}},
         *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success()); // Normal failure should fail
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     // should not commit
     ASSERT_EQ(commit_res, ExecResult::ExecResultTxDeterministicError);
 
@@ -495,7 +495,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Gas consumption behavior (native contracts may or may not consume gas in
@@ -504,7 +504,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
   ASSERT_LT(gas_consumed, gas_limit); // Should not exceed limit
   ASSERT_GE(gas_consumed, 10000);
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
@@ -693,10 +693,10 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
@@ -849,11 +849,11 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                               .uniquifier = make_new_uniquifier()}},
         *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success())
         << "Error type " << error_type << " should succeed via manual revert";
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted)
         << "Error type " << error_type << " transaction should commit";
 
@@ -880,11 +880,11 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                               .uniquifier = make_new_uniquifier()}},
         *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success())
         << "No error case should succeed normally";
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "No error case transaction should commit";
 
@@ -1084,10 +1084,10 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();

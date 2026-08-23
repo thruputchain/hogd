@@ -197,10 +197,10 @@ TEST_F(EventTest, EventSuccess)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -314,10 +314,10 @@ TEST_F(EventTest, BadEventInputs)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -399,10 +399,10 @@ TEST_F(EventTest, EventLengthIncludesTopics)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -480,10 +480,10 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -613,10 +613,10 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -768,7 +768,7 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Every reverted child saw a fresh, full allowance.
@@ -778,7 +778,7 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
     ASSERT_EQ(frame_status, InvocationFrameStatusCode::Abort);
   }
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -949,7 +949,7 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   ASSERT_EQ(revert_child_status, InvocationFrameStatusCode::Abort);
@@ -958,7 +958,7 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
   // survives into the log.
   ASSERT_EQ(accepted_event_materializations, 3 * kMaxEventsPerTransaction);
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1296,10 +1296,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context, &tx_id_1);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1317,10 +1317,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
       }};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context, &tx_id_2);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
-  auto r2 = handler2.try_commit_transaction();
+  auto r2 = handler2.try_commit_transaction()();
   ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
   ASSERT_TRUE(
       handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted,
@@ -1412,7 +1412,7 @@ TEST(EventRpcValidationProposalData,
       entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
       auto status = ctx.handler().retrocausal_queue_insert(
           make_validation_proposal_observation_key(i),
-          std::as_bytes(std::span(entry.data(), entry.size())));
+          std::as_bytes(std::span(entry.data(), entry.size())))();
       if (!status.has_value()) {
         return InvokeError{InvokeErrorCode::Unrecoverable};
       }
@@ -1452,20 +1452,20 @@ TEST(EventRpcValidationProposalData,
   NondeterministicProposalData consume_proposal_data;
   {
     auto insert_handler = fw.make_new_system_call_handler(insert_tx, *context);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
     insert_proposal_data = insert_handler.get_proposal_data();
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler =
         fw.make_new_system_call_handler(consume_tx, *context);
-    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
+    ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
     consume_proposal_data = consume_handler.get_proposal_data();
     ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
               kValidationProposalObservationCount);
     ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(),
               kValidationProposalObservationCount);
-    ASSERT_EQ(consume_handler.try_commit_transaction(),
+    ASSERT_EQ(consume_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -1475,8 +1475,8 @@ TEST(EventRpcValidationProposalData,
     auto insert_handler =
         fw.make_new_system_call_handler_validation(insert_tx, *context,
                                                    insert_proposal_data);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -1494,8 +1494,8 @@ TEST(EventRpcValidationProposalData,
       PerTransactionEventServerProxy(*capped_event_proxy, fw.get_block_number(),
                                      1001),
       ValidationModeCtor{consume_proposal_data}, *context);
-  ASSERT_TRUE(consume_validation_handler.root_invoke().is_root_success());
-  ASSERT_EQ(consume_validation_handler.try_commit_transaction(),
+  ASSERT_TRUE(consume_validation_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(consume_validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
 
   ProposedTransaction proposed_tx{

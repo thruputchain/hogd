@@ -204,7 +204,7 @@ TEST_F(ItemViewTest, RCQRead)
 
   auto check_item = [&](std::optional<uint8_t> const &expected_entry,
                         bool advance_cursor) {
-    auto r = rcq_item.get_next_item(execution_mode_data, advance_cursor);
+    auto r = rcq_item.get_next_item(execution_mode_data, advance_cursor)();
     ASSERT_TRUE(r.has_value());
     if (expected_entry) {
       ASSERT_NE(r.value(), nullptr);
@@ -275,7 +275,7 @@ TEST_F(ItemViewTest, RCQRead)
   auto check_item_validation = [&](std::optional<uint8_t> const &expected_entry,
                                    bool advance_cursor) {
     auto r =
-        validate_rcq_item.get_next_item(validation_mode_data, advance_cursor);
+        validate_rcq_item.get_next_item(validation_mode_data, advance_cursor)();
     ASSERT_TRUE(r.has_value());
     if (expected_entry) {
       ASSERT_NE(r.value(), nullptr);
@@ -377,12 +377,12 @@ TEST_F(ItemViewTest, RCQInsertOverflow)
   ExecutionModeData mode = ProposalModeData();
 
   for (int i = 0; i < kRetrocausalQueueBlockEntriesMaxLen; i++) {
-    auto res = rcq_item.get_next_item(mode, true);
+    auto res = rcq_item.get_next_item(mode, true)();
     ASSERT_TRUE(res.has_value() && res.value() != nullptr);
     auto const &val = *res.value();
     check_eq(val, i);
   }
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() == nullptr);
 }
 
@@ -398,7 +398,7 @@ TEST_F(ItemViewTest, CurrentBlockConsumeOrder)
   ExecutionModeData mode = ProposalModeData();
 
   auto check_read = [&](uint8_t expect, bool advance_cursor) {
-    auto res = rcq_item.get_next_item(mode, advance_cursor);
+    auto res = rcq_item.get_next_item(mode, advance_cursor)();
     ASSERT_TRUE(res.has_value() && res.value() != nullptr);
     auto const &val = *res.value();
     check_eq(val, expect);
@@ -429,7 +429,7 @@ TEST_F(ItemViewTest, CurrentBlockInsertConsumeSelfDelta)
   ExecutionModeData mode = ProposalModeData();
 
   auto check_read = [&](uint8_t expect, bool advance_cursor) {
-    auto res = rcq_item.get_next_item(mode, advance_cursor);
+    auto res = rcq_item.get_next_item(mode, advance_cursor)();
     ASSERT_TRUE(res.has_value() && res.value() != nullptr);
     auto const &val = *res.value();
     check_eq(val, expect);
@@ -490,7 +490,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 1);
 
@@ -506,7 +506,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
       delta.retrocausal_queue().consume->current_block_consumed.empty());
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 2);
 
@@ -519,7 +519,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
                 .consume->past_block_consume.partial_consumed_number,
             0);
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 3);
 
@@ -547,7 +547,7 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 7);
 
@@ -564,7 +564,7 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
             (std::vector<uint32_t>{7}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 8);
 
@@ -587,14 +587,14 @@ TEST_F(ItemViewTest,
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 20);
 
   ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(1)).has_value());
   ASSERT_TRUE(rcq_item.insert_entry(make_test_queue_entry(2)).has_value());
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 1);
 
@@ -619,17 +619,17 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
 
   ExecutionModeData mode = ProposalModeData();
 
-  auto res = rcq_item.get_next_item(mode, true);
+  auto res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 42);
 
-  res = rcq_item.get_next_item(mode, true);
+  res = rcq_item.get_next_item(mode, true)();
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 99);
 
   auto fully_consumed = RetrocausalQueueItem::make_fully_consumed_item(
       *item, item->get_retrocausally_consumed_entries(
-                 rcq_item.get_retrocausally_consumed_count()));
+                 rcq_item.get_retrocausally_consumed_count())());
   auto delta = fully_consumed.get_delta();
 
   ASSERT_TRUE(delta.retrocausal_queue().consume);

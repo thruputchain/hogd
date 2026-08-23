@@ -74,9 +74,9 @@ TEST_P(FibonacciTest, FibonacciCalls)
                                 kSufficientGas, 5U),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -100,7 +100,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
                                                                            20U),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 2000);
   }
@@ -186,9 +186,9 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                         .value()},
                     .uniquifier = make_new_uniquifier()}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -211,9 +211,9 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                         .value()},
                     .uniquifier = make_new_uniquifier()}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
   // NOLINTEND(bugprone-unchecked-optional-access)

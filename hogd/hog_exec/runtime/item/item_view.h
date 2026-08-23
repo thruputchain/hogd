@@ -240,15 +240,13 @@ public:
 
   // Populates base_item_ from the snapshot cache.  Answers with no coroutine
   // frame on a cache hit; only a miss allocates and suspends on the database.
-  x23::MaybeAsync<SystemStatus<void>>
-  load(StorageSnapshotCache &snapshot_cache,
-       AddressAndKey const &addrkey) const;
+  x23::MaybeAsync<SystemStatus<void>> load(StorageSnapshotCache &snapshot_cache,
+                                           AddressAndKey const &addrkey) const;
 
 private:
   // Miss path for load(): awaits the pending cache fill, then stores it.
-  x23::Async<SystemStatus<void>>
-  load_slow(x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending)
-      const;
+  x23::Async<SystemStatus<void>> load_slow(
+      x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending) const;
   // Shared tail of both load() paths.
   SystemStatus<void>
   store_loaded(SystemStatus<const SnapshotStorageItem *> const &r) const;

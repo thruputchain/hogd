@@ -141,9 +141,9 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -159,9 +159,9 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -222,9 +222,9 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -243,9 +243,9 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -353,9 +353,9 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -468,9 +468,9 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -486,9 +486,9 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -504,9 +504,9 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -567,9 +567,9 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -591,9 +591,9 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -617,7 +617,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -638,7 +638,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 

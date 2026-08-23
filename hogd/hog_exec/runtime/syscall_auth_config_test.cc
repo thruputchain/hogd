@@ -82,11 +82,11 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
       *context);
 
   // Invoke the contract method which calls the syscall
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -164,11 +164,11 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
       *context);
 
   // Invoke the contract method which calls both syscalls
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -231,9 +231,9 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -286,9 +286,9 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -359,9 +359,9 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                               .uniquifier = make_new_uniquifier()}},
         *context);
 
-    auto root_res = handler.root_invoke();
+    auto root_res = handler.root_invoke()();
     ASSERT_TRUE(root_res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -389,9 +389,9 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                               .uniquifier = make_new_uniquifier()}},
         *context);
 
-    auto root_res = handler.root_invoke();
+    auto root_res = handler.root_invoke()();
     ASSERT_TRUE(root_res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -504,8 +504,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationRejectsMalformedArgs)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   auto item = lookup_storage_item_from_db(
@@ -576,8 +576,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMaxIndexBoundary)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   auto item = lookup_storage_item_from_db(

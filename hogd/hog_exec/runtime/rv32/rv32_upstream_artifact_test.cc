@@ -234,7 +234,7 @@ TEST_P(Rv32UpstreamArtifactTest, passesThroughRuntimeContext)
                                               rv32_context);
   handler.enable_tracing();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success()) << test_case.name;
   const auto output = handler.get_most_recent_frame_output();
@@ -262,7 +262,7 @@ TEST_F(Rv32UpstreamArtifactTest, failPathMapsToDeterministicRuntimeFailure)
                                               rv32_context);
   handler.enable_tracing();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);

@@ -90,12 +90,10 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     forwarded_token_ids.push_back(token_id.value());
   }
 
-  auto [res, gas_consumed] = co_await
-      syscall_handler.invoke(query.invocation.invoked_address,
-                             sdk_method_id(query.invocation.entrypoint),
-                             query.invocation.gas_limit,
-                             query.invocation.calldata, query.invoke_flags,
-                             forwarded_token_ids);
+  auto [res, gas_consumed] = co_await syscall_handler.invoke(
+      query.invocation.invoked_address,
+      sdk_method_id(query.invocation.entrypoint), query.invocation.gas_limit,
+      query.invocation.calldata, query.invoke_flags, forwarded_token_ids);
 
   if (!res.has_value()) {
     switch (res.error().code()) {

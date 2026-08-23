@@ -2258,9 +2258,9 @@ protected:
                 }},
         *context_);
 
-    auto r = handler.root_invoke();
+    auto r = handler.root_invoke()();
     ASSERT_TRUE(r.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_EQ(res, ExecResult::ExecResultOK);
   }
 
@@ -2289,9 +2289,9 @@ protected:
                 }},
         *context_);
 
-    auto r = handler.root_invoke();
+    auto r = handler.root_invoke()();
     ASSERT_TRUE(r.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_NE(res, ExecResult::ExecResultOK);
   }
 
@@ -3572,18 +3572,18 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   NondeterministicProposalData delete_recreate_proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     insert_proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_delete_recreate, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     delete_recreate_proposal_data = handler.get_proposal_data();
     ASSERT_EQ(delete_recreate_proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(
         delete_recreate_proposal_data.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -3592,15 +3592,15 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
     auto handler =
         make_new_system_call_handler_validation(tx_insert, *context_,
                                                 insert_proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_delete_recreate, *context_,
                                                 delete_recreate_proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -3625,25 +3625,25 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
   // Insert concurrent entries on both addresses.
   for (auto const &tx : {tx_insert_a, tx_insert_b}) {
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Proposal on address A.
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Validation on address B, reusing A's proposal data.
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3678,8 +3678,8 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
     for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
       auto tx = make_tx(addr, 0, v);
       auto handler = make_new_system_call_handler(tx, *context_);
-      ASSERT_TRUE(handler.root_invoke().is_root_success());
-      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.root_invoke()().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
   }
 
@@ -3691,15 +3691,15 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3734,8 +3734,8 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
     for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
       auto tx = make_tx(addr, 0, v);
       auto handler = make_new_system_call_handler(tx, *context_);
-      ASSERT_TRUE(handler.root_invoke().is_root_success());
-      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.root_invoke()().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
   }
 
@@ -3748,15 +3748,15 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3791,8 +3791,8 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
     for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
       auto tx = make_tx(addr, 0, v);
       auto handler = make_new_system_call_handler(tx, *context_);
-      ASSERT_TRUE(handler.root_invoke().is_root_success());
-      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.root_invoke()().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
   }
 
@@ -3805,15 +3805,15 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3847,8 +3847,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{42});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3858,8 +3858,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{99});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Method 60 consumes a concurrent entry. But here entry 42 is from a past
@@ -3871,15 +3871,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3912,8 +3912,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{42});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Method 63: peek(42) -> delete -> insert(99) -> consume(99) -> consume(42)
@@ -3923,15 +3923,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3968,8 +3968,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{42});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Method 64: peek(42) -> delete -> insert(99). No consume, so
@@ -3980,15 +3980,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -4038,8 +4038,8 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{77});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Method 65: insert(10) -> consume(10) -> delete -> insert(20) ->
@@ -4052,15 +4052,15 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -4088,19 +4088,19 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
   NondeterministicProposalData orch_pd;
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     insert_pd = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_orch, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     orch_pd = handler.get_proposal_data();
     // Two bits: the TryInvoke lock probe (false, the conflict) and the
     // consume of the concurrent entry, which is also observed.
     ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
     ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -4108,14 +4108,14 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
   {
     auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
                                                            insert_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -4142,19 +4142,19 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
   NondeterministicProposalData orch_pd;
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     insert_pd = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_orch, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     orch_pd = handler.get_proposal_data();
     // Two bits: the consume of the concurrent entry and the TryInvoke lock
     // probe (true, no conflict).
     ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
     ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -4162,14 +4162,14 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
   {
     auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
                                                            insert_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -4214,9 +4214,9 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
   // kInvalidExecutorBehavior surfaces as an Unrecoverable invoke error, not
   // just at commit. Check both. A deterministic per-tx rejection during invoke
   // is a safe outcome and is allowed.
-  auto r = handler.root_invoke();
+  auto r = handler.root_invoke()();
   if (r.is_root_success()) {
-    ASSERT_NE(handler.try_commit_transaction(),
+    ASSERT_NE(handler.try_commit_transaction()(),
               ExecResult::ExecResultUnrecoverable)
         << "executor drove HogDb to reject a contract-produced RCQ delta as "
            "invalid executor behavior at commit (issue #3152)";

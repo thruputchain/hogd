@@ -166,7 +166,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   };
 
   auto runtime_res =
-      context->make_new_runtime(deployed_contract_hash, &handler);
+      context->make_new_runtime(deployed_contract_hash, &handler)();
   ASSERT_TRUE(runtime_res.has_value());
   auto runtime = std::move(runtime_res.value());
   ASSERT_TRUE(runtime != nullptr);
@@ -359,7 +359,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
   ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
 }
@@ -457,7 +457,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
   ASSERT_EQ(res.gas_consumed_, 510);
 }
@@ -594,7 +594,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
 }
 
@@ -633,7 +633,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
         // This would have failed if the bytestring was not loaded lazily:
         // we're getting the bytestring from the prior write, not the snapshot
-        auto r2 = ctx.handler().get_bytestring(kBadKey);
+        auto r2 = ctx.handler().get_bytestring(kBadKey)();
         if (!r2.has_value() || !r2.value().has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -693,7 +693,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   SystemCallHandler handler2 = make_handler(
@@ -707,7 +707,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               },
       },
       snapshot, 0, 0, *runtime_context);
-  res = handler2.root_invoke();
+  res = handler2.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -727,7 +727,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           // get_nnint() with force_load_from_snapshot=false from clean state
           // should not query db
-          auto r0 = ctx.handler().get_nnint(kBadKey, false);
+          auto r0 = ctx.handler().get_nnint(kBadKey, false)();
           if (!r0.has_value() || !r0.value().has_value() ||
               r0.value().value().first.has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
@@ -751,7 +751,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
           }
 
           // assert that get_nnint() without a load doesn't query db
-          auto r3 = ctx.handler().get_nnint(kBadKey, false);
+          auto r3 = ctx.handler().get_nnint(kBadKey, false)();
           if (!r3.has_value() || !r3.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -774,7 +774,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // assert that get_nnint() after a set doesn't query db, even with
           // force_load_from_snapshot=true
-          auto r2 = ctx.handler().get_nnint(kBadKey, true);
+          auto r2 = ctx.handler().get_nnint(kBadKey, true)();
           if (!r2.has_value() || !r2.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -784,7 +784,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
           // get_nnint() after a set with force_load_from_snapshot=false should
           // return the set value if it exists
-          auto r3 = ctx.handler().get_nnint(kBadKey, false);
+          auto r3 = ctx.handler().get_nnint(kBadKey, false)();
           if (!r3.has_value() || !r3.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -831,7 +831,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         },
         snapshot, 0, 0, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.result_);
   }
   {
@@ -847,7 +847,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
         },
         snapshot, 0, 1, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.result_);
   }
 }
@@ -901,7 +901,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
       },
       snapshot, 0, 0, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
 }
@@ -1012,7 +1012,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
                                               .calldata = {}}},
                    snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -1082,7 +1082,7 @@ TEST_F(NativeContractTest, OversizedCalldataDoesNotThrowBadAlloc)
   // sdk-parallel LibraryExn::Handling(DecodingArgs) abort — a frame that
   // ran and reverted, not a fault or a crash.
   EXPECT_NO_THROW({
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     EXPECT_TRUE(res.result_.has_value());
   });
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
@@ -1167,7 +1167,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
       },
       snapshot, 0, 0, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 

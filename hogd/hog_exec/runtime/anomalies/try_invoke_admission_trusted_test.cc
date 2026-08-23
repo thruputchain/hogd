@@ -274,9 +274,9 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   // Honest proposal: child admission fails (false bit) because the child cannot
   // pay for the write at the child boundary, before the parent's transfer.
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
-  ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
+  ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
   auto proposal = proposal_handler.get_proposal_data();
-  ASSERT_EQ(proposal_handler.try_commit_transaction(),
+  ASSERT_EQ(proposal_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(
       ExecResult::ExecResultOK,
@@ -296,10 +296,10 @@ TEST_F(TryInvokeAdmissionTrustedTest,
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
-  ASSERT_TRUE(handler.root_invoke().is_root_success())
+  ASSERT_TRUE(handler.root_invoke()().is_root_success())
       << "validation trusts the forged true bit; the per-child HogDb admission "
          "is not replayed";
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "the aggregate root batch is affordable: the transfer covers the "
          "child storage cost";
   ASSERT_TRUE(handler.emit_events(
@@ -359,9 +359,9 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
   auto tx = make_invoke_root_tx();
 
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
-  ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
+  ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
   auto proposal = proposal_handler.get_proposal_data();
-  ASSERT_EQ(proposal_handler.try_commit_transaction(),
+  ASSERT_EQ(proposal_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(
       ExecResult::ExecResultOK,
@@ -378,8 +378,8 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "create-then-delete nets to zero storage cost in the aggregate batch";
   ASSERT_TRUE(handler.emit_events(
       ExecResult::ExecResultOK,
@@ -451,9 +451,9 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
   auto tx = make_invoke_root_tx();
 
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
-  ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
+  ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
   auto proposal = proposal_handler.get_proposal_data();
-  ASSERT_EQ(proposal_handler.try_commit_transaction(),
+  ASSERT_EQ(proposal_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(
       ExecResult::ExecResultOK,
@@ -472,10 +472,10 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
-  ASSERT_TRUE(handler.root_invoke().is_root_success())
+  ASSERT_TRUE(handler.root_invoke()().is_root_success())
       << "validation trusts the forged false bit and takes the child-failure "
          "branch";
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events(
       ExecResult::ExecResultOK,
       ProposedTransaction{.signed_tx = SignedTransaction{.tx = tx}})());

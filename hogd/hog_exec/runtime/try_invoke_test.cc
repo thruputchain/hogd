@@ -100,7 +100,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
     fns_storage.emplace(
         1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           auto key = make_storage_key("test");
-          auto res = ctx.handler().get_bytestring(key);
+          auto res = ctx.handler().get_bytestring(key)();
           if (!res.has_value()) {
             return res.error().to_invoke_error();
           }
@@ -214,10 +214,10 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
       }};
   auto handler = make_new_system_call_handler(signed_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -236,10 +236,10 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(signed_tx2, *context);
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
-  auto r2 = handler2.try_commit_transaction();
+  auto r2 = handler2.try_commit_transaction()();
   ASSERT_TRUE(r2 == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler2.emit_events(ExecResult::ExecResultOK,
@@ -331,10 +331,10 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -551,9 +551,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -600,9 +600,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.result_); // Should return error
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   // transaction should not commit
   ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
   advance_block();
@@ -646,9 +646,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -698,7 +698,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
           auto system_res =
               ctx.handler().set_nnint(key, std::nullopt, add_value,
                                       std::to_underlying(
-                                          StorageDeltaFlags::None));
+                                          StorageDeltaFlags::None))();
 
           if (!system_res.has_value()) {
             ADD_FAILURE() << "set_nnint should have succeeded";
@@ -783,12 +783,12 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   // The transaction should fail because the caller returns a deterministic
   // error (after observing that the try_invoke of the callee did not succeed).
   ASSERT_FALSE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   // The transaction should not commit because it failed
   ASSERT_TRUE(commit_res == ExecResult::ExecResultTxDeterministicError);
 
@@ -961,7 +961,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet (keeps the exclusive lock)
 
@@ -977,7 +977,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 }
 
@@ -1136,7 +1136,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet (keeps the exclusive lock)
 
@@ -1153,10 +1153,10 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
   handler2.enable_tracing();
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   // transaction should not commit
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultTxDeterministicError);
 
@@ -1200,7 +1200,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   }
 
   // Now commit the first transaction (should succeed)
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
 
   advance_block();
@@ -1260,7 +1260,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                     auto system_res =
                         ctx.handler().set_nnint(key, std::nullopt, add_value,
                                                 std::to_underlying(
-                                                    StorageDeltaFlags::None));
+                                                    StorageDeltaFlags::None))();
 
                     if (!system_res.has_value()) {
                       // System-level error during async operation
@@ -1370,7 +1370,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit this transaction yet
 
@@ -1385,15 +1385,15 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   // Transaction should not commit because handler2 returned a failure
   ASSERT_EQ(commit_res2, ExecResult::ExecResultTxDeterministicError);
 
   // Now commit the first transaction (should succeed)
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_EQ(commit_res1, ExecResult::ExecResultOK);
 
   advance_block();
@@ -1561,7 +1561,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
                     auto system_res =
                         ctx.handler().set_nnint(key, set_value, add_value,
                                                 std::to_underlying(
-                                                    StorageDeltaFlags::None));
+                                                    StorageDeltaFlags::None))();
 
                     if (!system_res.has_value()) {
                       // System-level error during async operation
@@ -1619,7 +1619,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc1_handler =
       make_new_system_call_handler(tc1_handler_tx, *context);
   {
-    auto res = tc1_handler.root_invoke();
+    auto res = tc1_handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
   }
 
@@ -1639,16 +1639,16 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc1_handler2 =
       make_new_system_call_handler(tc1_handler2_tx, *context);
   {
-    auto res = tc1_handler2.root_invoke();
+    auto res = tc1_handler2.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler2.try_commit_transaction();
+    auto commit_res = tc1_handler2.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
   // TC1.3: Then commit the first transaction (releasing the exclusive lock to a
   // set_typeclass lock).
   {
-    auto commit_res = tc1_handler.try_commit_transaction();
+    auto commit_res = tc1_handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   }
 
@@ -1665,9 +1665,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc1_handler3 =
       make_new_system_call_handler(tc1_handler3_tx, *context);
   {
-    auto res = tc1_handler3.root_invoke();
+    auto res = tc1_handler3.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler3.try_commit_transaction();
+    auto commit_res = tc1_handler3.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc1_handler3.emit_events(ExecResult::ExecResultOK,
                                          ProposedTransaction{
@@ -1703,9 +1703,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc2_handler1 =
       make_new_system_call_handler(tc2_handler1_tx, *context);
   {
-    auto res = tc2_handler1.root_invoke();
+    auto res = tc2_handler1.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler1.try_commit_transaction();
+    auto commit_res = tc2_handler1.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc2_handler1.emit_events(ExecResult::ExecResultOK,
                                          ProposedTransaction{
@@ -1724,9 +1724,9 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   SystemCallHandler tc2_handler2 =
       make_new_system_call_handler(tc2_handler2_tx, *context);
   {
-    auto res = tc2_handler2.root_invoke();
+    auto res = tc2_handler2.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler2.try_commit_transaction();
+    auto commit_res = tc2_handler2.try_commit_transaction()();
     ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
     ASSERT_TRUE(tc2_handler2.emit_events(ExecResult::ExecResultOK,
                                          ProposedTransaction{
@@ -1886,9 +1886,9 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2092,9 +2092,9 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2311,9 +2311,9 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2467,9 +2467,9 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2677,9 +2677,9 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -2878,10 +2878,10 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -3094,12 +3094,12 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                               .uniquifier = self->make_new_uniquifier()}};
           auto handler =
               self->make_new_system_call_handler(handler_tx, *context);
-          auto res = handler.root_invoke();
+          auto res = handler.root_invoke()();
           if (!res.is_root_success()) {
             panic("root invoke 0 failed");
           }
           co_await set.bg();
-          auto commit_res = handler.try_commit_transaction();
+          auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
             panic("try_commit_transaction error: {}", x23::show(commit_res));
@@ -3128,12 +3128,12 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   .uniquifier = self->make_new_uniquifier()}};
           auto handler =
               self->make_new_system_call_handler(handler_tx, *context);
-          auto res = handler.root_invoke();
+          auto res = handler.root_invoke()();
           co_await set.bg();
           if (!res.is_root_success()) {
             co_return;
           }
-          auto commit_res = handler.try_commit_transaction();
+          auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
             panic("try_commit_transaction error: {}", x23::show(commit_res));
@@ -3153,9 +3153,9 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
               .uniquifier = make_new_uniquifier()}};
       auto handler = make_new_system_call_handler(handler_tx, *context);
 
-      auto res = handler.root_invoke();
+      auto res = handler.root_invoke()();
       ASSERT_TRUE(res.is_root_success());
-      auto commit_res = handler.try_commit_transaction();
+      auto commit_res = handler.try_commit_transaction()();
       ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
       ASSERT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -3372,9 +3372,9 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -3423,7 +3423,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
   fns_w.emplace(1,
                 [key](
                     NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto res = ctx.handler().get_bytestring(key);
+                  auto res = ctx.handler().get_bytestring(key)();
                   if (!res.has_value()) {
                     return InvokeError{InvokeErrorCode::Deterministic};
                   }
@@ -3554,9 +3554,9 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -3590,7 +3590,7 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
                     auto key = make_storage_key("rcq-self-consume");
                     uint8_t entry = 0xA5;
                     auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&entry, 1)));
+                        key, std::as_bytes(std::span(&entry, 1)))();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -3603,7 +3603,7 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
                   [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                     auto key = make_storage_key("rcq-self-consume");
                     auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
+                        ctx.handler().retrocausal_queue_consume(key, false)();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -3682,7 +3682,7 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success())
       << "RCQ self-consume across TryInvoke frames must not be Unrecoverable";
 }
@@ -3705,7 +3705,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
                     auto key = make_storage_key("rcq-multi");
                     uint8_t entry = 0xBB;
                     auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&entry, 1)));
+                        key, std::as_bytes(std::span(&entry, 1)))();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -3718,7 +3718,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
                   [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                     auto key = make_storage_key("rcq-multi");
                     auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
+                        ctx.handler().retrocausal_queue_consume(key, false)();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -3789,7 +3789,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success())
       << "insert-consume-insert via TryInvoke must succeed";
 }
@@ -3873,7 +3873,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -3960,10 +3960,10 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 

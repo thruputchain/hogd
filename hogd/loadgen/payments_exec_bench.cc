@@ -57,10 +57,10 @@ public:
         for (auto const &tx : init_block) {
           auto handler =
               framework_->make_new_system_call_handler(tx.tx, *context_);
-          if (!handler.root_invoke().is_root_success()) {
+          if (!handler.root_invoke()().is_root_success()) {
             throw std::runtime_error("initialization transaction failed");
           }
-          if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+          if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
             throw std::runtime_error("failed to commit init transaction");
           }
           // mint/initialize emit events; drain them so the committed handler
@@ -116,13 +116,13 @@ BENCHMARK_DEFINE_F(PaymentsExecBench, transfer)(benchmark::State &state)
   for (auto _ : state) {
     auto const &tx = work_txs_[i++ % work_txs_.size()];
     auto handler = framework_->make_new_system_call_handler(tx.tx, *context_);
-    auto invoke_result = handler.root_invoke();
+    auto invoke_result = handler.root_invoke()();
     if (!invoke_result.is_root_success()) {
       state.SkipWithError("work transaction failed");
       break;
     }
     gas_per_tx = invoke_result.gas_consumed_;
-    [[maybe_unused]] auto aborted = handler.abort_transaction();
+    [[maybe_unused]] auto aborted = handler.abort_transaction()();
   }
 
   state.SetItemsProcessed(state.iterations());

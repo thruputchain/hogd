@@ -27,7 +27,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 {
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status.has_value()) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
     co_return SyscallInnerResult{status->error().code(), WrappedGasAmount{0}};
@@ -45,7 +46,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(SyscallBytestringGetOutputs{.bytestring = *bs});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 };
 
 MaybeAsyncSyscallInnerResult
@@ -55,11 +57,13 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 {
   auto status = co_await syscall_handler.get_bytestring(input_key);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   auto &get_status = *status;
   if (!get_status) {
-    co_return SyscallInnerResult{get_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{get_status.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
   output_length = (*get_status)->size();
@@ -71,7 +75,8 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
         SyscallBytestringGetLenOutputs{.length = output_length});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 };
 
 MaybeAsyncSyscallInnerResult
@@ -81,20 +86,25 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             StorageDeltaFlagSet input_flags)
 {
   if (input_bytestring.size() > kBytestringMaxLen) {
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
-  auto status = co_await
-      syscall_handler.set_bytestring(input_key, input_bytestring, input_flags);
+  auto status =
+      co_await syscall_handler.set_bytestring(input_key, input_bytestring,
+                                              input_flags);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   auto &set_status = *status;
   if (!set_status) {
-    co_return SyscallInnerResult{set_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{set_status.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 } // namespace hogd

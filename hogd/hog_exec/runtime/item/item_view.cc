@@ -23,8 +23,8 @@
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
-#include "x23/vec.h"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -330,8 +330,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
-  auto concurrent_entry = co_await
-      get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
+  auto concurrent_entry =
+      co_await get_next_concurrent_entry(locally_consumed_index_,
+                                         execution_mode_data);
   if (!concurrent_entry.has_value()) {
     co_return concurrent_entry.error();
   }
@@ -525,7 +526,6 @@ RetrocausalQueueItem::get_next_concurrent_entry_proposing(
       proposal_data.log_queue_entry_observation(addrkey, index, live);
   co_return recorded.get();
 }
-
 
 const QueueEntry *
 RetrocausalQueueItem::get_next_self_entry(uint32_t index) const

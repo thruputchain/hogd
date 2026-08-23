@@ -103,7 +103,7 @@ TEST_F(Sha256IncrementalTest, BasicUpdateAndFinalize)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
 }
 
@@ -231,7 +231,7 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
 }
 

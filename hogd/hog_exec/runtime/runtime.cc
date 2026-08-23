@@ -24,12 +24,14 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
     trace("Invoking method {} with gas limit {}", method_id, gas_limit);
   } catch (std::exception const &e) {
     report_dropped_log(e.what());
-    co_return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = 0};
   } catch (...) {
     report_dropped_log("unknown exception");
-    co_return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = 0};
   }
   auto [res, gas_consumed] = co_await invoke_internal(method_id, gas_limit);
   try {
@@ -38,12 +40,14 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
           gas_consumed);
   } catch (std::exception const &e) {
     report_dropped_log(e.what());
-    co_return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = gas_consumed};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = gas_consumed};
   } catch (...) {
     report_dropped_log("unknown exception");
-    co_return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = gas_consumed};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = gas_consumed};
   }
 
   // Interpreters that perform metering on a basic block level, instead of

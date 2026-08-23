@@ -99,11 +99,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
       *context);
 
   // Invoke the contract method which calls the syscall and verifies the height
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -175,11 +175,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
       *context);
 
   // Invoke the contract method which calls the syscall and verifies the height
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -247,10 +247,10 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 

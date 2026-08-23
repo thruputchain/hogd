@@ -107,10 +107,10 @@ TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -164,10 +164,10 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntry)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -219,14 +219,14 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntryEmitsNoStorageDelta)
       *context);
   handler.enable_tracing();
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
   EXPECT_TRUE(trace->storage_writes.empty());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -283,14 +283,14 @@ TEST_F(SyscallRcqPeekTest, PeekConsumeNoQueueEntryEmitsNoStorageDelta)
       *context);
   handler.enable_tracing();
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
   EXPECT_TRUE(trace->storage_writes.empty());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -353,7 +353,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
       *context);
   handler.enable_tracing();
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = handler.get_trace();
@@ -362,7 +362,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
   EXPECT_EQ(trace->storage_writes[0].delta.type(),
             StorageDeltaType::kDeltaTypeDelete);
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -427,8 +427,8 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
                                            .calldata = insert_calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
-  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -449,14 +449,14 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
       *context);
   peek_handler.enable_tracing();
 
-  auto root_res = peek_handler.root_invoke();
+  auto root_res = peek_handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   auto const *trace = peek_handler.get_trace();
   ASSERT_NE(trace, nullptr);
   EXPECT_TRUE(trace->storage_writes.empty());
 
-  ASSERT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(peek_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // A bytestring at the key is not a retrocausal queue; PeekLen must not
@@ -524,10 +524,10 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -630,8 +630,8 @@ TEST_F(SyscallRcqPeekTest,
   auto insert_handler =
       make_new_system_call_handler(make_tx(8, insert_calldata.value()),
                                    *context);
-  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // The cap-plus-one observation returns InvalidSyscallInput; the process stays
   // alive and the contract (which handles the error) commits.
@@ -641,8 +641,8 @@ TEST_F(SyscallRcqPeekTest,
   ASSERT_TRUE(peek_calldata.has_value());
   auto peek_handler =
       make_new_system_call_handler(make_tx(9, peek_calldata.value()), *context);
-  ASSERT_TRUE(peek_handler.root_invoke().is_root_success());
-  EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(peek_handler.root_invoke()().is_root_success());
+  EXPECT_EQ(peek_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // #3043: A destructive concurrent RCQ consume that crosses the per-tx
@@ -671,7 +671,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         auto target = NativeContractTestFramework::make_storage_key("target_q");
         for (uint8_t payload : {uint8_t{0xA0}, uint8_t{0xA1}}) {
           auto res = ctx.handler().retrocausal_queue_insert(
-              target, std::as_bytes(std::span(&payload, 1)));
+              target, std::as_bytes(std::span(&payload, 1)))();
           if (!res.has_value()) {
             return res.error().to_invoke_error();
           }
@@ -682,7 +682,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
           auto payload = static_cast<uint8_t>(i);
           auto res = ctx.handler().retrocausal_queue_insert(
-              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)))();
           if (!res.has_value()) {
             return res.error().to_invoke_error();
           }
@@ -702,7 +702,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         auto target = NativeContractTestFramework::make_storage_key("target_q");
 
         auto first =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false)();
         if (!first.has_value()) {
           return first.error().to_invoke_error();
         }
@@ -713,7 +713,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx - 1; ++i) {
           auto peek =
               ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
-                                                      /*peek=*/true);
+                                                      /*peek=*/true)();
           if (!peek.has_value()) {
             return peek.error().to_invoke_error();
           }
@@ -723,7 +723,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
         }
 
         auto capped =
-            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false)();
         if (!capped.has_value()) {
           return capped.error().to_invoke_error();
         }
@@ -768,13 +768,13 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
   // state.
   {
     auto insert_handler = make_new_system_call_handler(insert_tx, *context);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
     insert_proposal_data = insert_handler.get_proposal_data();
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler = make_new_system_call_handler(consume_tx, *context);
-    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
+    ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
     consume_proposal_data = consume_handler.get_proposal_data();
     // The cap-crossing consume logs a nondeterministic bit but records no
     // observation: the sequence stops at the cap while the bit count is one
@@ -783,7 +783,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
               kMaxConcurrentRcqReadsPerTx);
     ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
               kMaxConcurrentRcqReadsPerTx + 1);
-    ASSERT_EQ(consume_handler.try_commit_transaction(),
+    ASSERT_EQ(consume_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -796,15 +796,15 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
     auto insert_handler =
         make_new_system_call_handler_validation(insert_tx, *context,
                                                 insert_proposal_data);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler =
         make_new_system_call_handler_validation(consume_tx, *context,
                                                 consume_proposal_data);
-    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
-    ASSERT_EQ(consume_handler.try_commit_transaction(),
+    ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
+    ASSERT_EQ(consume_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 

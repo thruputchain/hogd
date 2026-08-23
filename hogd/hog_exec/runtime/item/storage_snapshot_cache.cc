@@ -97,8 +97,8 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   {
     auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
-      return SystemStatus<const Contract *>{
-          obj->has_value() ? &(*obj)->contract : nullptr};
+      return SystemStatus<const Contract *>{obj->has_value() ? &(*obj)->contract
+                                                             : nullptr};
     }
   }
   return load_contract_by_hash(hash);
@@ -121,8 +121,8 @@ StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = deployment_cache_.find_shared(addr);
     if (obj) {
-      return SystemStatus<const DeployedContract *>{
-          obj->has_value() ? &**obj : nullptr};
+      return SystemStatus<const DeployedContract *>{obj->has_value() ? &**obj
+                                                                     : nullptr};
     }
   }
   return load_deployed_contract(addr);

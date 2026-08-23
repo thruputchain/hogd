@@ -114,25 +114,25 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
 
   // Block 1: method 0 creates the item (set_add(0, 200)).
   auto handler1 = run_method(0);
-  ASSERT_TRUE(handler1.root_invoke().is_root_success());
-  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+  ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   // Block 2: method 1 nets the item down to 100 in its own block, so its
   // subtraction is bounded by the item's already-committed value.
   auto handler2 = run_method(1);
-  ASSERT_TRUE(handler2.root_invoke().is_root_success());
-  ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler2.root_invoke()().is_root_success());
+  ASSERT_EQ(handler2.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   // Block 3: method 0's set_add resets this block's capacity to base 0, so
   // method 1's push fails the 2-phase commit.
   auto handler3 = run_method(0);
-  ASSERT_TRUE(handler3.root_invoke().is_root_success());
-  ASSERT_EQ(handler3.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler3.root_invoke()().is_root_success());
+  ASSERT_EQ(handler3.try_commit_transaction()(), ExecResult::ExecResultOK);
   auto handler4 = run_method(1);
-  ASSERT_TRUE(handler4.root_invoke().is_root_success());
-  ASSERT_EQ(handler4.try_commit_transaction(),
+  ASSERT_TRUE(handler4.root_invoke()().is_root_success());
+  ASSERT_EQ(handler4.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError);
 
   if (GetParam() == TestDB::kHogDb) {

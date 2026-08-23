@@ -73,10 +73,9 @@ private:
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
   x23::Async<ExecProposeResult>
-  run_propose_transaction(SignedTransaction signed_tx,
-                                            TransactionID tx_id);
+  run_propose_transaction(SignedTransaction signed_tx, TransactionID tx_id);
   x23::Async<ExecResult> run_validate_transaction(ProposedTransaction tx,
-                                      TransactionID tx_id);
+                                                  TransactionID tx_id);
 
   x23::Async<ExpectedViewResult>
   run_view_transaction(TransactionViewQuery const &query);

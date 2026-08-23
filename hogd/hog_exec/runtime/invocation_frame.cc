@@ -336,8 +336,9 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
-        auto acq_res = co_await
-            frame_stack_.back().try_acquire_frame_locks(db_proxy_, no_obs);
+        auto acq_res =
+            co_await frame_stack_.back().try_acquire_frame_locks(db_proxy_,
+                                                                 no_obs);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
           co_return acq_res.error();
@@ -428,7 +429,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     }
 
     co_return SystemStatus<std::pair<InvokeResult, bool>>{
-      std::pair{frame_result, manually_reverted}};
+        std::pair{frame_result, manually_reverted}};
   }
 
   // commit child invocation frame successfully

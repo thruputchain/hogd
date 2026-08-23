@@ -25,10 +25,12 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 bool &output_current_set_opt,
                                 int128_t &output_current_add)
 {
-  auto status = co_await
-      syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
+  auto status =
+      co_await syscall_handler.get_nnint(input_key,
+                                         input_force_load_from_snapshot);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
     co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
@@ -54,7 +56,8 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     }
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -68,16 +71,19 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   if (optional_input_set_value) {
     set_value = *optional_input_set_value;
   }
-  auto status = co_await syscall_handler.set_nnint(input_key, set_value, input_add_value,
-                                          input_flags);
+  auto status =
+      co_await syscall_handler.set_nnint(input_key, set_value, input_add_value,
+                                         input_flags);
   if (!status.has_value()) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
     co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 } // namespace hogd

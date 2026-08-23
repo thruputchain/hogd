@@ -133,8 +133,8 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -202,8 +202,8 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -258,8 +258,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_NE(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // 4. Two adjust_allowance invocations in one transaction accumulate.
@@ -325,8 +325,8 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -442,8 +442,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -461,8 +461,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -480,8 +480,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -499,8 +499,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_NE(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_NE(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -596,8 +596,8 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -671,8 +671,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -809,8 +809,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -830,8 +830,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -850,8 +850,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -908,8 +908,8 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -980,8 +980,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -1143,8 +1143,8 @@ TEST_F(NativeTokenAllowanceTest,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -1163,8 +1163,8 @@ TEST_F(NativeTokenAllowanceTest,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context, &spend_tx_id);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -1220,8 +1220,8 @@ TEST_F(NativeTokenAllowanceTest,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -1342,8 +1342,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -1363,8 +1363,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
   }
@@ -1524,8 +1524,8 @@ TEST_F(NativeTokenAllowanceTest,
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -1628,8 +1628,8 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(),
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError);
 
   EXPECT_FALSE(lookup_storage_item_from_db(
@@ -1726,8 +1726,8 @@ TEST_F(NativeTokenAllowanceTest,
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -1775,8 +1775,8 @@ TEST_F(NativeTokenAllowanceTest,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto late_handler = make_new_system_call_handler(late_tx, *runtime_context);
-  ASSERT_TRUE(late_handler.root_invoke().is_root_success());
-  ASSERT_EQ(late_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(late_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(late_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       late_handler.emit_events(ExecResult::ExecResultOK,
                                ProposedTransaction{.signed_tx = late_tx})());
@@ -1810,7 +1810,7 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   };
   auto runtime_context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(tx, *runtime_context);
-  EXPECT_FALSE(handler.root_invoke().is_root_success());
+  EXPECT_FALSE(handler.root_invoke()().is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

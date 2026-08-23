@@ -92,7 +92,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
               [contract_hash](
                   NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                 auto r =
-                    ctx.handler().deploy_contract(kDeployNonce, contract_hash);
+                    ctx.handler().deploy_contract(kDeployNonce, contract_hash)();
                 if (!r.has_value())
                   return r.error().to_invoke_error();
                 if (!r.value().has_value())
@@ -130,10 +130,10 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
         },
         context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     EXPECT_EQ(commit_res, ExecResult::ExecResultUnrecoverable);
   }
 
@@ -145,7 +145,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   // Probe the old block ID with a read. If the BlockTX was garbage
   // collected (InvokeTX properly closed), this returns Abandon. If the
   // leaked InvokeTX kept the BlockTX alive, this succeeds.
-  auto tip_res = fw.get_db_proxy().get_db_tip(old_block);
+  auto tip_res = fw.get_db_proxy().get_db_tip(old_block)();
   EXPECT_FALSE(tip_res.has_value())
       << "BlockTX should be gone after discard — leaked InvokeTX kept it alive";
 }

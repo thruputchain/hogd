@@ -178,12 +178,12 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kGetBlockHeight);
-    body.get_block_height().outputs =
+    body.get_block_height()().outputs =
         SyscallGetBlockHeightOutputs{.result = executing_height};
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
@@ -208,7 +208,7 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
@@ -256,7 +256,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   {
@@ -296,7 +296,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
@@ -333,7 +333,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   {
@@ -365,7 +365,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
@@ -394,7 +394,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 
         uint32_t token_id = 0;
         auto m = ctx.syscall<SyscallNo::kMintAuthToken>(
-            BlockHeight{ctx.handler().get_block_height().value() + 5},
+            BlockHeight{ctx.handler().get_block_height()().value() + 5},
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(
                                            serialized_node.data()),
                                        serialized_node.size()),
@@ -432,7 +432,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 
   auto handler = make_new_system_call_handler(tx, *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   {
@@ -469,7 +469,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
@@ -515,7 +515,7 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   QueueEntry full_entry;
   full_entry.append_range(entry_bytes);
@@ -523,8 +523,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueInsert);
-    body.retrocausal_queue_insert().inputs.key = key;
-    body.retrocausal_queue_insert().inputs.queue_entry = full_entry;
+    body.retrocausal_queue_insert()().inputs.key = key;
+    body.retrocausal_queue_insert()().inputs.queue_entry = full_entry;
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
@@ -539,9 +539,9 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
-    body.retrocausal_queue_consume().inputs.key = key;
-    body.retrocausal_queue_consume().inputs.peek = false;
-    body.retrocausal_queue_consume().outputs =
+    body.retrocausal_queue_consume()().inputs.key = key;
+    body.retrocausal_queue_consume()().inputs.peek = false;
+    body.retrocausal_queue_consume()().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
@@ -551,7 +551,7 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
@@ -617,7 +617,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 
   auto handler = make_new_system_call_handler(tx, context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   {
@@ -633,9 +633,9 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   }
   {
     SyscallTraceBody body(SyscallNo::kDeployContract);
-    body.deploy_contract().inputs.nonce = kNonce;
-    body.deploy_contract().inputs.contract_hash = blob_hash;
-    body.deploy_contract().outputs =
+    body.deploy_contract()().inputs.nonce = kNonce;
+    body.deploy_contract()().inputs.contract_hash = blob_hash;
+    body.deploy_contract()().outputs =
         SyscallDeployContractOutputs{.deployed_address = expected_addr};
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
@@ -645,7 +645,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // BytestringGet follows the same truncation convention as ConsumeAuthToken
@@ -685,7 +685,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   {
@@ -710,7 +710,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-exception-escape)

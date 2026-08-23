@@ -76,8 +76,7 @@ public:
 
   x23::Async<SystemStatus<std::optional<QueueEntry>>>
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
-                                         AddressAndKey addrkey,
-                                         uint32_t index);
+                                         AddressAndKey addrkey, uint32_t index);
 
   // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
   // non-null it receives the conflict diagnostics hog_db built at the level
@@ -179,10 +178,8 @@ public:
 
     last_push_conflict_ =
         DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
-    auto r = co_await
-        db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
-                                              current_subtransaction_batch_,
-                                              &last_push_conflict_);
+    auto r = co_await db_proxy_.try_push_new_subtransaction(
+        block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
     current_subtransaction_batch_.clear();
     co_return r;
   }

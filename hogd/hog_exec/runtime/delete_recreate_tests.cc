@@ -213,10 +213,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -393,10 +393,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -573,10 +573,10 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -641,7 +641,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
   auto verify_handler =
       make_new_system_call_handler(verify_handler_tx, *verify_context);
 
-  auto verify_res = verify_handler.root_invoke();
+  auto verify_res = verify_handler.root_invoke()();
   ASSERT_TRUE(verify_res.is_root_success());
 }
 

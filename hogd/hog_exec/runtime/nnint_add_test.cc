@@ -150,9 +150,9 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -240,9 +240,9 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -328,9 +328,9 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
               }},
       *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_EQ(commit_res1, ExecResult::ExecResultOK);
 
   // Second transaction: call method 1 (add on (-100))
@@ -347,9 +347,9 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
               }},
       *context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   // HogDb rejects the concurrent NNIntAdd(-100) alongside set_add(0,200) at the
   // bounds pre-check (snapshot base=0, delta=-100 => sum < min(base,0)) and
   // returns a conflict error.
@@ -381,9 +381,9 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
               }},
       *context);
 
-  auto res3 = handler3.root_invoke();
+  auto res3 = handler3.root_invoke()();
   ASSERT_TRUE(res3.is_root_success());
-  auto commit_res3 = handler3.try_commit_transaction();
+  auto commit_res3 = handler3.try_commit_transaction()();
   ASSERT_EQ(commit_res3, ExecResult::ExecResultOK);
 
   // Fourth transaction: call method 1 (add on (-100))
@@ -400,9 +400,9 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
               }},
       *context);
 
-  auto res4 = handler4.root_invoke();
+  auto res4 = handler4.root_invoke()();
   ASSERT_TRUE(res4.is_root_success());
-  auto commit_res4 = handler4.try_commit_transaction();
+  auto commit_res4 = handler4.try_commit_transaction()();
   ASSERT_EQ(commit_res4, ExecResult::ExecResultTxNonDeterministicError);
 
   // The getter surfaces the same diagnostic the FFI serializes out. handler4's
@@ -483,9 +483,9 @@ TEST_F(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -541,9 +541,9 @@ TEST_F(NNIntAddTest, NegativeSetValueWithPositiveAdd)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -602,7 +602,7 @@ TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 // NOLINTEND(bugprone-unchecked-optional-access)

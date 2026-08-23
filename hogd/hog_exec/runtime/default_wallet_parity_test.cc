@@ -209,11 +209,11 @@ protected:
     stx.tx.uniquifier = make_new_uniquifier();
 
     auto handler = make_new_system_call_handler(stx, *ctx_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     CapturedRecord rec;
     rec.push_back(res.is_root_success() ? 1 : 0);
     auto frame_output = handler.get_most_recent_frame_output();
-    ExecResult commit = handler.try_commit_transaction();
+    ExecResult commit = handler.try_commit_transaction()();
     rec.push_back(static_cast<uint8_t>(commit));
     switch (frame_output.status_code()) {
     case InvocationFrameStatusCode::Return:
@@ -446,8 +446,8 @@ protected:
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    EXPECT_TRUE(handler.root_invoke().is_root_success());
-    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    ExecResult commit = handler.try_commit_transaction()();
     CapturedRecord outcome;
     outcome.push_back(static_cast<uint8_t>(commit));
     if (commit == ExecResult::ExecResultOK) {

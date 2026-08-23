@@ -197,10 +197,10 @@ x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress addr)
 {
   auto res = co_await client_.get_deployment(block_id, addr);
-  co_return to_system_error_code<std::nullopt>(res,
-                                               [](DeployedContractHash &&x) {
-    return std::make_optional<DeployedContractHash>(std::move(x));
-  });
+  co_return to_system_error_code<std::nullopt>(
+      res, [](DeployedContractHash &&x) {
+        return std::make_optional<DeployedContractHash>(std::move(x));
+      });
 }
 
 x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
@@ -208,13 +208,13 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 AddressAndKey addrkey,
                                                 uint64_t search_start_number)
 {
-  auto res = co_await
-      client_.get_next_retrocausal_queue_block(block_id, addrkey,
-                                               search_start_number);
-  co_return to_system_error_code<std::nullopt>(res,
-                                               [](RetrocausalQueueBlock &&x) {
-    return std::make_optional<RetrocausalQueueBlock>(std::move(x));
-  });
+  auto res =
+      co_await client_.get_next_retrocausal_queue_block(block_id, addrkey,
+                                                        search_start_number);
+  co_return to_system_error_code<std::nullopt>(
+      res, [](RetrocausalQueueBlock &&x) {
+        return std::make_optional<RetrocausalQueueBlock>(std::move(x));
+      });
 }
 
 x23::Async<SystemStatus<std::optional<QueueEntry>>>
@@ -222,8 +222,9 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                                       AddressAndKey addrkey,
                                                       uint32_t index)
 {
-  auto res = co_await
-      client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey, index);
+  auto res =
+      co_await client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey,
+                                                              index);
   co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });
@@ -234,8 +235,8 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
   try {
-    auto res = co_await client_.commit_transaction(block_id, tx_id,
-                                                   new_contracts);
+    auto res =
+        co_await client_.commit_transaction(block_id, tx_id, new_contracts);
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping

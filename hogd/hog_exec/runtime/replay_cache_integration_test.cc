@@ -140,8 +140,8 @@ public:
   ExecResult run_and_commit(Transaction const &tx)
   {
     auto handler = make_new_system_call_handler(tx, *ctx_);
-    handler.root_invoke();
-    return handler.try_commit_transaction();
+    handler.root_invoke()();
+    return handler.try_commit_transaction()();
   }
 };
 
@@ -210,10 +210,10 @@ TEST_F(ReplayCacheIntegrationTest, ExpiredHeightRejectedBeforeBodyRuns)
   auto handler =
       make_new_system_call_handler(make_tx(3, /*nonce=*/10, /*expiry=*/0),
                                    *ctx_);
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   EXPECT_FALSE(root_res.is_root_success());
   EXPECT_FALSE(body_ran_);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 
@@ -233,10 +233,10 @@ TEST_F(ReplayCacheIntegrationTest,
   tx.contracts_to_deploy.push_back(*make_native_contract(99));
 
   auto handler = make_new_system_call_handler(tx, *ctx_);
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   EXPECT_FALSE(root_res.is_root_success());
   EXPECT_FALSE(body_ran_);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 
@@ -248,10 +248,10 @@ TEST_F(ReplayCacheIntegrationTest, UnexpiredHeightRunsBodyAndCommits)
   advance_block();
 
   auto handler = make_new_system_call_handler(make_tx(3, /*nonce=*/11), *ctx_);
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   EXPECT_TRUE(root_res.is_root_success());
   EXPECT_TRUE(body_ran_);
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // The executor-side expiry comparison in replay_uniquifier_expired is strict
@@ -271,9 +271,9 @@ TEST_F(ReplayCacheIntegrationTest, ExpiryAtExecutingHeightAcceptedBoundary)
   auto handler =
       make_new_system_call_handler(make_tx(3, /*nonce=*/22, executing_height),
                                    *ctx_);
-  EXPECT_TRUE(handler.root_invoke().is_root_success());
+  EXPECT_TRUE(handler.root_invoke()().is_root_success());
   EXPECT_TRUE(body_ran_);
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(ReplayCacheIntegrationTest, ManualRevertBurnsNonce)

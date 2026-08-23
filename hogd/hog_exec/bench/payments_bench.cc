@@ -133,11 +133,11 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 
           auto handler =
               bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
-          if (!handler.root_invoke().is_root_success()) {
+          if (!handler.root_invoke()().is_root_success()) {
             error("Failed to invoke transaction");
             panic("Failed to invoke transaction");
           }
-          if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+          if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
             panic("failed to perform commit operation");
           }
           handler.emit_events(ExecResult::ExecResultOK,

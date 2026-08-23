@@ -192,9 +192,9 @@ ViewGatewayRpc::current_view_pin()
   }
   ViewState const &current_state =
       view_states_.at(current_view_block_id_).get();
-  co_await g.reset_and_return(
-      result_t{std::pair{current_state.block_id,
-                         current_state.tip.value.proposal_header.block_height}});
+  co_await g.reset_and_return(result_t{
+      std::pair{current_state.block_id,
+                current_state.tip.value.proposal_header.block_height}});
   panic("unreachable");
 }
 

@@ -32,8 +32,8 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
-#include "x23/vec.h"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 

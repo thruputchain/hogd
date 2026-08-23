@@ -56,11 +56,11 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
                     Uniquifier{.block_expiry_height = 100, .nonce = 100}),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
 
@@ -69,11 +69,11 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
                     Uniquifier{.block_expiry_height = 100, .nonce = 100}),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto r2 = tx2.try_push_current_subtransaction();
+  auto r2 = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
 
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   advance_block();
 
@@ -99,12 +99,12 @@ TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
                make_nonce_delta(
                    Uniquifier{.block_expiry_height = 1000, .nonce = 42}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value())
       << "ConsumeUniquifier with exclusive lock should be rejected as "
          "executor misbehavior, not as a conflict";
   EXPECT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
-  ASSERT_TRUE(tx.abort_transaction().has_value());
+  ASSERT_TRUE(tx.abort_transaction()().has_value());
 }
 
 TEST_P(DirectNonceTests,
@@ -127,10 +127,10 @@ TEST_P(DirectNonceTests,
                                 .nonce = nonce}),
                  std::to_underlying(StorageDeltaFlags::None));
 
-    auto push_result = tx.try_push_current_subtransaction();
+    auto push_result = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   };
 
   // Blocks 1 and 2 each add a height-3 nonce.
@@ -156,13 +156,13 @@ TEST_P(DirectNonceTests,
                                                        .nonce = 300}),
                            std::to_underlying(StorageDeltaFlags::None));
 
-  auto post_expiry_push = post_expiry_tx.try_push_current_subtransaction();
+  auto post_expiry_push = post_expiry_tx.try_push_current_subtransaction()();
   ASSERT_TRUE(post_expiry_push.has_value());
   ASSERT_FALSE(post_expiry_push.value())
       << "The pre-GC reservation treats the cache size as 3 (current 2 + "
          "new 1), requiring balance for a third entry that is not available; "
          "the consume must be rejected at push time.";
-  ASSERT_TRUE(post_expiry_tx.abort_transaction().has_value());
+  ASSERT_TRUE(post_expiry_tx.abort_transaction()().has_value());
 
   auto balance_after_rejection = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(contract_addr));
@@ -199,10 +199,10 @@ TEST_P(DirectNonceTests,
                                 .nonce = nonce}),
                  std::to_underlying(StorageDeltaFlags::None));
 
-    auto push_result = tx.try_push_current_subtransaction();
+    auto push_result = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block();
   };
 
@@ -229,10 +229,10 @@ TEST_P(DirectNonceTests,
                     Uniquifier{.block_expiry_height = 7, .nonce = 400}),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto tx1_push = tx1.try_push_current_subtransaction();
+  auto tx1_push = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(tx1_push.has_value());
   ASSERT_TRUE(tx1_push.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_replay_cache_addrkey(contract_addr),
@@ -240,10 +240,10 @@ TEST_P(DirectNonceTests,
                     Uniquifier{.block_expiry_height = 7, .nonce = 401}),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto tx2_push = tx2.try_push_current_subtransaction();
+  auto tx2_push = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(tx2_push.has_value());
   ASSERT_TRUE(tx2_push.value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   advance_block();
 
@@ -282,10 +282,10 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
                                 .nonce = nonce}),
                  std::to_underlying(StorageDeltaFlags::None));
 
-    auto push_result = tx.try_push_current_subtransaction();
+    auto push_result = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block();
   };
 
@@ -310,7 +310,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
                     Uniquifier{.block_expiry_height = 7, .nonce = 400}),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto tx1_push = tx1.try_push_current_subtransaction();
+  auto tx1_push = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(tx1_push.has_value());
   ASSERT_TRUE(tx1_push.value());
 
@@ -320,12 +320,12 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
                     Uniquifier{.block_expiry_height = 7, .nonce = 401}),
                 std::to_underlying(StorageDeltaFlags::None));
 
-  auto tx2_push = tx2.try_push_current_subtransaction();
+  auto tx2_push = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(tx2_push.has_value());
   ASSERT_TRUE(tx2_push.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   advance_block();
 
@@ -372,10 +372,10 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
                                 .nonce = nonce}),
                  std::to_underlying(StorageDeltaFlags::None));
 
-    auto push_result = tx.try_push_current_subtransaction();
+    auto push_result = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(push_result.has_value());
     ASSERT_TRUE(push_result.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block();
   };
 
@@ -400,7 +400,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
                 make_nonce_delta(
                     Uniquifier{.block_expiry_height = 7, .nonce = 400}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto tx1_push = tx1.try_push_current_subtransaction();
+  auto tx1_push = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(tx1_push.has_value());
   ASSERT_TRUE(tx1_push.value());
 
@@ -409,7 +409,7 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
                 make_nonce_delta(
                     Uniquifier{.block_expiry_height = 7, .nonce = 401}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto tx2_push = tx2.try_push_current_subtransaction();
+  auto tx2_push = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(tx2_push.has_value());
   ASSERT_TRUE(tx2_push.value());
 
@@ -418,15 +418,15 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
                 make_nonce_delta(
                     Uniquifier{.block_expiry_height = 7, .nonce = 402}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto tx3_push = tx3.try_push_current_subtransaction();
+  auto tx3_push = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(tx3_push.has_value());
   ASSERT_TRUE(tx3_push.value());
 
   // tx2 is the middle tx that aborts.
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 
   advance_block();
 
@@ -491,13 +491,13 @@ TEST_P(DirectNonceTests, ReplayCacheHeightCapRejects4001stHeight)
                    Uniquifier{.block_expiry_height = new_height, .nonce = 77}),
                std::to_underlying(StorageDeltaFlags::None));
 
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value());
   ASSERT_FALSE(r.value())
       << "replay-cache height cap at " << kReplayCacheHeightsMaxLen
       << " must reject a brand-new height once the cap is reached";
 
-  ASSERT_TRUE(tx.abort_transaction().has_value());
+  ASSERT_TRUE(tx.abort_transaction()().has_value());
 
   // Metadata must still be exactly at the cap, not one over.
   auto final_meta = dao.read_address_replay_cache_meta(contract_addr);
@@ -527,11 +527,11 @@ TEST_P(DirectNonceTests, ExpiredHeightFreesCapSlotForNewHeightNextBlock)
                  make_nonce_delta(
                      Uniquifier{.block_expiry_height = expiry, .nonce = nonce}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     if (!r.has_value() || !r.value()) {
       return std::make_pair(r.has_value(), r.has_value() && r.value());
     }
-    EXPECT_TRUE(tx.commit_transaction().has_value());
+    EXPECT_TRUE(tx.commit_transaction()().has_value());
     return std::make_pair(true, true);
   };
 
@@ -555,12 +555,12 @@ TEST_P(DirectNonceTests, ExpiredHeightFreesCapSlotForNewHeightNextBlock)
                  make_nonce_delta(Uniquifier{.block_expiry_height = over_cap,
                                              .nonce = 9999}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_FALSE(r.value())
         << "the " << (kReplayCacheHeightsMaxLen + 1)
         << "th distinct height in one block must exceed the cap";
-    ASSERT_TRUE(tx.abort_transaction().has_value());
+    ASSERT_TRUE(tx.abort_transaction()().has_value());
   }
 
   // Advance one block: the lowest seeded height (base_height) is now expired,

@@ -178,7 +178,8 @@ make_native_default_wallet_contract()
               call.target, std::as_bytes(std::span(call.calldata)),
               /*auth tokens*/ std::span<uint32_t>{}, inputs, outputs);
           if (!inv.has_value()) {
-            co_return NativeContractBuilder::host_fn_error_conversion(inv.error());
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                inv.error());
           }
           if (*inv != SyscallErrorCode::kSyscallErrorCodeNone) {
             // Rejected before a child frame ran: sdk contract_call Err(_).
@@ -203,7 +204,8 @@ make_native_default_wallet_contract()
               std::as_writable_bytes(std::span(return_buf)), return_written,
               std::span<std::byte>{}, auth_written);
           if (!get.has_value()) {
-            co_return NativeContractBuilder::host_fn_error_conversion(get.error());
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                get.error());
           }
           // Unreachable with a correct host (after a Return/Abort frame the
           // payload exists and the syscall succeeds), but the sdk maps a
@@ -239,8 +241,8 @@ make_native_default_wallet_contract()
       });
 
   builder.add<default_wallet::DefaultWallet, u8"deploy">(
-      [](NativeSyscallContext &ctx, SHA256Hash nonce,
-         SHA256Hash contract_hash) -> x23::Async<InvokeStatus<deploy_result_t>> {
+      [](NativeSyscallContext &ctx, SHA256Hash nonce, SHA256Hash contract_hash)
+          -> x23::Async<InvokeStatus<deploy_result_t>> {
         auto auth_err = co_await check_root_pubkey_auth(ctx);
         if (!auth_err.has_value()) {
           co_return auth_err.error();
@@ -250,8 +252,9 @@ make_native_default_wallet_contract()
         }
 
         ContractAddress deployed{};
-        auto r = co_await ctx.syscall<SyscallNo::kDeployContract>(nonce, contract_hash,
-                                                         deployed);
+        auto r = co_await ctx.syscall<SyscallNo::kDeployContract>(nonce,
+                                                                  contract_hash,
+                                                                  deployed);
         if (!r.has_value()) {
           co_return NativeContractBuilder::host_fn_error_conversion(r.error());
         }

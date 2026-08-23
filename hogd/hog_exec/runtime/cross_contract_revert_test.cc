@@ -196,10 +196,10 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -437,10 +437,10 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -586,11 +586,11 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success())
       << "Expected root success, but frame success: " << res.is_frame_success();
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();

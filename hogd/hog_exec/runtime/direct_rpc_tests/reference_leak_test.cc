@@ -118,7 +118,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_consume_delta(),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value()); // Should succeed
 
@@ -127,7 +127,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction();
+  auto r2 = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()) << "rcq_conflict: Second consume should fail";
 
@@ -136,15 +136,15 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
                               std::to_underlying(StorageDeltaFlags::None));
-    auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
+    auto r_intermediate = tx_intermediate.try_push_current_subtransaction()();
     ASSERT_TRUE(r_intermediate.has_value());
     ASSERT_FALSE(r_intermediate.value())
         << "bytestring_conflict: Intermediate bytestring should fail";
-    ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
+    ASSERT_TRUE(tx_intermediate.abort_transaction()().has_value());
   }
 
   // Here's where the reference must be released.
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
 
   // The bug test: now try to reserve an RCQ delta that doesn't need consume
   // This should succeed if the reference was properly released on the failure
@@ -152,14 +152,14 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r3 = tx3.try_push_current_subtransaction();
+  auto r3 = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value())
       << "Should be able to reserve insert-only RCQ after consume conflict";
 
   // Clean up
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 // Test Auth Data reference leak: when try_reserve_change_signer() fails,
@@ -178,7 +178,7 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_auth_data_delta({0, 2}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -186,16 +186,16 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_auth_data_delta({1, 2}), // Overlap in key ids
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction();
+  auto r2 = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value())
       << "auth_conflict: Second auth data delta with same key ID should fail";
 
   // Here's where the reference must be released.
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
 
   // Clean up
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   advance_block();
 
@@ -222,7 +222,7 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
                 make_replay_cache_delta(
                     Uniquifier{.block_expiry_height = 100, .nonce = 100}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -232,15 +232,15 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
                 make_replay_cache_delta(Uniquifier{.block_expiry_height = 100,
                                                    .nonce = 100}), // Same nonce
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction();
+  auto r2 = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value()) << "replay_conflict: Duplicate nonce should fail";
 
   // Here's where the reference must be released.
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
 
   // Clean up
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   advance_block();
   // hog_db (deliberately) does not support reading replay cache data in the
@@ -271,7 +271,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_nnint_delta(5, 0), // Set to 5
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -281,7 +281,7 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
       key,
       make_nnint_delta(5, -10), // Try to subtract 10 from 5 (would go negative)
       std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction();
+  auto r2 = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value())
       << "nnint_conflict: Subtraction that would go negative should fail";
@@ -291,15 +291,15 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
     auto tx_intermediate = make_new_per_tx_db_proxy();
     tx_intermediate.add_delta(key, make_bytestring_delta("foo"),
                               std::to_underlying(StorageDeltaFlags::None));
-    auto r_intermediate = tx_intermediate.try_push_current_subtransaction();
+    auto r_intermediate = tx_intermediate.try_push_current_subtransaction()();
     ASSERT_TRUE(r_intermediate.has_value());
     ASSERT_FALSE(r_intermediate.value())
         << "bytestring_conflict: Intermediate bytestring should fail";
-    ASSERT_TRUE(tx_intermediate.abort_transaction().has_value());
+    ASSERT_TRUE(tx_intermediate.abort_transaction()().has_value());
   }
 
   // Here's where the reference must be released.
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
 
   // The bug test: now try to reserve a different type after the failed NNInt
   // reservation This should succeed if the reference was properly released on
@@ -307,14 +307,14 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r3 = tx3.try_push_current_subtransaction();
+  auto r3 = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value())
       << "Should be able to reserve bytestring after nnint conflict";
 
   // Clean up
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
@@ -331,27 +331,27 @@ TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction();
+  auto r1 = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_auth_data_delta({2, 5, 7}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction();
+  auto r2 = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_auth_data_delta({2, 7}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r3 = tx3.try_push_current_subtransaction();
+  auto r3 = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r3.has_value());
   ASSERT_TRUE(r3.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReferenceLeakTest,

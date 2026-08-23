@@ -73,7 +73,6 @@ private:
   record_concurrent_entry(uint32_t index, QueueEntry entry) const;
 
 public:
-
   RetrocausalQueueMetadata const &retrocausal_queue_metadata() const
   {
     CHECK(type() == ItemViewType::kRetrocausalQueue);

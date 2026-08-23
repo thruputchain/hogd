@@ -107,11 +107,11 @@ TEST_P(RevertTest, RootFrameReverts)
       *runtime_context);
 
   // Execute the transaction - it should succeed
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Commit the transaction - it should succeed
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
@@ -289,7 +289,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                 });
   fns_2.emplace(
       1, [key1](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = ctx.handler().get_bytestring(key1);
+        auto res = ctx.handler().get_bytestring(key1)();
         if (!res.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -323,7 +323,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                 });
   fns_3.emplace(
       1, [key2](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = ctx.handler().get_bytestring(key2);
+        auto res = ctx.handler().get_bytestring(key2)();
         if (!res.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -365,10 +365,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -487,11 +487,11 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
       *runtime_context);
 
   // Execute the transaction - it should succeed
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Commit the transaction - it should succeed
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -602,7 +602,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
   auto locker_tx = make_new_per_tx_db_proxy(UINT64_MAX);
   locker_tx.add_delta(conflict_addrkey, make_bytestring_delta("locker"),
                       std::to_underlying(StorageDeltaFlags::None));
-  auto lock_res = locker_tx.try_push_current_subtransaction();
+  auto lock_res = locker_tx.try_push_current_subtransaction()();
   ASSERT_TRUE(lock_res.has_value());
   ASSERT_TRUE(lock_res.value());
 
@@ -617,12 +617,12 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Clean up the locker transaction.
-  ASSERT_TRUE(locker_tx.abort_transaction().has_value());
+  ASSERT_TRUE(locker_tx.abort_transaction()().has_value());
 
   advance_block();
 
@@ -712,10 +712,10 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
 
   // Proposal mode: run and extract proposal data.
   auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);
-  auto proposal_res = proposal_handler.root_invoke();
+  auto proposal_res = proposal_handler.root_invoke()();
   ASSERT_TRUE(proposal_res.is_root_success());
   auto proposal_data = proposal_handler.get_proposal_data();
-  ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+  ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
 
   // No nondeterministic bit should have been logged.
   EXPECT_EQ(proposal_data.nondeterministic_bit_count, 0U);
@@ -726,9 +726,9 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *runtime_context,
                                               proposal_data);
-  auto validation_res = validation_handler.root_invoke();
+  auto validation_res = validation_handler.root_invoke()();
   ASSERT_TRUE(validation_res.is_root_success());
-  ASSERT_EQ(validation_handler.try_commit_transaction(),
+  ASSERT_EQ(validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
 }
 

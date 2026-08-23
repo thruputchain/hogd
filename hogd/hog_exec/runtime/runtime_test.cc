@@ -26,7 +26,7 @@ TEST(MultiplexedContextTest, UnregisteredTypeAtInvokeIsUnrecoverable)
       .contract_size = 0,
       .contract_type = ContractType::kMockTest,
   });
-  auto runtime = context.make_new_runtime(deployed, nullptr);
+  auto runtime = context.make_new_runtime(deployed, nullptr)();
   ASSERT_FALSE(runtime.has_value());
   EXPECT_EQ(runtime.error().code(), SystemErrorCode::Unrecoverable);
 }

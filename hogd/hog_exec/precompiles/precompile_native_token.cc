@@ -148,11 +148,9 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key,
-                                                 /*load_from_snapshot=*/true,
-                                                 output_set, output_set_opt,
-                                                 output_add);
+  auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      allow_key,
+      /*load_from_snapshot=*/true, output_set, output_set_opt, output_add);
   if (!r.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -220,11 +218,9 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   int128_t supply_base{};
   bool supply_base_present{};
   int128_t supply_add{};
-  auto get =
-      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
-                                                 true, supply_base,
-                                                 supply_base_present,
-                                                 supply_add);
+  auto get = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
+      supply_add);
   if (!get) {
     co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
@@ -243,7 +239,8 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   }
 
   auto credit =
-      co_await ctx.handler().modify_native_token_balance(receiver, signed_amount);
+      co_await ctx.handler().modify_native_token_balance(receiver,
+                                                         signed_amount);
   if (!credit) {
     co_return credit.error().to_invoke_error();
   }
@@ -315,11 +312,9 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   int128_t supply_base{};
   bool supply_base_present{};
   int128_t supply_add{};
-  auto get =
-      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
-                                                 true, supply_base,
-                                                 supply_base_present,
-                                                 supply_add);
+  auto get = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
+      supply_add);
   if (!get) {
     co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
@@ -333,7 +328,8 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  auto debit = co_await ctx.handler().modify_native_token_balance(owner, supply_delta);
+  auto debit =
+      co_await ctx.handler().modify_native_token_balance(owner, supply_delta);
   if (!debit) {
     co_return debit.error().to_invoke_error();
   }
@@ -418,7 +414,8 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // checked add on the credit leg cannot fire. HogDb's commit-time
   // add-capacity bound remains the backstop for hand-crafted states.
 
-  if (auto moved = co_await native_token_unchecked_transfer(ctx.handler(), *owner,
+  if (auto moved =
+          co_await native_token_unchecked_transfer(ctx.handler(), *owner,
                                                    receiver, amount_signed_int);
       !moved.has_value()) {
     co_return moved.error();
@@ -473,7 +470,8 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // debit, then the receiver credit. Any failure aborts the frame and
   // reverts the staged allowance debit.
   if (owner != *spender) {
-    auto allow_res = co_await adjust_allowance(ctx, owner, *spender, -amount_signed_int);
+    auto allow_res =
+        co_await adjust_allowance(ctx, owner, *spender, -amount_signed_int);
     if (!allow_res.has_value()) {
       co_return allow_res.error();
     }
@@ -504,7 +502,8 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // checked add on the credit leg cannot fire. HogDb's commit-time
   // add-capacity bound remains the backstop for hand-crafted states.
 
-  if (auto moved = co_await native_token_unchecked_transfer(ctx.handler(), owner,
+  if (auto moved =
+          co_await native_token_unchecked_transfer(ctx.handler(), owner,
                                                    receiver, amount_signed_int);
       !moved.has_value()) {
     co_return moved.error();
@@ -594,9 +593,10 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
-                                                 output_set_opt, output_add);
+  auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true,
+                                                               output_set,
+                                                               output_set_opt,
+                                                               output_add);
   if (!r.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -692,7 +692,8 @@ make_native_token_contract()
         if (!ctx.consume_gas(1)) {
           co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        auto balance = co_await ctx.handler().get_native_token_balance(contract_address);
+        auto balance =
+            co_await ctx.handler().get_native_token_balance(contract_address);
         if (!balance.has_value()) {
           co_return balance.error().to_invoke_error();
         }
@@ -719,7 +720,8 @@ make_native_token_contract()
           co_return caller_address.error();
         }
 
-        auto balance = co_await ctx.handler().get_native_token_balance(*caller_address);
+        auto balance =
+            co_await ctx.handler().get_native_token_balance(*caller_address);
         if (!balance.has_value()) {
           co_return balance.error().to_invoke_error();
         }
@@ -754,7 +756,8 @@ make_native_token_contract()
             kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
             supply_add);
         if (!get.has_value()) {
-          co_return NativeContractBuilder::host_fn_error_conversion(get.error());
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              get.error());
         }
         uint128_t total_supply;
         if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {

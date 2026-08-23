@@ -175,9 +175,9 @@ TEST_F(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, InvokeRejectsDuplicateForwardedAuthTokenIds)
@@ -256,9 +256,9 @@ TEST_F(SyscallAuthTokenTest, InvokeRejectsDuplicateForwardedAuthTokenIds)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, GetCalldataRejectsPartialAuthTokenOutputSpan)
@@ -360,9 +360,9 @@ TEST_F(SyscallAuthTokenTest, GetCalldataRejectsPartialAuthTokenOutputSpan)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
@@ -495,9 +495,9 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 class SyscallAuthTokenExpiryTest : public ::testing::Test,
@@ -615,9 +615,9 @@ TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
@@ -694,9 +694,9 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
@@ -772,9 +772,9 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 // MintAuthToken bytes that fail x23 deserialization (not a serialized
 // AuthTokenNode) are rejected as kInvalidSyscallInput -- the XdrException
@@ -848,9 +848,9 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenRejectsUndeserializableBytes)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Child consumes a token, gets unwrapped child tokens, returns them to
@@ -1031,9 +1031,9 @@ TEST_F(SyscallAuthTokenTest, ReturnAuthTokensToParent)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReturnRejectsDuplicateAuthTokenIds)
@@ -1122,9 +1122,9 @@ TEST_F(SyscallAuthTokenTest, ReturnRejectsDuplicateAuthTokenIds)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, GetReturnedBufferRejectsPartialAuthTokenOutputSpan)
@@ -1228,9 +1228,9 @@ TEST_F(SyscallAuthTokenTest, GetReturnedBufferRejectsPartialAuthTokenOutputSpan)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Return syscall with auth token IDs that the child doesn't own must
@@ -1308,9 +1308,9 @@ TEST_F(SyscallAuthTokenTest, ReturnUnownedAuthTokensCausesExit)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Regression test for #1702: a child mints a token then faults; the parent
@@ -1457,9 +1457,9 @@ TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Regression test for #1702 comment 1: forwarding a completely fabricated
@@ -1527,9 +1527,9 @@ TEST_F(SyscallAuthTokenTest, ForwardFabricatedAuthTokenIdIsRejected)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Regression test for #1702 comment 2: after a child consumes a token, the
@@ -1642,9 +1642,9 @@ TEST_F(SyscallAuthTokenTest, ReplayConsumedAuthTokenIsRejected)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Regression test for #1711: a middle contract learns a token ID from calldata
@@ -1765,9 +1765,9 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
@@ -1827,9 +1827,9 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
@@ -1918,9 +1918,9 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
@@ -1989,9 +1989,9 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
@@ -2103,9 +2103,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
@@ -2242,9 +2242,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotConsumeForwardedToken)
@@ -2340,9 +2340,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotConsumeForwardedToken)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotMintToken)
@@ -2421,9 +2421,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotMintToken)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
@@ -2533,9 +2533,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
@@ -2648,9 +2648,9 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Return(revert_frame=true) with auth token IDs must trap, even when
@@ -2749,9 +2749,9 @@ TEST_F(SyscallAuthTokenTest, ReturnRevertWithMintedAuthTokenCausesExit)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // A token minted inside a manually-reverted child frame must not be usable
@@ -2868,9 +2868,9 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Issue #2543 reported the behavior exercised here as a rollback bug. It is
@@ -3097,7 +3097,7 @@ TEST_F(SyscallAuthTokenTest,
           .uniquifier = make_new_uniquifier(),
       },
       *runtime_context);
-  auto polluted_res = polluted_handler.root_invoke();
+  auto polluted_res = polluted_handler.root_invoke()();
   ASSERT_TRUE(polluted_res.is_root_success());
 
   auto control_handler = make_new_system_call_handler(
@@ -3112,7 +3112,7 @@ TEST_F(SyscallAuthTokenTest,
           .uniquifier = make_new_uniquifier(),
       },
       *runtime_context);
-  auto control_res = control_handler.root_invoke();
+  auto control_res = control_handler.root_invoke()();
   ASSERT_TRUE(control_res.is_root_success());
 
   ASSERT_TRUE(polluted.did_reverted_consume);
@@ -3269,7 +3269,7 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
                   .uniquifier = make_new_uniquifier(),
               }},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // If the child ran at all, neither zero-cost syscall may have succeeded.

@@ -56,7 +56,7 @@ protected:
 
                   for (uint8_t val : calldata) {
                     auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
+                        key, std::as_bytes(std::span(&val, 1)))();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -75,7 +75,7 @@ protected:
 
           last_consumed_values_.clear();
           for (uint8_t i = 0; i < consume_count; i++) {
-            auto res = ctx.handler().retrocausal_queue_consume(key, false);
+            auto res = ctx.handler().retrocausal_queue_consume(key, false)();
             if (!res.has_value()) {
               return res.error().to_invoke_error();
             }
@@ -93,7 +93,7 @@ protected:
           if (ctx.handler().get_calldata().size() > 1) {
             uint8_t abort_code = ctx.handler().get_calldata().at(1);
             if (abort_code == 1) {
-              auto status = ctx.handler().abort_transaction();
+              auto status = ctx.handler().abort_transaction()();
               if (!status.has_value()) {
                 return status.error().to_invoke_error();
               }
@@ -116,7 +116,7 @@ protected:
                   // Insert all values (bytes after the first)
                   for (size_t i = 1; i < calldata.size(); i++) {
                     auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&calldata[i], 1)));
+                        key, std::as_bytes(std::span(&calldata[i], 1)))();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -129,7 +129,7 @@ protected:
                   last_consumed_values_.clear();
                   for (uint8_t i = 0; i < consume_count; i++) {
                     auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
+                        ctx.handler().retrocausal_queue_consume(key, false)();
                     if (!res.has_value()) {
                       return res.error().to_invoke_error();
                     }
@@ -149,7 +149,7 @@ protected:
                   auto const &value = ctx.handler().get_calldata().at(0);
                   auto key = make_storage_key("nnint0");
 
-                  auto r = ctx.handler().set_nnint(key, {value}, 0, {});
+                  auto r = ctx.handler().set_nnint(key, {value}, 0, {})();
                   if (!r.has_value()) {
                     return r.error().to_invoke_error();
                   }
@@ -161,7 +161,7 @@ protected:
                   auto const &calldata = ctx.handler().get_calldata();
                   auto key = make_storage_key("rcq0");
                   auto res = ctx.handler().retrocausal_queue_insert(
-                      key, std::as_bytes(std::span(calldata)));
+                      key, std::as_bytes(std::span(calldata)))();
                   if (!res.has_value()) {
                     return res.error().to_invoke_error();
                   }
@@ -176,7 +176,7 @@ protected:
                   auto key = make_storage_key("rcq0");
                   auto res = ctx.handler().set_bytestring(
                       key, std::as_bytes(std::span(calldata)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      std::to_underlying(StorageDeltaFlags::None))();
                   if (!res.has_value()) {
                     return res.error().to_invoke_error();
                   }
@@ -280,12 +280,12 @@ protected:
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return testing::AssertionFailure() << "Root invoke failed";
     }
 
-    auto r = handler.try_commit_transaction();
+    auto r = handler.try_commit_transaction()();
     if (r != ExecResult::ExecResultOK) {
       return testing::AssertionFailure() << "Commit failed: " << x23::show(r);
     }
@@ -483,7 +483,7 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                             .uniquifier = make_new_uniquifier()}}, // Consume 1
                                                                    // item
       *context_);
-  ASSERT_TRUE(handler_t1.root_invoke().is_root_success());
+  ASSERT_TRUE(handler_t1.root_invoke()().is_root_success());
   // At this point, T1's RetrocausalQueueIt should have consumed_past_entries_
   // = 1.
 
@@ -499,19 +499,19 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                            .calldata = Calldata({5, 4})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
-  ASSERT_TRUE(handler_t2.root_invoke().is_root_success());
+  ASSERT_TRUE(handler_t2.root_invoke()().is_root_success());
   // T2's RetrocausalQueueIt should have consumed_past_entries_ = 0.
   // In the OLD buggy code, this would have overwritten the global lock's
   // consumed_past_entries_ to 0.
 
   // T1 Commits.
-  ASSERT_EQ(handler_t1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_t1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   ASSERT_FALSE(
       consume({2, 3})); // Aborts because of T1 consume (single consumer).
 
   // T2 Commits.
-  ASSERT_EQ(handler_t2.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_t2.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   // Verify final state: {2, 3, 4, 5} exactly.
@@ -547,7 +547,7 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .calldata = Calldata({2})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
-  ASSERT_TRUE(handler_consume.root_invoke().is_root_success());
+  ASSERT_TRUE(handler_consume.root_invoke()().is_root_success());
 
   auto handler_insert = make_new_system_call_handler(
       SignedTransaction{
@@ -560,11 +560,11 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .calldata = Calldata({9})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
-  ASSERT_TRUE(handler_insert.root_invoke().is_root_success());
+  ASSERT_TRUE(handler_insert.root_invoke()().is_root_success());
 
   // If the invariant is violated, one of these commits will abort the process.
-  ASSERT_EQ(handler_consume.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_EQ(handler_insert.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_consume.try_commit_transaction()(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_insert.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_P(RCQTest, ConsumeFromPastBlock)
@@ -805,14 +805,14 @@ TEST_P(RCQTest, ConcurrentOverflow)
                             .uniquifier = make_new_uniquifier()}},
       *context_);
 
-  ASSERT_TRUE(handler1.root_invoke().is_root_success());
-  ASSERT_TRUE(handler2.root_invoke().is_root_success());
+  ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+  ASSERT_TRUE(handler2.root_invoke()().is_root_success());
 
   // First commit should succeed.
-  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Second commit should fail because it exceeds the block limit.
-  ASSERT_EQ(handler2.try_commit_transaction(),
+  ASSERT_EQ(handler2.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError);
 }
 
@@ -961,12 +961,12 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                             .uniquifier = make_new_uniquifier()}},
       *context_);
 
-  ASSERT_TRUE(handler1.root_invoke().is_root_success());
-  ASSERT_TRUE(handler2.root_invoke().is_root_success());
+  ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+  ASSERT_TRUE(handler2.root_invoke()().is_root_success());
 
   // Both should commit: 500 + 500 = 1000 = exactly at limit.
-  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler2.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -1014,8 +1014,8 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                            .calldata = Calldata({0x2f})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 
@@ -1037,8 +1037,8 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                            .calldata = Calldata({0x41})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
-    ASSERT_TRUE(handler1.root_invoke().is_root_success());
-    ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+    ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler2 = make_new_system_call_handler(
@@ -1053,14 +1053,14 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                                {0x07, 0x02, 0x42, 0x43})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
-    ASSERT_TRUE(handler2.root_invoke().is_root_success());
+    ASSERT_TRUE(handler2.root_invoke()().is_root_success());
     // Before the fix (#1357), this triggered:
     //   CHECK_LE(cost_change, locked_storage_cost) [8 < 0]
     // TX2's reservation was 0 because snapshot_cost_transform clamped
     // against the old bytestring cost, but commit_change returned 8.
     // Now fixed: try_atomic_change_lock returns a conservative standalone
     // cost that survives the snapshot_cost_transform subtraction.
-    ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler2.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 }

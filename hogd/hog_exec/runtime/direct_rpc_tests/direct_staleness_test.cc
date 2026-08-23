@@ -95,15 +95,15 @@ TEST_F(DirectStalenessTest, SnapshotItemReadOnStaleBlockReturnsAbandon)
     auto tx = make_new_per_tx_db_proxy(0);
     tx.add_delta(key, make_nnint_set_add_delta(0, 42),
                  std::to_underlying(StorageDeltaFlags::None));
-    ASSERT_TRUE(tx.try_push_current_subtransaction().has_value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.try_push_current_subtransaction()().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   advance_block();
 
   auto [block_a, block_b] = create_and_commit_sibling();
 
-  auto res = get_db_proxy().get_snapshot_item(block_b, key);
+  auto res = get_db_proxy().get_snapshot_item(block_b, key)();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
@@ -117,7 +117,7 @@ TEST_F(DirectStalenessTest, ContractReadOnStaleBlockReturnsAbandon)
 
   auto [block_a, block_b] = create_and_commit_sibling();
 
-  auto res = get_db_proxy().get_contract(block_b, sha256(*contract));
+  auto res = get_db_proxy().get_contract(block_b, sha256(*contract))();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
@@ -132,7 +132,7 @@ TEST_F(DirectStalenessTest, DeploymentReadOnStaleBlockReturnsAbandon)
 
   auto [block_a, block_b] = create_and_commit_sibling();
 
-  auto res = get_db_proxy().get_deployment(block_b, contract_addr);
+  auto res = get_db_proxy().get_deployment(block_b, contract_addr)();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
@@ -143,11 +143,11 @@ TEST_F(DirectStalenessTest, DbTipReadOnStaleBlockReturnsAbandon)
 
   auto [block_a, block_b] = create_and_commit_sibling();
 
-  auto stale_snapshot_res = get_db_proxy().get_contract(block_b, SHA256Hash{});
+  auto stale_snapshot_res = get_db_proxy().get_contract(block_b, SHA256Hash{})();
   ASSERT_FALSE(stale_snapshot_res.has_value());
   EXPECT_EQ(stale_snapshot_res.error().code(), SystemErrorCode::Abandon);
 
-  auto res = get_db_proxy().get_db_tip(block_b);
+  auto res = get_db_proxy().get_db_tip(block_b)();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Abandon);
 }
@@ -175,7 +175,7 @@ TEST_F(DirectStalenessTest,
   delta.deployed_contract_hash() = deployed_contract_hash;
   tx.add_delta(addrkey, std::move(delta),
                std::to_underlying(StorageDeltaFlags::None));
-  auto push = tx.try_push_current_subtransaction();
+  auto push = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(push.has_value());
   ASSERT_TRUE(push.value());
 
@@ -187,7 +187,7 @@ TEST_F(DirectStalenessTest,
                     std::make_unique<const Contract>(contract));
   BorrowedContractBatch new_contracts(hashes, contracts);
 
-  auto commit = tx.commit_transaction(new_contracts);
+  auto commit = tx.commit_transaction(new_contracts)();
   ASSERT_FALSE(commit.has_value());
   EXPECT_EQ(commit.error().code(), SystemErrorCode::Abandon);
 
@@ -237,7 +237,7 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
   delta.deployed_contract_hash() = deployed_contract_hash;
   tx.add_delta(addrkey, std::move(delta),
                std::to_underlying(StorageDeltaFlags::None));
-  auto push = tx.try_push_current_subtransaction();
+  auto push = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(push.has_value());
   ASSERT_TRUE(push.value());
 
@@ -249,7 +249,7 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
                     std::make_unique<const Contract>(contract));
   BorrowedContractBatch new_contracts(hashes, contracts);
 
-  auto commit = tx.commit_transaction(new_contracts);
+  auto commit = tx.commit_transaction(new_contracts)();
   ASSERT_FALSE(commit.has_value());
   EXPECT_EQ(commit.error().code(), SystemErrorCode::Abandon);
 
@@ -290,7 +290,7 @@ TEST_F(DirectStalenessTest, StaleOverlimitNewContractCommitReturnsAbandon)
   delta.deployed_contract_hash() = deployed_contract_hash;
   tx.add_delta(addrkey, std::move(delta),
                std::to_underlying(StorageDeltaFlags::None));
-  auto push = tx.try_push_current_subtransaction();
+  auto push = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(push.has_value());
   ASSERT_TRUE(push.value());
 
@@ -302,7 +302,7 @@ TEST_F(DirectStalenessTest, StaleOverlimitNewContractCommitReturnsAbandon)
                     std::make_unique<const Contract>(contract));
   BorrowedContractBatch new_contracts(hashes, contracts);
 
-  auto commit = tx.commit_transaction(new_contracts);
+  auto commit = tx.commit_transaction(new_contracts)();
   ASSERT_FALSE(commit.has_value());
   EXPECT_EQ(commit.error().code(), SystemErrorCode::Abandon);
 
@@ -350,17 +350,17 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
     auto tx = make_new_per_tx_db_proxy(0);
     tx.add_delta(addrkey, make_bytestring_delta("old-value"),
                  std::to_underlying(StorageDeltaFlags::None));
-    ASSERT_TRUE(tx.try_push_current_subtransaction().has_value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.try_push_current_subtransaction()().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   advance_block();
 
-  auto snap1 = get_db_proxy().open_viewing_snapshot();
+  auto snap1 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap1.has_value());
   StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
 
-  auto warm = cache1.try_get_snapshot_item(addrkey);
+  auto warm = cache1.try_get_snapshot_item(addrkey)();
   ASSERT_TRUE(warm.has_value());
   ASSERT_NE(warm.value(), nullptr);
   EXPECT_EQ(warm.value()->bytestring(), make_bytestring("old-value"));
@@ -369,33 +369,33 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
     auto tx = make_new_per_tx_db_proxy(1);
     tx.add_delta(addrkey, make_bytestring_delta("new-value"),
                  std::to_underlying(StorageDeltaFlags::None));
-    ASSERT_TRUE(tx.try_push_current_subtransaction().has_value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.try_push_current_subtransaction()().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   advance_block();
 
   // The stale cache still returns old-value.
-  auto stale = cache1.try_get_snapshot_item(addrkey);
+  auto stale = cache1.try_get_snapshot_item(addrkey)();
   ASSERT_TRUE(stale.has_value());
   ASSERT_NE(stale.value(), nullptr);
   EXPECT_EQ(stale.value()->bytestring(), make_bytestring("old-value"));
 
   // A fresh viewing snapshot sees new-value.
-  auto snap2 = get_db_proxy().open_viewing_snapshot();
+  auto snap2 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap2.has_value());
   StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
 
-  auto fresh = cache2.try_get_snapshot_item(addrkey);
+  auto fresh = cache2.try_get_snapshot_item(addrkey)();
   ASSERT_TRUE(fresh.has_value());
   ASSERT_NE(fresh.value(), nullptr);
   EXPECT_EQ(fresh.value()->bytestring(), make_bytestring("new-value"));
 
   EXPECT_TRUE(get_db_proxy()
-                  .close_viewing_snapshot(snap2->viewing_block_id)
+                  .close_viewing_snapshot(snap2->viewing_block_id)()
                   .has_value());
   EXPECT_TRUE(get_db_proxy()
-                  .close_viewing_snapshot(snap1->viewing_block_id)
+                  .close_viewing_snapshot(snap1->viewing_block_id)()
                   .has_value());
 }
 
@@ -406,17 +406,17 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
 
   advance_block();
 
-  auto snap1 = get_db_proxy().open_viewing_snapshot();
+  auto snap1 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap1.has_value());
   StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
 
   // Warm negative contract lookup.
-  auto warm = cache1.try_get_contract_by_hash(missing_hash);
+  auto warm = cache1.try_get_contract_by_hash(missing_hash)();
   ASSERT_TRUE(warm.has_value());
   EXPECT_EQ(warm.value(), nullptr);
 
   // Warm negative deployment lookup.
-  auto warm_deploy = cache1.try_get_deployed_contract(contract_addr);
+  auto warm_deploy = cache1.try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(warm_deploy.has_value());
   EXPECT_EQ(warm_deploy.value(), nullptr);
 
@@ -428,41 +428,41 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   advance_block();
 
   // Stale cache still returns nulls.
-  auto stale_contract = cache1.try_get_contract_by_hash(missing_hash);
+  auto stale_contract = cache1.try_get_contract_by_hash(missing_hash)();
   ASSERT_TRUE(stale_contract.has_value());
   EXPECT_EQ(stale_contract.value(), nullptr);
 
-  auto stale_deploy = cache1.try_get_deployed_contract(contract_addr);
+  auto stale_deploy = cache1.try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(stale_deploy.has_value());
   EXPECT_EQ(stale_deploy.value(), nullptr);
 
   // Fresh viewing snapshot sees the deployment.
-  auto snap2 = get_db_proxy().open_viewing_snapshot();
+  auto snap2 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap2.has_value());
   StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
 
-  auto fresh_deploy = cache2.try_get_deployed_contract(contract_addr);
+  auto fresh_deploy = cache2.try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(fresh_deploy.has_value());
   EXPECT_NE(fresh_deploy.value(), nullptr);
 
   auto deployed_hash = sha256(*contract);
-  auto fresh_contract = cache2.try_get_contract_by_hash(deployed_hash);
+  auto fresh_contract = cache2.try_get_contract_by_hash(deployed_hash)();
   ASSERT_TRUE(fresh_contract.has_value());
   EXPECT_NE(fresh_contract.value(), nullptr);
 
   // The deployment entry back-points at the same cached contract entry the
   // direct hash lookup returns, and a native contract has no translation.
-  auto fresh_deploy_ptr = cache2.try_get_deployed_contract(contract_addr);
+  auto fresh_deploy_ptr = cache2.try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(fresh_deploy_ptr.has_value());
   ASSERT_NE(fresh_deploy_ptr.value(), nullptr);
   EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract, fresh_contract.value());
   EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
 
   EXPECT_TRUE(get_db_proxy()
-                  .close_viewing_snapshot(snap2->viewing_block_id)
+                  .close_viewing_snapshot(snap2->viewing_block_id)()
                   .has_value());
   EXPECT_TRUE(get_db_proxy()
-                  .close_viewing_snapshot(snap1->viewing_block_id)
+                  .close_viewing_snapshot(snap1->viewing_block_id)()
                   .has_value());
 }
 
@@ -470,35 +470,35 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
 {
   advance_block();
 
-  auto snap1 = get_db_proxy().open_viewing_snapshot();
+  auto snap1 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap1.has_value());
   StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
 
-  auto warm_tip = cache1.try_get_db_tip();
+  auto warm_tip = cache1.try_get_db_tip()();
   ASSERT_TRUE(warm_tip.has_value());
   BlockHeight old_height = warm_tip.value()->value.proposal_header.block_height;
 
   advance_block();
 
   // Stale cache still returns old height.
-  auto stale_tip = cache1.try_get_db_tip();
+  auto stale_tip = cache1.try_get_db_tip()();
   ASSERT_TRUE(stale_tip.has_value());
   EXPECT_EQ(stale_tip.value()->value.proposal_header.block_height, old_height);
 
   // Fresh viewing snapshot sees incremented height.
-  auto snap2 = get_db_proxy().open_viewing_snapshot();
+  auto snap2 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap2.has_value());
   StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
 
-  auto fresh_tip = cache2.try_get_db_tip();
+  auto fresh_tip = cache2.try_get_db_tip()();
   ASSERT_TRUE(fresh_tip.has_value());
   EXPECT_GT(fresh_tip.value()->value.proposal_header.block_height, old_height);
 
   EXPECT_TRUE(get_db_proxy()
-                  .close_viewing_snapshot(snap2->viewing_block_id)
+                  .close_viewing_snapshot(snap2->viewing_block_id)()
                   .has_value());
   EXPECT_TRUE(get_db_proxy()
-                  .close_viewing_snapshot(snap1->viewing_block_id)
+                  .close_viewing_snapshot(snap1->viewing_block_id)()
                   .has_value());
 }
 
@@ -521,7 +521,7 @@ TEST_F(DirectStalenessTest,
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     auto observed = ctx.handler().retrocausal_queue_consume(
-        NativeContractTestFramework::make_storage_key("rcq0"), true);
+        NativeContractTestFramework::make_storage_key("rcq0"), true)();
     if (!observed.has_value()) {
       return observed.error().to_invoke_error();
     }
@@ -577,19 +577,19 @@ TEST_F(DirectStalenessTest,
       PerTransactionEventServerProxy(event_proxy, block_b, kTxId),
       ValidationModeCtor{std::move(forged)}, runtime_context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success())
+  ASSERT_TRUE(handler.root_invoke()().is_root_success())
       << "The validation proposal data should drive the contract into a "
          "manual root-frame revert";
 
   close_and_commit_block(block_a);
 
-  auto stale_read = get_db_proxy().get_db_tip(block_b);
+  auto stale_read = get_db_proxy().get_db_tip(block_b)();
   ASSERT_FALSE(stale_read.has_value());
   ASSERT_EQ(stale_read.error().code(), SystemErrorCode::Abandon);
 
   // The manual-revert observation push fails with a system error; the executor
   // surfaces it as ExecResultSystemError.
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultSystemError);
 
   // Because try_commit_transaction() aborted the HogDb transaction before
@@ -602,7 +602,7 @@ TEST_F(DirectStalenessTest,
   // longer find or abort the original (block_b, tx_id) transaction.  Before the
   // fix this abort succeeded, proving the InvokeTX had been leaked open.
   PerTransactionDatabaseProxy cleanup(get_db_proxy(), block_b, kTxId);
-  EXPECT_FALSE(cleanup.abort_transaction().has_value())
+  EXPECT_FALSE(cleanup.abort_transaction()().has_value())
       << "manual-revert observation push system error left the InvokeTX open";
 
   EXPECT_EQ(get_coord_client().dbsched_abandon_snapshot(block_b),

@@ -118,7 +118,7 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
           auto res = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)));
+              key, std::as_bytes(std::span(&val, 1)))();
           if (!res.has_value())
             return res.error().to_invoke_error();
         }
@@ -127,7 +127,7 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
       [&observed_values](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -159,19 +159,19 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   NondeterministicProposalData insert_10_p, insert_20_p, peek_p;
   {
     auto h10 = make_new_system_call_handler(tx_insert_10, *ctx);
-    ASSERT_TRUE(h10.root_invoke().is_root_success());
+    ASSERT_TRUE(h10.root_invoke()().is_root_success());
     insert_10_p = h10.get_proposal_data();
-    ASSERT_EQ(h10.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h10.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h20 = make_new_system_call_handler(tx_insert_20, *ctx);
-    ASSERT_TRUE(h20.root_invoke().is_root_success());
+    ASSERT_TRUE(h20.root_invoke()().is_root_success());
     insert_20_p = h20.get_proposal_data();
-    ASSERT_EQ(h20.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(h20.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hpeek = make_new_system_call_handler(tx_peek, *ctx);
-    ASSERT_TRUE(hpeek.root_invoke().is_root_success());
+    ASSERT_TRUE(hpeek.root_invoke()().is_root_success());
     peek_p = hpeek.get_proposal_data();
-    ASSERT_EQ(hpeek.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hpeek.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_EQ(observed_values, (std::vector<uint8_t>{10}));
@@ -187,19 +187,19 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   {
     auto h10 = make_new_system_call_handler_validation(tx_insert_10, *ctx,
                                                        insert_10_p);
-    ASSERT_TRUE(h10.root_invoke().is_root_success());
-    ASSERT_EQ(h10.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h10.root_invoke()().is_root_success());
+    ASSERT_EQ(h10.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h20 = make_new_system_call_handler_validation(tx_insert_20, *ctx,
                                                        insert_20_p);
-    ASSERT_TRUE(h20.root_invoke().is_root_success());
-    ASSERT_EQ(h20.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h20.root_invoke()().is_root_success());
+    ASSERT_EQ(h20.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hpeek =
         make_new_system_call_handler_validation(tx_peek, *ctx,
                                                 std::move(swapped_peek_p));
-    ASSERT_TRUE(hpeek.root_invoke().is_root_success());
-    ASSERT_EQ(hpeek.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hpeek.root_invoke()().is_root_success());
+    ASSERT_EQ(hpeek.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_EQ(observed_values, (std::vector<uint8_t>{20}))
@@ -238,7 +238,7 @@ TEST_F(RCQObservationByValueTest,
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
           auto res = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)));
+              key, std::as_bytes(std::span(&val, 1)))();
           if (!res.has_value())
             return res.error().to_invoke_error();
         }
@@ -247,7 +247,7 @@ TEST_F(RCQObservationByValueTest,
       [&consumed_values](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
           return consume_res.error().to_invoke_error();
         if (!consume_res.value().has_value())
@@ -278,16 +278,16 @@ TEST_F(RCQObservationByValueTest,
   NondeterministicProposalData insert_p, consume_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
     insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
     consume_p = hb.get_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
     EXPECT_EQ(consume_p.observed_queue_entry_sequence[0], QueueEntry{10});
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_EQ(consumed_values, (std::vector<uint8_t>{10}));
@@ -301,14 +301,14 @@ TEST_F(RCQObservationByValueTest,
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_consume, *ctx,
                                                 std::move(swapped_consume_p));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_EQ(consumed_values, (std::vector<uint8_t>{20}))
@@ -344,7 +344,7 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
 
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -356,7 +356,7 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
 
         uint8_t entry = kEntry;
         auto insert_res = ctx.handler().retrocausal_queue_insert(
-            key, std::as_bytes(std::span(&entry, 1)));
+            key, std::as_bytes(std::span(&entry, 1)))();
         if (!insert_res.has_value())
           return insert_res.error().to_invoke_error();
 
@@ -379,14 +379,14 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
   // Honest proposal: empty queue, peek sees nothing, contract fails.
   {
     auto handler = make_new_system_call_handler(tx, *ctx);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success())
         << "honest proposal on an empty RCQ cannot see the entry";
     auto honest_p = handler.get_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
     EXPECT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0);
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 
   EXPECT_FALSE(
@@ -403,8 +403,8 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(forged));
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "known anomaly: the later self-insert satisfies the earlier "
          "observation in value-based accounting (issue #2359)";
   ASSERT_NO_THROW(
@@ -432,7 +432,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
       // method 0: peek and write what we see
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -454,7 +454,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
           auto res = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)));
+              key, std::as_bytes(std::span(&val, 1)))();
           if (!res.has_value())
             return res.error().to_invoke_error();
         }
@@ -471,17 +471,17 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
   // Honest proposal: TX_A peeks an empty queue, fails.
   {
     auto handler = make_new_system_call_handler(tx_peek, *ctx);
-    ASSERT_FALSE(handler.root_invoke().is_root_success());
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_FALSE(handler.root_invoke()().is_root_success());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 
   // TX_B inserts {42} honestly.
   NondeterministicProposalData insert_p;
   {
     auto handler = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     insert_p = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Forge TX_A's ndet data: bit=true, observation={42}.
@@ -497,13 +497,13 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
   {
     auto ha = make_new_system_call_handler_validation(tx_peek, *ctx,
                                                       std::move(forged_peek));
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_NO_THROW(

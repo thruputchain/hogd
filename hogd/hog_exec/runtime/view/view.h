@@ -5,8 +5,8 @@
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "transaction.hh"
-#include "x23/async.h"
 #include "view.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

@@ -65,9 +65,9 @@ protected:
                                                   fibonacci_contract_address_),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
     advance_block();
@@ -88,9 +88,9 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
                                           UINT64_MAX, uint32_t{5}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -104,9 +104,9 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
                                           UINT64_MAX, uint32_t{20}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -125,7 +125,7 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
                                           uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     // inner call OOG => caller using the non-try client hits unreachable
     ASSERT_FALSE(res.is_root_success());
   }
@@ -144,7 +144,7 @@ TEST_P(CrossCallTests, LowOverallGasPropagates)
                                           1000, uint32_t{20}, UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 1000);
   }
@@ -165,9 +165,9 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
                                       UINT64_MAX, uint32_t{20}, uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_GE(res.gas_consumed_, 1000);
     gas_consumed_1 = res.gas_consumed_;
@@ -182,9 +182,9 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
                                       UINT64_MAX, uint32_t{20}, uint64_t{1010}),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_GE(res.gas_consumed_, 1010);
     gas_consumed_2 = res.gas_consumed_;

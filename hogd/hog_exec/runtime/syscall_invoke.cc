@@ -157,8 +157,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      CopyableInvokeOutputs &output_outputs)
 {
   if (!SystemCallHandler::validate_invoke_flags(input_inputs.flags)) {
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
   Calldata calldata;
@@ -172,8 +173,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
 
   if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
   // owned_auth_token_ids may or may not be aligned.
@@ -191,21 +193,20 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   }
 
   if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
-  auto [invoke_res, gas_amount] = co_await
-      syscall_handler.invoke(input_address, input_inputs.entrypoint_id,
-                             std::min<GasAmount>(input_inputs.gas_limit,
-                                                 remaining_gas.get()),
-                             std::move(calldata), input_inputs.flags,
-                             owned_auth_token_ids_vec);
+  auto [invoke_res, gas_amount] = co_await syscall_handler.invoke(
+      input_address, input_inputs.entrypoint_id,
+      std::min<GasAmount>(input_inputs.gas_limit, remaining_gas.get()),
+      std::move(calldata), input_inputs.flags, owned_auth_token_ids_vec);
 
   // A SystemError ends execution of the whole block.
   if (!invoke_res.has_value()) {
     co_return SyscallInnerResult{invoke_res.error().to_host_fn_error(),
-            WrappedGasAmount{gas_amount}};
+                                 WrappedGasAmount{gas_amount}};
   }
 
   // A SyscallError means the invoke was rejected before a child frame ran: a
@@ -213,7 +214,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // other syscall) and report the error code.
   SyscallStatus<InvocationFrameStatusCode> const &frame = *invoke_res;
   if (!frame.has_value()) {
-    co_return SyscallInnerResult{frame.error().code(), WrappedGasAmount{gas_amount}};
+    co_return SyscallInnerResult{frame.error().code(),
+                                 WrappedGasAmount{gas_amount}};
   }
 
   // A child frame ran. Report its outcome (Return / Abort / Fault) via
@@ -223,7 +225,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (!return_buffer_host.has_value()) {
     // Handle the SystemError case
     co_return SyscallInnerResult{return_buffer_host.error().to_host_fn_error(),
-            WrappedGasAmount{gas_amount}};
+                                 WrappedGasAmount{gas_amount}};
   }
 
   SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
@@ -239,7 +241,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // above, so the dereference is safe.
   output_outputs.frame_status = *frame;
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{gas_amount}};
+                               WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

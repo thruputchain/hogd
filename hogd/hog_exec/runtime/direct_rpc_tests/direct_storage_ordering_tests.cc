@@ -85,11 +85,11 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
       .delta = make_nnint_add_delta(cost_model_->get_nnint_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
+  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())
+      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())()
           .has_value());
   advance_block();
 
@@ -131,7 +131,7 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
                   make_nnint_add_delta(cost_model_->get_nnint_cost()),
                   std::to_underlying(StorageDeltaFlags::None));
 
-  auto r = proxy.try_push_current_subtransaction();
+  auto r = proxy.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
 
@@ -147,10 +147,10 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
                   make_nnint_add_delta(0),
                   std::to_underlying(StorageDeltaFlags::None));
 
-  auto r2 = proxy.try_push_current_subtransaction();
+  auto r2 = proxy.try_push_current_subtransaction()();
   ASSERT_TRUE(r2.has_value());
   ASSERT_TRUE(r2.value());
-  ASSERT_TRUE(proxy.commit_transaction().has_value());
+  ASSERT_TRUE(proxy.commit_transaction()().has_value());
 
   advance_block();
 
@@ -207,11 +207,11 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
                                     cost_model_->get_balance_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas);
+  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())
+      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())()
           .has_value());
   advance_block();
 
@@ -249,7 +249,7 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                        .delta = make_nnint_set_add_delta(0, 1),
                                        .flags = std::to_underlying(
                                            StorageDeltaFlags::None)});
-  auto r1 = db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner);
+  auto r1 = db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner)();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -261,7 +261,7 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                           StorageDeltaFlags::None)});
   DbConflictResult conflict(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r2 = db_proxy.try_push_new_subtransaction(get_block_number(), 2, loser,
-                                                 &conflict);
+                                                 &conflict)();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
   // The fixture runs Proposal mode: hog_db selects All in debug builds,
@@ -322,7 +322,7 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
   }
 
   // Must not throw — the wrapper converts x23::XdrBadInput to Unrecoverable.
-  auto r = oversized_proxy.try_push_current_subtransaction();
+  auto r = oversized_proxy.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
   ASSERT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
 }
@@ -357,7 +357,7 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
   tx.add_delta(addrkey, std::move(delta),
                std::to_underlying(StorageDeltaFlags::None));
 
-  auto push = tx.try_push_current_subtransaction();
+  auto push = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(push.has_value());
   ASSERT_TRUE(push.value());
 
@@ -367,7 +367,7 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
                     std::make_unique<const Contract>(contract));
   BorrowedContractBatch new_contracts(hashes, contracts);
 
-  auto res = tx.commit_transaction(new_contracts);
+  auto res = tx.commit_transaction(new_contracts)();
   ASSERT_FALSE(res.has_value());
   EXPECT_EQ(res.error().code(), SystemErrorCode::Unrecoverable);
 }

@@ -18,8 +18,8 @@
 #include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
-#include "x23/vec.h"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -49,9 +49,10 @@ public:
           std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    auto [res, gas_consumed] = co_await
-        wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
-                               Meta::kSyscallNo, std::move(parsed));
+    auto [res, gas_consumed] =
+        co_await wrap_after_parse<Meta>(guard.check(), handler_,
+                                        gas_remaining(), Meta::kSyscallNo,
+                                        std::move(parsed));
 
     consume_gas(gas_consumed);
     co_return res;

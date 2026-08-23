@@ -98,7 +98,7 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
                                 base_height, static_cast<uint64_t>(i))}};
         auto handler =
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
-        auto r = handler.root_invoke();
+        auto r = handler.root_invoke()();
         if (!r.is_root_success()) {
           panic("Failed to invoke transaction");
         }
@@ -172,12 +172,12 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
               CommonBenchState::bench_uniquifier(base_height,
                                                  static_cast<uint64_t>(k));
           auto handler = bs.make_handler(local_tx, k, *runtime_context);
-          if (!handler.root_invoke().is_root_success()) {
+          if (!handler.root_invoke()().is_root_success()) {
             error("Failed to invoke transaction");
             panic("Failed to invoke transaction");
           }
           if (do_commit) {
-            if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+            if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
               panic("failed to perform commit operation");
             }
           }

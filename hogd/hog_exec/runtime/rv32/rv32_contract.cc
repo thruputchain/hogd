@@ -115,11 +115,12 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
         .gas_remaining = machine.gas_remaining(),
     };
 
-    auto [host_result, gas_consumed] = co_await
-        syscall_entry(host_fn_ctx, context, pending_ecall->a0,
-                      pending_ecall->a1, pending_ecall->a2, pending_ecall->a3,
-                      pending_ecall->a4, pending_ecall->a5, pending_ecall->a6,
-                      pending_ecall->a7);
+    auto [host_result, gas_consumed] =
+        co_await syscall_entry(host_fn_ctx, context, pending_ecall->a0,
+                               pending_ecall->a1, pending_ecall->a2,
+                               pending_ecall->a3, pending_ecall->a4,
+                               pending_ecall->a5, pending_ecall->a6,
+                               pending_ecall->a7);
 
     if (host_result.has_value()) {
       result = machine.resume_from_ecall(
@@ -145,21 +146,26 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
       assert(false);
       error("Unrecoverable: HostFnErrorCode::NoneOrRecoverable is not expected "
             "from TrampolineResult");
-      co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable},
+                         total_gas_consumed};
     case HostFnErrorCode::Unrecoverable:
-      co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable},
+                         total_gas_consumed};
     case HostFnErrorCode::ValidationFailure:
       co_return result_t{InvokeError{InvokeErrorCode::ValidationFailure},
-              total_gas_consumed};
+                         total_gas_consumed};
     case HostFnErrorCode::Abandon:
-      co_return result_t{InvokeError{InvokeErrorCode::Abandon}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Abandon},
+                         total_gas_consumed};
     case HostFnErrorCode::Return:
       // Successful return: the value (not error) state of InvokeStatus<void>.
       co_return result_t{{}, total_gas_consumed};
     case HostFnErrorCode::OutOfGas:
-      co_return result_t{InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::OutOfGas},
+                         total_gas_consumed};
     case HostFnErrorCode::Exit:
-      co_return result_t{InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Deterministic},
+                         total_gas_consumed};
     }
   }
 
@@ -169,13 +175,15 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
 
   if (result == rv32::StepResult::kContinue) [[unlikely]] {
     error("Unrecoverable: rv32::StepResult::kContinue when halt expected");
-    co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+    co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable},
+                       total_gas_consumed};
   }
 
   if (result == rv32::StepResult::kHalted) [[unlikely]] {
     error("Unrecoverable: rv32::StepResult::kHalted is not expected from "
           "ThreadedMachine");
-    co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+    co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable},
+                       total_gas_consumed};
   }
 
   assert(result == rv32::StepResult::kTrap);
@@ -183,10 +191,12 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
   assert(machine.trap() != rv32::Trap::kHostTrap);
 
   if (machine.trap() == rv32::Trap::kOutOfGas) {
-    co_return result_t{InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
+    co_return result_t{InvokeError{InvokeErrorCode::OutOfGas},
+                       total_gas_consumed};
   }
 
-  co_return result_t{InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
+  co_return result_t{InvokeError{InvokeErrorCode::Deterministic},
+                     total_gas_consumed};
 }
 
 InvokeErrorCode
@@ -233,8 +243,8 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
             show_byte_array(deployed_contract_hash.hash));
       co_return SystemError{SystemErrorCode::Unrecoverable};
     }
-    co_return std::make_unique<Rv32Runtime>(&*deployed_contract.entry->translated,
-                                         syscall_handler);
+    co_return std::make_unique<Rv32Runtime>(
+        &*deployed_contract.entry->translated, syscall_handler);
   }
 
   // Transaction-local deployment: not in the block-scoped snapshot cache.

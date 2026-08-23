@@ -200,7 +200,7 @@ TEST_F(TraceShapeTest, Sha256WrapperTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
@@ -248,7 +248,7 @@ TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
@@ -305,12 +305,12 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
   const auto events = handler.get_most_recent_frame_events();
   ASSERT_NE(handler.get_trace(), nullptr);
   auto const &trace = *handler.get_trace();
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                   ProposedTransaction{.signed_tx = tx})());
 
@@ -366,7 +366,7 @@ TEST_F(TraceShapeTest, InvalidSyscallFallbackTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   // The SDK skips GetCalldataLen for a fixed-size (u64) calldata layout, and
   // the invalid syscall is traced under its raw out-of-range discriminant.
@@ -400,8 +400,8 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
                                       kGasLimit, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -413,7 +413,7 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   // The caller derives its storage key by hashing the SDK static_key
   // preimage (length-prefixed "FibonacciContractCaller" plus the field tag),
@@ -491,8 +491,8 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
                                       kGasLimit, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     advance_block();
   }
 
@@ -505,7 +505,7 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   const std::vector<uint8_t> key_preimage =
       from_hex("18174669626f6e61636369436f6e747261637443616c6c65720100");
@@ -576,7 +576,7 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   // CXS encoding of the thrown ManualRevertTestError::BasicRevert exception.
   const std::vector<uint8_t> abort_buffer = from_hex("ffb6f18780ef7b828201");
@@ -641,7 +641,7 @@ TEST_F(TraceShapeTest, VerifySignatureTraceIsExact)
   auto handler = make_new_system_call_handler(tx, runtime_context_);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(

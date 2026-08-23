@@ -20,7 +20,8 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
 {
   auto status = co_await syscall_handler.get_block_height();
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   output_result = *status;
   if (auto *trace_data =
@@ -29,7 +30,8 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetBlockHeightOutputs{.result = output_result});
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 } // namespace hogd

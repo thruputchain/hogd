@@ -186,10 +186,10 @@ public:
     tx.add_delta(addrkey,
                  NativeContractTestFramework::make_bytestring_delta(value),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto push = tx.try_push_current_subtransaction();
+    auto push = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(push.has_value());
     ASSERT_TRUE(push.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   static TransactionViewQuery make_read_query()

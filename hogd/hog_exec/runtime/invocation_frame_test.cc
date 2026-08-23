@@ -98,7 +98,7 @@ TEST_F(InvocationFrameTest, ForwardAuthToken)
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
   // frame commits successfully
-  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
   ASSERT_TRUE(result.has_value());
   ASSERT_TRUE(result.value().first.result_.has_value());
   ASSERT_EQ(result.value().second, false);
@@ -152,7 +152,7 @@ TEST_F(InvocationFrameTest, RevertsRestoreToken)
   stack.set_active_frame_return(
       InvocationFrameOutput(InvocationFrameStatusCode::Fault));
   auto result = stack.finish_frame(InvokeError{InvokeErrorCode::Deterministic},
-                                   execution_mode_data_);
+                                   execution_mode_data_)();
   ASSERT_TRUE(result.has_value());
   ASSERT_FALSE(result.value().first.result_.has_value());
   ASSERT_EQ(result.value().second, true);
@@ -197,7 +197,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   // child manually reverts: invoke succeeds but frame output is Fault
   stack.set_active_frame_return(
       InvocationFrameOutput(InvocationFrameStatusCode::Fault));
-  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
   ASSERT_TRUE(result.has_value());
   ASSERT_TRUE(result.value().first.result_.has_value());
   ASSERT_EQ(result.value().second, true);
@@ -224,7 +224,7 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
                                  std::to_underlying(InvokeFlag::TryInvoke), {})
                     .has_value());
     auto result =
-        stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+        stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
     ASSERT_TRUE(result.has_value()) << "iteration " << i;
     ASSERT_TRUE(result.value().first.result_.has_value()) << "iteration " << i;
     ASSERT_EQ(result.value().second, false);
@@ -234,7 +234,7 @@ TEST_F(InvocationFrameTest, TryInvokeHitsSavepointDepthLimit)
                   .start_frame(make_test_address(1), Calldata{},
                                std::to_underlying(InvokeFlag::TryInvoke), {})
                   .has_value());
-  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  auto result = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
   ASSERT_TRUE(result.has_value());
   ASSERT_FALSE(result.value().first.result_.has_value());
 }
@@ -288,7 +288,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
                   .has_value());
   stack.set_active_frame_return(
       InvocationFrameOutput(InvocationFrameStatusCode::Fault));
-  auto result1 = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  auto result1 = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
   ASSERT_TRUE(result1.has_value());
   ASSERT_EQ(result1.value().second, true);
 
@@ -304,7 +304,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   ASSERT_TRUE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
 
-  auto result2 = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_);
+  auto result2 = stack.finish_frame(InvokeStatus<void>{}, execution_mode_data_)();
   ASSERT_TRUE(result2.has_value());
   ASSERT_TRUE(result2.value().first.result_.has_value());
   ASSERT_EQ(result2.value().second, false);

@@ -655,7 +655,7 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
 {
   const DeployedContractHash deployed =
       NativeContractTestFramework::make_deployed_contract_hash(contract);
-  auto runtime = rv32_context.make_new_runtime(deployed, &handler);
+  auto runtime = rv32_context.make_new_runtime(deployed, &handler)();
   EXPECT_TRUE(runtime.has_value());
   EXPECT_NE(runtime.value(), nullptr);
   if (!runtime.has_value() || runtime.value() == nullptr) {
@@ -788,7 +788,7 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallThenReturnTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
   ASSERT_TRUE(result.is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
@@ -832,7 +832,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
   ASSERT_TRUE(result.is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
@@ -843,7 +843,7 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   auto const &trace = *handler.get_trace();
   const auto events = handler.get_most_recent_frame_events();
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
                                   ProposedTransaction{.signed_tx = tx})());
 
@@ -917,7 +917,7 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
                                               rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
 
@@ -962,7 +962,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
       rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
 
@@ -1007,7 +1007,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
       rv32_context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
 
@@ -1054,8 +1054,8 @@ TEST_F(Rv32RuntimeContextTest,
   handler1.enable_tracing();
   handler2.enable_tracing();
 
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  const auto result1 = handler1.root_invoke()();
+  const auto result2 = handler2.root_invoke()();
 
   ASSERT_TRUE(result1.is_root_success());
   ASSERT_TRUE(result2.is_root_success());
@@ -1091,8 +1091,8 @@ TEST_F(Rv32RuntimeContextTest, ArtifactMemoryTransformReturnsDeterministicBytes)
       make_new_system_call_handler(make_root_transaction(kParityGas),
                                    rv32_context);
 
-  const auto result1 = handler1.root_invoke();
-  const auto result2 = handler2.root_invoke();
+  const auto result1 = handler1.root_invoke()();
+  const auto result2 = handler2.root_invoke()();
 
   ASSERT_TRUE(result1.is_root_success());
   ASSERT_TRUE(result2.is_root_success());
@@ -1120,7 +1120,7 @@ TEST_F(Rv32RuntimeContextTest, DispatchesNonzeroMethodInGuest)
       make_new_system_call_handler(make_root_transaction(kEnoughGas, 1),
                                    rv32_context);
 
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
   const auto output = handler.get_most_recent_frame_output();
@@ -1144,7 +1144,7 @@ TEST_F(Rv32RuntimeContextTest, UnknownMethodIsMeteredGuestTrap)
       make_root_transaction(kEnoughGas, kUnknownMethodId), rv32_context);
   rv32_handler.enable_tracing();
 
-  auto rv32_result = rv32_handler.root_invoke();
+  auto rv32_result = rv32_handler.root_invoke()();
 
   ASSERT_FALSE(rv32_result.is_root_success());
   EXPECT_EQ(rv32_result.result_.error().code(), InvokeErrorCode::Deterministic);
@@ -1162,7 +1162,7 @@ TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
 
   auto handler = make_new_system_call_handler(make_root_transaction(kEnoughGas),
                                               rv32_context);
-  auto result = handler.root_invoke();
+  auto result = handler.root_invoke()();
 
   ASSERT_TRUE(result.is_root_success());
   // Three argument loads (a0..a2) plus the ecall instruction.
@@ -1450,12 +1450,12 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
                             std::move(increment_calldata_bytes), 1),
       rv32_context);
   increment_handler.enable_tracing();
-  const auto increment_result = increment_handler.root_invoke();
+  const auto increment_result = increment_handler.root_invoke()();
   ASSERT_TRUE(increment_result.is_root_success())
       << "rv32 counter increment did not return cleanly";
   EXPECT_EQ(increment_handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Return);
-  ASSERT_EQ(increment_handler.try_commit_transaction(),
+  ASSERT_EQ(increment_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_NE(increment_handler.get_trace(), nullptr);
   auto const *increment_trace = increment_handler.get_trace();
@@ -1476,7 +1476,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
                                                          Calldata{}, 2),
                                    rv32_context);
   get_handler.enable_tracing();
-  const auto get_result = get_handler.root_invoke();
+  const auto get_result = get_handler.root_invoke()();
   ASSERT_TRUE(get_result.is_root_success())
       << "rv32 counter get did not return cleanly after increment";
   const auto get_output = get_handler.get_most_recent_frame_output();
@@ -1492,7 +1492,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactRealCalldataRoundTrip)
     return;
   }
   EXPECT_EQ(*decoded, kIncrementAmount);
-  ASSERT_EQ(get_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(get_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Smoke test for SDK-lowered RV32 artifacts.
@@ -1545,7 +1545,7 @@ TEST_F(Rv32RuntimeContextTest, LoweredSdkArtifactSmoke)
   handler.enable_tracing();
   handler.enable_transaction_stats();
 
-  const auto result = handler.root_invoke();
+  const auto result = handler.root_invoke()();
 
   if (handler.get_trace() != nullptr) {
     std::cerr << "[smoke] trace status_code="

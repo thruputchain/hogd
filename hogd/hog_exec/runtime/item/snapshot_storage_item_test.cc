@@ -111,7 +111,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
   auto check_get_block = [&](uint64_t search_block_number,
                              uint64_t expected_block_number,
                              x23::Vec<QueueEntry> expected_entries) {
-    auto block = test_item.get_next_rcq_block(search_block_number);
+    auto block = test_item.get_next_rcq_block(search_block_number)();
     // CHECK, not ASSERT_*: a fatal gtest assertion inside a lambda returns from
     // the lambda, not the test, so the checks below would still run on a null
     // or short block.
@@ -125,7 +125,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
   };
 
   auto check_get_block_not_found = [&](uint64_t search_block_number) {
-    auto block = test_item.get_next_rcq_block(search_block_number);
+    auto block = test_item.get_next_rcq_block(search_block_number)();
     ASSERT_TRUE(block.has_value());
     EXPECT_FALSE(block.value());
   };
@@ -154,7 +154,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
                                 BlockID{1}, *db_proxy_);
   auto check_concurrent_entry =
       [&](uint32_t index, std::optional<QueueEntry> const &expected_entry) {
-        auto entry = test_item.get_concurrent_rcq_entry(index);
+        auto entry = test_item.get_concurrent_rcq_entry(index)();
         ASSERT_TRUE(entry.has_value());
         EXPECT_EQ(entry.value().get(), expected_entry);
       };
@@ -197,13 +197,13 @@ TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
                                 BlockID{1}, *db_proxy_);
   auto check_concurrent_entry =
       [&](uint32_t index, std::optional<QueueEntry> const &expected_entry) {
-        auto entry = test_item.get_concurrent_rcq_entry(index);
+        auto entry = test_item.get_concurrent_rcq_entry(index)();
         ASSERT_TRUE(entry.has_value());
         EXPECT_EQ(entry.value().get(), expected_entry);
       };
 
   auto check_concurrent_entry_bad = [&](uint32_t index) {
-    auto entry = test_item.get_concurrent_rcq_entry(index);
+    auto entry = test_item.get_concurrent_rcq_entry(index)();
     ASSERT_FALSE(entry.has_value());
     EXPECT_EQ(entry.error().error_code(), SystemErrorCode::Unrecoverable);
   };

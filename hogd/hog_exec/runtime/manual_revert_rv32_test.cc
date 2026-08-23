@@ -162,10 +162,10 @@ TEST_P(ManualRevertRv32Test, BasicManualRevert)
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success()) << "Manual revert test should succeed";
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Transaction should commit successfully";
 }
@@ -242,10 +242,10 @@ TEST_P(ManualRevertRv32Test, BasicNoRevert)
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success()) << "No revert test should succeed";
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Transaction should commit successfully";
 }
@@ -309,11 +309,11 @@ TEST_P(ManualRevertRv32Test, NestedManualRevert)
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success())
       << "Nested manual revert test should succeed";
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Transaction should commit successfully";
 }
@@ -385,11 +385,11 @@ TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
                               .uniquifier = make_new_uniquifier()}},
         *multiplexed_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success())
         << "Error type " << error_type << " should succeed via manual revert";
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Error type " << error_type
         << " transaction should commit successfully";
@@ -457,10 +457,10 @@ TEST_P(ManualRevertRv32Test, ErrorTypeNoError)
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success()) << "Error type 0 should succeed normally";
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
       << "Error type 0 transaction should commit successfully";
 }
@@ -530,11 +530,11 @@ TEST_P(ManualRevertRv32Test, StorageManualRevert)
                               .uniquifier = make_new_uniquifier()}},
         *multiplexed_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success())
         << "Storage manual revert should succeed";
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Storage manual revert transaction should commit successfully";
   }
@@ -589,11 +589,11 @@ TEST_P(ManualRevertRv32Test, StorageManualRevert)
                               .uniquifier = make_new_uniquifier()}},
         *multiplexed_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success())
         << "Storage no revert should succeed normally";
 
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK)
         << "Storage no revert transaction should commit successfully";
   }

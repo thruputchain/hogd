@@ -384,8 +384,8 @@ protected:
                                        .calldata = {}},
                         .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
                             ProposedTransaction{.signed_tx = handler_tx})());
@@ -413,8 +413,8 @@ protected:
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    EXPECT_TRUE(handler.root_invoke().is_root_success());
-    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    ExecResult commit = handler.try_commit_transaction()();
     CapturedRecord outcome;
     outcome.push_back(static_cast<uint8_t>(commit));
     if (commit == ExecResult::ExecResultOK) {
@@ -454,8 +454,8 @@ protected:
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
-    EXPECT_TRUE(handler.root_invoke().is_root_success());
-    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
+    ExecResult commit = handler.try_commit_transaction()();
     std::vector<CapturedRecord> records;
     if (commit == ExecResult::ExecResultOK) {
       EXPECT_TRUE(

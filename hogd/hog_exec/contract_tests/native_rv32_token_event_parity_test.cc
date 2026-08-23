@@ -306,8 +306,8 @@ protected:
                                          .calldata = target_calldata(target)},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx.tx, *multiplexed_context_);
-    ASSERT_TRUE(h.root_invoke().is_root_success());
-    ASSERT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h.root_invoke()().is_root_success());
+    ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
     ASSERT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());
     advance_block();
@@ -329,9 +329,9 @@ protected:
                           .uniquifier = make_new_uniquifier()}};
     auto h =
         make_new_system_call_handler(h_tx.tx, *multiplexed_context_, &tx_id);
-    EXPECT_TRUE(h.root_invoke().is_root_success())
+    EXPECT_TRUE(h.root_invoke()().is_root_success())
         << "method=" << method << " target0=" << static_cast<int>(target[0]);
-    EXPECT_EQ(h.try_commit_transaction(), ExecResult::ExecResultOK)
+    EXPECT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK)
         << "method=" << method << " target0=" << static_cast<int>(target[0]);
     EXPECT_TRUE(h.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = h_tx})());

@@ -393,9 +393,9 @@ TEST_F(TupleReturnRv32Test, BasicTwoTuple)
                               .value()},
           .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -418,9 +418,9 @@ TEST_F(TupleReturnRv32Test, NestedTuple)
                               .value()},
           .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -437,9 +437,9 @@ TEST_F(TupleReturnRv32Test, SingleElementTuple)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -456,9 +456,9 @@ TEST_F(TupleReturnRv32Test, ThreeElementTuple)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -475,9 +475,9 @@ TEST_F(TupleReturnRv32Test, DeeplyNested)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -494,9 +494,9 @@ TEST_F(TupleReturnRv32Test, TupleWithFixedArray)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -513,9 +513,9 @@ TEST_F(TupleReturnRv32Test, TupleWithVariableArray)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -532,9 +532,9 @@ TEST_F(TupleReturnRv32Test, NestedArrays)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -551,9 +551,9 @@ TEST_F(TupleReturnRv32Test, ArrayOfTuples)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -570,9 +570,9 @@ TEST_F(TupleReturnRv32Test, NestedArray2D)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -589,9 +589,9 @@ TEST_F(TupleReturnRv32Test, NestedArray3D)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -608,9 +608,9 @@ TEST_F(TupleReturnRv32Test, DeeplyNestedArray)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -627,9 +627,9 @@ TEST_F(TupleReturnRv32Test, TupleWithOption)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -646,9 +646,9 @@ TEST_F(TupleReturnRv32Test, TupleAllOptional)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -665,9 +665,9 @@ TEST_F(TupleReturnRv32Test, NestedOptionTuple)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -684,9 +684,9 @@ TEST_F(TupleReturnRv32Test, KitchenSink)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -703,9 +703,9 @@ TEST_F(TupleReturnRv32Test, ArraysAndTuples)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -722,9 +722,9 @@ TEST_F(TupleReturnRv32Test, TupleWithNestedArray)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -741,9 +741,9 @@ TEST_F(TupleReturnRv32Test, Tuple8Elements)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -760,9 +760,9 @@ TEST_F(TupleReturnRv32Test, Tuple16Elements)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -779,9 +779,9 @@ TEST_F(TupleReturnRv32Test, EmptyTuple)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -798,9 +798,9 @@ TEST_F(TupleReturnRv32Test, TupleWithBytes)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -817,9 +817,9 @@ TEST_F(TupleReturnRv32Test, TupleWithVariableBytes)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -836,9 +836,9 @@ TEST_F(TupleReturnRv32Test, NestedBytesArray)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -855,9 +855,9 @@ TEST_F(TupleReturnRv32Test, TupleArrayOption)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -874,9 +874,9 @@ TEST_F(TupleReturnRv32Test, NestedEverything)
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 

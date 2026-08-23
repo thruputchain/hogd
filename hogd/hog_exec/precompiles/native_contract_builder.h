@@ -22,10 +22,10 @@
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -44,8 +44,8 @@ template<typename T> struct NativeContractArgs;
 // Contract bodies are coroutines (they await syscalls), so they return
 // x23::Async<InvokeStatus<R>> rather than InvokeStatus<R>.
 template<typename R, typename... Args>
-struct NativeContractArgs<x23::Async<InvokeStatus<R>> (*)(NativeSyscallContext &,
-                                                          Args...)> {
+struct NativeContractArgs<
+    x23::Async<InvokeStatus<R>> (*)(NativeSyscallContext &, Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -196,8 +196,9 @@ public:
         // the inner lambda only forwards the call, so it is not itself a
         // coroutine.
         auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
-        auto return_value = co_await [&]<size_t... Is>(
-            std::index_sequence<Is...>) -> x23::Async<InvokeStatus<return_t>> {
+        auto return_value =
+            co_await [&]<size_t... Is>(std::index_sequence<Is...>)
+            -> x23::Async<InvokeStatus<return_t>> {
           return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
             return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
           }(std::make_index_sequence<

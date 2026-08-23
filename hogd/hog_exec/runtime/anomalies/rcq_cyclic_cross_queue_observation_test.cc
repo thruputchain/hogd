@@ -116,7 +116,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       // queue_b
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key_a = make_storage_key("queue_a");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true)();
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -129,7 +129,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
         uint8_t val = kValB;
         auto key_b = make_storage_key("queue_b");
         auto ins = ctx.handler().retrocausal_queue_insert(
-            key_b, std::as_bytes(std::span(&val, 1)));
+            key_b, std::as_bytes(std::span(&val, 1)))();
         if (!ins.has_value())
           return ins.error().to_invoke_error();
 
@@ -146,7 +146,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       // queue_a
       [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key_b = make_storage_key("queue_b");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true);
+        auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true)();
         if (!peek_res.has_value())
           return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
@@ -159,7 +159,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
         uint8_t val = kValA;
         auto key_a = make_storage_key("queue_a");
         auto ins = ctx.handler().retrocausal_queue_insert(
-            key_a, std::as_bytes(std::span(&val, 1)));
+            key_a, std::as_bytes(std::span(&val, 1)))();
         if (!ins.has_value())
           return ins.error().to_invoke_error();
 
@@ -183,14 +183,14 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   // Honest proposal: neither order works.
   {
     auto ha = make_new_system_call_handler(tx_a, *ctx);
-    ASSERT_FALSE(ha.root_invoke().is_root_success())
+    ASSERT_FALSE(ha.root_invoke()().is_root_success())
         << "TX_A fails: queue_a is empty, nothing to peek";
-    ASSERT_TRUE(ha.abort_transaction().has_value());
+    ASSERT_TRUE(ha.abort_transaction()().has_value());
 
     auto hb = make_new_system_call_handler(tx_b, *ctx);
-    ASSERT_FALSE(hb.root_invoke().is_root_success())
+    ASSERT_FALSE(hb.root_invoke()().is_root_success())
         << "TX_B fails: queue_b is empty, nothing to peek";
-    ASSERT_TRUE(hb.abort_transaction().has_value());
+    ASSERT_TRUE(hb.abort_transaction()().has_value());
   }
 
   EXPECT_FALSE(
@@ -216,13 +216,13 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   {
     auto ha = make_new_system_call_handler_validation(tx_a, *ctx,
                                                       std::move(forged_a));
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler_validation(tx_b, *ctx,
                                                       std::move(forged_b));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   ASSERT_NO_THROW(

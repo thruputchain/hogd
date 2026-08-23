@@ -140,10 +140,10 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   auto handler =
       make_new_system_call_handler(handler_tx, *test_runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -245,10 +245,10 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   auto handler1 =
       make_new_system_call_handler(handler1_tx, *test_runtime_context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
 
-  auto commit_res1 = handler1.try_commit_transaction();
+  auto commit_res1 = handler1.try_commit_transaction()();
   ASSERT_TRUE(commit_res1 == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler1.emit_events(ExecResult::ExecResultOK,
@@ -266,10 +266,10 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   auto handler2 =
       make_new_system_call_handler(handler2_tx, *test_runtime_context);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
-  auto commit_res2 = handler2.try_commit_transaction();
+  auto commit_res2 = handler2.try_commit_transaction()();
   ASSERT_TRUE(commit_res2 == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler2.emit_events(ExecResult::ExecResultOK,
@@ -440,10 +440,10 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   auto handler =
       make_new_system_call_handler(handler_tx, *test_runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -494,13 +494,13 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
     // delta directly at the handler layer (the surface #1503 guards) to
     // keep the read-side fault and commit-time rejection covered.
     auto r_debit = ctx.handler().modify_native_token_balance(
-        ctx.handler().get_current_address(), -kTransferAmount);
+        ctx.handler().get_current_address(), -kTransferAmount)();
     if (!r_debit.has_value() || !r_debit.value().has_value()) {
       ADD_FAILURE() << "staging the direct overspend debit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     auto r_credit = ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                              kTransferAmount);
+                                                              kTransferAmount)();
     if (!r_credit.has_value() || !r_credit.value().has_value()) {
       ADD_FAILURE() << "staging the direct overspend credit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -559,13 +559,13 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // HogDb's commit-time balance-lock must still reject the transaction because
   // the sender's persisted balance would go negative; try_commit_transaction
   // internally aborts on failure.
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_NE(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -596,13 +596,13 @@ TEST_F(BalanceCostTrackingTest,
     // delta directly at the handler layer (the surface #1503 guards) to
     // keep the read-side fault and commit-time rejection covered.
     auto r_debit = ctx.handler().modify_native_token_balance(
-        ctx.handler().get_current_address(), -kTransferAmount);
+        ctx.handler().get_current_address(), -kTransferAmount)();
     if (!r_debit.has_value() || !r_debit.value().has_value()) {
       ADD_FAILURE() << "staging the direct overspend debit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     auto r_credit = ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                              kTransferAmount);
+                                                              kTransferAmount)();
     if (!r_credit.has_value() || !r_credit.value().has_value()) {
       ADD_FAILURE() << "staging the direct overspend credit failed";
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -659,10 +659,10 @@ TEST_F(BalanceCostTrackingTest,
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_NE(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -761,11 +761,11 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Nothing bad was staged: the transaction commits.
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -874,8 +874,8 @@ TEST_F(BalanceCostTrackingTest,
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -1040,10 +1040,10 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1147,10 +1147,10 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1237,12 +1237,12 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(kTransferAmount));
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1339,12 +1339,12 @@ TEST_F(BalanceCostTrackingTest,
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   EXPECT_EQ(observed_receiver_balance, static_cast<uint128_t>(balance_cost));
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1427,10 +1427,10 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
   auto handler =
       make_new_system_call_handler(handler_tx, *test_runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res == ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1547,10 +1547,10 @@ TEST_F(BalanceCostTrackingTest,
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,

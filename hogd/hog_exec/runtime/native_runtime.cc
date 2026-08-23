@@ -80,8 +80,8 @@ NativeContract::invoke_impl(function_t const &fn,
 
   // These are the only error codes that can get upgraded to OutOfGas
   if (gas_limit == gas_consumed) {
-    co_return std::pair{InvokeStatus<void>{InvokeError{
-                            InvokeErrorCode::OutOfGas}},
+    co_return std::pair{InvokeStatus<void>{
+                            InvokeError{InvokeErrorCode::OutOfGas}},
                         gas_consumed};
   }
   co_return std::pair{status, gas_consumed};

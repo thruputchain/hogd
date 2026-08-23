@@ -114,7 +114,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
 
                   auto deploy_result =
                       ctx.handler().deploy_contract(kDeployNonce,
-                                                    contract_1_hash);
+                                                    contract_1_hash)();
                   if (!deploy_result.has_value()) {
                     return deploy_result.error().to_invoke_error();
                   }
@@ -162,11 +162,11 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   auto handler = make_new_system_call_handler(handler_tx, context);
 
   // Invoke the contract
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -259,7 +259,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
   // Invoke the contract - it should succeed (contract caught the error)
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   ContractAddress deploy_addr =
@@ -306,7 +306,7 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
                            -> InvokeStatus<void> {
                          auto deploy_result =
                              ctx.handler().deploy_contract(kDeployNonce,
-                                                           malformed_hash);
+                                                           malformed_hash)();
                          if (!deploy_result.has_value()) {
                            return deploy_result.error().to_invoke_error();
                          }
@@ -349,7 +349,7 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
       }};
   auto handler = make_new_system_call_handler(handler_tx, context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
 
@@ -379,7 +379,7 @@ TEST_P(SelectiveDeploymentTest,
                            -> InvokeStatus<void> {
                          auto deploy_result =
                              ctx.handler().deploy_contract(kDeployNonce,
-                                                           malformed_hash);
+                                                           malformed_hash)();
                          if (!deploy_result.has_value()) {
                            return deploy_result.error().to_invoke_error();
                          }
@@ -429,10 +429,10 @@ TEST_P(SelectiveDeploymentTest,
   auto handler =
       make_new_system_call_handler_validation(tx, context,
                                               std::move(proposal_data));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
 
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure)
       << "Unused proposal bit must cause validation failure even when initial "
          "validation rejects a malformed attached rv32 contract";
@@ -469,7 +469,7 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
       [fib_hash, entry_id, calldata = inner.calldata](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto deploy_result =
-            ctx.handler().deploy_contract(kDeployNonce, fib_hash);
+            ctx.handler().deploy_contract(kDeployNonce, fib_hash)();
         if (!deploy_result.has_value()) {
           ADD_FAILURE() << "deploy_contract system error";
           return deploy_result.error().to_invoke_error();
@@ -560,8 +560,8 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
       }};
   auto handler = make_new_system_call_handler(handler_tx, context);
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   auto deployment_lookup = lookup_deployment_from_db(deploy_addr);
@@ -599,7 +599,7 @@ TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
                             .uniquifier = make_new_uniquifier()}},
       context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
   EXPECT_EQ(res.gas_consumed_, 0U);
@@ -629,7 +629,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
                 [big_hash](
                     NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto deploy_result =
-                      ctx.handler().deploy_contract(kDeployNonce, big_hash);
+                      ctx.handler().deploy_contract(kDeployNonce, big_hash)();
                   if (!deploy_result.has_value()) {
                     return deploy_result.error().to_invoke_error();
                   }
@@ -670,9 +670,9 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
       }};
   auto handler = make_new_system_call_handler(handler_tx, context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -709,7 +709,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   fns.emplace(0,
               [blob_hash](
                   NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                auto res = ctx.handler().deploy_contract(kNonce, blob_hash);
+                auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
                 if (!res.has_value()) {
                   return res.error().to_invoke_error();
                 }
@@ -721,7 +721,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
               });
   fns.emplace(
       1, [blob_hash](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = ctx.handler().deploy_contract(kNonce, blob_hash);
+        auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
         if (!res.has_value()) {
           return res.error().to_invoke_error();
         }
@@ -769,8 +769,8 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
                     .contracts_to_deploy = {blob},
                 }},
         context);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -788,8 +788,8 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
                     .uniquifier = make_new_uniquifier(),
                 }},
         context);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -829,7 +829,7 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   auto deploy_then =
       [blob_hash, deployed_addr](NativeSyscallContext &ctx,
                                  bool fault) noexcept -> InvokeStatus<void> {
-    auto res = ctx.handler().deploy_contract(kNonce, blob_hash);
+    auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
     if (!res.has_value()) {
       return res.error().to_invoke_error();
     }
@@ -937,8 +937,8 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
                   .contracts_to_deploy = {blob},
               }},
       context);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
   EXPECT_FALSE(lookup_deployment_from_db(deployed_addr).has_value());
@@ -982,7 +982,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   auto leaf_deploy =
       [blob_hash](NativeSyscallContext &ctx,
                   SHA256Hash const &nonce) noexcept -> InvokeStatus<void> {
-    auto res = ctx.handler().deploy_contract(nonce, blob_hash);
+    auto res = ctx.handler().deploy_contract(nonce, blob_hash)();
     if (!res.has_value()) {
       return res.error().to_invoke_error();
     }
@@ -1104,8 +1104,8 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
                     .contracts_to_deploy = {blob},
                 }},
         context);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   };
 
   // Mid faults after the successful TryInvoke: the leaf's deployment is
@@ -1176,7 +1176,7 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto deploy = ctx.handler().deploy_contract(kNonce, blob_hash);
+        auto deploy = ctx.handler().deploy_contract(kNonce, blob_hash)();
         if (!deploy.has_value()) {
           return deploy.error().to_invoke_error();
         }
@@ -1215,8 +1215,8 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
                   .contracts_to_deploy = {blob},
               }},
       context);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
   auto row = lookup_deployment_from_db(expected_self);
@@ -1251,7 +1251,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
                 [limit_hash](
                     NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
                   auto deploy_result =
-                      ctx.handler().deploy_contract(kDeployNonce, limit_hash);
+                      ctx.handler().deploy_contract(kDeployNonce, limit_hash)();
                   if (!deploy_result.has_value()) {
                     return deploy_result.error().to_invoke_error();
                   }
@@ -1292,9 +1292,9 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
       }};
   auto handler = make_new_system_call_handler(handler_tx, context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
                           ProposedTransaction{.signed_tx = handler_tx})());
@@ -1350,10 +1350,10 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
       }};
   auto handler = make_new_system_call_handler(handler_tx, context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxDeterministicError);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());

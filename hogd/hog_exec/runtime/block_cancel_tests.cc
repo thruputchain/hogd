@@ -90,7 +90,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Advance the block - this closes and commits the current block,
@@ -99,7 +99,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
 
   // Try to commit the transaction - this should fail because the block
   // the transaction was created for is no longer current
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultSystemError);
 }
 
@@ -155,7 +155,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommitDiscardedBody)
 
   // Root frame faults: the body is discarded, but the transaction must still
   // commit its side-records (replay nonce) via commit_body_discarded.
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
 
   // Advance the block so the discarded-body commit hits a stale block.
@@ -164,7 +164,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommitDiscardedBody)
   // The stale-block commit failure must surface as a system error and leave
   // the handler cleanly aborted (enforced by the destructor invariant under
   // the force_commit_or_abort guard).
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultSystemError);
 }
 
@@ -258,7 +258,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
   // Advance the block - this closes and commits the current block,
   // making the transaction's block no longer current
   advance_block();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
 
   ASSERT_FALSE(res.result_.has_value());
   ASSERT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Abandon});

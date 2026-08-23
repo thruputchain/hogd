@@ -79,10 +79,8 @@ load_allocation(NativeSyscallContext &ctx,
   int128_t output_set{};
   bool output_set_opt{};
   int128_t output_add{};
-  auto r =
-      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(contract_data_key, true,
-                                                 output_set, output_set_opt,
-                                                 output_add);
+  auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      contract_data_key, true, output_set, output_set_opt, output_add);
   if (!r.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
@@ -168,7 +166,8 @@ make_native_initial_token_claim_contract()
         // Deploy the contract using hash and nonce
         ContractAddress deployed_addr{};
         auto deploy_res =
-            co_await ctx.syscall<SyscallNo::kDeployContract>(nonce, hash, deployed_addr);
+            co_await ctx.syscall<SyscallNo::kDeployContract>(nonce, hash,
+                                                             deployed_addr);
         if (!deploy_res.has_value()) {
           co_return NativeContractBuilder::host_fn_error_conversion(
               deploy_res.error());

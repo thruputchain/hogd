@@ -120,7 +120,7 @@ public:
     ASSERT_EQ(syscall_res2.error().code(), Code);
     ASSERT_EQ(gas_consumed2, 10);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 
   template<HostFnErrorCode Code> void run_gas_limit_supercedes_test()
@@ -153,7 +153,7 @@ public:
     ASSERT_EQ(syscall_res2.error().code(), HostFnErrorCode::OutOfGas);
     ASSERT_EQ(gas_consumed2, 10);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 
   // See the #1759 block at the bottom of this file. A frame with no gas left
@@ -177,7 +177,7 @@ public:
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
 
-    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+    auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
   }
 };
 
@@ -424,7 +424,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   // The gas consumed must be 0, not an error code value
   ASSERT_EQ(gas.get(), 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Test that syscall_Return_inner with a valid buffer returns 0 gas consumed
@@ -452,7 +452,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
   // The gas consumed must be 0
   ASSERT_EQ(gas.get(), 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 namespace {
@@ -508,7 +508,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowingSyscallTranslatedToUnrecoverable)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
@@ -530,7 +530,7 @@ TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest,
@@ -550,7 +550,7 @@ TEST_F(SyscallErrorHandlingTest,
   ASSERT_TRUE(status.has_value());
   ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // ---------------------------------------------------------------------------
@@ -662,7 +662,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtZeroGasIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The second half of the #1759 chain: Return is what carries the child frame's
@@ -687,7 +687,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The other side of the boundary: the rewrite must not swallow syscalls the
@@ -711,7 +711,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Pins the comparison itself at a nonzero cost: a syscall that costs exactly
@@ -745,7 +745,7 @@ TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
   ASSERT_EQ(*above_cost, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_above_cost, kFixedSyscallCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The wasmtime trampoline does `set_fuel(gas_remaining - gas_consumed)` behind
@@ -776,7 +776,7 @@ TEST_F(SyscallErrorHandlingTest, ReportedGasNeverExceedsGasRemaining)
         << "gas_remaining = " << gas_remaining;
   }
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // An exhausted frame is not a licence to downgrade a transaction-fatal error
@@ -831,7 +831,7 @@ TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
   ASSERT_FALSE(mint_res.has_value());
   ASSERT_EQ(mint_res.error().code(), HostFnErrorCode::OutOfGas);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
@@ -855,7 +855,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
   ASSERT_FALSE(ret_res.has_value());
   ASSERT_EQ(ret_res.error().code(), HostFnErrorCode::OutOfGas);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 namespace {
@@ -903,7 +903,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyRoundTrips)
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
   ASSERT_EQ(gas_consumed, 1000);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The gas epilogue is the part a suspension could most easily skip past, so
@@ -928,7 +928,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyStillMeteredOnResume)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, 10);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
@@ -950,7 +950,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, 0);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 } // namespace hogd

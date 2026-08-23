@@ -57,7 +57,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
            int64_t add_amount) -> InvokeStatus<void> {
           auto r = ctx.handler().set_nnint(kKey, set_amount, add_amount,
                                            std::to_underlying(
-                                               StorageDeltaFlags::None));
+                                               StorageDeltaFlags::None))();
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -68,7 +68,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
         1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
           auto r = ctx.handler().set_nnint(kKey, 35, 0,
                                            std::to_underlying(
-                                               StorageDeltaFlags::None));
+                                               StorageDeltaFlags::None))();
           if (!r.has_value() || !r.value().has_value()) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -111,12 +111,12 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       ADD_FAILURE() << "root invoke for reset transaction failed";
       return false;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res != ExecResult::ExecResultOK) {
       ADD_FAILURE() << "try_commit_transaction error for reset transaction";
       return false;
@@ -157,11 +157,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = *calldata}}},
                 *context);
-            auto res = handler.root_invoke();
+            auto res = handler.root_invoke()();
             if (!res.is_root_success()) {
               panic("root invoke failed");
             }
-            auto commit_res = handler.try_commit_transaction();
+            auto commit_res = handler.try_commit_transaction()();
             if (commit_res != ExecResult::ExecResultOK &&
                 commit_res != ExecResult::ExecResultTxNonDeterministicError) {
               panic("try_commit_transaction error");

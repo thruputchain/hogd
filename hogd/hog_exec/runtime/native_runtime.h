@@ -53,9 +53,8 @@ public:
   // Not noexcept: these bodies are coroutines now (they await syscalls), and
   // a coroutine's frame allocation can throw before the body runs.
   // NativeContract::invoke() re-establishes the noexcept boundary.
-  using function_t =
-      UniqueFunction<x23::Async<InvokeStatus<void>>(NativeSyscallContext &)
-                         const>;
+  using function_t = UniqueFunction<x23::Async<InvokeStatus<void>>(
+      NativeSyscallContext &) const>;
   using function_entry_t = std::pair<Runtime::MethodID, function_t>;
 
   NativeContract(std::unordered_map<Runtime::MethodID, function_t> functions)

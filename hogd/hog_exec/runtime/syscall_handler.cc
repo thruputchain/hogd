@@ -159,13 +159,13 @@ SystemCallHandler::root_is_legacy_initial_token_claim()
       *root_invoked_address_ != kGenesisRootContractAddress) {
     co_return false;
   }
-  auto deployed = co_await
-      snapshot_cache_.try_get_deployed_contract(*root_invoked_address_);
+  auto deployed = co_await snapshot_cache_.try_get_deployed_contract(
+      *root_invoked_address_);
   if (!deployed.has_value()) {
     co_return std::unexpected(deployed.error());
   }
   co_return *deployed != nullptr &&
-         (*deployed)->hash.contract_type == ContractType::kNative;
+      (*deployed)->hash.contract_type == ContractType::kNative;
 }
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -370,11 +370,11 @@ SystemCallHandler::root_invoke()
           ? root_invocation.gas_limit - cumulative_invoke_result_.gas_consumed_
           : 0;
 
-  auto [res, gas_consumed] = co_await
-      invoke(root_invocation.invoked_address,
-             sdk_method_id(root_invocation.entrypoint), available_gas,
-             std::move(root_invocation.calldata),
-             std::to_underlying(InvokeFlag::None), {});
+  auto [res, gas_consumed] =
+      co_await invoke(root_invocation.invoked_address,
+                      sdk_method_id(root_invocation.entrypoint), available_gas,
+                      std::move(root_invocation.calldata),
+                      std::to_underlying(InvokeFlag::None), {});
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
@@ -582,10 +582,9 @@ SystemCallHandler::try_commit_transaction()
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
   co_await add_replay_nonce_delta();
 
-  auto r = co_await
-      last_frame_ // NOLINT(bugprone-unchecked-optional-access)
-          .value()
-          .try_acquire_frame_locks(db_proxy_, observations);
+  auto r = co_await last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+               .value()
+               .try_acquire_frame_locks(db_proxy_, observations);
   if (!r.has_value()) {
     two_phase_commit_failed_ = true;
     co_await report_db_conflict_diagnostic();
@@ -812,8 +811,8 @@ SystemCallHandler::validate_new_invocation(
   return {};
 }
 
-x23::Async<
-    std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>>
+x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
+                     GasAmount>>
 SystemCallHandler::invoke(ContractAddress const &address,
                           Runtime::MethodID method, GasAmount gas_limit,
                           Calldata calldata, InvokeFlagSet flags,
@@ -887,9 +886,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
       report_dropped_log("unknown exception");
       co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
     }
-    co_return invoke_result_t{SyscallError{
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-            0};
+    co_return invoke_result_t{
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+        0};
   }
 
   Invocation invocation = {.invoked_address = address,
@@ -914,10 +913,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
   }
   auto stashed_parent_trace = std::move(start_status.value());
 
-  InvokeResult cumulative_result = runtime.value()->invoke(method, gas_limit);
+  InvokeResult cumulative_result =
+      co_await runtime.value()->invoke(method, gas_limit);
 
-  auto finish_status = co_await
-      finish_frame(cumulative_result.result_, std::move(stashed_parent_trace));
+  auto finish_status = co_await finish_frame(cumulative_result.result_,
+                                             std::move(stashed_parent_trace));
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
     // We can add gas consumption here, but that would only affect the state of
@@ -1087,9 +1087,9 @@ SystemCallHandler::finish_frame_impl(
     // the conflict can be recorded on this (still-current) child frame's
     // trace.
     [[maybe_unused]] size_t stack_size = invocation_frame_stack_.size();
-    res = co_await
-        invocation_frame_stack_.finish_frame(result, execution_mode_data_,
-                                             &try_invoke_conflict);
+    res = co_await invocation_frame_stack_.finish_frame(result,
+                                                        execution_mode_data_,
+                                                        &try_invoke_conflict);
     [[maybe_unused]] size_t stack_size_after = invocation_frame_stack_.size();
     assert(stack_size_after == stack_size - 1);
     if (invocation_frame_stack_.empty()) {
@@ -1409,13 +1409,14 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   // Check the snapshot for a deployed contract; on a hit, the returned entry
   // carries the back-pointer to its (eagerly translated) code.
-  auto deployed_expect = co_await snapshot_cache_.try_get_deployed_contract(addr);
+  auto deployed_expect =
+      co_await snapshot_cache_.try_get_deployed_contract(addr);
   if (!deployed_expect) {
     co_return deployed_expect.error();
   }
   const DeployedContract *deployed = *deployed_expect;
   if (deployed != nullptr) {
-    co_return runtime_context_.make_new_runtime(*deployed, this);
+    co_return co_await runtime_context_.make_new_runtime(*deployed, this);
   }
 
   // Not in the snapshot; check the transaction's local context.
@@ -1443,7 +1444,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
   // Tx-local deployment or root default-wallet fallback: no cache entry
   // (entry stays null; the engine falls back to resolve_contract).
-  co_return runtime_context_.make_new_runtime(DeployedContract{*local_hash}, this);
+  co_return co_await runtime_context_.make_new_runtime(
+      DeployedContract{*local_hash}, this);
 }
 
 Calldata const &
@@ -1601,7 +1603,8 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     co_return contract_res.error();
   }
   if (contract_res.value() == nullptr) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   assert(contract_res.value() != nullptr);
   auto const &contract = *contract_res.value();
@@ -1610,7 +1613,8 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // genesis and should not be redeployed by user transactions
   if (contract.contract_type() == ContractType::kNative &&
       is_banned_redeploy_native_contract(contract.native_contract_id())) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto deploy_addr =
@@ -1656,13 +1660,15 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   }
 
   if (item_view->get<DeletedItem>()) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
-      auto load_status = co_await unmodified_item->load(snapshot_cache_, addrkey);
+      auto load_status =
+          co_await unmodified_item->load(snapshot_cache_, addrkey);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1680,7 +1686,8 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
     co_return &base_item.bytestring();
   }
 
-  co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -1692,7 +1699,8 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -1723,7 +1731,7 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
   if (auto const *nnint_item = item_view->get<NNIntItem>()) {
     if (nnint_item->base_value_.has_value()) {
       co_return std::make_pair(from_xdr(*nnint_item->base_value_),
-                             from_xdr(nnint_item->add_value_));
+                               from_xdr(nnint_item->add_value_));
     }
     // If we're not loading from the snapshot, we can return nullopt for the
     // base value.
@@ -1732,7 +1740,8 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
     }
 
     auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
-    auto snapshot_value = co_await snapshot_cache_.try_get_snapshot_item(addrkey);
+    auto snapshot_value =
+        co_await snapshot_cache_.try_get_snapshot_item(addrkey);
     if (!snapshot_value.has_value()) {
       co_return snapshot_value.error();
     }
@@ -1747,14 +1756,15 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
       co_return std::make_pair(0, from_xdr(nnint_item->add_value_));
     }
     co_return std::make_pair(snapshot_value.value()->nnint(),
-                           from_xdr(nnint_item->add_value_));
+                             from_xdr(nnint_item->add_value_));
   }
 
   if (item_view->get<DeletedItem>()) {
     if (!load_from_snapshot) {
       co_return std::make_pair(std::nullopt, 0);
     }
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist};
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
@@ -1764,7 +1774,8 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
-      auto load_status = co_await unmodified_item->load(snapshot_cache_, addrkey);
+      auto load_status =
+          co_await unmodified_item->load(snapshot_cache_, addrkey);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1791,7 +1802,8 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
   if (!load_from_snapshot) {
     co_return std::make_pair(std::nullopt, 0);
   }
-  co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -1804,7 +1816,8 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           input_flags)) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -1815,12 +1828,12 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
   co_return item_view->set(NNIntItem{.base_value_ =
-                                      set_value.has_value()
-                                          ? std::optional<int128_xdr>(
-                                                to_xdr(*set_value))
-                                          : std::nullopt,
-                                  .add_value_ = to_xdr(add_value)},
-                        input_flags);
+                                         set_value.has_value()
+                                             ? std::optional<int128_xdr>(
+                                                   to_xdr(*set_value))
+                                             : std::nullopt,
+                                     .add_value_ = to_xdr(add_value)},
+                           input_flags);
 }
 
 x23::Async<SystemStatus<SyscallStatus<void>>>
@@ -1831,7 +1844,8 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 
   if (!SystemCallHandler::validate_flags<StorageDeltaFlags::ExclusiveLock>(
           flags)) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -1879,7 +1893,8 @@ retrocausal_queue_item_from_view(ItemView *item_view,
   }
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
-      auto load_status = co_await unmodified_item->load(snapshot_cache, addrkey);
+      auto load_status =
+          co_await unmodified_item->load(snapshot_cache, addrkey);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1915,7 +1930,8 @@ retrocausal_queue_item_from_view(ItemView *item_view,
     co_return item_view->get<RetrocausalQueueItem>();
   }
 
-  co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
@@ -1962,7 +1978,8 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
-      auto load_status = co_await unmodified_item->load(snapshot_cache, addrkey);
+      auto load_status =
+          co_await unmodified_item->load(snapshot_cache, addrkey);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
@@ -1989,7 +2006,8 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
                                              /*advance_cursor=*/false);
   }
 
-  co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 } // namespace
 
@@ -1998,15 +2016,17 @@ SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
   if (queue_entry.size() > kQueueEntryMaxLen) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
 
-  auto queue_item = co_await
-      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_,
-                                       execution_mode_data_);
+  auto queue_item =
+      co_await retrocausal_queue_item_from_view(item_view, addrkey,
+                                                snapshot_cache_,
+                                                execution_mode_data_);
   if (!queue_item.has_value()) {
     co_return queue_item.error();
   }
@@ -2029,9 +2049,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   assert(item_view);
 
   if (peek) {
-    co_return co_await
-        retrocausal_queue_peek_from_view(item_view, addrkey, snapshot_cache_,
-                                         execution_mode_data_);
+    co_return co_await retrocausal_queue_peek_from_view(item_view, addrkey,
+                                                        snapshot_cache_,
+                                                        execution_mode_data_);
   }
 
   // For unmodified keys, probe with a local item first. Only persist
@@ -2039,15 +2059,16 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   // absent key does not pin the storage type.
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (!unmodified_item->is_loaded()) {
-      auto load_status = co_await unmodified_item->load(snapshot_cache_, addrkey);
+      auto load_status =
+          co_await unmodified_item->load(snapshot_cache_, addrkey);
       if (!load_status.has_value()) {
         co_return load_status.error();
       }
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    auto entry = co_await load_next_queue_entry(queue_item,
-                                                execution_mode_data_,
-                                                /*advance_cursor=*/true);
+    auto entry =
+        co_await load_next_queue_entry(queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
@@ -2059,9 +2080,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   }
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
-    auto entry = co_await load_next_queue_entry(*queue_item,
-                                                execution_mode_data_,
-                                                /*advance_cursor=*/true);
+    auto entry =
+        co_await load_next_queue_entry(*queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
     item_view->sync_retrocausally_consumed(*queue_item);
     co_return entry;
   }
@@ -2079,9 +2100,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
         item_view->get_retrocausally_consumed_count());
     auto queue_item = RetrocausalQueueItem::make_fully_consumed_item(
         unmodified_item.base_item(), std::move(consumed));
-    auto entry = co_await load_next_queue_entry(queue_item,
-                                                execution_mode_data_,
-                                                /*advance_cursor=*/true);
+    auto entry =
+        co_await load_next_queue_entry(queue_item, execution_mode_data_,
+                                       /*advance_cursor=*/true);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
@@ -2092,7 +2113,8 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     co_return entry;
   }
 
-  co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return SyscallError{
+      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
 
 // == Native token syscalls ==
@@ -2173,7 +2195,8 @@ SystemCallHandler::modify_native_token_balance(
 {
   assert(!invocation_frame_stack_.empty());
   if (is_read_only()) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   AddressAndKey addrkey{.address = contract_address,
@@ -2216,7 +2239,8 @@ SystemCallHandler::change_public_key_registration(uint32_t key_index,
                                                   PublicKeyConfigOpt new_key)
 {
   if (key_index >= kMaxSigners) {
-    co_return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    co_return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   assert(!invocation_frame_stack_.empty());

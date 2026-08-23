@@ -1408,7 +1408,7 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
 
   framework_.advance_block();
   auto const expired_height = BlockHeight{
-      framework_.get_db_tip().value.proposal_header.block_height - 1};
+      framework_.get_db_tip()().value.proposal_header.block_height - 1};
 
   NativeViewSetup setup(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
@@ -1473,7 +1473,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
@@ -1499,7 +1499,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
   auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
-      snapshot.viewing_block_id);
+      snapshot.viewing_block_id)();
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1529,7 +1529,7 @@ TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  DbTip tip = framework_.get_db_tip();
+  DbTip tip = framework_.get_db_tip()();
   StorageSnapshotCache snapshot_cache(tip.id, framework_.get_db_proxy());
 
   Invocation invocation{
@@ -1554,7 +1554,7 @@ TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
 {
   framework_.advance_block();
 
-  auto res = framework_.get_db_proxy().open_viewing_snapshot();
+  auto res = framework_.get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(res.has_value());
 
   auto &snapshot = res.value();
@@ -1562,7 +1562,7 @@ TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
   EXPECT_GE(snapshot.tip.value.proposal_header.block_height, 0);
 
   auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
-      snapshot.viewing_block_id);
+      snapshot.viewing_block_id)();
   EXPECT_TRUE(close_res.has_value());
 }
 
@@ -1587,7 +1587,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   deploy_native(kNativeAddr);
   framework_.advance_block();
 
-  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot();
+  auto snapshot_res = framework_.get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snapshot_res.has_value());
   auto &snapshot = snapshot_res.value();
 
@@ -1615,7 +1615,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
 
   auto close_res = framework_.get_db_proxy().close_viewing_snapshot(
-      snapshot.viewing_block_id);
+      snapshot.viewing_block_id)();
   EXPECT_TRUE(close_res.has_value());
 }
 

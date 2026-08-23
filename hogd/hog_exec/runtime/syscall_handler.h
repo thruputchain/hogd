@@ -127,9 +127,9 @@ public:
 
   // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
   // allocation is what finish_frame() catches on its behalf.
-  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame_impl(
-      InvokeStatus<void> result,
-      std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame_impl(InvokeStatus<void> result,
+                    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
 
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
@@ -280,9 +280,8 @@ public:
   //  - value (InvocationFrameStatusCode): a child frame ran; the value is how
   //    it ended (Return / Abort / Fault).
   [[nodiscard]]
-  x23::Async<
-      std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
-                GasAmount>>
+  x23::Async<std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
+                       GasAmount>>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
          std::span<uint32_t const> owned_auth_token_ids);

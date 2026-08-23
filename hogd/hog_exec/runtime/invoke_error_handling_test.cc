@@ -262,9 +262,9 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                 }},
         *runtime_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction();
+    auto r = handler.try_commit_transaction()();
     ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 }
@@ -434,9 +434,9 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                 }},
         *runtime_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction();
+    auto r = handler.try_commit_transaction()();
     ASSERT_EQ(r, ExecResult::ExecResultOK);
   }
 }
@@ -506,7 +506,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
               }},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -606,9 +606,9 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // A child that traps/faults: Invoke returns None, frame_status == Fault, and
@@ -689,9 +689,9 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Issue #1909, locked in as working-as-intended: an Invoke rejected before a
@@ -799,9 +799,9 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,

@@ -393,7 +393,7 @@ public:
     }
     else {
       auto contract =
-          syscall_handler->resolve_contract(deployed_contract.hash.hash);
+          syscall_handler->resolve_contract(deployed_contract.hash.hash)();
       if (!contract.has_value()) {
         return contract.error();
       }
@@ -453,9 +453,9 @@ protected:
                               Transaction{.invocation = std::move(invocation),
                                           .uniquifier = make_new_uniquifier()}},
         runtime_context_);
-    bool ok = handler.root_invoke().is_root_success();
+    bool ok = handler.root_invoke()().is_root_success();
     if (ok) {
-      handler.try_commit_transaction();
+      handler.try_commit_transaction()();
       advance_block();
     }
     return ok;

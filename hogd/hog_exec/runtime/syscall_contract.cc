@@ -44,14 +44,16 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_contract_hash,
                              ContractAddress &output_deployed_address)
 {
-  auto status = co_await
-      syscall_handler.deploy_contract(input_nonce, input_contract_hash);
+  auto status = co_await syscall_handler.deploy_contract(input_nonce,
+                                                         input_contract_hash);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   auto &deploy_status = *status;
   if (!deploy_status) {
-    co_return SyscallInnerResult{deploy_status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{deploy_status.error().code(),
+                                 WrappedGasAmount{0}};
   }
   output_deployed_address = *deploy_status;
 
@@ -62,7 +64,8 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
         .deployed_address = output_deployed_address});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 } // namespace hogd

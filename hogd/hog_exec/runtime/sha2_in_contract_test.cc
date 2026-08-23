@@ -106,14 +106,14 @@ TEST_F(Sha2InContractTest, InvokeFFFFF)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(std::ranges::equal(output.return_buffer(), hash_actual));
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
