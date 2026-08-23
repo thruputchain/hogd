@@ -19,6 +19,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -32,20 +33,26 @@ StorageSnapshotCache::~StorageSnapshotCache()
   release_db_tip();
 }
 
-SystemStatus<const ContractCacheEntry *>
+x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
 StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
 {
   {
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
-      return obj->has_value() ? &**obj : nullptr;
+      return SystemStatus<const ContractCacheEntry *>{
+          obj->has_value() ? &**obj : nullptr};
     }
   }
+  return load_contract_entry(hash);
+}
 
-  auto db_res = db_proxy_.get_contract(block_id_, hash);
+x23::Async<SystemStatus<const ContractCacheEntry *>>
+StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
+{
+  auto db_res = co_await db_proxy_.get_contract(block_id_, hash);
   if (!db_res) {
-    return db_res.error();
+    co_return db_res.error();
   }
 
   if constexpr (is_debug_build()) {
@@ -75,77 +82,101 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
   // then the contract cache needs to only cache positive lookups
   auto [obj, lock] = contract_cache_.insert(hash, std::move(entry));
   if (obj != nullptr) {
-    return obj->has_value() ? &**obj : nullptr;
+    co_return obj->has_value() ? &**obj : nullptr;
   }
   CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = contract_cache_.find(hash, lock);
   CHECK_PTR(obj2);
-  return obj2->has_value() ? &**obj2 : nullptr;
+  co_return obj2->has_value() ? &**obj2 : nullptr;
 }
 
-SystemStatus<const Contract *>
+x23::MaybeAsync<SystemStatus<const Contract *>>
 StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
-  auto entry = get_contract_entry(hash);
-  if (!entry) {
-    return entry.error();
+  {
+    auto [obj, sl] = contract_cache_.find_shared(hash);
+    if (obj) {
+      return SystemStatus<const Contract *>{
+          obj->has_value() ? &(*obj)->contract : nullptr};
+    }
   }
-  return entry.value() ? &entry.value()->contract : nullptr;
+  return load_contract_by_hash(hash);
 }
 
-SystemStatus<const DeployedContract *>
+x23::Async<SystemStatus<const Contract *>>
+StorageSnapshotCache::load_contract_by_hash(SHA256Hash hash)
+{
+  auto entry = co_await load_contract_entry(hash);
+  if (!entry) {
+    co_return entry.error();
+  }
+  co_return entry.value() ? &entry.value()->contract : nullptr;
+}
+
+x23::MaybeAsync<SystemStatus<const DeployedContract *>>
 StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
 {
   {
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = deployment_cache_.find_shared(addr);
     if (obj) {
-      return obj->has_value() ? &**obj : nullptr;
+      return SystemStatus<const DeployedContract *>{
+          obj->has_value() ? &**obj : nullptr};
     }
   }
+  return load_deployed_contract(addr);
+}
 
-  auto db_res = db_proxy_.get_deployment(block_id_, addr);
+x23::Async<SystemStatus<const DeployedContract *>>
+StorageSnapshotCache::load_deployed_contract(ContractAddress addr)
+{
+  auto db_res = co_await db_proxy_.get_deployment(block_id_, addr);
   if (!db_res) {
-    return db_res.error();
+    co_return db_res.error();
   }
 
   std::optional<DeployedContract> deployed;
   if (db_res.value()) {
     DeployedContractHash meta = db_res.value().value();
     // Eagerly warm + translate the contract code; back-point at its entry.
-    auto entry = get_contract_entry(meta.hash);
+    auto entry = co_await get_contract_entry(meta.hash);
     if (!entry) {
-      return entry.error();
+      co_return entry.error();
     }
     deployed.emplace(meta, entry.value());
   }
 
   auto [obj, lock] = deployment_cache_.insert(addr, std::move(deployed));
   if (obj != nullptr) {
-    return obj->has_value() ? &**obj : nullptr;
+    co_return obj->has_value() ? &**obj : nullptr;
   }
   CHECK(lock.owns_lock());
   // concurrent insert happened: fetch the result from the cache again
   auto *obj2 = deployment_cache_.find(addr, lock);
   CHECK_PTR(obj2);
-  return obj2->has_value() ? &**obj2 : nullptr;
+  co_return obj2->has_value() ? &**obj2 : nullptr;
 }
 
-SystemStatus<const SnapshotStorageItem *>
+x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   {
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
     if (obj) {
-      return obj;
+      return SystemStatus<const SnapshotStorageItem *>{obj};
     }
   }
+  return load_snapshot_item(addrkey);
+}
 
-  auto db_res = db_proxy_.get_snapshot_item(block_id_, addrkey);
+x23::Async<SystemStatus<const SnapshotStorageItem *>>
+StorageSnapshotCache::load_snapshot_item(AddressAndKey addrkey)
+{
+  auto db_res = co_await db_proxy_.get_snapshot_item(block_id_, addrkey);
   if (!db_res) {
-    return db_res.error();
+    co_return db_res.error();
   }
 
   // cache both positive and negative lookups
@@ -157,7 +188,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   auto entry =
       SnapshotStorageItem::make_variant(std::move(db_item), addrkey.key);
   if (!entry) {
-    return entry.error();
+    co_return entry.error();
   }
 
   auto [out, ul] =
@@ -165,35 +196,41 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
                                   block_id_, db_proxy_);
   if (out) {
     // insertion happened; return the result
-    return out;
+    co_return out;
   }
   CHECK(ul.owns_lock());
 
   auto *obj = snapshot_item_cache_.find(addrkey, ul);
   // otherwise, lookup the item in the cache again
   CHECK_PTR(obj);
-  return obj;
+  co_return obj;
 }
 
-SystemStatus<const DbTip *>
+x23::MaybeAsync<SystemStatus<const DbTip *>>
 StorageSnapshotCache::try_get_db_tip()
 {
   auto *tip = db_tip_.load();
   if (tip != nullptr) {
-    return tip;
+    return SystemStatus<const DbTip *>{tip};
   }
+  return load_db_tip();
+}
 
-  auto db_res = db_proxy_.get_db_tip(block_id_);
+x23::Async<SystemStatus<const DbTip *>>
+StorageSnapshotCache::load_db_tip()
+{
+  auto db_res = co_await db_proxy_.get_db_tip(block_id_);
   if (!db_res) {
-    return db_res.error();
+    co_return db_res.error();
   }
 
   std::unique_ptr<DbTip> tip_unique = std::make_unique<DbTip>(db_res.value());
-  if (db_tip_.compare_exchange_strong(tip, tip_unique.get())) {
-    return tip_unique.release();
+  DbTip *expected = nullptr;
+  if (db_tip_.compare_exchange_strong(expected, tip_unique.get())) {
+    co_return tip_unique.release();
   }
-  CHECK_PTR(tip);
-  return tip;
+  CHECK_PTR(expected);
+  co_return expected;
 }
 
 void

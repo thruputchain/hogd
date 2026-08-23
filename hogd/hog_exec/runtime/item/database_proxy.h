@@ -23,7 +23,8 @@
 #include "sched_exec.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/srpc.h"
+#include "x23/async.h"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -55,49 +56,67 @@ public:
   DatabaseProxy(DatabaseProxy &&) = delete;
   DatabaseProxy &operator=(DatabaseProxy &&) = delete;
 
-  SystemStatus<std::optional<WireStorageItem>>
-  get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
+  // Every call below is a coroutine that suspends until hog_db answers, so the
+  // thread is free to run other transactions meanwhile.  Small key arguments
+  // are taken BY VALUE so they are copied into the coroutine frame and stay
+  // valid across the suspension; the two batch arguments below are too large
+  // to copy and are documented as caller-owned instead.
+  x23::Async<SystemStatus<std::optional<WireStorageItem>>>
+  get_snapshot_item(BlockID block_id, AddressAndKey addrkey);
 
-  SystemStatus<std::optional<Contract>>
-  get_contract(BlockID block_id, SHA256Hash const &contract_hash);
+  x23::Async<SystemStatus<std::optional<Contract>>>
+  get_contract(BlockID block_id, SHA256Hash contract_hash);
 
-  SystemStatus<std::optional<DeployedContractHash>>
-  get_deployment(BlockID block_id, ContractAddress const &addr);
+  x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
+  get_deployment(BlockID block_id, ContractAddress addr);
 
-  SystemStatus<std::optional<RetrocausalQueueBlock>>
-  get_next_retrocausal_queue_block(BlockID block_id,
-                                   AddressAndKey const &addrkey,
+  x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
+  get_next_retrocausal_queue_block(BlockID block_id, AddressAndKey addrkey,
                                    uint64_t search_start_number);
 
-  SystemStatus<std::optional<QueueEntry>>
+  x23::Async<SystemStatus<std::optional<QueueEntry>>>
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
-                                         AddressAndKey const &addrkey,
+                                         AddressAndKey addrkey,
                                          uint32_t index);
 
   // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
   // non-null it receives the conflict diagnostics hog_db built at the level
   // it selected from the block's execution mode.
-  SystemStatus<bool>
+  //
+  // [delta_batch] and [conflict_out] are borrowed across the suspension: this
+  // is a coroutine, so a reference parameter is NOT copied into the frame and
+  // the caller must keep the referent alive until the call completes.  The
+  // batch is far too large to copy per push, which is why it stays a
+  // reference; PerTransactionDatabaseProxy owns both for the whole call.
+  x23::Async<SystemStatus<bool>>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch,
                               DbConflictResult *conflict_out = nullptr);
 
-  SystemStatus<void>
+  // [new_contracts] is borrowed across the suspension; see above.
+  x23::Async<SystemStatus<void>>
   commit_transaction(BlockID block_id, TransactionID tx_id,
                      BorrowedContractBatch const &new_contracts);
 
-  SystemStatus<void> abort_transaction(BlockID block_id, TransactionID tx_id);
+  x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
+                                                   TransactionID tx_id);
 
-  SystemStatus<void> pop_subtransactions(BlockID block_id, TransactionID tx_id,
-                                         uint32_t count);
+  x23::Async<SystemStatus<void>>
+  pop_subtransactions(BlockID block_id, TransactionID tx_id, uint32_t count);
 
-  SystemStatus<DbTip> get_db_tip(BlockID block_id);
+  x23::Async<SystemStatus<DbTip>> get_db_tip(BlockID block_id);
 
-  SystemStatus<ViewingSnapshot> open_viewing_snapshot();
-  SystemStatus<void> close_viewing_snapshot(BlockID block_id);
+  x23::Async<SystemStatus<ViewingSnapshot>> open_viewing_snapshot();
+  x23::Async<SystemStatus<void>> close_viewing_snapshot(BlockID block_id);
 
 private:
-  using base_client_t = x23::SRpcMulticlient<x23::RpcLogger>::ClientRef;
+  // The async multiclient: a DB read suspends the calling coroutine instead of
+  // parking its thread, which is what lets contract execution share the x23
+  // ThreadPool rather than needing a DispatchPool of its own.  Still a
+  // multiclient (one connection per LLC): a synchronous-bodied async server
+  // serializes requests per connection, so a single connection would serialize
+  // every DB read in the process.
+  using base_client_t = x23::RpcMulticlient<x23::RpcLogger>::ClientRef;
   using client_t = DatabaseToExecutorInterfaceV1::client<base_client_t>;
   client_t client_;
 };
@@ -137,7 +156,9 @@ public:
     return last_push_conflict_;
   }
 
-  SystemStatus<bool> try_push_current_subtransaction()
+  // Coroutine: the staged batch stays owned by this object across the
+  // suspension, and is cleared only once hog_db has answered.
+  x23::Async<SystemStatus<bool>> try_push_current_subtransaction()
   {
     if constexpr (is_debug_build()) {
       // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -158,20 +179,20 @@ public:
 
     last_push_conflict_ =
         DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
-    auto r =
+    auto r = co_await
         db_proxy_.try_push_new_subtransaction(block_id_, tx_id_,
                                               current_subtransaction_batch_,
                                               &last_push_conflict_);
     current_subtransaction_batch_.clear();
-    return r;
+    co_return r;
   }
 
-  SystemStatus<void> pop_subtransactions(uint32_t count)
+  x23::Async<SystemStatus<void>> pop_subtransactions(uint32_t count)
   {
     return db_proxy_.pop_subtransactions(block_id_, tx_id_, count);
   }
 
-  SystemStatus<void> commit_transaction()
+  x23::Async<SystemStatus<void>> commit_transaction()
   {
     static const BorrowedContractBatch::hash_set_t kEmptyHashes;
     static const BorrowedContractBatch::contract_map_t kEmptyContracts;
@@ -180,13 +201,15 @@ public:
     return db_proxy_.commit_transaction(block_id_, tx_id_, kEmptyBatch);
   }
 
-  SystemStatus<void>
+  // [new_contracts] is borrowed for the duration of the call; the caller owns
+  // it (see DatabaseProxy::commit_transaction).
+  x23::Async<SystemStatus<void>>
   commit_transaction(BorrowedContractBatch const &new_contracts)
   {
     return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
   }
 
-  SystemStatus<void> abort_transaction()
+  x23::Async<SystemStatus<void>> abort_transaction()
   {
     return db_proxy_.abort_transaction(block_id_, tx_id_);
   }

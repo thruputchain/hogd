@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -17,6 +16,8 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -95,28 +96,30 @@ SnapshotStorageItem::make_variant(WireStorageItem item,
   }
 }
 
-SystemStatus<const RetrocausalQueueBlock *>
+x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
 SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
     DatabaseProxy &db_proxy, BlockID block_id, AddressAndKey const &addrkey,
-    uint64_t search_start_index, std::unique_lock<mutex_type> &ul) const
+    uint64_t search_start_index) const
 {
-  assert(ul.owns_lock());
   // If we've already queried for a block below search_start_index and that
   // search failed, then there's no reason to query the database again.
   if (block_number_upper_bound_ &&
       search_start_index >= *block_number_upper_bound_) {
-    return nullptr;
+    co_return nullptr;
   }
 
   auto it = blocks_.lower_bound(search_start_index);
   if (it != blocks_.end()) {
-    return it->second.get();
+    co_return it->second.get();
   }
 
-  auto db_res = db_proxy.get_next_retrocausal_queue_block(block_id, addrkey,
-                                                          search_start_index);
+  // rcq_mtx_ is held by our caller across this suspension, so no other
+  // coroutine observes the half-updated blocks_/upper-bound state below.
+  auto db_res = co_await
+      db_proxy.get_next_retrocausal_queue_block(block_id, addrkey,
+                                                search_start_index);
   if (!db_res) {
-    return db_res.error();
+    co_return db_res.error();
   }
   auto block = db_res.value();
 
@@ -125,60 +128,66 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
     assert(!block_number_upper_bound_ ||
            search_start_index < *block_number_upper_bound_);
     block_number_upper_bound_ = search_start_index;
-    return nullptr;
+    co_return nullptr;
   }
 
   auto ptr = std::make_unique<RetrocausalQueueBlock>(*block);
   auto const *out = ptr.get();
   blocks_[block->block_number] = std::move(ptr);
-  return out;
+  co_return out;
 }
 
-SystemStatus<const RetrocausalQueueBlock *>
+x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
 SnapshotStorageItem::get_next_rcq_block(uint64_t search_start_block) const
 {
   // This method is only valid for RCQ items
   if (!std::holds_alternative<RetrocausalQueueEntry>(entry_)) {
-    return nullptr;
+    co_return nullptr;
   }
   auto const &rcq = std::get<RetrocausalQueueEntry>(entry_);
-  std::unique_lock ul(rcq_mtx_);
-  return rcq.get_next_block(db_proxy_, block_id_, addrkey_, search_start_block,
-                            ul);
+  x23::CoroGuard g;
+  co_await g(rcq_mtx_);
+  co_return co_await rcq.get_next_block(db_proxy_, block_id_, addrkey_,
+                                        search_start_block);
 }
 
-SystemStatus<Nondeterministic<std::optional<QueueEntry>>>
+x23::Async<SystemStatus<Nondeterministic<std::optional<QueueEntry>>>>
 SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
 {
   {
-    std::lock_guard ul(rcq_mtx_);
+    x23::CoroGuard g;
+    co_await g(rcq_mtx_);
     if (index < concurrent_queue_entries_.size()) {
-      return concurrent_queue_entries_[index];
+      co_return concurrent_queue_entries_[index];
     }
     if (index != concurrent_queue_entries_.size()) [[unlikely]] {
       error("unrecoverable: bad get_concurrent_rcq_entry access");
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
 
-  auto db_res =
+  // Deliberately read without the lock held, then reconcile below: a racing
+  // load of the same index issues a second RPC but must see the same answer,
+  // which the mismatch check enforces.
+  auto db_res = co_await
       db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey_,
                                                        index);
   if (!db_res) {
-    return db_res.error();
+    co_return db_res.error();
   }
   auto entry = db_res.value();
   if (entry.has_value()) {
-    std::lock_guard ul(rcq_mtx_);
+    x23::CoroGuard g;
+    co_await g(rcq_mtx_);
     if (index == concurrent_queue_entries_.size()) {
       concurrent_queue_entries_.push_back(*entry);
     }
     else if (concurrent_queue_entries_[index] != *entry) [[unlikely]] {
       error("unrecoverable: mismatch in concurrent rcq return results");
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
-  return entry;
+  co_return entry;
 }
 
 } // namespace hogd

@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -60,14 +61,19 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  SystemStatus<const Contract *>
+  // Each lookup answers from cache without allocating a coroutine frame --
+  // MaybeAsync's value arm -- and falls back to an Async that suspends on the
+  // database read only on a miss.  The lock guarding each cache is always
+  // released before that read, so no cache lock is ever held across a
+  // suspension.
+  x23::MaybeAsync<SystemStatus<const Contract *>>
   try_get_contract_by_hash(SHA256Hash const &hash);
-  SystemStatus<const DeployedContract *>
+  x23::MaybeAsync<SystemStatus<const DeployedContract *>>
   try_get_deployed_contract(ContractAddress const &addr);
-  SystemStatus<const SnapshotStorageItem *>
+  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
-  SystemStatus<const DbTip *> try_get_db_tip();
+  x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
 
   ~StorageSnapshotCache();
 
@@ -90,8 +96,21 @@ private:
   void release_db_tip();
   // Lookup/insert/eager-translate the contract entry for `hash`. Returns
   // nullptr (wrapped) for a negative lookup.
-  SystemStatus<const ContractCacheEntry *>
+  x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
   get_contract_entry(SHA256Hash const &hash);
+
+  // Miss paths for the lookups above.  Each takes its key BY VALUE so the key
+  // is copied into the coroutine frame and stays valid across the database
+  // read.
+  x23::Async<SystemStatus<const ContractCacheEntry *>>
+  load_contract_entry(SHA256Hash hash);
+  x23::Async<SystemStatus<const Contract *>>
+  load_contract_by_hash(SHA256Hash hash);
+  x23::Async<SystemStatus<const DeployedContract *>>
+  load_deployed_contract(ContractAddress addr);
+  x23::Async<SystemStatus<const SnapshotStorageItem *>>
+  load_snapshot_item(AddressAndKey addrkey);
+  x23::Async<SystemStatus<const DbTip *>> load_db_tip();
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
