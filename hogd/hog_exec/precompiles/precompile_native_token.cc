@@ -131,7 +131,7 @@ allowance_key(ContractAddress owner, ContractAddress spender)
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 erc20_error(itc_erc20::ERC20Error code)
 {
-  co_return {Result<void, ERC20Exception>::make_err(ERC20Exception{code})};
+  co_return Result<void, ERC20Exception>::make_err(ERC20Exception{code});
 }
 
 // Strict allowance adjustment, mirroring itc_erc20::add_to_allowance (the SDK's
@@ -272,7 +272,7 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   if (auto emitted = co_await emit_event<3>(ctx, *event_buf); !emitted) {
     co_return emitted.error();
   }
-  co_return {Result<void, ERC20Exception>::make_ok()};
+  co_return Result<void, ERC20Exception>::make_ok();
 }
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
@@ -360,7 +360,7 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   if (auto emitted = co_await emit_event<3>(ctx, *event_buf); !emitted) {
     co_return emitted.error();
   }
-  co_return {Result<void, ERC20Exception>::make_ok()};
+  co_return Result<void, ERC20Exception>::make_ok();
 }
 
 // implementation functions
@@ -436,7 +436,7 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
     co_return err.error();
   }
 
-  co_return {Result<void, ERC20Exception>::make_ok()};
+  co_return Result<void, ERC20Exception>::make_ok();
 }
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
@@ -524,7 +524,7 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return err.error();
   }
 
-  co_return {Result<void, ERC20Exception>::make_ok()};
+  co_return Result<void, ERC20Exception>::make_ok();
 }
 
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
@@ -575,7 +575,7 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
     co_return err.error();
   }
 
-  co_return {Result<void, ERC20Exception>::make_ok()};
+  co_return Result<void, ERC20Exception>::make_ok();
 }
 
 x23::Async<InvokeStatus<Result<amount_t, ERC20Exception>>>
@@ -601,8 +601,8 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-    co_return {Result<amount_t, ERC20Exception>::make_ok(
-        std::make_tuple(uint64_t{0}, uint64_t{0}))};
+    co_return Result<amount_t, ERC20Exception>::make_ok(
+        std::make_tuple(uint64_t{0}, uint64_t{0}));
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -614,8 +614,8 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   uint128_t utotal = std::max<int128_t>(total, 0);
-  co_return {Result<amount_t, ERC20Exception>::make_ok(
-      std::make_tuple(utotal >> 64, utotal & 0xffffffffffffffffULL))};
+  co_return Result<amount_t, ERC20Exception>::make_ok(
+      std::make_tuple(utotal >> 64, utotal & 0xffffffffffffffffULL));
 }
 
 } // namespace
@@ -702,8 +702,8 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        co_return {Result<amount_t, ERC20Exception>::make_ok(
-            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
+        co_return Result<amount_t, ERC20Exception>::make_ok(
+            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL));
       });
 
   // get_balance
@@ -730,8 +730,8 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        co_return {Result<amount_t, ERC20Exception>::make_ok(
-            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
+        co_return Result<amount_t, ERC20Exception>::make_ok(
+            std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL));
       });
 
   // mint
@@ -774,9 +774,9 @@ make_native_token_contract()
         else {
           total_supply = supply_base + supply_add;
         }
-        co_return {Result<amount_t, ERC20Exception>::make_ok(
+        co_return Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(total_supply >> 64,
-                            total_supply & 0xffffffffffffffffULL))};
+                            total_supply & 0xffffffffffffffffULL));
       });
 
   assert(builder.check_methods<itc_erc20::ERC20>());

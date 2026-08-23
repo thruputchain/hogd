@@ -562,7 +562,7 @@ open_mocked_syscall_handler(void *db, void *rc,
           // Report a failed abort -- whether it returns an error status or
           // throws -- rather than silently dropping it.
           try {
-            auto abort_res = handler->to_handler().abort_transaction();
+            auto abort_res = handler->to_handler().abort_transaction()();
             if (!abort_res.has_value()) {
               best_effort_log([&] {
                 error("error aborting transaction during traced "
@@ -642,7 +642,7 @@ close_syscall_handler(void *syscall_handler) noexcept
     // attempt a second abort.
     if (!owned->is_committed_or_aborted()) {
       owned->mark_committed_or_aborted();
-      auto res = owned->to_handler().abort_transaction();
+      auto res = owned->to_handler().abort_transaction()();
       if (!res.has_value()) {
         error("error aborting transaction during close: {}", res.error());
         db.poison_lifecycle();
@@ -850,7 +850,7 @@ try_commit_transaction(void *syscall_handler) noexcept
       error("try_commit_transaction after a failed finish-result handoff");
       return kUnrecoverableError;
     }
-    auto res = context->to_handler().try_commit_transaction();
+    auto res = context->to_handler().try_commit_transaction()();
     context->mark_committed_or_aborted();
 
     // Always serialize the full DbConflictResult (including the None arm) so
@@ -938,7 +938,7 @@ abort_transaction(void *syscall_handler) noexcept
   }
 
   try {
-    auto res = context->to_handler().abort_transaction();
+    auto res = context->to_handler().abort_transaction()();
     // SystemCallHandler::abort_transaction() marks its transaction aborted
     // before issuing the abort RPC, so the context must record the abort even
     // when the RPC reports or throws an error; otherwise the destructor in

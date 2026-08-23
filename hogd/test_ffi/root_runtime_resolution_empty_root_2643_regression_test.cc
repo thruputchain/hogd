@@ -68,8 +68,8 @@ public:
   {
     if (throw_after_mock_lookup_ &&
         deployed_contract.hash.contract_type == ContractType::kMockTest) {
-      auto contract =
-          syscall_handler->resolve_contract(deployed_contract.hash.hash);
+      auto contract = co_await syscall_handler->resolve_contract(
+          deployed_contract.hash.hash);
       if (!contract.has_value()) {
         co_return contract.error();
       }
@@ -80,8 +80,8 @@ public:
       throw_after_mock_lookup_ = false;
       throw std::bad_alloc();
     }
-    co_return MockRuntimeContext::make_new_runtime(deployed_contract,
-                                                   syscall_handler);
+    co_return co_await MockRuntimeContext::make_new_runtime(deployed_contract,
+                                                            syscall_handler);
   }
 
   void throw_after_mock_lookup_once() { throw_after_mock_lookup_ = true; }

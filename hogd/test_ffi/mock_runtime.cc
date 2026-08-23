@@ -49,7 +49,7 @@ MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
     (void)runtime;
   });
   auto res = backing_contract_.invoke(method_id);
-  return {res, gas_consumed()};
+  return std::pair<InvokeStatus<void>, GasAmount>{res, gas_consumed()};
 }
 
 x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
@@ -60,7 +60,7 @@ MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
   if (deployed_contract_hash.contract_type == ContractType::kMockTest) {
 
     auto contract =
-        syscall_handler->resolve_contract(deployed_contract_hash.hash);
+        co_await syscall_handler->resolve_contract(deployed_contract_hash.hash);
     if (!contract.has_value()) {
       co_return contract.error();
     }

@@ -294,6 +294,7 @@ private:
   x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
+    using result_t = std::pair<InvokeStatus<void>, GasAmount>;
     rv32::Machine machine(image_.program, image_.memory_bytes, gas_limit);
     std::ranges::copy(image_.initial_memory, machine.memory().begin());
     machine.seed_method_id(method_id);
@@ -363,12 +364,12 @@ private:
     if (result == rv32::StepResult::kHalted) {
       // Halt only arises from a clean Return; Exit maps to a deterministic
       // trap in to_host_result.
-      return {{}, consumed};
+      return result_t{{}, consumed};
     }
     if (machine.trap() == rv32::Trap::kOutOfGas) {
-      return {InvokeError{InvokeErrorCode::OutOfGas}, consumed};
+      return result_t{InvokeError{InvokeErrorCode::OutOfGas}, consumed};
     }
-    return {InvokeError{InvokeErrorCode::Deterministic}, consumed};
+    return result_t{InvokeError{InvokeErrorCode::Deterministic}, consumed};
   }
 };
 

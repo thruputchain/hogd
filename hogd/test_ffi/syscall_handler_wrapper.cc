@@ -108,7 +108,7 @@ SyscallHandlerContext::root_invoke(bool enable_tracing)
   // consumed early in SystemCallHandler::root_invoke(), so even a pre-frame
   // throw must block a later retry (issue #2643).
   root_invoke_attempted_ = true;
-  auto res = handler_.root_invoke();
+  auto res = handler_.root_invoke()();
 
   if (res.result_.has_value() ||
       res.result_.error().code() == InvokeErrorCode::Deterministic ||
@@ -513,7 +513,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
 
   // finish the frame
   auto res =
-      handler_.finish_frame(result.result_, std::move(stashed_parent_trace));
+      handler_.finish_frame(result.result_, std::move(stashed_parent_trace))();
   if (!res.has_value()) {
     error("unrecoverable: finish_mock_invocation_frame failed: {}",
           res.error());
