@@ -32,27 +32,17 @@ NativeContract::find_function(Runtime::MethodID method) const
   return &it->second;
 }
 
-x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
+x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
-                       uint64_t gas_limit) const noexcept
+                       uint64_t gas_limit) const
 {
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
   const auto *fn = find_function(method);
-  if (fn == nullptr)
-    return result_t{InvokeError{InvokeErrorCode::Deterministic}, 0};
-  // Creating the body coroutine allocates its frame and can throw; this
-  // function is noexcept, so translate that into the same structured failure
-  // the body itself would report.
-  try {
-    return invoke_impl(*fn, syscall_handler, gas_limit);
-  } catch (std::exception const &e) {
-    error("Unrecoverable: could not start native contract body: {}", e.what());
-    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
-  } catch (...) {
-    report_dropped_log("non-std exception starting native contract body");
-    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  if (fn == nullptr) {
+    co_return result_t{InvokeError{InvokeErrorCode::Deterministic}, 0};
   }
+  co_return co_await invoke_impl(*fn, syscall_handler, gas_limit);
 }
 
 x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
@@ -138,7 +128,7 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
   : Runtime(syscall_handler), contract_(contract)
 {}
 
-x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
+x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
 NativeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   return contract_.invoke(method_id, *syscall_handler_, gas_limit);

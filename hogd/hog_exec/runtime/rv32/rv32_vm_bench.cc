@@ -889,7 +889,7 @@ make_memory_transform_artifact()
       std::move(memory));
 }
 
-MaybeAsyncSyscallResult
+AsyncSyscallResult
 artifact_bench_entry(ExternHostCallContext /*context*/,
                      ExecutionContext context, uint32_t arg0, uint32_t arg1,
                      uint32_t arg2, uint32_t arg3, uint32_t /*arg4*/,
@@ -918,7 +918,7 @@ artifact_bench_entry(ExternHostCallContext /*context*/,
   return SyscallResult{SyscallErrorCode::kSyscallErrorCodeFault, 4};
 }
 
-MaybeAsyncSyscallResult
+AsyncSyscallResult
 bridge_noop_entry(ExternHostCallContext /*context*/, ExecutionContext context,
                   uint32_t /*arg0*/, uint32_t /*arg1*/, uint32_t /*arg2*/,
                   uint32_t /*arg3*/, uint32_t /*arg4*/, uint32_t /*arg5*/,

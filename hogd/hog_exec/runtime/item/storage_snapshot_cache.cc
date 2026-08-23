@@ -33,18 +33,19 @@ StorageSnapshotCache::~StorageSnapshotCache()
   release_db_tip();
 }
 
-x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
-StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
+x23::Async<SystemStatus<const ContractCacheEntry *>>
+StorageSnapshotCache::get_contract_entry(SHA256Hash hash)
 {
   {
-    // Use shared lock for read-only cache lookup
+    // Use shared lock for read-only cache lookup.  The scope ends before the
+    // await below, so no cache lock is ever held across a suspension.
     auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
-      return SystemStatus<const ContractCacheEntry *>{
+      co_return SystemStatus<const ContractCacheEntry *>{
           obj->has_value() ? &**obj : nullptr};
     }
   }
-  return load_contract_entry(hash);
+  co_return co_await load_contract_entry(hash);
 }
 
 x23::Async<SystemStatus<const ContractCacheEntry *>>
@@ -91,17 +92,17 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
   co_return obj2->has_value() ? &**obj2 : nullptr;
 }
 
-x23::MaybeAsync<SystemStatus<const Contract *>>
-StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
+x23::Async<SystemStatus<const Contract *>>
+StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash hash)
 {
   {
     auto [obj, sl] = contract_cache_.find_shared(hash);
     if (obj) {
-      return SystemStatus<const Contract *>{obj->has_value() ? &(*obj)->contract
-                                                             : nullptr};
+      co_return SystemStatus<const Contract *>{
+          obj->has_value() ? &(*obj)->contract : nullptr};
     }
   }
-  return load_contract_by_hash(hash);
+  co_return co_await load_contract_by_hash(hash);
 }
 
 x23::Async<SystemStatus<const Contract *>>
@@ -114,18 +115,18 @@ StorageSnapshotCache::load_contract_by_hash(SHA256Hash hash)
   co_return entry.value() ? &entry.value()->contract : nullptr;
 }
 
-x23::MaybeAsync<SystemStatus<const DeployedContract *>>
-StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
+x23::Async<SystemStatus<const DeployedContract *>>
+StorageSnapshotCache::try_get_deployed_contract(ContractAddress addr)
 {
   {
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = deployment_cache_.find_shared(addr);
     if (obj) {
-      return SystemStatus<const DeployedContract *>{obj->has_value() ? &**obj
-                                                                     : nullptr};
+      co_return SystemStatus<const DeployedContract *>{
+          obj->has_value() ? &**obj : nullptr};
     }
   }
-  return load_deployed_contract(addr);
+  co_return co_await load_deployed_contract(addr);
 }
 
 x23::Async<SystemStatus<const DeployedContract *>>
@@ -158,17 +159,17 @@ StorageSnapshotCache::load_deployed_contract(ContractAddress addr)
   co_return obj2->has_value() ? &**obj2 : nullptr;
 }
 
-x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
-StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
+x23::Async<SystemStatus<const SnapshotStorageItem *>>
+StorageSnapshotCache::try_get_snapshot_item(AddressAndKey addrkey)
 {
   {
     // Use shared lock for read-only cache lookup
     auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
     if (obj) {
-      return SystemStatus<const SnapshotStorageItem *>{obj};
+      co_return SystemStatus<const SnapshotStorageItem *>{obj};
     }
   }
-  return load_snapshot_item(addrkey);
+  co_return co_await load_snapshot_item(addrkey);
 }
 
 x23::Async<SystemStatus<const SnapshotStorageItem *>>
@@ -206,14 +207,13 @@ StorageSnapshotCache::load_snapshot_item(AddressAndKey addrkey)
   co_return obj;
 }
 
-x23::MaybeAsync<SystemStatus<const DbTip *>>
+x23::Async<SystemStatus<const DbTip *>>
 StorageSnapshotCache::try_get_db_tip()
 {
-  auto *tip = db_tip_.load();
-  if (tip != nullptr) {
-    return SystemStatus<const DbTip *>{tip};
+  if (auto *tip = db_tip_.load(); tip != nullptr) {
+    co_return SystemStatus<const DbTip *>{tip};
   }
-  return load_db_tip();
+  co_return co_await load_db_tip();
 }
 
 x23::Async<SystemStatus<const DbTip *>>

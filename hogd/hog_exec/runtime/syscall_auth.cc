@@ -29,7 +29,7 @@
 
 namespace hogd {
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
     const int32_t *optional_input_key_scheme,
@@ -103,7 +103,7 @@ syscall_ChangePublicKeyRegistration_inner(
                                WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_WriteAddressRequiredWeight_inner(SystemCallHandler &syscall_handler,
                                          Weight input_required_weight)
 {
@@ -122,7 +122,7 @@ syscall_WriteAddressRequiredWeight_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
                            generated::AuthClaim &output_auth_claim)
 {
@@ -134,10 +134,10 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetAuthClaimOutputs{.auth_claim = claim});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_MintAuthToken_inner(
     SystemCallHandler &syscall_handler, const BlockHeight &input_expiry_height,
     std::span<const std::byte> input_serialized_auth_token,
@@ -190,7 +190,7 @@ syscall_MintAuthToken_inner(
                                WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_ConsumeAuthToken_inner(
     SystemCallHandler &syscall_handler, uint32_t input_token_id,
     std::span<std::byte> output_auth_payload,

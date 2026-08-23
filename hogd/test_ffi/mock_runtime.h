@@ -159,7 +159,7 @@ public:
   ~MockRuntime() override = default;
 
 private:
-  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   // Body of invoke_internal(). The guest call it runs is synchronous down to
@@ -182,7 +182,7 @@ public:
   ~EmptyRuntime() override = default;
 
 protected:
-  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID /*unused*/, uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");

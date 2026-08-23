@@ -18,7 +18,7 @@
 
 namespace hogd {
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<std::byte> output_bytestring,
@@ -49,7 +49,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{0}};
 };
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKeyContractData &input_key,
                                RuntimeMemoryLength &output_length)
@@ -78,7 +78,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{0}};
 };
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring,

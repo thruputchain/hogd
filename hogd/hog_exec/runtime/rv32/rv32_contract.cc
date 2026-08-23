@@ -58,12 +58,13 @@ Rv32Contract::instantiate(uint64_t gas) const
   return rv32::ThreadedMachine(pre_instantiation_, gas);
 }
 
-x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
-Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
+x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
-  auto machine_noexcept =
-      [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
+  // Instantiation runs before any suspension and reports its own failures
+  // structurally; only the loop below can suspend.
+  auto instantiated = [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
     try {
       rv32::ThreadedMachine machine = contract_->instantiate(gas_limit);
       machine.seed_method_id(method_id);
@@ -73,22 +74,11 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
       return InvokeError{InvokeErrorCode::Unrecoverable};
     }
   }();
-  if (!machine_noexcept.has_value()) {
-    return result_t{machine_noexcept.error(), 0};
+  if (!instantiated.has_value()) {
+    co_return result_t{instantiated.error(), 0};
   }
 
-  // Creating the loop coroutine allocates its frame and can throw; this
-  // function is noexcept, so translate that the same way an instantiation
-  // failure is translated above.
-  try {
-    return run_ecall_loop(std::move(*machine_noexcept), gas_limit);
-  } catch (std::exception const &e) {
-    error("Unrecoverable: could not start rv32 ecall loop: {}", e.what());
-    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
-  } catch (...) {
-    report_dropped_log("non-std exception starting rv32 ecall loop");
-    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
-  }
+  co_return co_await run_ecall_loop(std::move(*instantiated), gas_limit);
 }
 
 // The machine is moved into this coroutine's frame: syscalls suspend the loop,

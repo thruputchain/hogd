@@ -542,9 +542,12 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
   handler.start_syscall_trace(syscall_no, gas_remaining);
 
   // Wrapping the logic in a lambda so that no matter what, the checks at the
-  // end to consume gas and validate return state cannot be skipped.
-  auto body = [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
-      -> MaybeAsyncSyscallInnerResult {
+  // end to consume gas and validate return state cannot be skipped.  It is a
+  // coroutine, so it cannot be noexcept -- its own frame allocation happens in
+  // the ramp and can throw.  The caller builds and awaits it inside one try
+  // instead, which keeps those checks on the throwing path too.
+  auto make_body = [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/)
+      -> AsyncSyscallInnerResult {
     // check whether any loads failed
     if (!(SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
               std::get<Is>(args)) &&
@@ -553,7 +556,7 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
         stats->syscall_fault_count++;
       }
       disarm_outputs(args);
-      return kFaultResult;
+      co_return kFaultResult;
     }
 
     // Check whether any inputs/outputs were aliased
@@ -567,7 +570,7 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
         report_dropped_syscall_trace(e.what());
       }
       disarm_outputs(args);
-      return kFaultResult;
+      co_return kFaultResult;
     }
 
     if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
@@ -579,7 +582,7 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
           report_dropped_syscall_trace(e.what());
         }
         disarm_outputs(args);
-        return SyscallInnerResult{
+        co_return SyscallInnerResult{
             HostFnStatus<SyscallErrorCode>{
                 SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
             WrappedGasAmount{0}};
@@ -631,41 +634,34 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
     // template only required because we can't do auto [...handler] =
     // handler_pack; yet.  This would be so much cleaner in c++26.
     //
-    // The inner syscall bodies run arbitrary allocating storage/cache/frame
-    // logic against attacker-controlled inputs, so this is the exception
-    // boundary for all of them: anything that escapes (most commonly
-    // std::bad_alloc under memory pressure) is translated into a structured
-    // Unrecoverable result here instead of terminating hogexec (issue #3400
-    // and siblings). The inner bodies are deliberately not noexcept so the
-    // translation happens here instead of at their own boundary via
-    // std::terminate(); this lambda is noexcept so that boundary is
-    // reestablished immediately around the catch.
-    auto res = [&]<size_t... ExtraArgs>(
-                   std::index_sequence<ExtraArgs...> /*unused*/) noexcept
-        -> MaybeAsyncSyscallInnerResult {
-      try {
-        return SyscallMeta::kInnerFunc(
-            std::get<ExtraArgs>(extra_args)...,
-            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                std::get<Is>(args))...);
-      } catch (...) {
-        return translate_syscall_body_exception(kSyscall, args);
-      }
+    // The inner lambda only forwards the body's Async on; it is not itself a
+    // coroutine.  The inner bodies run arbitrary allocating storage/cache/frame
+    // logic against attacker-controlled inputs and are deliberately not
+    // noexcept, so anything they throw -- most commonly std::bad_alloc under
+    // memory pressure, including the frame allocation in their own ramp --
+    // lands in this coroutine's promise and is rethrown at the caller's
+    // co_await, which translates it into a structured Unrecoverable there
+    // (issue #3400 and siblings).
+    co_return co_await [&]<size_t... ExtraArgs>(
+                           std::index_sequence<ExtraArgs...> /*unused*/)
+        -> AsyncSyscallInnerResult {
+      return SyscallMeta::kInnerFunc(
+          std::get<ExtraArgs>(extra_args)...,
+          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+              std::get<Is>(args))...);
     }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
+  };
 
-    return res;
-  }(std::make_index_sequence<syscall_t::kNumArgs>{});
-
-  // A body that ran to completion is already here; one that had to wait
-  // suspends us until it is done. Either way nothing may escape: a body that
-  // completed its Async with an exception rethrows at this co_await rather
-  // than at the call above, so the same translation the direct call gets has
-  // to be repeated here (issue #3400 and siblings).
+  // Nothing may escape: the body's frame allocation, anything its inner
+  // syscall throws, and anything it completes its Async with all surface
+  // inside this one try, so the gas accounting and return-state validation
+  // below run on the throwing path too (issue #3400 and siblings).
   // Seeded only because SyscallInnerResult is not default-constructible.
   SyscallInnerResult body_result{HostFnError{HostFnErrorCode::Unrecoverable},
                                  WrappedGasAmount{0}};
   try {
-    body_result = co_await body;
+    body_result =
+        co_await make_body(std::make_index_sequence<syscall_t::kNumArgs>{});
   } catch (...) {
     body_result = translate_syscall_body_exception(kSyscall, args);
   }
@@ -784,37 +780,24 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 // parameter, whose destructor flushes it during unwinding. Survivable only
 // because Unrecoverable discards the transaction.
 template<is_syscall_meta SyscallMeta, typename Args>
-MaybeAsyncSyscallResult
+AsyncSyscallResult
 wrap_after_parse(bool alias_check_passed, SystemCallHandler &handler,
                  const GasAmount gas_remaining, SyscallNo syscall_no,
-                 Args &&args) noexcept
+                 Args &&args)
 {
-  try {
-    return wrap_after_parse_async<SyscallMeta>(alias_check_passed, handler,
-                                               gas_remaining, syscall_no,
-                                               std::forward<Args>(args));
-  } catch (std::exception const &e) {
-    try {
-      error("unrecoverable: syscall {} frame allocation failed: {}", syscall_no,
-            e.what());
-    } catch (...) {
-      report_dropped_syscall_trace("syscall frame allocation diagnostic");
-    }
-    return SyscallResult{HostFnError{HostFnErrorCode::Unrecoverable}, 0};
-  } catch (...) {
-    report_dropped_syscall_trace("non-std exception allocating syscall frame");
-    return SyscallResult{HostFnError{HostFnErrorCode::Unrecoverable}, 0};
-  }
+  return wrap_after_parse_async<SyscallMeta>(alias_check_passed, handler,
+                                             gas_remaining, syscall_no,
+                                             std::forward<Args>(args));
 }
 
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
 template<is_syscall_meta SyscallMeta>
-MaybeAsyncSyscallResult
+AsyncSyscallResult
 wrap_outer(SystemCallHandler &handler, ExecutionContext context,
            SyscallNo syscall_no, uint32_t arg1, uint32_t arg2, uint32_t arg3,
-           uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7) noexcept
+           uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
@@ -830,8 +813,8 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  auto res = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
-      -> MaybeAsyncSyscallResult {
+  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
+             -> AsyncSyscallResult {
     // Attempt to load syscall arguments from contract memory.
     AliasGuard guard;
     auto parsed_args = std::tuple{
@@ -839,14 +822,10 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
               typename syscall_t::template arg_i<Is>>(guard, context.memory,
                                                       input_args)...};
 
-    // wrap_after_parse() is noexcept and translates a failure to allocate the
-    // coroutine frame, so nothing escapes into this noexcept lambda.
     return wrap_after_parse<SyscallMeta>(guard.check(), handler,
                                          context.gas_remaining, syscall_no,
                                          std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
-
-  return res;
 }
 
 } // namespace hogd

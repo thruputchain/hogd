@@ -50,13 +50,13 @@ has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids)
 
 } // namespace
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
                            ContractAddress &output_sender)
 {
   auto status = syscall_handler.get_msg_sender();
   if (!status) {
-    return {status.error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }
 
   output_sender = *status;
@@ -65,10 +65,10 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetMsgSenderOutputs{.sender = output_sender});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
                                 ContractAddress &output_address)
 {
@@ -79,10 +79,10 @@ syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetCurrentAddressOutputs{.address = output_address});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
                                        SHA256Hash &output_source_tx_hash)
 {
@@ -93,10 +93,10 @@ syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(SyscallGetSourceTransactionHashOutputs{
         .source_tx_hash = output_source_tx_hash});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len,
                              uint32_t &output_auth_token_count)
@@ -110,10 +110,10 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(SyscallGetCalldataLenOutputs{
         .len = output_len, .auth_token_count = output_auth_token_count});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           std::span<std::byte> output_buffer,
                           RuntimeMemoryLength &output_written_len,
@@ -121,7 +121,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           RuntimeMemoryLength &output_auth_token_written_len)
 {
   if (output_auth_token_list.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
 
@@ -144,10 +144,10 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
         SyscallGetCalldataOutputs{.calldata = calldata,
                                   .auth_tokens = auth_token_list});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+AsyncSyscallInnerResult
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
@@ -244,7 +244,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{gas_amount}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer,
                      bool input_revert_frame,
@@ -257,16 +257,16 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   // -> !, which could lead to UB in the contract code if that function then
   // returns an error.
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
   if (input_returned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
   if (!input_returned_auth_token_ids.empty() && input_revert_frame) {
     // Cannot revert the frame and also return auth tokens
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
   ReturnBuffer buffer;
@@ -290,20 +290,20 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   }
 
   if (has_duplicate_auth_token_ids(returned_auth_token_ids_vec)) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
   if (!syscall_handler.check_auth_tokens_owned(returned_auth_token_ids_vec)) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
   syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame,
                                     std::move(returned_auth_token_ids_vec));
 
-  return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_GetReturnedBuffer_inner(
     SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
     RuntimeMemoryLength &output_written_len,
@@ -312,15 +312,15 @@ syscall_GetReturnedBuffer_inner(
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(), WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    return {status->error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status->error().code(), WrappedGasAmount{0}};
   }
   CHECK(**status != nullptr);
 
   if (output_restored_auth_token_ids.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
 
@@ -344,13 +344,13 @@ syscall_GetReturnedBuffer_inner(
         SyscallGetReturnedBufferOutputs{.buffer = return_buffer});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 syscall_Exit_inner()
 {
-  return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
 }
 
 } // namespace hogd

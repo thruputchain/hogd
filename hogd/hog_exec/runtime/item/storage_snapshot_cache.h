@@ -61,19 +61,19 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  // Each lookup answers from cache without allocating a coroutine frame --
-  // MaybeAsync's value arm -- and falls back to an Async that suspends on the
-  // database read only on a miss.  The lock guarding each cache is always
-  // released before that read, so no cache lock is ever held across a
-  // suspension.
-  x23::MaybeAsync<SystemStatus<const Contract *>>
-  try_get_contract_by_hash(SHA256Hash const &hash);
-  x23::MaybeAsync<SystemStatus<const DeployedContract *>>
-  try_get_deployed_contract(ContractAddress const &addr);
-  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
-  try_get_snapshot_item(AddressAndKey const &addrkey);
+  // Each lookup answers from cache when it can and suspends on a database read
+  // only on a miss.  The lock guarding each cache is always released before
+  // that read, so no cache lock is ever held across a suspension.  Every key is
+  // taken BY VALUE: these are coroutines, so a reference parameter would not be
+  // copied into the frame and would dangle across the read.
+  x23::Async<SystemStatus<const Contract *>>
+  try_get_contract_by_hash(SHA256Hash hash);
+  x23::Async<SystemStatus<const DeployedContract *>>
+  try_get_deployed_contract(ContractAddress addr);
+  x23::Async<SystemStatus<const SnapshotStorageItem *>>
+  try_get_snapshot_item(AddressAndKey addrkey);
 
-  x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
+  x23::Async<SystemStatus<const DbTip *>> try_get_db_tip();
 
   ~StorageSnapshotCache();
 
@@ -96,12 +96,10 @@ private:
   void release_db_tip();
   // Lookup/insert/eager-translate the contract entry for `hash`. Returns
   // nullptr (wrapped) for a negative lookup.
-  x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
-  get_contract_entry(SHA256Hash const &hash);
+  x23::Async<SystemStatus<const ContractCacheEntry *>>
+  get_contract_entry(SHA256Hash hash);
 
-  // Miss paths for the lookups above.  Each takes its key BY VALUE so the key
-  // is copied into the coroutine frame and stays valid across the database
-  // read.
+  // Miss paths for the lookups above.
   x23::Async<SystemStatus<const ContractCacheEntry *>>
   load_contract_entry(SHA256Hash hash);
   x23::Async<SystemStatus<const Contract *>>

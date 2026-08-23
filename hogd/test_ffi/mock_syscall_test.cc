@@ -31,7 +31,7 @@ namespace hogd {
 
 namespace {
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 int_type_test(uint32_t inp_1, int128_t const &inp_128,
               int128_t const &inp_128_by_value, uint32_t &out_1,
               uint64_t &out_2, int128_t &out_128)
@@ -43,10 +43,10 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
   out_1 = 10;
   out_2 = UINT64_MAX;
   out_128 = int128_t{out_1} + int128_t{out_2};
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 span_type_test(std::span<const std::byte> span_in,
                std::span<std::byte> span_out)
 {
@@ -61,41 +61,41 @@ span_type_test(std::span<const std::byte> span_in,
   span_out[2] = std::byte{3};
   span_out[3] = std::byte{4};
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 no_return_test()
 {
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 signed_i32_type_test(int32_t input_value)
 {
   EXPECT_EQ(input_value, -1);
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 unsigned_u32_type_test(uint32_t input_value)
 {
   // The inner syscall is only reached when the (by-value, non-pointer) slot
   // narrows cleanly to a u32; the test passes the largest valid u32.
   EXPECT_EQ(input_value, UINT32_MAX);
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 gas_metering_test()
 {
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{5}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+AsyncSyscallInnerResult
 error_syscall_test()
 {
-  return {SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable,
           WrappedGasAmount{0}};
 }
 

@@ -69,7 +69,7 @@ public:
   {}
 
 protected:
-  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
+  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
     return invoke_off_pool(method_id, gas_limit);

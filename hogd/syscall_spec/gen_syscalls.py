@@ -51,41 +51,6 @@ def validate_and_extract_error_codes(syscall: dict) -> list[str]:
     return error_codes
 
 
-# Syscalls whose inner body reads or writes hog_db, and so may suspend.
-#
-# Their generated declaration returns MaybeAsyncSyscallInnerResult instead of a
-# plain SyscallInnerResult, and their bodies are coroutines; every other body
-# returns its result directly and lands in MaybeAsync's value arm at no cost
-# (see wrap_after_parse_async in syscall_entry_outer.h).
-#
-# This lives here rather than in protocol/syscalls.yaml because whether a body
-# suspends is a hog_exec implementation detail -- the wire ABI is identical
-# either way, and the Rust/TS SDKs generated from the same spec do not care.
-# A stale entry cannot go unnoticed: the body definition would no longer match
-# this declaration and the build fails.
-ASYNC_SYSCALLS = frozenset({
-    "BytestringGetLen",
-    "BytestringGet",
-    "BytestringSet",
-    "NonnegativeIntGet",
-    "NonnegativeIntSetAdd",
-    "DeleteObject",
-    "RetrocausalQueueInsert",
-    "RetrocausalQueueConsume",
-    "RetrocausalQueuePeekLen",
-    "DeployContract",
-    "GetBlockHeight",
-    "ChangePublicKeyRegistration",
-    "WriteAddressRequiredWeight",
-    # Both read the executing block height, which comes from the db tip.
-    "MintAuthToken",
-    "ConsumeAuthToken",
-    # Invoke recurses into Runtime::invoke, so it suspends wherever the child
-    # invocation does.
-    "Invoke",
-})
-
-
 """
 Each syscall generates a
 syscall_{callname}_inner(...); declaration.
@@ -313,21 +278,16 @@ def gen_inner_outer(
 
     inner_arg_decls = ", ".join(inner_arg_decl_strs)
 
-    if name in ASYNC_SYSCALLS:
-        if inner_return_type != "HostFnStatus<SyscallErrorCode>":
-            raise ValueError(
-                f"Syscall {name}: async syscalls must use the standard inner "
-                f"return type, got {inner_return_type}"
-            )
-        result_type = "MaybeAsyncSyscallInnerResult"
-    else:
-        result_type = f"std::pair<{inner_return_type}, WrappedGasAmount>"
+    # Every inner body is a coroutine returning an Async, whether or not it
+    # actually suspends -- see AsyncSyscallInnerResult for why it cannot be a
+    # MaybeAsync that sometimes carries a plain value instead.
+    assert inner_return_type == "HostFnStatus<SyscallErrorCode>"
 
-    inner = f"""{result_type}
+    inner = f"""AsyncSyscallInnerResult
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
-    frame = f"""{result_type}
+    frame = f"""AsyncSyscallInnerResult
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
 {{
   throw std::runtime_error("unimplemented");

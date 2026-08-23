@@ -1014,37 +1014,8 @@ SystemCallHandler::start_frame(
   return stashed_parent_trace;
 }
 
-// Stays noexcept and is deliberately NOT a coroutine: creating one allocates
-// its frame in the ramp function, which can throw std::bad_alloc before the
-// body runs, and x23's promises define no
-// get_return_object_on_allocation_failure -- a noexcept coroutine would
-// std::terminate() exactly where this contract promises a structured
-// Unrecoverable. The body lives in finish_frame_impl() and the failure is
-// translated here, into MaybeAsync's value arm.
-x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>>
-SystemCallHandler::finish_frame(
-    InvokeStatus<void> result,
-    std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept
-{
-  try {
-    return finish_frame_impl(result, std::move(stashed_parent_trace));
-  } catch (std::exception const &e) {
-    try {
-      error("unrecoverable: could not start frame completion: {}", e.what());
-    } catch (...) {
-      report_dropped_log("frame-completion start failure diagnostic");
-    }
-    return SystemStatus<std::pair<InvokeResult, bool>>{
-        SystemError{SystemErrorCode::Unrecoverable}};
-  } catch (...) {
-    report_dropped_log("non-std exception starting frame completion");
-    return SystemStatus<std::pair<InvokeResult, bool>>{
-        SystemError{SystemErrorCode::Unrecoverable}};
-  }
-}
-
 x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
-SystemCallHandler::finish_frame_impl(
+SystemCallHandler::finish_frame(
     InvokeStatus<void> result,
     std::unique_ptr<InvocationFrameTrace> stashed_parent_trace)
 {
