@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <span>
 #include <string_view>
-#include <utility>
 
 #include "event.hh"
 #include "hogd/base/log.h"

@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <span>
 #include <type_traits>
-#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

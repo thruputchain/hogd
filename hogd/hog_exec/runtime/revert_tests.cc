@@ -439,7 +439,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
         std::array<std::byte, 128> restored_auth_token_ids{};
         RuntimeMemoryLength restored_auth_token_ids_written_len = 0;
 
-        auto [res, _gas] = syscall_GetReturnedBuffer_inner(
+        auto [res, _gas] = co_await syscall_GetReturnedBuffer_inner(
             ctx.handler(), std::as_writable_bytes(std::span(buffer)),
             written_len, std::span(restored_auth_token_ids),
             restored_auth_token_ids_written_len);
