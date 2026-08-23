@@ -47,6 +47,7 @@
 #include "exec_result.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
@@ -516,11 +517,28 @@ source_address_auth_claim()
   return claim;
 }
 
+// The network a node is serving, as clients learn it: from the networkHash
+// field of the runtime manifest the node emits when it becomes ready.
+NetworkHash
+readiness_network_hash(Readiness const &readiness)
+{
+  std::optional<NetworkHash> hash = parse_network_hash(readiness.network_hash);
+  if (!hash.has_value()) {
+    throw std::runtime_error(
+        std::format("readiness reported an unparseable network hash '{}'",
+                    readiness.network_hash));
+  }
+  return *hash;
+}
+
 SignedTransaction
-sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key)
+sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key,
+                 NetworkHash const &network_hash)
 {
   Signature signature(CryptographicScheme::Ed25519);
-  auto signed_bytes = ed25519_sign(secret_key, x23::serialize(tx));
+  auto signed_bytes =
+      ed25519_sign(secret_key,
+                   transaction_signature_preimage(network_hash, tx));
   if (!signed_bytes.has_value()) {
     throw std::runtime_error("failed to sign test transaction");
   }
@@ -2143,7 +2161,9 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
         .auth_claim = source_address_auth_claim(),
     };
     Signature signature(CryptographicScheme::Ed25519);
-    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    auto signed_bytes = ed25519_sign(
+        keypair.second,
+        transaction_signature_preimage(readiness_network_hash(readiness), tx));
     ASSERT_TRUE(signed_bytes.has_value());
     signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
@@ -2272,7 +2292,9 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         .auth_claim = source_address_auth_claim(),
     };
     Signature signature(CryptographicScheme::Ed25519);
-    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    auto signed_bytes = ed25519_sign(
+        keypair.second,
+        transaction_signature_preimage(readiness_network_hash(readiness), tx));
     ASSERT_TRUE(signed_bytes.has_value());
     signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
@@ -3088,7 +3110,9 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     };
 
     Signature signature(CryptographicScheme::Ed25519);
-    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    auto signed_bytes = ed25519_sign(
+        keypair.second,
+        transaction_signature_preimage(readiness_network_hash(readiness), tx));
     ASSERT_TRUE(signed_bytes.has_value());
     signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
@@ -3214,7 +3238,8 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
         .auth_claim = source_address_auth_claim(),
     };
     SignedTransaction signed_prefund_wallet_tx =
-        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second);
+        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second,
+                         readiness_network_hash(readiness));
     const TransactionHash prefund_wallet_tx_hash =
         sha256(signed_prefund_wallet_tx.tx);
     TransactionHashBatch prefund_hashes =
@@ -3246,7 +3271,8 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
         .auth_claim = source_address_auth_claim(),
     };
     SignedTransaction signed_create_wallet_tx =
-        sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second);
+        sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second,
+                         readiness_network_hash(readiness));
     const TransactionHash create_wallet_tx_hash =
         sha256(signed_create_wallet_tx.tx);
     TransactionHashBatch create_hashes =
