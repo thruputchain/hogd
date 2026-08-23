@@ -1,11 +1,13 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 
 #include <exception>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/format.h"
 
