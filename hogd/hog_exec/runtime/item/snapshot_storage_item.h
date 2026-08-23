@@ -57,6 +57,23 @@ public:
   x23::Async<SystemStatus<Nondeterministic<std::optional<QueueEntry>>>>
   get_concurrent_rcq_entry(uint32_t index) const;
 
+private:
+  // The two locked halves of get_concurrent_rcq_entry, split so that each one
+  // holds rcq_mtx_ for a single straight-line region it can leave through
+  // reset_and_return (see the note on rcq_mtx_).  The database read runs
+  // between them with the lock released.
+  //
+  // Returns the entry already recorded at [index], nullopt if [index] is the
+  // next one to load, or Unrecoverable for an out-of-order access.
+  x23::Async<SystemStatus<std::optional<QueueEntry>>>
+  peek_concurrent_entry(uint32_t index) const;
+  // Records [entry] at [index], or checks it against what a racing load
+  // already recorded there.
+  x23::Async<SystemStatus<void>>
+  record_concurrent_entry(uint32_t index, QueueEntry entry) const;
+
+public:
+
   RetrocausalQueueMetadata const &retrocausal_queue_metadata() const
   {
     CHECK(type() == ItemViewType::kRetrocausalQueue);
@@ -106,14 +123,19 @@ public:
   // We must have already loaded up to count retrocausally consumed entries from
   // the db.  A coroutine only because rcq_mtx_ is a CoroLock; it touches no
   // database and never suspends once it holds the lock.
+  //
+  // Releases the lock through reset_and_return rather than letting ~CoroGuard
+  // do it -- see the note on rcq_mtx_.
   x23::Async<x23::Vec<QueueEntry>>
   get_retrocausally_consumed_entries(uint32_t count) const
   {
     x23::CoroGuard g;
     co_await g(rcq_mtx_);
     CHECK_LE(count, concurrent_queue_entries_.size());
-    co_return x23::Vec<QueueEntry>(concurrent_queue_entries_.begin(),
-                                   concurrent_queue_entries_.begin() + count);
+    co_await g.reset_and_return(
+        x23::Vec<QueueEntry>(concurrent_queue_entries_.begin(),
+                             concurrent_queue_entries_.begin() + count));
+    panic("unreachable");
   }
 
 private:
@@ -223,6 +245,15 @@ private:
   // block, a second transaction resuming on this thread would block the whole
   // worker waiting for a lock whose holder is parked on an RPC.  Acquiring a
   // CoroLock suspends the waiter instead, so neither happens.
+  //
+  // Every holder below releases it with `co_await g.reset_and_return(...)` and
+  // never by letting ~CoroGuard run.  The destructor path calls CoroLock's
+  // unlock(), which resumes the next waiter as a plain nested call on the
+  // current stack; under contention that builds an unbounded
+  // unlock->resume->unlock chain and overruns the thread stack.
+  // reset_and_return hands the next waiter back from await_suspend instead, so
+  // the resume is a symmetric transfer that reuses this frame rather than
+  // stacking on it (cf. EventRPCContext::get_context_slow).
   mutable x23::CoroLock rcq_mtx_;
 
   // Note: the elements of the concurrent read cache

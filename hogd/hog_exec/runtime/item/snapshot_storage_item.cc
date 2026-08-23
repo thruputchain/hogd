@@ -147,28 +147,67 @@ SnapshotStorageItem::get_next_rcq_block(uint64_t search_start_block) const
   auto const &rcq = std::get<RetrocausalQueueEntry>(entry_);
   x23::CoroGuard g;
   co_await g(rcq_mtx_);
-  co_return co_await rcq.get_next_block(db_proxy_, block_id_, addrkey_,
-                                        search_start_block);
+  auto res = co_await rcq.get_next_block(db_proxy_, block_id_, addrkey_,
+                                         search_start_block);
+  // Never `co_return` while holding the guard: ~CoroGuard would resume the
+  // next waiter as a nested call on this stack (see rcq_mtx_).
+  co_await g.reset_and_return(res);
+  panic("unreachable");
+}
+
+x23::Async<SystemStatus<std::optional<QueueEntry>>>
+SnapshotStorageItem::peek_concurrent_entry(uint32_t index) const
+{
+  using result_t = SystemStatus<std::optional<QueueEntry>>;
+  x23::CoroGuard g;
+  co_await g(rcq_mtx_);
+  if (index < concurrent_queue_entries_.size()) {
+    co_await g.reset_and_return(result_t{concurrent_queue_entries_[index]});
+    panic("unreachable");
+  }
+  if (index != concurrent_queue_entries_.size()) [[unlikely]] {
+    error("unrecoverable: bad get_concurrent_rcq_entry access");
+    co_await g.reset_and_return(
+        result_t{SystemError{SystemErrorCode::Unrecoverable}});
+    panic("unreachable");
+  }
+  co_await g.reset_and_return(result_t{std::nullopt});
+  panic("unreachable");
+}
+
+x23::Async<SystemStatus<void>>
+SnapshotStorageItem::record_concurrent_entry(uint32_t index,
+                                             QueueEntry entry) const
+{
+  x23::CoroGuard g;
+  co_await g(rcq_mtx_);
+  if (index == concurrent_queue_entries_.size()) {
+    concurrent_queue_entries_.push_back(std::move(entry));
+  }
+  else if (concurrent_queue_entries_[index] != entry) [[unlikely]] {
+    error("unrecoverable: mismatch in concurrent rcq return results");
+    co_await g.reset_and_return(
+        SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}});
+    panic("unreachable");
+  }
+  co_await g.reset_and_return(SystemStatus<void>{});
+  panic("unreachable");
 }
 
 x23::Async<SystemStatus<Nondeterministic<std::optional<QueueEntry>>>>
 SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
 {
-  {
-    x23::CoroGuard g;
-    co_await g(rcq_mtx_);
-    if (index < concurrent_queue_entries_.size()) {
-      co_return concurrent_queue_entries_[index];
-    }
-    if (index != concurrent_queue_entries_.size()) [[unlikely]] {
-      error("unrecoverable: bad get_concurrent_rcq_entry access");
-      co_return SystemError{SystemErrorCode::Unrecoverable};
-    }
+  auto cached = co_await peek_concurrent_entry(index);
+  if (!cached.has_value()) {
+    co_return cached.error();
+  }
+  if (cached.value().has_value()) {
+    co_return Nondeterministic<std::optional<QueueEntry>>{cached.value()};
   }
 
-  // Deliberately read without the lock held, then reconcile below: a racing
-  // load of the same index issues a second RPC but must see the same answer,
-  // which the mismatch check enforces.
+  // Deliberately read with the lock released, then reconcile: a racing load of
+  // the same index issues a second RPC but must see the same answer, which the
+  // mismatch check in record_concurrent_entry enforces.
   auto db_res = co_await
       db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey_,
                                                        index);
@@ -177,14 +216,9 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
   }
   auto entry = db_res.value();
   if (entry.has_value()) {
-    x23::CoroGuard g;
-    co_await g(rcq_mtx_);
-    if (index == concurrent_queue_entries_.size()) {
-      concurrent_queue_entries_.push_back(*entry);
-    }
-    else if (concurrent_queue_entries_[index] != *entry) [[unlikely]] {
-      error("unrecoverable: mismatch in concurrent rcq return results");
-      co_return SystemError{SystemErrorCode::Unrecoverable};
+    auto recorded = co_await record_concurrent_entry(index, *entry);
+    if (!recorded.has_value()) {
+      co_return recorded.error();
     }
   }
   co_return entry;
