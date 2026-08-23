@@ -310,8 +310,7 @@ GenTs::show_def(const Typedef &d)
 
       prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: true "
             "}} }};\n",
-            d.id,
-            ts_type, d.id);
+            d.id, ts_type, d.id);
       prtop("export function {}(val: {}): {} {{\n", factory, ts_type, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -331,8 +330,7 @@ GenTs::show_def(const Typedef &d)
       string factory = to_camel_case(d.id);
       prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: true "
             "}} }};\n",
-            d.id,
-            tref, d.id);
+            d.id, tref, d.id);
       prtop("export function {}(val: {}): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -377,8 +375,7 @@ GenTs::show_def(const Typedef &d)
       string factory = to_camel_case(d.id);
       prtop("export type {} = {}[] & {{ readonly __brand: {{ readonly {}: "
             "true }} }};\n",
-            d.id,
-            tref, d.id);
+            d.id, tref, d.id);
       prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
@@ -424,8 +421,7 @@ GenTs::show_def(const Typedef &d)
       string factory = to_camel_case(d.id);
       prtop("export type {} = {}[] & {{ readonly __brand: {{ readonly {}: "
             "true }} }};\n",
-            d.id,
-            tref, d.id);
+            d.id, tref, d.id);
       prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
