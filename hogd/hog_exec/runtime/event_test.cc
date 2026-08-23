@@ -118,8 +118,8 @@ TEST_F(EventTest, EventSuccess)
       fns_orchestrator;
   fns_orchestrator.emplace(
       0,
-      [addr_emitter](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [addr_emitter](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto status =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -545,8 +545,8 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [addr_child](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [addr_child](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "parent-event-count-limit";
 
         for (uint32_t i = 0; i < kParentEventCount; ++i) {
@@ -664,8 +664,8 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
       0,
-      [&accepted_event_materializations](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [&accepted_event_materializations](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "reverted-child-event";
 
         for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
@@ -711,8 +711,8 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [addr_child, &frame_statuses](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [addr_child, &frame_statuses](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (auto &frame_status : frame_statuses) {
           CopyableInvokeOutputs outputs{};
           CopyableInvokeInputs inputs{
@@ -830,9 +830,8 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
       fns_revert_child;
   fns_revert_child.emplace(
       0,
-      [&accepted_event_materializations,
-       fill_allowance](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [&accepted_event_materializations, fill_allowance](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "reverted-child";
         if (!co_await fill_allowance(ctx, event_data,
                                      accepted_event_materializations)) {
@@ -850,9 +849,8 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
       fns_fault_child;
   fns_fault_child.emplace(
       0,
-      [&accepted_event_materializations,
-       fill_allowance](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [&accepted_event_materializations, fill_allowance](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "faulted-child";
         if (!co_await fill_allowance(ctx, event_data,
                                      accepted_event_materializations)) {
@@ -866,9 +864,8 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
   fns_parent.emplace(
       0,
       [addr_revert_child, addr_fault_child, &accepted_event_materializations,
-       &revert_child_status, &fault_child_status,
-       fill_allowance](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+       &revert_child_status, &fault_child_status, fill_allowance](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto invoke_child =
             [&ctx](ContractAddress const &addr,
                    InvocationFrameStatusCode &status_out) -> x23::Async<bool> {
@@ -1003,9 +1000,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_emitter;
     fns_emitter.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
 
           auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
@@ -1030,8 +1025,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
         fns_manual_revert;
     fns_manual_revert.emplace(
         0,
-        [addr_emitter](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [addr_emitter](
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::string test_data = "method1_event";
           Calldata calldata(test_data.begin(), test_data.end());
 
@@ -1069,8 +1064,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
         fns_deterministic;
     fns_deterministic.emplace(
         0,
-        [addr_emitter](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [addr_emitter](
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::string test_data = "method2_event";
           Calldata calldata(test_data.begin(), test_data.end());
 
@@ -1107,9 +1102,8 @@ TEST_F(EventTest, EventWithRevertingFrames)
         fns_orchestrator;
     fns_orchestrator.emplace(
         0,
-        [addr_emitter, addr_manual_revert,
-         addr_deterministic](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [addr_emitter, addr_manual_revert, addr_deterministic](
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           {
             std::string test_data = "first_event";
             Calldata calldata(test_data.begin(), test_data.end());

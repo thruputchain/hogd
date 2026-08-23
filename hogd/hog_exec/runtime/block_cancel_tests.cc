@@ -59,7 +59,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
-                [](NativeSyscallContext & /*unused*/) noexcept
+                [](NativeSyscallContext & /*unused*/)
                     -> x23::Async<InvokeStatus<void>> {
                   co_return InvokeStatus<void>{};
                 });
@@ -127,7 +127,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommitDiscardedBody)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
-                [](NativeSyscallContext & /*unused*/) noexcept
+                [](NativeSyscallContext & /*unused*/)
                     -> x23::Async<InvokeStatus<void>> {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 });
@@ -181,9 +181,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_writer;
     fns_writer.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           auto [res, _gas] = syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span{"hello"}),
@@ -202,8 +200,8 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
         fns_caller;
     fns_caller.emplace(
         0,
-        [addr_writer](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [addr_writer](
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r0 =
               co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{

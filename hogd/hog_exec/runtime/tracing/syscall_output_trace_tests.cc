@@ -219,8 +219,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
       make_storage_key("trace_nnint_unset");
 
   auto context = make_single_contract_context(
-      [set_key, unset_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [set_key,
+       unset_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const int128_t set_value = 5;
         auto w = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             set_key, &set_value, int128_t{7},
@@ -304,8 +304,8 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   const SHA256Hash expected_hash = sha256(std::span(whole));
 
   auto context = make_single_contract_context(
-      [part1, part2, expected_hash](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [part1, part2, expected_hash](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto u1 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0U, std::as_bytes(std::span(part1)), true);
         if (!u1.has_value() ||
@@ -380,8 +380,8 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
   auto serialized_node = x23::serialize(node);
 
   auto context = make_single_contract_context(
-      [payload, serialized_node, claim](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [payload, serialized_node,
+       claim](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         generated::AuthClaim claim_out{};
         auto c = co_await ctx.syscall<SyscallNo::kGetAuthClaim>(claim_out);
         if (!c.has_value() ||
@@ -476,8 +476,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   const std::array<uint8_t, 3> entry_bytes = {0xAA, 0xBB, 0xCC};
 
   auto context = make_single_contract_context(
-      [key, entry_bytes](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [key, entry_bytes](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(entry_bytes)));
         if (!ins.has_value() ||
@@ -574,8 +574,8 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [blob_hash, expected_addr](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [blob_hash, expected_addr](
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 ContractAddress predicted{};
                 auto g = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
                     static_cast<const ContractAddress *>(nullptr), kNonce,
@@ -659,8 +659,8 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   const std::array<uint8_t, 8> value = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
   auto context = make_single_contract_context(
-      [key, value](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [key,
+       value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto w = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key, std::as_bytes(std::span(value)),
             std::to_underlying(StorageDeltaFlags::None));

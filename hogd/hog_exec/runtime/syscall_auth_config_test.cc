@@ -115,8 +115,8 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0,
-      [public_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // 1. Set a public key at index 0
         int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
         uint32_t key_weight = 5;
@@ -254,8 +254,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0,
-      [public_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // scheme=null, bytes not empty — should be rejected
         std::span<const std::byte> key_bytes(
             reinterpret_cast<const std::byte *>(public_key.data()),
@@ -312,8 +312,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
   fns.emplace(
       // Method 0: Register a key
       0,
-      [public_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
         uint32_t key_weight = 5;
         std::span<const std::byte> key_bytes(
@@ -430,8 +430,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationRejectsMalformedArgs)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0,
-      [public_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         int32_t ed25519_scheme =
             std::to_underlying(CryptographicScheme::Ed25519);
         uint32_t key_weight = 5;
@@ -541,8 +541,8 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMaxIndexBoundary)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0,
-      [public_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [public_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         int32_t key_scheme = std::to_underlying(CryptographicScheme::Ed25519);
         uint32_t key_weight = 5;
         std::span<const std::byte> key_bytes(

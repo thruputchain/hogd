@@ -47,23 +47,23 @@ protected:
 // caller.
 TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 {
-  auto inner_func =
-      [](InvokeErrorCode enum_code) -> x23::Async<InvokeStatus<void>> {
+  // Not a coroutine: a pure enum-to-status mapping with nothing to await.
+  auto inner_func = [](InvokeErrorCode enum_code) -> InvokeStatus<void> {
     // Using a switch, so that the compiler will warn when an enum value is
     // missing
     switch (enum_code) {
     case InvokeErrorCode::None:
-      co_return InvokeStatus<void>{};
+      return InvokeStatus<void>{};
     case InvokeErrorCode::Deterministic:
-      co_return InvokeError{InvokeErrorCode::Deterministic};
+      return InvokeError{InvokeErrorCode::Deterministic};
     case InvokeErrorCode::OutOfGas:
-      co_return InvokeError{InvokeErrorCode::OutOfGas};
+      return InvokeError{InvokeErrorCode::OutOfGas};
     case InvokeErrorCode::Abandon:
-      co_return InvokeError{InvokeErrorCode::Abandon};
+      return InvokeError{InvokeErrorCode::Abandon};
     case InvokeErrorCode::ValidationFailure:
-      co_return InvokeError{InvokeErrorCode::ValidationFailure};
+      return InvokeError{InvokeErrorCode::ValidationFailure};
     case InvokeErrorCode::Unrecoverable:
-      co_return InvokeError{InvokeErrorCode::Unrecoverable};
+      return InvokeError{InvokeErrorCode::Unrecoverable};
     }
 
     // GCC with -Werror in CI doesn't recognize the above switch as exhaustive,
@@ -77,32 +77,32 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
   // those methods on the callee contract (no self-reentrance).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
   fns_callee.emplace(0,
-                     [&](NativeSyscallContext & /*unused*/) noexcept
+                     [&](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return inner_func(InvokeErrorCode::None);
                      });
   fns_callee.emplace(1,
-                     [&](NativeSyscallContext & /*unused*/) noexcept
+                     [&](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return inner_func(InvokeErrorCode::Deterministic);
                      });
   fns_callee.emplace(2,
-                     [&](NativeSyscallContext & /*unused*/) noexcept
+                     [&](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return inner_func(InvokeErrorCode::OutOfGas);
                      });
   fns_callee.emplace(3,
-                     [&](NativeSyscallContext & /*unused*/) noexcept
+                     [&](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return inner_func(InvokeErrorCode::Abandon);
                      });
   fns_callee.emplace(4,
-                     [&](NativeSyscallContext & /*unused*/) noexcept
+                     [&](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return inner_func(InvokeErrorCode::ValidationFailure);
                      });
   fns_callee.emplace(5,
-                     [&](NativeSyscallContext & /*unused*/) noexcept
+                     [&](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return inner_func(InvokeErrorCode::Unrecoverable);
                      });
@@ -113,8 +113,8 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
       fns_orchestrator;
   fns_orchestrator.emplace(
       0,
-      [kCalleeAddress](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -280,7 +280,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_target;
   fns_target.emplace(0,
-                     [](NativeSyscallContext & /*unused*/) noexcept
+                     [](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return InvokeStatus<void>{};
                      });
@@ -289,9 +289,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
-      0,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Valid flags should succeed
         auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -447,7 +445,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee2;
   fns_callee2.emplace(0,
-                      [](NativeSyscallContext & /*unused*/) noexcept
+                      [](NativeSyscallContext & /*unused*/)
                           -> x23::Async<InvokeStatus<void>> {
                         co_return InvokeStatus<void>{};
                       });
@@ -455,27 +453,25 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
       std::make_unique<NativeContract>(std::move(fns_callee2));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller2;
-  fns_caller2.emplace(0,
-                      [kCalleeAddress](NativeSyscallContext &ctx) noexcept
-                          -> x23::Async<InvokeStatus<void>> {
-                        CopyableInvokeInputs inputs{
-                            .entrypoint_id = 0,
-                            .gas_limit = UINT64_MAX,
-                            .flags = std::to_underlying(InvokeFlag::None),
-                        };
-                        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
-                            kCalleeAddress, std::span<const std::byte>{},
-                            std::span<uint32_t>{}, inputs,
-                            CopyableInvokeOutputs{});
-                        if (!r.has_value() ||
-                            r.value() !=
-                                SyscallErrorCode::kSyscallErrorCodeNone) {
-                          ADD_FAILURE()
-                              << "Invoke with an empty auth-token span failed";
-                          co_return InvokeError{InvokeErrorCode::Deterministic};
-                        }
-                        co_return InvokeStatus<void>{};
-                      });
+  fns_caller2.emplace(
+      0,
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kCalleeAddress, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, CopyableInvokeOutputs{});
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Invoke with an empty auth-token span failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller2));
 
@@ -530,7 +526,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
   fns_callee.emplace(0,
-                     [kRevertPayload](NativeSyscallContext &ctx) noexcept
+                     [kRevertPayload](NativeSyscallContext &ctx)
                          -> x23::Async<InvokeStatus<void>> {
                        ReturnBuffer buffer;
                        buffer.resize_uninitialized(kRevertPayload.size());
@@ -546,8 +542,8 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
   fns_orch.emplace(
       0,
-      [kCalleeAddress, kRevertPayload](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [kCalleeAddress, kRevertPayload](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{.entrypoint_id = 0,
                                     .gas_limit = UINT64_MAX,
                                     .flags = 0};
@@ -620,19 +616,18 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
   constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
-  fns_callee.emplace(0,
-                     [](NativeSyscallContext & /*ctx*/) noexcept
-                         -> x23::Async<InvokeStatus<void>> {
-                       co_return InvokeError{InvokeErrorCode::Deterministic};
-                     });
+  fns_callee.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeError{InvokeErrorCode::Deterministic};
+      });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_orch;
   fns_orch.emplace(
       0,
-      [kCalleeAddress](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [kCalleeAddress](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{.entrypoint_id = 0,
                                     .gas_limit = UINT64_MAX,
                                     .flags = 0};
@@ -707,17 +702,15 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
   constexpr std::string_view kPayload = "OK!!";
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
-  fns_callee.emplace(0,
-                     [kPayload](NativeSyscallContext &ctx) noexcept
-                         -> x23::Async<InvokeStatus<void>> {
-                       ReturnBuffer buffer;
-                       buffer.resize_uninitialized(kPayload.size());
-                       std::memcpy(buffer.data(), kPayload.data(),
-                                   kPayload.size());
-                       ctx.handler().set_return_buffer(std::move(buffer), false,
-                                                       {});
-                       co_return InvokeStatus<void>{};
-                     });
+  fns_callee.emplace(
+      0,
+      [kPayload](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(kPayload.size());
+        std::memcpy(buffer.data(), kPayload.data(), kPayload.size());
+        ctx.handler().set_return_buffer(std::move(buffer), false, {});
+        co_return InvokeStatus<void>{};
+      });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
 
@@ -725,8 +718,7 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
   fns_orch.emplace(
       0,
       [kCalleeAddress, kMissingAddress,
-       kPayload](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+       kPayload](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // 1) A child that runs and returns normally seeds the slot.
         CopyableInvokeInputs ok_inputs{.entrypoint_id = 0,
                                        .gas_limit = UINT64_MAX,

@@ -92,32 +92,33 @@ protected:
     return std::make_unique<NativeContext>(std::move(cmap));
   }
 
-  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return co_await ctx.syscall<SyscallNo::kInvoke>(
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
         kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
         CopyableInvokeOutputs{});
   }
 
   static std::unique_ptr<RuntimeContext> make_rcq_insert_context()
   {
-    auto contract = build_contract([](NativeSyscallContext &ctx) noexcept
-                                       -> x23::Async<InvokeStatus<void>> {
-      auto const &cd = ctx.handler().get_calldata();
-      auto key = make_storage_key("rcq0");
-      for (uint8_t val : cd) {
-        auto res = ctx.handler().retrocausal_queue_insert(
-            key, std::as_bytes(std::span(&val, 1)))();
-        if (!res.has_value())
-          co_return res.error().to_invoke_error();
-      }
-      co_return InvokeStatus<void>{};
-    });
+    auto contract = build_contract(
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          for (uint8_t val : cd) {
+            auto res = ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)))();
+            if (!res.has_value())
+              co_return res.error().to_invoke_error();
+          }
+          co_return InvokeStatus<void>{};
+        });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
     cmap.emplace(1, std::move(contract));
     return std::make_unique<NativeContext>(std::move(cmap));
@@ -177,9 +178,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   }
 
   bool marker_branch_taken = false;
-  auto consume_then_peek_marker_contract =
-      build_contract([&marker_branch_taken](NativeSyscallContext &ctx) noexcept
-                         -> x23::Async<InvokeStatus<void>> {
+  auto consume_then_peek_marker_contract = build_contract(
+      [&marker_branch_taken](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         QueueEntry expected_entry;
         expected_entry.push_back(10);
@@ -307,7 +308,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   // A method 0: try_invoke B.0 (which reverts after 2 consumes).
   auto a_try_invoke = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -457,7 +458,7 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
 
   auto a_try_peek_insert = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -552,7 +553,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   auto a_try_peek = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -678,7 +679,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   auto a_try_peek = build_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -1332,9 +1333,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   constexpr uint32_t kOverCap = kRetrocausalQueueBlockEntriesMaxLen + 1;
 
   uint32_t consumes_succeeded = 0;
-  auto consumer_contract =
-      build_contract([&consumes_succeeded](NativeSyscallContext &ctx) noexcept
-                         -> x23::Async<InvokeStatus<void>> {
+  auto consumer_contract = build_contract(
+      [&consumes_succeeded](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         for (uint32_t i = 0; i < kOverCap; ++i) {
           auto res = ctx.handler().retrocausal_queue_consume(key, false)();

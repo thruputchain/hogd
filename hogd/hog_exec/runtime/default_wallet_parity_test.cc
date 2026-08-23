@@ -332,8 +332,8 @@ protected:
     auto calldata = wallet_meta::make_calldata<u8"execute">(calls);
     Runtime::MethodID method_id = wallet_meta::method_id<u8"execute">();
     return [target, result_key, method_id, mint_and_forward_token,
-            calldata = std::move(calldata)](NativeSyscallContext &ctx) noexcept
-               -> x23::Async<InvokeStatus<void>> {
+            calldata = std::move(calldata)](
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       // Optionally mint an auth token and forward its handle: execute takes
       // no Signer args, so the wallet must reject the unconsumed handle.
       uint32_t token_id = 0;
@@ -918,7 +918,7 @@ TEST_F(DefaultWalletParityTest, ZeroByteChildReturn)
   constexpr int32_t kEmptyReturnId = 63;
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [](NativeSyscallContext & /*unused*/) noexcept
+              [](NativeSyscallContext & /*unused*/)
                   -> x23::Async<InvokeStatus<void>> {
                 co_return InvokeStatus<void>{};
               });

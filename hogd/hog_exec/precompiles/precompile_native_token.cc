@@ -629,14 +629,14 @@ native_token_unchecked_transfer(SystemCallHandler &handler,
   // genesis claim); a negative amount is a precondition violation, not a
   // recoverable input.
   CHECK(amount >= 0);
-  auto r1 = handler.modify_native_token_balance(from, -amount);
+  auto r1 = co_await handler.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {
     co_return r1.error().to_invoke_error();
   }
   if (!r1.value().has_value()) {
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  auto r2 = handler.modify_native_token_balance(to, amount);
+  auto r2 = co_await handler.modify_native_token_balance(to, amount);
   if (!r2.has_value()) {
     co_return r2.error().to_invoke_error();
   }

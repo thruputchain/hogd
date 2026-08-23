@@ -257,7 +257,7 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
     handles.push_back([](const ChunkRange &chunk, const ParallelBatch &parallel,
                          x23::XdrVec<T> &objs,
                          const std::vector<size_t> &byte_offsets,
-                         const std::vector<size_t> &obj_offsets) noexcept
+                         const std::vector<size_t> &obj_offsets)
                           -> x23::Async<bool> {
       co_await default_coropoll().pool_.bg();
 

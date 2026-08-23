@@ -67,9 +67,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Read the storage key, expecting it to be empty
           std::vector<std::byte> buf(1024);
@@ -107,9 +105,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
           co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
           auto delete_status =
@@ -134,9 +130,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_orchestrator;
     fns_orchestrator.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r0 =
               co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
@@ -253,9 +247,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Read the storage key, expecting it to be empty
           int128_t current_set = 0;
@@ -292,9 +284,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
           co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
           auto delete_status =
@@ -319,9 +309,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_orchestrator;
     fns_orchestrator.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r0 =
               co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
@@ -439,9 +427,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Consume from the storage key, expecting it to be empty
           std::vector<std::byte> buf(1024);
@@ -479,9 +465,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
           co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
           auto delete_status =
@@ -506,9 +490,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_orchestrator;
     fns_orchestrator.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r0 =
               co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
@@ -618,9 +600,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_verify;
     fns_verify.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength written_len = 0;

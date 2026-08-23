@@ -290,9 +290,7 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         Calldata calldata{};
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
@@ -373,7 +371,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
   // Callee contract: method 0 returns a deterministic error
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
   fns_callee.emplace(0,
-                     [](NativeSyscallContext & /*unused*/) noexcept
+                     [](NativeSyscallContext & /*unused*/)
                          -> x23::Async<InvokeStatus<void>> {
                        co_return InvokeError{InvokeErrorCode::Deterministic};
                      });
@@ -382,30 +380,27 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
 
   // Caller contract: method 0 invokes callee method 0
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
-  fns_caller.emplace(0,
-                     [&](NativeSyscallContext &ctx) noexcept
-                         -> x23::Async<InvokeStatus<void>> {
-                       Calldata calldata{};
-                       CopyableInvokeInputs inputs{
-                           .entrypoint_id = 0,
-                           .gas_limit = UINT64_MAX,
-                           .flags = 0,
-                       };
-                       CopyableInvokeOutputs outputs{};
-                       auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
-                           callee_addr, std::as_bytes(std::span(calldata)),
-                           std::span<uint32_t>{}, inputs, outputs);
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        Calldata calldata{};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        CopyableInvokeOutputs outputs{};
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            callee_addr, std::as_bytes(std::span(calldata)),
+            std::span<uint32_t>{}, inputs, outputs);
 
-                       if (!r.has_value() ||
-                           r.value() !=
-                               SyscallErrorCode::kSyscallErrorCodeNone ||
-                           outputs.frame_status !=
-                               InvocationFrameStatusCode::Fault) {
-                         ADD_FAILURE() << "Expected child frame to fault";
-                         co_return InvokeError{InvokeErrorCode::Deterministic};
-                       }
-                       co_return InvokeStatus<void>{};
-                     });
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          ADD_FAILURE() << "Expected child frame to fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
 
@@ -485,9 +480,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_writer;
     fns_writer.emplace(
-        0,
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
           auto [res, _gas] = syscall_BytestringSet_inner(
@@ -506,7 +499,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_caller;
     fns_caller.emplace(0,
-                       [addr_writer](NativeSyscallContext &ctx) noexcept
+                       [addr_writer](NativeSyscallContext &ctx)
                            -> x23::Async<InvokeStatus<void>> {
                          Calldata args = {'t', 'e', 's', 't'};
                          CopyableInvokeInputs inputs{
@@ -685,8 +678,8 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0,
-      [kChildAddress](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [kChildAddress](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,

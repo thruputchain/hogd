@@ -148,30 +148,30 @@ protected:
   }
 
   // try_invoke child method `method` from inside a parent contract lambda.
-  static auto try_invoke_child(NativeSyscallContext &ctx,
-                               Runtime::MethodID method,
-                               CopyableInvokeOutputs &outputs)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_child(NativeSyscallContext &ctx, Runtime::MethodID method,
+                   CopyableInvokeOutputs &outputs)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return co_await ctx.syscall<SyscallNo::kInvoke>(
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
         kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
         outputs);
   }
 
   // Plain (non-try) invoke of child method `method`.
-  static auto co_await invoke_child(NativeSyscallContext &ctx,
-                                    Runtime::MethodID method)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  invoke_child(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::None),
     };
-    return co_await ctx.syscall<SyscallNo::kInvoke>(
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
         kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
         CopyableInvokeOutputs{});
   }
@@ -180,8 +180,8 @@ protected:
   // no storage-token balance, so this fails proposal-mode child admission.
   static NativeContract::function_t make_child_write(std::string_view payload)
   {
-    return [p = std::string(payload)](NativeSyscallContext &ctx) noexcept
-               -> x23::Async<InvokeStatus<void>> {
+    return [p = std::string(payload)](
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
       auto [ws, _wg] = syscall_BytestringSet_inner(
           ctx.handler(), key, std::as_bytes(std::span(std::string_view(p))),
@@ -199,8 +199,7 @@ protected:
   // succeeds as a no-op.
   static NativeContract::function_t make_child_delete()
   {
-    return [](NativeSyscallContext &ctx) noexcept
-               -> x23::Async<InvokeStatus<void>> {
+    return [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key("child-key");
       auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
       if (!del.has_value() ||
@@ -236,26 +235,25 @@ TEST_F(TryInvokeAdmissionTrustedTest,
       make_amount(static_cast<uint128_t>(transfer_amount));
 
   auto child = make_contract(make_child_write(kPayload));
-  auto parent =
-      make_contract([transfer_amount_xdr](NativeSyscallContext &ctx) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
-        CopyableInvokeOutputs outputs{};
-        auto child_res = try_invoke_child(ctx, kChildWrite, outputs);
-        if (!child_res.has_value()) {
-          co_return InvokeError{InvokeErrorCode::Unrecoverable};
-        }
+  auto parent = make_contract([transfer_amount_xdr](NativeSyscallContext &ctx)
+                                  -> x23::Async<InvokeStatus<void>> {
+    CopyableInvokeOutputs outputs{};
+    auto child_res = co_await try_invoke_child(ctx, kChildWrite, outputs);
+    if (!child_res.has_value()) {
+      co_return InvokeError{InvokeErrorCode::Unrecoverable};
+    }
 
-        auto token = ContractTraitClient<itc_erc20::ERC20>(kAddrToken);
-        auto transfer_res =
-            co_await token.invoke_opt<u8"transfer">(ctx, kAddrChild,
-                                                    transfer_amount_xdr);
-        if (!transfer_res.has_value() || !transfer_res.value().has_value() ||
-            !transfer_res.value().value().has_value() ||
-            !transfer_res.value().value().value().is_ok()) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return InvokeStatus<void>{};
-      });
+    auto token = ContractTraitClient<itc_erc20::ERC20>(kAddrToken);
+    auto transfer_res =
+        co_await token.invoke_opt<u8"transfer">(ctx, kAddrChild,
+                                                transfer_amount_xdr);
+    if (!transfer_res.has_value() || !transfer_res.value().has_value() ||
+        !transfer_res.value().value().has_value() ||
+        !transfer_res.value().value().value().is_ok()) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    co_return InvokeStatus<void>{};
+  });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(kRootNativeId, std::move(parent));
@@ -335,7 +333,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
   auto parent = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs outputs{};
-        auto child_res = try_invoke_child(ctx, kChildWrite, outputs);
+        auto child_res = co_await try_invoke_child(ctx, kChildWrite, outputs);
         if (!child_res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
@@ -413,7 +411,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
   auto parent = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs outputs{};
-        auto child_res = try_invoke_child(ctx, kChildWrite, outputs);
+        auto child_res = co_await try_invoke_child(ctx, kChildWrite, outputs);
         if (!child_res.has_value()) {
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }

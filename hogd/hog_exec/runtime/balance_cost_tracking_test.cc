@@ -329,9 +329,8 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0,
-      [kFirstTransferAmount,
-       kSecondTransferAmount](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [kFirstTransferAmount, kSecondTransferAmount](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto native_token_addr =
             GenesisConfigurationLoader::kPresetNativeTokenAddress;
         using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;

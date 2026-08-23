@@ -411,7 +411,7 @@ TEST_F(ViewTest, ViewDeterministicRv32)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(0,
-                        [](NativeSyscallContext & /*unused*/) noexcept
+                        [](NativeSyscallContext & /*unused*/)
                             -> x23::Async<InvokeStatus<void>> {
                           co_return InvokeError{InvokeErrorCode::Deterministic};
                         });
@@ -440,7 +440,7 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenDefaulted)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
+                    [](NativeSyscallContext & /*unused*/)
                         -> x23::Async<InvokeStatus<void>> {
                       co_return InvokeStatus<void>{};
                     });
@@ -492,7 +492,7 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenSuppliedTrue)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
+                    [](NativeSyscallContext & /*unused*/)
                         -> x23::Async<InvokeStatus<void>> {
                       co_return InvokeStatus<void>{};
                     });
@@ -549,7 +549,7 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
+                    [](NativeSyscallContext & /*unused*/)
                         -> x23::Async<InvokeStatus<void>> {
                       co_return InvokeStatus<void>{};
                     });
@@ -613,7 +613,7 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(0,
-                    [](NativeSyscallContext & /*unused*/) noexcept
+                    [](NativeSyscallContext & /*unused*/)
                         -> x23::Async<InvokeStatus<void>> {
                       co_return InvokeStatus<void>{};
                     });
@@ -869,7 +869,7 @@ TEST_F(ViewTest, ViewSingleFrameNoEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(0,
-                        [](NativeSyscallContext & /*unused*/) noexcept
+                        [](NativeSyscallContext & /*unused*/)
                             -> x23::Async<InvokeStatus<void>> {
                           co_return InvokeStatus<void>{};
                         });
@@ -946,11 +946,10 @@ TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
       NativeContractTestFramework::make_contract_address(11);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
-  fns_setup.emplace(0,
-                    [](NativeSyscallContext &ctx) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
-                      co_return emit_event(ctx, "inner_leaf");
-                    });
+  fns_setup.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        co_return emit_event(ctx, "inner_leaf");
+      });
   fns_setup.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "outer_before"); !r.has_value()) {
@@ -1014,11 +1013,10 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
       NativeContractTestFramework::make_contract_address(12);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
-  fns_setup.emplace(0,
-                    [](NativeSyscallContext &ctx) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
-                      co_return emit_event(ctx, "leaf");
-                    });
+  fns_setup.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        co_return emit_event(ctx, "leaf");
+      });
   fns_setup.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "middle_pre"); !r.has_value()) {
@@ -1258,7 +1256,7 @@ TEST_F(ViewTest, ViewForwardedTokenExceedingMaxDepthReturnsInvalidInput)
   }
 
   NativeViewSetup setup(0,
-                        [](NativeSyscallContext & /*unused*/) noexcept
+                        [](NativeSyscallContext & /*unused*/)
                             -> x23::Async<InvokeStatus<void>> {
                           ADD_FAILURE() << "contract should not be invoked";
                           co_return InvokeStatus<void>{};
@@ -1635,18 +1633,16 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
 
-  fns.emplace(0,
-              [](NativeSyscallContext & /*ctx*/) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
-                co_return InvokeStatus<void>{};
-              });
+  fns.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
 
-  fns.emplace(2,
-              [](NativeSyscallContext & /*ctx*/) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
-                ADD_FAILURE() << "Consumer should never be invoked";
-                co_return InvokeStatus<void>{};
-              });
+  fns.emplace(
+      2, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        ADD_FAILURE() << "Consumer should never be invoked";
+        co_return InvokeStatus<void>{};
+      });
 
   fns.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {

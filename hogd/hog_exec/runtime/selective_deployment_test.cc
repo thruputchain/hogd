@@ -109,7 +109,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   // Create a native contract that will deploy only the first contract
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(0,
-                [contract_1_hash](NativeSyscallContext &ctx) noexcept
+                [contract_1_hash](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   // Deploy only the first contract
 
@@ -211,8 +211,8 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
     fns_0.emplace(
         0,
-        [native_token_hash](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [native_token_hash](
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Attempt to deploy the native token contract - should fail
           ContractAddress deploy_addr;
           auto syscall_res = co_await ctx.syscall<SyscallNo::kDeployContract>(
@@ -300,21 +300,20 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_deployer;
-  fns_deployer.emplace(0,
-                       [malformed_hash](NativeSyscallContext &ctx) noexcept
-                           -> x23::Async<InvokeStatus<void>> {
-                         auto deploy_result =
-                             ctx.handler().deploy_contract(kDeployNonce,
-                                                           malformed_hash)();
-                         if (!deploy_result.has_value()) {
-                           co_return deploy_result.error().to_invoke_error();
-                         }
-                         if (!deploy_result.value().has_value()) {
-                           co_return InvokeError{
-                               InvokeErrorCode::Deterministic};
-                         }
-                         co_return InvokeStatus<void>{};
-                       });
+  fns_deployer.emplace(
+      0,
+      [malformed_hash](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto deploy_result =
+            ctx.handler().deploy_contract(kDeployNonce, malformed_hash)();
+        if (!deploy_result.has_value()) {
+          co_return deploy_result.error().to_invoke_error();
+        }
+        if (!deploy_result.value().has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_deployer =
       std::make_unique<NativeContract>(std::move(fns_deployer));
 
@@ -374,21 +373,20 @@ TEST_P(SelectiveDeploymentTest,
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
       fns_deployer;
-  fns_deployer.emplace(0,
-                       [malformed_hash](NativeSyscallContext &ctx) noexcept
-                           -> x23::Async<InvokeStatus<void>> {
-                         auto deploy_result =
-                             ctx.handler().deploy_contract(kDeployNonce,
-                                                           malformed_hash)();
-                         if (!deploy_result.has_value()) {
-                           co_return deploy_result.error().to_invoke_error();
-                         }
-                         if (!deploy_result.value().has_value()) {
-                           co_return InvokeError{
-                               InvokeErrorCode::Deterministic};
-                         }
-                         co_return InvokeStatus<void>{};
-                       });
+  fns_deployer.emplace(
+      0,
+      [malformed_hash](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto deploy_result =
+            ctx.handler().deploy_contract(kDeployNonce, malformed_hash)();
+        if (!deploy_result.has_value()) {
+          co_return deploy_result.error().to_invoke_error();
+        }
+        if (!deploy_result.value().has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_deployer =
       std::make_unique<NativeContract>(std::move(fns_deployer));
 
@@ -467,9 +465,8 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
       fns_deployer;
   fns_deployer.emplace(
       0,
-      [fib_hash, entry_id,
-       calldata = inner.calldata](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [fib_hash, entry_id, calldata = inner.calldata](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto deploy_result =
             ctx.handler().deploy_contract(kDeployNonce, fib_hash)();
         if (!deploy_result.has_value()) {
@@ -628,7 +625,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(0,
-                [big_hash](NativeSyscallContext &ctx) noexcept
+                [big_hash](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto deploy_result =
                       ctx.handler().deploy_contract(kDeployNonce, big_hash)();
@@ -709,8 +706,8 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [blob_hash](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [blob_hash](
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
                 if (!res.has_value()) {
                   co_return res.error().to_invoke_error();
@@ -723,8 +720,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
               });
   fns.emplace(
       1,
-      [blob_hash](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [blob_hash](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
         if (!res.has_value()) {
           co_return res.error().to_invoke_error();
@@ -867,8 +863,8 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [child_addr](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [child_addr](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto invoke_child = [&](Runtime::MethodID method,
                                 InvocationFrameStatusCode expected)
             -> x23::Async<InvokeStatus<void>> {
@@ -985,9 +981,9 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
                                                    blob_hash);
 
   // Leaf: deploy under the method-selected nonce and return successfully.
-  auto leaf_deploy = [blob_hash](NativeSyscallContext &ctx,
-                                 SHA256Hash const &nonce) noexcept
-      -> x23::Async<InvokeStatus<void>> {
+  auto leaf_deploy =
+      [blob_hash](NativeSyscallContext &ctx,
+                  SHA256Hash const &nonce) -> x23::Async<InvokeStatus<void>> {
     auto res = ctx.handler().deploy_contract(nonce, blob_hash)();
     if (!res.has_value()) {
       co_return res.error().to_invoke_error();
@@ -1044,7 +1040,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_root;
   auto root_body = [mid_addr](NativeSyscallContext &ctx,
                               Runtime::MethodID mid_method,
-                              InvocationFrameStatusCode expected) noexcept
+                              InvocationFrameStatusCode expected)
       -> x23::Async<InvokeStatus<void>> {
     CopyableInvokeOutputs outputs{};
     CopyableInvokeInputs inputs{.entrypoint_id = mid_method,
@@ -1160,9 +1156,8 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
       0,
-      [blob_hash, other_addr, expected_self,
-       expected_other](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [blob_hash, other_addr, expected_self, expected_other](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractAddress out_null{};
         auto s1 = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
             static_cast<const ContractAddress *>(nullptr), kNonce, blob_hash,
@@ -1258,7 +1253,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(0,
-                [limit_hash](NativeSyscallContext &ctx) noexcept
+                [limit_hash](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto deploy_result =
                       ctx.handler().deploy_contract(kDeployNonce, limit_hash)();
@@ -1326,13 +1321,12 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   auto oversized_hash = sha256(oversized);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
-  fns_0.emplace(0,
-                [](NativeSyscallContext & /*ctx*/) noexcept
-                    -> x23::Async<InvokeStatus<void>> {
-                  ADD_FAILURE() << "transaction body must not execute when an "
-                                   "attached contract is oversized";
-                  co_return InvokeError{InvokeErrorCode::Deterministic};
-                });
+  fns_0.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        ADD_FAILURE() << "transaction body must not execute when an "
+                         "attached contract is oversized";
+        co_return InvokeError{InvokeErrorCode::Deterministic};
+      });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));

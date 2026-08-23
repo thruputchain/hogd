@@ -231,17 +231,15 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
       get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r = co_await client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr,
-                                                               kReceiverAddr,
-                                                               make_amount(50));
-        (void)r;
-        co_return InvokeStatus<void>{};
-      });
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto client = ContractTraitClient<itc_erc20::ERC20>(
+                    GenesisConfigurationLoader::kPresetNativeTokenAddress);
+                auto r = co_await client.invoke_opt<u8"transfer_from">(
+                    ctx, kOwnerAddr, kReceiverAddr, make_amount(50));
+                (void)r;
+                co_return InvokeStatus<void>{};
+              });
   auto spender_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -965,23 +963,20 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   ASSERT_FALSE(lookup_storage_item_from_db(allowance_addrkey).has_value());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
-        auto r =
-            co_await client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr,
-                                                          kReceiverAddr,
-                                                          make_amount(100));
-        if (!r.has_value() || !r.value().has_value() ||
-            !r.value().value().has_value() ||
-            !r.value().value().value().is_ok()) {
-          ADD_FAILURE() << "self transfer_from should succeed";
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return InvokeStatus<void>{};
-      });
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto client = ContractTraitClient<itc_erc20::ERC20>(
+                    GenesisConfigurationLoader::kPresetNativeTokenAddress);
+                auto r = co_await client.invoke_opt<u8"transfer_from">(
+                    ctx, kOwnerAddr, kReceiverAddr, make_amount(100));
+                if (!r.has_value() || !r.value().has_value() ||
+                    !r.value().value().has_value() ||
+                    !r.value().value().value().is_ok()) {
+                  ADD_FAILURE() << "self transfer_from should succeed";
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                co_return InvokeStatus<void>{};
+              });
   auto owner_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;

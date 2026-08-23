@@ -92,9 +92,8 @@ protected:
   static NativeContract::function_t make_write_method(std::string_view key_name,
                                                       std::string_view value)
   {
-    return [k = std::string(key_name),
-            v = std::string(value)](NativeSyscallContext &ctx) noexcept
-               -> x23::Async<InvokeStatus<void>> {
+    return [k = std::string(key_name), v = std::string(value)](
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key(k);
       auto [ws, _wg] = syscall_BytestringSet_inner(
           ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))),
@@ -162,14 +161,15 @@ protected:
   }
 
   // try_invoke helper for use inside A-contract lambdas.
-  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return co_await ctx.syscall<SyscallNo::kInvoke>(
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
         kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
         CopyableInvokeOutputs{});
   }
@@ -179,15 +179,16 @@ protected:
   // from one that ran but rolled back (frame_status != Return). Under the
   // current Invoke ABI both cases return kSyscallErrorCodeNone, so the
   // frame_status channel is the only way to tell them apart.
-  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method,
-                           CopyableInvokeOutputs &outputs)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method,
+               CopyableInvokeOutputs &outputs)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return co_await ctx.syscall<SyscallNo::kInvoke>(
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
         kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
         outputs);
   }
@@ -196,7 +197,7 @@ protected:
   // validation tests that don't need real execution).
   static std::unique_ptr<NativeContext> make_noop_context()
   {
-    auto noop = make_contract([](NativeSyscallContext & /*unused*/) noexcept
+    auto noop = make_contract([](NativeSyscallContext & /*unused*/)
                                   -> x23::Async<InvokeStatus<void>> {
       co_return InvokeStatus<void>{};
     });
@@ -213,8 +214,7 @@ protected:
   static std::unique_ptr<RuntimeContext> make_rcq_context()
   {
     auto contract = make_contract(
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
@@ -225,8 +225,7 @@ protected:
           }
           co_return InvokeStatus<void>{};
         },
-        [](NativeSyscallContext &ctx) noexcept
-            -> x23::Async<InvokeStatus<void>> {
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           uint8_t count = cd.empty() ? 1 : cd[0];
           auto key = make_storage_key("rcq0");
@@ -315,9 +314,9 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 {
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
+        if (auto r = co_await try_invoke_b(ctx, kWriteHello); !r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
-        if (auto r = try_invoke_b(ctx, kWriteWorld); !r.has_value())
+        if (auto r = co_await try_invoke_b(ctx, kWriteWorld); !r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
         // Write something to prove we survived both try_invokes
@@ -359,7 +358,7 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
   // A: single try_invoke of B.write_hello → produces 1 nondeterministic bit.
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
+        if (auto r = co_await try_invoke_b(ctx, kWriteHello); !r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
         co_return InvokeStatus<void>{};
       });
@@ -398,7 +397,7 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = try_invoke_b(ctx, kWriteHello, r0_outputs);
+        auto r0 = co_await try_invoke_b(ctx, kWriteHello, r0_outputs);
         if (!r0.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
 
@@ -409,7 +408,8 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
         // replayed as a rollback, so this branch is correctly skipped.
         if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
             r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          if (auto r1 = try_invoke_b(ctx, kWriteWorld); !r1.has_value())
+          if (auto r1 = co_await try_invoke_b(ctx, kWriteWorld);
+              !r1.has_value())
             co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -611,26 +611,25 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
   std::vector<uint8_t> consumed_values;
 
   // Custom contract: single method that inserts then consumes.
-  auto contract =
-      make_contract([&consumed_values](NativeSyscallContext &ctx) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("rcq0");
-        consumed_values.clear();
-        for (uint8_t val : {10, 20}) {
-          auto r = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)))();
-          if (!r.has_value())
-            co_return r.error().to_invoke_error();
-        }
-        for (int i = 0; i < 3; i++) {
-          auto r = ctx.handler().retrocausal_queue_consume(key, false)();
-          if (!r.has_value())
-            co_return r.error().to_invoke_error();
-          if (r.value().has_value() && r.value().value().size() == 1)
-            consumed_values.push_back(r.value().value()[0]);
-        }
-        co_return InvokeStatus<void>{};
-      });
+  auto contract = make_contract([&consumed_values](NativeSyscallContext &ctx)
+                                    -> x23::Async<InvokeStatus<void>> {
+    auto key = make_storage_key("rcq0");
+    consumed_values.clear();
+    for (uint8_t val : {10, 20}) {
+      auto r = ctx.handler().retrocausal_queue_insert(
+          key, std::as_bytes(std::span(&val, 1)))();
+      if (!r.has_value())
+        co_return r.error().to_invoke_error();
+    }
+    for (int i = 0; i < 3; i++) {
+      auto r = ctx.handler().retrocausal_queue_consume(key, false)();
+      if (!r.has_value())
+        co_return r.error().to_invoke_error();
+      if (r.value().has_value() && r.value().value().size() == 1)
+        consumed_values.push_back(r.value().value()[0]);
+    }
+    co_return InvokeStatus<void>{};
+  });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract));
   auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
@@ -1020,9 +1019,9 @@ TEST_P(ProposeValidateRoundtripTest,
     return proposal;
   };
 
-  auto contract_a =
-      make_contract([make_index_calldata](NativeSyscallContext &ctx) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
+  auto contract_a = make_contract(
+      [make_index_calldata](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t successes = 0;
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           CopyableInvokeInputs inputs{
@@ -1054,9 +1053,9 @@ TEST_P(ProposeValidateRoundtripTest,
         co_return InvokeStatus<void>{};
       });
 
-  auto contract_b =
-      make_contract([make_depth_poc_key](NativeSyscallContext &ctx) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
+  auto contract_b = make_contract(
+      [make_depth_poc_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &calldata = ctx.handler().get_calldata();
         if (calldata.size() != 2) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1145,10 +1144,10 @@ TEST_P(ProposeValidateRoundtripTest,
         }
         co_return InvokeStatus<void>{};
       });
-  auto contract_b = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
-                                      -> x23::Async<InvokeStatus<void>> {
-    co_return InvokeStatus<void>{};
-  });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1197,10 +1196,10 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
         }
         co_return InvokeStatus<void>{};
       });
-  auto contract_b = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
-                                      -> x23::Async<InvokeStatus<void>> {
-    co_return InvokeStatus<void>{};
-  });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1250,10 +1249,10 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
         }
         co_return InvokeStatus<void>{};
       });
-  auto contract_b = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
-                                      -> x23::Async<InvokeStatus<void>> {
-    co_return InvokeStatus<void>{};
-  });
+  auto contract_b = make_contract(
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1353,10 +1352,10 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         }
         co_return InvokeStatus<void>{};
       });
-  auto contract_c = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
-                                      -> x23::Async<InvokeStatus<void>> {
-    co_return InvokeStatus<void>{};
-  });
+  auto contract_c = make_contract(
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
@@ -1402,7 +1401,7 @@ TEST_P(ProposeValidateRoundtripTest,
 {
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, kWriteHello);
+        auto r = co_await try_invoke_b(ctx, kWriteHello);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
@@ -1546,7 +1545,7 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
                               ExecResult expected_result) {
     auto make_error_context = [root_error] {
       auto contract_a =
-          make_contract([root_error](NativeSyscallContext & /*unused*/) noexcept
+          make_contract([root_error](NativeSyscallContext & /*unused*/)
                             -> x23::Async<InvokeStatus<void>> {
             co_return InvokeError{root_error};
           });
@@ -1875,7 +1874,7 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // try_invoke B method 0 — it will fault
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
         // B faulted, frame reverted. Now A re-consumes from rcq0.
@@ -1946,7 +1945,7 @@ TEST_P(ProposeValidateRoundtripTest,
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // try_invoke B method 0 — it will fault
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
         // Do NOT re-consume — no observation generated in reverted child
@@ -2294,9 +2293,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
           co_return res.error().to_invoke_error();
         co_return InvokeStatus<void>{};
       });
-  auto insert_contract_a =
-      make_contract([](NativeSyscallContext & /*ctx*/) noexcept
-                        -> x23::Async<InvokeStatus<void>> {
+  auto insert_contract_a = make_contract(
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
         co_return InvokeStatus<void>{};
       });
   auto insert_ctx = make_ab_context(std::move(insert_contract_a),
@@ -2330,7 +2328,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
       });
   auto invoke_contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Deterministic};
         co_return InvokeStatus<void>{};
@@ -2452,7 +2450,7 @@ TEST_P(ProposeValidateRoundtripTest,
   // A: method 0 = try_invoke B.0 (faults), return success.
   auto a_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -2551,11 +2549,11 @@ TEST_P(ProposeValidateRoundtripTest,
   auto a_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Frame 1: B.0 consumes + faults
-        auto r1 = try_invoke_b(ctx, 0);
+        auto r1 = co_await try_invoke_b(ctx, 0);
         if (!r1.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         // Frame 2: B.1 writes bytestring
-        auto r2 = try_invoke_b(ctx, 1);
+        auto r2 = co_await try_invoke_b(ctx, 1);
         if (!r2.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -2659,7 +2657,7 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
   // A: method 0 = try_invoke B.0.
   auto a_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -2754,7 +2752,7 @@ TEST_P(ProposeValidateRoundtripTest,
 
   auto a_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};
@@ -2831,13 +2829,13 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
   // A: method 0 = try_invoke B.0 three times, all fault.
   auto a_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-        auto r1 = try_invoke_b(ctx, 0);
+        auto r1 = co_await try_invoke_b(ctx, 0);
         if (!r1.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
-        auto r2 = try_invoke_b(ctx, 0);
+        auto r2 = co_await try_invoke_b(ctx, 0);
         if (!r2.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
-        auto r3 = try_invoke_b(ctx, 0);
+        auto r3 = co_await try_invoke_b(ctx, 0);
         if (!r3.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
         co_return InvokeStatus<void>{};

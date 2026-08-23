@@ -82,8 +82,8 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
   // Contract that writes state, then reverts with return data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [str_hello, return_data, key](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [str_hello, return_data, key](
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 // Write state that should be reverted
                 auto [res, _gas] = syscall_BytestringSet_inner(
                     ctx.handler(), key, std::as_bytes(std::span(str_hello)),
@@ -169,9 +169,8 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [parent_data, parent_key,
-       kAddressChild](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [parent_data, parent_key, kAddressChild](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), parent_key, std::as_bytes(std::span(parent_data)),
             std::to_underlying(StorageDeltaFlags::None))();
@@ -226,8 +225,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
   fns_child.emplace(
       0,
       [child_data, child_return_data,
-       child_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+       child_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
             std::to_underlying(StorageDeltaFlags::None))();
@@ -316,8 +314,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     // Method 0: Manual revert with return data
     fns.emplace(0,
-                [test_data, return_data,
-                 key](NativeSyscallContext &ctx) noexcept
+                [test_data, return_data, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto [res, _gas] = syscall_BytestringSet_inner(
                       ctx.handler(), key, std::as_bytes(std::span(test_data)),
@@ -339,7 +336,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                 });
     // Method 1: Normal failure
     fns.emplace(1,
-                [test_data, key](NativeSyscallContext &ctx) noexcept
+                [test_data, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto [res, _gas] = syscall_BytestringSet_inner(
                       ctx.handler(), key, std::as_bytes(std::span(test_data)),
@@ -439,8 +436,8 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [test_data, return_data](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [test_data, return_data](
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 // Do expensive work before reverting
                 for (int i = 0; i < 10; ++i) {
                   auto temp_key = make_storage_key("temp_" + std::to_string(i));
@@ -545,104 +542,100 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
 
   // Contract A -- calls B:0, expects an Abort frame_status, then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_a;
-  fns_a.emplace(0,
-                [data1, return1](NativeSyscallContext &ctx) noexcept
-                    -> x23::Async<InvokeStatus<void>> {
-                  auto key = make_storage_key("level1");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(data1)),
-                      std::to_underlying(StorageDeltaFlags::None))();
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE()
-                        << "MultipleNestedManualReverts: Failed to set "
+  fns_a.emplace(
+      0,
+      [data1,
+       return1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("level1");
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span(data1)),
+            std::to_underlying(StorageDeltaFlags::None))();
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                            "bytestring on contract A";
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  CopyableInvokeOutputs r2_outputs{};
-                  auto r2 = co_await
-                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
-                    CopyableInvokeInputs inputs{
-                        .entrypoint_id = 0,
-                        .gas_limit = UINT64_MAX,
-                        .flags = 0,
-                    };
-                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressB, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, r2_outputs);
-                  }();
-                  if (!r2.has_value()) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (r2_outputs.frame_status !=
-                      InvocationFrameStatusCode::Abort) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+        CopyableInvokeOutputs r2_outputs{};
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = 0,
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, r2_outputs);
+        }();
+        if (!r2.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r2_outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  ReturnBuffer buffer;
-                  buffer.resize_uninitialized(return1.size());
-                  std::memcpy(buffer.data(), return1.data(), return1.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true);
-                  co_return InvokeStatus<void>{};
-                });
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(return1.size());
+        std::memcpy(buffer.data(), return1.data(), return1.size());
+        ctx.handler().set_return_buffer(std::move(buffer), true);
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract_a = std::make_unique<NativeContract>(std::move(fns_a));
 
   // Contract B -- calls C:0, expects an Abort frame_status, then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
-  fns_b.emplace(0,
-                [data2, return2](NativeSyscallContext &ctx) noexcept
-                    -> x23::Async<InvokeStatus<void>> {
-                  auto key = make_storage_key("level2");
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(data2)),
-                      std::to_underlying(StorageDeltaFlags::None))();
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE()
-                        << "MultipleNestedManualReverts: Failed to set "
+  fns_b.emplace(
+      0,
+      [data2,
+       return2](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("level2");
+        auto [res, _gas] = syscall_BytestringSet_inner(
+            ctx.handler(), key, std::as_bytes(std::span(data2)),
+            std::to_underlying(StorageDeltaFlags::None))();
+        if (!res.has_value() ||
+            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MultipleNestedManualReverts: Failed to set "
                            "bytestring on contract B";
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  CopyableInvokeOutputs r3_outputs{};
-                  auto r3 = co_await
-                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
-                    CopyableInvokeInputs inputs{
-                        .entrypoint_id = 0,
-                        .gas_limit = UINT64_MAX,
-                        .flags = 0,
-                    };
-                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
-                        kAddressC, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, r3_outputs);
-                  }();
-                  if (!r3.has_value()) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  if (r3_outputs.frame_status !=
-                      InvocationFrameStatusCode::Abort) {
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+        CopyableInvokeOutputs r3_outputs{};
+        auto r3 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = UINT64_MAX,
+              .flags = 0,
+          };
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressC, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, r3_outputs);
+        }();
+        if (!r3.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (r3_outputs.frame_status != InvocationFrameStatusCode::Abort) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  ReturnBuffer buffer;
-                  buffer.resize_uninitialized(return2.size());
-                  std::memcpy(buffer.data(), return2.data(), return2.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true);
-                  co_return InvokeStatus<void>{};
-                });
+        ReturnBuffer buffer;
+        buffer.resize_uninitialized(return2.size());
+        std::memcpy(buffer.data(), return2.data(), return2.size());
+        ctx.handler().set_return_buffer(std::move(buffer), true);
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract_b = std::make_unique<NativeContract>(std::move(fns_b));
 
   // Contract C -- deepest level; write then manual revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_c;
   fns_c.emplace(0,
-                [data3, return3](NativeSyscallContext &ctx) noexcept
+                [data3, return3](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   auto key = make_storage_key("level3");
                   auto [res, _gas] = syscall_BytestringSet_inner(
@@ -734,7 +727,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
-                [test_data, key](NativeSyscallContext &ctx) noexcept
+                [test_data, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   // Write state that should be reverted on error
                   auto [res, _gas] = syscall_BytestringSet_inner(
@@ -756,58 +749,56 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                   ctx.handler().set_return_buffer(std::move(buffer), true);
                   co_return InvokeStatus<void>{};
                 });
-    fns.emplace(1,
-                [test_data, key](NativeSyscallContext &ctx) noexcept
-                    -> x23::Async<InvokeStatus<void>> {
-                  // Write state that should be reverted on error
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None))();
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
-                                     "bytestring in method 1";
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+    fns.emplace(
+        1,
+        [test_data,
+         key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          // Write state that should be reverted on error
+          auto [res, _gas] = syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span(test_data)),
+              std::to_underlying(StorageDeltaFlags::None))();
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
+                             "bytestring in method 1";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                  // Simulate insufficient gas error - this should trigger
-                  // manual revert
-                  ReturnBuffer buffer;
-                  auto error_msg =
-                      make_bytestring("Insufficient gas for invocation");
-                  buffer.resize_uninitialized(error_msg.size());
-                  std::memcpy(buffer.data(), error_msg.data(),
-                              error_msg.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true);
-                  co_return InvokeStatus<void>{};
-                });
-    fns.emplace(2,
-                [test_data, key](NativeSyscallContext &ctx) noexcept
-                    -> x23::Async<InvokeStatus<void>> {
-                  // Write state that should be reverted on error
-                  auto [res, _gas] = syscall_BytestringSet_inner(
-                      ctx.handler(), key, std::as_bytes(std::span(test_data)),
-                      std::to_underlying(StorageDeltaFlags::None))();
-                  if (!res.has_value() ||
-                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
-                                     "bytestring in method 2";
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          // Simulate insufficient gas error - this should trigger
+          // manual revert
+          ReturnBuffer buffer;
+          auto error_msg = make_bytestring("Insufficient gas for invocation");
+          buffer.resize_uninitialized(error_msg.size());
+          std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+          ctx.handler().set_return_buffer(std::move(buffer), true);
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        2,
+        [test_data,
+         key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          // Write state that should be reverted on error
+          auto [res, _gas] = syscall_BytestringSet_inner(
+              ctx.handler(), key, std::as_bytes(std::span(test_data)),
+              std::to_underlying(StorageDeltaFlags::None))();
+          if (!res.has_value() ||
+              res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "ErrorTypeManualReverts: Failed to set "
+                             "bytestring in method 2";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                  // Simulate custom contract error - this should trigger manual
-                  // revert
-                  ReturnBuffer buffer;
-                  auto error_msg =
-                      make_bytestring("Test custom contract error");
-                  buffer.resize_uninitialized(error_msg.size());
-                  std::memcpy(buffer.data(), error_msg.data(),
-                              error_msg.size());
-                  ctx.handler().set_return_buffer(std::move(buffer), true);
-                  co_return InvokeStatus<void>{};
-                });
+          // Simulate custom contract error - this should trigger manual
+          // revert
+          ReturnBuffer buffer;
+          auto error_msg = make_bytestring("Test custom contract error");
+          buffer.resize_uninitialized(error_msg.size());
+          std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+          ctx.handler().set_return_buffer(std::move(buffer), true);
+          co_return InvokeStatus<void>{};
+        });
     fns.emplace(3,
-                [test_data, key](NativeSyscallContext &ctx) noexcept
+                [test_data, key](NativeSyscallContext &ctx)
                     -> x23::Async<InvokeStatus<void>> {
                   // Write state that should NOT be reverted (no error)
                   auto [res, _gas] = syscall_BytestringSet_inner(
@@ -936,8 +927,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [parent_data, parent_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [parent_data, parent_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), parent_key, std::as_bytes(std::span(parent_data)),
             std::to_underlying(StorageDeltaFlags::None))();
@@ -994,8 +985,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
   fns_child.emplace(
       0,
       [child_data, child_return_data,
-       child_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+       child_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), child_key, std::as_bytes(std::span(child_data)),
             std::to_underlying(StorageDeltaFlags::None))();
@@ -1038,8 +1028,8 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
       fns_grandchild;
   fns_grandchild.emplace(
       0,
-      [grandchild_data, grandchild_key](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      [grandchild_data, grandchild_key](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), grandchild_key,
             std::as_bytes(std::span(grandchild_data)),

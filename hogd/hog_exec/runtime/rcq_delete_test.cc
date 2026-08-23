@@ -79,59 +79,62 @@ protected:
   // on purpose, still need real frames.
   //
   // Each returns true on success; callers report and bail on false.
-  [[nodiscard]] static bool rcq_insert(NativeSyscallContext &ctx,
-                                       uint32_t value)
+  [[nodiscard]] static x23::Async<bool> rcq_insert(NativeSyscallContext &ctx,
+                                                   uint32_t value)
   {
     auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
         kStorageKey, std::as_bytes(std::span(&value, 1)));
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
   }
 
-  [[nodiscard]] static bool rcq_consume_expect(NativeSyscallContext &ctx,
-                                               uint32_t expected)
+  [[nodiscard]] static x23::Async<bool>
+  rcq_consume_expect(NativeSyscallContext &ctx, uint32_t expected)
   {
     uint32_t out = 0;
     RuntimeMemoryLength written_len = 0;
     auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
         written_len);
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
-           written_len == 4 && out == expected;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&written_len ==
+            4 &&
+        out == expected;
   }
 
-  [[nodiscard]] static bool rcq_consume_expect_empty(NativeSyscallContext &ctx)
+  [[nodiscard]] static x23::Async<bool>
+  rcq_consume_expect_empty(NativeSyscallContext &ctx)
   {
     uint32_t out = 0;
     RuntimeMemoryLength written_len = 0;
     auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
         written_len);
-    return res.has_value() &&
-           ((res.value() ==
-             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) ||
-            (res.value() ==
-             SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) &&
-           written_len == 0;
+    co_return res.has_value() &&
+        ((res.value() ==
+          SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) ||
+         (res.value() ==
+          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) &&
+        written_len == 0;
   }
 
   // Mirrors entrypoint 24: peek does not advance the queue.
-  [[nodiscard]] static bool rcq_peek_expect(NativeSyscallContext &ctx,
-                                            uint32_t expected)
+  [[nodiscard]] static x23::Async<bool>
+  rcq_peek_expect(NativeSyscallContext &ctx, uint32_t expected)
   {
     uint32_t peeked = 0;
     RuntimeMemoryLength peek_len = 0;
     auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, true, std::as_writable_bytes(std::span(&peeked, 1)),
         peek_len);
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
-           peek_len == 4 && peeked == expected;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&peek_len ==
+            4 &&
+        peeked == expected;
   }
 
   // Mirrors entrypoint 4: consuming a key that is not a queue must fail.
-  [[nodiscard]] static bool
+  [[nodiscard]] static x23::Async<bool>
   rcq_consume_expect_failure(NativeSyscallContext &ctx)
   {
     uint32_t out = 0;
@@ -139,16 +142,16 @@ protected:
     auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
         written_len);
-    return res.has_value() &&
-           res.value() != SyscallErrorCode::kSyscallErrorCodeNone;
+    co_return res.has_value() &&
+        res.value() != SyscallErrorCode::kSyscallErrorCodeNone;
   }
 
-  [[nodiscard]] static bool rcq_delete(NativeSyscallContext &ctx)
+  [[nodiscard]] static x23::Async<bool> rcq_delete(NativeSyscallContext &ctx)
   {
     auto res = co_await ctx.syscall<SyscallNo::kDeleteObject>(
         kStorageKey, std::to_underlying(StorageDeltaFlags::None));
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
   }
 
   // NOLINTNEXTLINE(readability-function-size)
@@ -259,15 +262,15 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t consume_a,
            uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
           // consume -> delete -> consume
-          if (!rcq_consume_expect(ctx, consume_a)) {
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
             ADD_FAILURE() << "Failed to consume " << consume_a;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
             ADD_FAILURE() << "Failed to consume " << consume_b;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -303,7 +306,8 @@ protected:
                  (res.value() !=
                   SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) ||
                 written_len != 0) {
-              ADD_FAILURE() << "consume(expect none) did not come back empty";
+              ADD_FAILURE()
+                  << "co_await consume(expect none) did not come back empty";
               // Wake the main thread: it blocks on wait_flag_1_, so returning
               // without setting the flag deadlocks the test instead of failing
               // it. (Same guard as the delete branch below.)
@@ -361,15 +365,15 @@ protected:
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
           // insert -> delete -> consume
-          if (!rcq_insert(ctx, insert_a)) {
+          if (!co_await rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
             ADD_FAILURE() << "Failed to consume " << consume_b;
             co_return InvokeError{InvokeErrorCode::None};
           }
@@ -383,11 +387,11 @@ protected:
         [](NativeSyscallContext &ctx,
            uint32_t insert_1) -> x23::Async<InvokeStatus<void>> {
           // delete -> insert
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_1)) {
+          if (!co_await rcq_insert(ctx, insert_1)) {
             ADD_FAILURE() << "Failed to insert";
             co_return InvokeError{InvokeErrorCode::None};
           }
@@ -396,26 +400,28 @@ protected:
         });
 
     // ConsumeOneOfManyDeleteConsumeRest:
-    // consume(a) -> delete -> consume(b) -> consume(c)
+    // co_await consume(a) -> delete -> co_await consume(b) -> co_await
+    // consume(c)
     builder.add<SerializationFormat::kTxs>(
         14,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> x23::Async<InvokeStatus<void>> {
-          // consume(a) -> delete -> consume(b) -> consume(c)
-          if (!rcq_consume_expect(ctx, consume_a)) {
-            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
+          // co_await consume(a) -> delete -> co_await consume(b) -> co_await
+          // consume(c)
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a) " << consume_a;
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
-            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b) " << consume_b;
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_c)) {
-            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
+          if (!co_await rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to co_await consume(c) " << consume_c;
             co_return InvokeError{InvokeErrorCode::None};
           }
 
@@ -423,43 +429,44 @@ protected:
         });
 
     // InsertSelfConsumeSelfDeleteInsertConsume:
-    // insert(a) -> consume(a) -> delete -> insert(b) -> consume(b)
+    // insert(a) -> co_await consume(a) -> delete -> insert(b) -> co_await
+    // consume(b)
     builder.add<SerializationFormat::kTxs>(
         15,
         [](NativeSyscallContext &ctx, uint32_t insert_a,
            uint32_t insert_b) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_insert(ctx, insert_a)) {
+          if (!co_await rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_a)) {
-            ADD_FAILURE() << "Failed to consume(a)";
+          if (!co_await rcq_consume_expect(ctx, insert_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_b)) {
+          if (!co_await rcq_insert(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_b)) {
-            ADD_FAILURE() << "Failed to consume(b)";
+          if (!co_await rcq_consume_expect(ctx, insert_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b)";
             co_return InvokeError{InvokeErrorCode::None};
           }
 
           co_return InvokeStatus<void>{};
         });
 
-    // DeleteConsumeEmpty: delete -> consume(expect nothing)
+    // DeleteConsumeEmpty: delete -> co_await consume(expect nothing)
     builder.add<SerializationFormat::kTxs>(
         17, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "consume did not come back empty";
             co_return InvokeError{InvokeErrorCode::None};
           }
@@ -468,18 +475,18 @@ protected:
         });
 
     // ConsumeEmptyDeleteConsumeEmpty:
-    // consume(nothing) -> delete -> consume(nothing)
+    // co_await consume(nothing) -> delete -> co_await consume(nothing)
     builder.add<SerializationFormat::kTxs>(
         18, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "first consume did not come back empty";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "second consume did not come back empty";
             co_return InvokeError{InvokeErrorCode::None};
           }
@@ -488,29 +495,30 @@ protected:
         });
 
     // MultipleDeleteRecreate:
-    // consume(a) -> delete -> consume(b) -> delete -> consume(c)
+    // co_await consume(a) -> delete -> co_await consume(b) -> delete ->
+    // co_await consume(c)
     builder.add<SerializationFormat::kTxs>(
         19,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
            uint32_t consume_c) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_consume_expect(ctx, consume_a)) {
-            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a) " << consume_a;
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (first)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
-            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b) " << consume_b;
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (second)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_c)) {
-            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
+          if (!co_await rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to co_await consume(c) " << consume_c;
             co_return InvokeError{InvokeErrorCode::None};
           }
 
@@ -518,33 +526,34 @@ protected:
         });
 
     // DeleteInsertDeleteInsertConsume:
-    // delete -> insert(a) -> delete -> insert(b) -> consume(concurrent)
+    // delete -> insert(a) -> delete -> insert(b) -> co_await
+    // consume(concurrent)
     builder.add<SerializationFormat::kTxs>(
         20,
         [](NativeSyscallContext &ctx, uint32_t insert_a, uint32_t insert_b,
            uint32_t consume_c) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (first)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_a)) {
+          if (!co_await rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (second)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_b)) {
+          if (!co_await rcq_insert(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_b)) {
+          if (!co_await rcq_consume_expect(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to consume self(b)";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_c)) {
-            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
+          if (!co_await rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to co_await consume(c) " << consume_c;
             co_return InvokeError{InvokeErrorCode::None};
           }
 
@@ -552,7 +561,7 @@ protected:
         });
 
     // PeekDeleteConsume:
-    // peek(expected) -> delete -> consume(expected)
+    // peek(expected) -> delete -> co_await consume(expected)
     builder.add<SerializationFormat::kTxs>(
         21,
         [](NativeSyscallContext &ctx,
@@ -584,7 +593,7 @@ protected:
           }
 
           // consume (should get same entry since peek doesn't advance)
-          if (!rcq_consume_expect(ctx, expected)) {
+          if (!co_await rcq_consume_expect(ctx, expected)) {
             ADD_FAILURE() << "Failed to consume " << expected
                           << " after peek+delete";
             co_return InvokeError{InvokeErrorCode::None};
@@ -594,31 +603,31 @@ protected:
         });
 
     // ConsumePastBlockDeleteConsumeConcurrent:
-    // consume(past_entry) -> delete -> insert(new) -> consume(self) ->
-    // consume(concurrent)
+    // co_await consume(past_entry) -> delete -> insert(new) -> co_await
+    // consume(self) -> co_await consume(concurrent)
     builder.add<SerializationFormat::kTxs>(
         22,
         [](NativeSyscallContext &ctx, uint32_t past_value,
            uint32_t insert_value,
            uint32_t concurrent_value) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_consume_expect(ctx, past_value)) {
+          if (!co_await rcq_consume_expect(ctx, past_value)) {
             ADD_FAILURE() << "Failed to consume past block entry "
                           << past_value;
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_value)) {
+          if (!co_await rcq_insert(ctx, insert_value)) {
             ADD_FAILURE() << "Failed to insert";
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_value)) {
+          if (!co_await rcq_consume_expect(ctx, insert_value)) {
             ADD_FAILURE() << "Failed to consume self entry " << insert_value;
             co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, concurrent_value)) {
+          if (!co_await rcq_consume_expect(ctx, concurrent_value)) {
             ADD_FAILURE() << "Failed to consume concurrent entry "
                           << concurrent_value;
             co_return InvokeError{InvokeErrorCode::None};
@@ -628,14 +637,14 @@ protected:
         });
 
     // ChangeTypeAndRecreateFromEmpty:
-    // consume(retrocausal) -> delete -> create bytestring -> delete ->
+    // co_await consume(retrocausal) -> delete -> create bytestring -> delete ->
     // create nnint -> delete -> insert(item)
     builder.add<SerializationFormat::kTxs>(
         23,
         [](NativeSyscallContext &ctx, uint32_t consume_value,
            uint32_t insert_value) -> x23::Async<InvokeStatus<void>> {
           // consume retrocausal item
-          if (!rcq_consume_expect(ctx, consume_value)) {
+          if (!co_await rcq_consume_expect(ctx, consume_value)) {
             ADD_FAILURE() << "Failed to consume retrocausal item "
                           << consume_value;
             co_return InvokeError{InvokeErrorCode::None};
@@ -692,7 +701,7 @@ protected:
           }
 
           // insert item
-          if (!rcq_insert(ctx, insert_value)) {
+          if (!co_await rcq_insert(ctx, insert_value)) {
             ADD_FAILURE() << "Failed to insert item";
             co_return InvokeError{InvokeErrorCode::None};
           }
@@ -737,7 +746,7 @@ protected:
         });
 
     // Method 26: try_delete_revert_then_consume(expected_value)
-    // invoke(method 25, TryInvoke) -> consume(expected_value)
+    // invoke(method 25, TryInvoke) -> co_await consume(expected_value)
     builder.add<SerializationFormat::kTxs>(
         26,
         [](NativeSyscallContext &ctx,
@@ -795,20 +804,20 @@ protected:
         27,
         [](NativeSyscallContext &ctx, uint32_t peek_val, uint32_t consume_a,
            uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_peek_expect(ctx, peek_val)) {
+          if (!co_await rcq_peek_expect(ctx, peek_val)) {
             ADD_FAILURE() << "Failed first peek of " << peek_val;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_peek_expect(ctx, peek_val)) {
+          if (!co_await rcq_peek_expect(ctx, peek_val)) {
             ADD_FAILURE() << "Failed second peek of " << peek_val;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_consume_expect(ctx, consume_a)) {
-            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a) " << consume_a;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
-            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b) " << consume_b;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -867,7 +876,7 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          // consume(self_val) - self entries consumed first
+          // co_await consume(self_val) - self entries consumed first
           auto r3 =
               co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
@@ -885,7 +894,7 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          // consume(concurrent_val)
+          // co_await consume(concurrent_val)
           auto r4 =
               co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
@@ -918,11 +927,11 @@ protected:
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, val_a)) {
+          if (!co_await rcq_insert(ctx, val_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, val_b)) {
+          if (!co_await rcq_insert(ctx, val_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1003,15 +1012,15 @@ protected:
         33,
         [](NativeSyscallContext &ctx, uint32_t old_val,
            uint32_t peek_val) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_consume_expect(ctx, old_val)) {
+          if (!co_await rcq_consume_expect(ctx, old_val)) {
             ADD_FAILURE() << "Failed to consume old entry " << old_val;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_peek_expect(ctx, peek_val)) {
+          if (!co_await rcq_peek_expect(ctx, peek_val)) {
             ADD_FAILURE() << "Failed to peek " << peek_val << " after delete";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1024,19 +1033,19 @@ protected:
         28,
         [](NativeSyscallContext &ctx, uint32_t old_val,
            uint32_t new_val) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_consume_expect(ctx, old_val)) {
+          if (!co_await rcq_consume_expect(ctx, old_val)) {
             ADD_FAILURE() << "Failed to consume old entry " << old_val;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, new_val)) {
+          if (!co_await rcq_insert(ctx, new_val)) {
             ADD_FAILURE() << "Failed to insert new entry";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_peek_expect(ctx, new_val)) {
+          if (!co_await rcq_peek_expect(ctx, new_val)) {
             ADD_FAILURE() << "Failed to peek new entry " << new_val;
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1050,7 +1059,7 @@ protected:
         34,
         [](NativeSyscallContext &ctx,
            uint32_t value) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_insert(ctx, value)) {
+          if (!co_await rcq_insert(ctx, value)) {
             ADD_FAILURE() << "Failed to insert in insert_and_fail";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1063,7 +1072,7 @@ protected:
         35,
         [](NativeSyscallContext &ctx,
            uint32_t value) -> x23::Async<InvokeStatus<void>> {
-          if (!rcq_consume_expect(ctx, value)) {
+          if (!co_await rcq_consume_expect(ctx, value)) {
             ADD_FAILURE() << "Failed to consume " << value
                           << " in consume_and_fail";
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -1476,12 +1485,12 @@ protected:
           // Runs as the TryInvoke'd child, so its own operations are in-frame:
           // invoking this contract again from here would be reentrant even
           // with an orchestrator driving the outer frame.
-          if (!rcq_consume_expect(ctx, consume_val)) {
+          if (!co_await rcq_consume_expect(ctx, consume_val)) {
             ADD_FAILURE() << "Failed to consume " << consume_val
                           << " in consume_insert_and_fail";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, insert_val)) {
+          if (!co_await rcq_insert(ctx, insert_val)) {
             ADD_FAILURE() << "Failed to insert in consume_insert_and_fail";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1578,7 +1587,7 @@ protected:
           }
 
           // consume concurrent entry -- the consume should succeed
-          if (!rcq_consume_expect(ctx, concurrent_val)) {
+          if (!co_await rcq_consume_expect(ctx, concurrent_val)) {
             ADD_FAILURE() << "Consume concurrent entry " << concurrent_val
                           << " should have succeeded";
             co_return InvokeError{InvokeErrorCode::None};
@@ -1615,7 +1624,7 @@ protected:
 
           // consume concurrent entry -- the consume should fail because the
           // bytestring exists there
-          if (!rcq_consume_expect_failure(ctx)) {
+          if (!co_await rcq_consume_expect_failure(ctx)) {
             ADD_FAILURE() << "Consume should have failed over the bytestring";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
@@ -1653,7 +1662,8 @@ protected:
           co_return InvokeStatus<void>{};
         });
 
-    // Method 51: delete -> peek(expect nothing) -> consume(expect nothing)
+    // Method 51: delete -> peek(expect nothing) -> co_await consume(expect
+    // nothing)
     builder.add<SerializationFormat::kTxs>(
         51, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
@@ -1682,7 +1692,7 @@ protected:
             co_return InvokeError{InvokeErrorCode::None};
           }
 
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "consume after peek did not come back empty";
             co_return InvokeError{InvokeErrorCode::None};
           }
@@ -1820,26 +1830,26 @@ protected:
             co_return true;
           };
 
-          // consume(a) -> delete -> insert(b) -> consume(b) -> delete ->
-          // insert(final)
-          // After first delete-recreate, self-entries are consumed before
-          // concurrent, so consume gets the just-inserted val_b.
-          if (!consume_one(val_a)) {
+          // co_await consume(a) -> delete -> insert(b) -> co_await consume(b)
+          // -> delete -> insert(final) After first delete-recreate,
+          // self-entries are consumed before concurrent, so consume gets the
+          // just-inserted val_b.
+          if (!co_await consume_one(val_a)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!delete_queue()) {
+          if (!co_await delete_queue()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!insert_one(val_b)) {
+          if (!co_await insert_one(val_b)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!consume_one(val_b)) {
+          if (!co_await consume_one(val_b)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!delete_queue()) {
+          if (!co_await delete_queue()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!insert_one(insert_val)) {
+          if (!co_await insert_one(insert_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1874,7 +1884,7 @@ protected:
             co_return true;
           };
 
-          if (!consume(true, peek_val)) {
+          if (!co_await consume(true, peek_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1894,10 +1904,10 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          if (!consume(false, insert_val)) {
+          if (!co_await consume(false, insert_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!consume(false, peek_val)) {
+          if (!co_await consume(false, peek_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -1984,13 +1994,13 @@ protected:
             co_return true;
           };
 
-          // insert(self_val) -> consume(self_val) -> delete ->
-          // insert(insert_val) -> consume(insert_val) ->
-          // consume(concurrent_val)
-          if (!do_insert(self_val)) {
+          // insert(self_val) -> co_await consume(self_val) -> delete ->
+          // insert(insert_val) -> co_await consume(insert_val) ->
+          // co_await consume(concurrent_val)
+          if (!co_await do_insert(self_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!do_consume(self_val)) {
+          if (!co_await do_consume(self_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
@@ -2002,30 +2012,31 @@ protected:
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          if (!do_insert(insert_val)) {
+          if (!co_await do_insert(insert_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!do_consume(insert_val)) {
+          if (!co_await do_consume(insert_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!do_consume(concurrent_val)) {
+          if (!co_await do_consume(concurrent_val)) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           co_return InvokeStatus<void>{};
         });
 
-    // Method 67 (issue #3152 reachability, multi-frame): consume(concurrent) ->
-    // delete -> insert(different), with the consume and insert each in their
-    // own child frame. Because deltas are flushed to the DB only at a frame
-    // boundary (try_push_new_subtransaction), the delete lands as its own
-    // subtransaction before the recreate, so HogDb sees a deletion -> RCQ
-    // exclusive upgrade. The recreated RCQ reloads the consumed concurrent
-    // entry into current_block_consumed (via make_fully_consumed_item) while
-    // added_entries holds only the new insert -- the exact shape HogDb's RCQ
-    // ExclusiveLock rejects as kInvalidExecutorBehavior. Unlike methods 62-65
-    // (single frame, so delete+recreate fold into one delta) this actually
-    // splits them across a push.
+    // Method 67 (issue #3152 reachability, multi-frame): co_await
+    // consume(concurrent) -> delete -> insert(different), with the consume and
+    // insert each in their own child frame. Because deltas are flushed to the
+    // DB only at a frame boundary (try_push_new_subtransaction), the delete
+    // lands as its own subtransaction before the recreate, so HogDb sees a
+    // deletion -> RCQ exclusive upgrade. The recreated RCQ reloads the consumed
+    // concurrent entry into current_block_consumed (via
+    // make_fully_consumed_item) while added_entries holds only the new insert
+    // -- the exact shape HogDb's RCQ ExclusiveLock rejects as
+    // kInvalidExecutorBehavior. Unlike methods 62-65 (single frame, so
+    // delete+recreate fold into one delta) this actually splits them across a
+    // push.
     builder.add<SerializationFormat::kTxs>(
         67,
         [](NativeSyscallContext &ctx, uint32_t concurrent_val,
@@ -2622,8 +2633,8 @@ TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
   EXPECT_FALSE(queue.has_value());
 }
 
-// Delete -> peek(empty) -> consume(empty). The peek must not decide the final
-// write shape; the empty consume should leave the key deleted.
+// Delete -> peek(empty) -> co_await consume(empty). The peek must not decide
+// the final write shape; the empty consume should leave the key deleted.
 TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
 {
   invoke_method(51);
@@ -2634,9 +2645,10 @@ TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
   EXPECT_FALSE(queue.has_value());
 }
 
-// Multiple delete-recreate cycles: consume(a) -> delete -> consume(b) -> delete
-// -> consume(c). Verifies that preserved entries accumulate correctly across
-// multiple cycles.
+// Multiple delete-recreate cycles: co_await consume(a) -> delete -> co_await
+// consume(b) -> delete
+// -> co_await consume(c). Verifies that preserved entries accumulate correctly
+// across multiple cycles.
 TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
 {
   insert(42);
@@ -3166,7 +3178,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 
   advance_block();
 
-  // Block 4: consume(30) — 10 and 20 are gone
+  // Block 4: co_await consume(30) — 10 and 20 are gone
   invoke_method(1, uint32_t{30});
 
   advance_block();
@@ -3695,7 +3707,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
     }
   }
 
-  // Method 60: consume(42) -> delete -> insert(77).
+  // Method 60: co_await consume(42) -> delete -> insert(77).
   // The second concurrent entry (99) is lost with the delete.
   auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{77});
   auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{77});
@@ -3751,7 +3763,8 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
     }
   }
 
-  // Method 61: consume(42) -> consume(99) -> delete -> insert(77).
+  // Method 61: co_await consume(42) -> co_await consume(99) -> delete ->
+  // insert(77).
   auto tx_a =
       make_tx(kContractAddress, 61, uint32_t{42}, uint32_t{99}, uint32_t{77});
   auto tx_b =
@@ -3808,7 +3821,8 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
     }
   }
 
-  // Method 62: consume(42)->delete->insert(55)->consume(55)->delete->insert(77)
+  // Method 62: co_await
+  // consume(42)->delete->insert(55)->consume(55)->delete->insert(77)
   auto tx_a =
       make_tx(kContractAddress, 62, uint32_t{42}, uint32_t{55}, uint32_t{77});
   auto tx_b =
@@ -3865,8 +3879,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
 
   advance_block();
 
-  // Block 2: insert concurrent entries, then consume(past) -> delete ->
-  // insert(new).
+  // Block 2: insert concurrent entries, then co_await consume(past) -> delete
+  // -> insert(new).
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{99});
     auto handler = make_new_system_call_handler(tx, *context_);
@@ -3876,7 +3890,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
 
   // Method 60 consumes a concurrent entry. But here entry 42 is from a past
   // block and will be consumed first (past-block entries are consumed before
-  // concurrent entries). So consume(42) -> delete -> insert(77).
+  // concurrent entries). So co_await consume(42) -> delete -> insert(77).
   auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{77});
   auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{77});
 
@@ -3928,7 +3942,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
-  // Method 63: peek(42) -> delete -> insert(99) -> consume(99) -> consume(42)
+  // Method 63: peek(42) -> delete -> insert(99) -> co_await consume(99) ->
+  // co_await consume(42)
   auto tx_a = make_tx(kContractAddress, 63, uint32_t{42}, uint32_t{99});
   auto tx_b = make_tx(kContractAddress2, 63, uint32_t{42}, uint32_t{99});
 
@@ -4054,8 +4069,8 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
-  // Method 65: insert(10) -> consume(10) -> delete -> insert(20) ->
-  //            consume(20) -> consume(77)
+  // Method 65: insert(10) -> co_await consume(10) -> delete -> insert(20) ->
+  //            co_await consume(20) -> co_await consume(77)
   auto tx_a =
       make_tx(kContractAddress, 65, uint32_t{10}, uint32_t{20}, uint32_t{77});
   auto tx_b =
@@ -4093,7 +4108,7 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 {
   // Concurrent insert whose lock the TryInvoke'd delete conflicts with.
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
-  // Method 32: TryInvoke delete (expects the conflict) -> consume(42).
+  // Method 32: TryInvoke delete (expects the conflict) -> co_await consume(42).
   auto tx_orch = make_tx(kContractAddress2, 32, uint32_t{42});
 
   NondeterministicProposalData insert_pd;
@@ -4146,7 +4161,8 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
   }
 
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
-  // Method 70: TryInvoke consume(42), expecting the frame to commit (Return).
+  // Method 70: TryInvoke co_await consume(42), expecting the frame to commit
+  // (Return).
   auto tx_orch =
       make_tx(kContractAddress2, 70, uint32_t{1}, uint32_t{42}, uint32_t{0});
 

@@ -89,8 +89,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [&](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto res =
                     co_await client_.invoke_opt<u8"read_only_bytestring_set">(
                         ctx, false);
@@ -101,8 +100,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
                 co_return InvokeStatus<void>{};
               });
   fns.emplace(1,
-              [&](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto res = co_await client_.invoke_opt<
                     u8"read_only_bytestring_set",
                     std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
@@ -176,8 +174,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [&](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
+              [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 auto res =
                     co_await client_.invoke_opt<u8"read_only_log_event">(ctx,
                                                                          false);
@@ -187,18 +184,17 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
 
                 co_return InvokeStatus<void>{};
               });
-  fns.emplace(1,
-              [&](NativeSyscallContext &ctx) noexcept
-                  -> x23::Async<InvokeStatus<void>> {
-                auto res = co_await client_.invoke_opt<
-                    u8"read_only_log_event",
-                    std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
-                if (!check_result(res)) {
-                  co_return InvokeError{InvokeErrorCode::Deterministic};
-                }
+  fns.emplace(
+      1, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await client_.invoke_opt<
+            u8"read_only_log_event", std::to_underlying(InvokeFlag::ReadOnly)>(
+            ctx, true);
+        if (!check_result(res)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                co_return InvokeStatus<void>{};
-              });
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -273,15 +269,14 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
   static constexpr ContractAddress kAddressRoot = make_contract_address(3);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_leaf;
-  fns_leaf.emplace(0,
-                   [](NativeSyscallContext &ctx) noexcept
-                       -> x23::Async<InvokeStatus<void>> {
-                     if (!ctx.handler().is_read_only()) {
-                       co_return InvokeError{InvokeErrorCode::Deterministic};
-                     }
+  fns_leaf.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (!ctx.handler().is_read_only()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                     co_return InvokeStatus<void>{};
-                   });
+        co_return InvokeStatus<void>{};
+      });
   auto contract_leaf = std::make_unique<NativeContract>(std::move(fns_leaf));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_middle;
@@ -402,9 +397,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   // Method 2: invoke transfer in normal mode (should succeed)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
-      0,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto res = co_await native_token_client.invoke_opt<
             u8"get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kObserverAddr);
@@ -420,9 +413,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         co_return InvokeStatus<void>{};
       });
   fns_caller.emplace(
-      1,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      1, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto res = co_await native_token_client.invoke_opt<
             u8"transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kReceiverAddr, make_amount(transfer_amount));
@@ -438,9 +429,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         co_return InvokeStatus<void>{};
       });
   fns_caller.emplace(
-      2,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
+      2, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto res = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr, make_amount(transfer_amount));
         if (!res.has_value() || !res.value().has_value() ||

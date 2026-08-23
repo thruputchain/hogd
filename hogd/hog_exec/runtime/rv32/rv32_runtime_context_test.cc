@@ -662,7 +662,7 @@ direct_invoke(std::shared_ptr<const Contract> const &contract,
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
                         .gas_consumed_ = 0};
   }
-  return runtime.value()->invoke(method_id, gas_limit);
+  return runtime.value()->invoke(method_id, gas_limit)();
 }
 
 std::shared_ptr<const Contract>

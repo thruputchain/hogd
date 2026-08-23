@@ -101,8 +101,8 @@ public:
 
   // Invoke `Name` on the ERC20 contract deployed at `target` and require Ok.
   template<StringLiteral Name, typename... Args>
-  static InvokeStatus<void> call_ok(NativeSyscallContext &ctx,
-                                    ContractAddress target, Args... args)
+  static x23::Async<InvokeStatus<void>>
+  call_ok(NativeSyscallContext &ctx, ContractAddress target, Args... args)
   {
     auto client = ContractTraitClient<itc_erc20::ERC20>(target);
     auto r = co_await client.template invoke_opt<Name>(ctx, args...);
@@ -112,9 +112,9 @@ public:
                     << std::string_view(reinterpret_cast<const char *>(
                                             Name.get().data()),
                                         Name.get().size());
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   }
 
   // Invoke `Name` on the ERC20 contract deployed at `target` and require a
@@ -124,7 +124,7 @@ public:
   // that does not parse as an itc_erc20 exception lands in a different
   // ContractErrorType alternative and is rejected here too.
   template<StringLiteral Name, typename... Args>
-  static InvokeStatus<void>
+  static x23::Async<InvokeStatus<void>>
   call_expect_err(NativeSyscallContext &ctx, ContractAddress target,
                   itc_erc20::ERC20Error expected, Args... args)
   {
@@ -138,12 +138,12 @@ public:
       ADD_FAILURE() << "itc_erc20 call faulted instead of returning an ERC20 "
                        "error: "
                     << name_str;
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     auto const &result = r.value().value().value();
     if (result.is_ok()) {
       ADD_FAILURE() << "itc_erc20 call unexpectedly returned Ok: " << name_str;
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     auto reported = std::visit(
         [](auto const &exception) -> std::optional<itc_erc20::ERC20Error> {
@@ -163,15 +163,15 @@ public:
       ADD_FAILURE() << "itc_erc20 call aborted without a decodable itc_erc20 "
                        "exception: "
                     << name_str;
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
     if (*reported != expected) {
       ADD_FAILURE() << "itc_erc20 call reported error "
                     << static_cast<int>(*reported) << ", expected "
                     << static_cast<int>(expected) << ": " << name_str;
-      return InvokeError{InvokeErrorCode::Deterministic};
+      co_return InvokeError{InvokeErrorCode::Deterministic};
     }
-    return {};
+    co_return InvokeStatus<void>{};
   }
 
 protected:
@@ -201,37 +201,36 @@ protected:
         kMethodTransfer,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return call_ok<u8"transfer">(ctx, target, kBob,
-                                          make_amount(kTransferAmount));
+          co_return co_await call_ok<u8"transfer">(ctx, target, kBob,
+                                                   make_amount(
+                                                       kTransferAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodAdjustAllowance,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
-                                                  make_difference(
-                                                      kAllowanceAmount));
+          co_return co_await call_ok<u8"adjust_allowance">(
+              ctx, target, kSpender, make_difference(kAllowanceAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodTransferFrom,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return call_ok<u8"transfer_from">(ctx, target, kAlice, kBob,
-                                               make_amount(
-                                                   kTransferFromAmount));
+          co_return co_await call_ok<u8"transfer_from">(
+              ctx, target, kAlice, kBob, make_amount(kTransferFromAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodInitialize,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return call_ok<u8"initialize">(ctx, target, kAlice);
+          co_return co_await call_ok<u8"initialize">(ctx, target, kAlice);
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodMint,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          co_return call_ok<u8"mint">(ctx, target, kAlice,
-                                      make_amount(kMintAmount));
+          co_return co_await call_ok<u8"mint">(ctx, target, kAlice,
+                                               make_amount(kMintAmount));
         });
     // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
     // allowance and then, as a sibling call in the same transaction, increment
@@ -242,15 +241,14 @@ protected:
         kMethodNettedNegativeApproval,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
-          auto rejected = call_expect_err<u8"adjust_allowance">(
+          auto rejected = co_await call_expect_err<u8"adjust_allowance">(
               ctx, target, itc_erc20::ERC20Error::TooLarge, kSpender,
               make_difference(-kAllowanceAmount));
           if (!rejected.has_value()) {
             co_return rejected.error();
           }
-          co_return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
-                                                  make_difference(
-                                                      kAllowanceAmount));
+          co_return co_await call_ok<u8"adjust_allowance">(
+              ctx, target, kSpender, make_difference(kAllowanceAmount));
         });
     auto wrapper_contract = builder.build();
 

@@ -100,12 +100,12 @@ TEST_F(NativeContractTest, BasicInstantiate)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
     fns_0.emplace(0,
-                  [](NativeSyscallContext & /*unused*/) noexcept
+                  [](NativeSyscallContext & /*unused*/)
                       -> x23::Async<InvokeStatus<void>> {
                     co_return InvokeStatus<void>{};
                   });
     fns_0.emplace(1,
-                  [](NativeSyscallContext & /*unused*/) noexcept
+                  [](NativeSyscallContext & /*unused*/)
                       -> x23::Async<InvokeStatus<void>> {
                     co_return InvokeError{InvokeErrorCode::Deterministic};
                   });
@@ -113,40 +113,38 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
     // Invokes another contract, returns the error code of the other contract
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
-    fns_1.emplace(0,
-                  [](NativeSyscallContext &ctx) noexcept
-                      -> x23::Async<InvokeStatus<void>> {
-                    auto const &calldata = ctx.handler().get_calldata();
+    fns_1.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
 
-                    if (calldata.size() !=
-                        sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
-                      co_return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    Runtime::MethodID invoked_id =
-                        *reinterpret_cast<const Runtime::MethodID *>(
-                            calldata.data());
-                    ContractAddress invoked_addr;
-                    std::memcpy(invoked_addr.data(),
-                                calldata.data() + sizeof(Runtime::MethodID),
-                                invoked_addr.size());
+          if (calldata.size() !=
+              sizeof(Runtime::MethodID) + sizeof(ContractAddress)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          Runtime::MethodID invoked_id =
+              *reinterpret_cast<const Runtime::MethodID *>(calldata.data());
+          ContractAddress invoked_addr;
+          std::memcpy(invoked_addr.data(),
+                      calldata.data() + sizeof(Runtime::MethodID),
+                      invoked_addr.size());
 
-                    CopyableInvokeInputs inputs{
-                        .entrypoint_id = invoked_id,
-                        .gas_limit = std::numeric_limits<GasAmount>::max(),
-                        .flags = std::to_underlying(InvokeFlag::None),
-                    };
-                    auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
-                        invoked_addr, std::span<const std::byte>{},
-                        std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = invoked_id,
+              .gas_limit = std::numeric_limits<GasAmount>::max(),
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+              invoked_addr, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
 
-                    if (invoke_res) {
-                      co_return (invoke_res.value() ==
-                                 SyscallErrorCode::kSyscallErrorCodeNone)
-                          ? InvokeStatus<void>{}
-                          : InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    co_return InvokeError{InvokeErrorCode::Deterministic};
-                  });
+          if (invoke_res) {
+            co_return (invoke_res.value() ==
+                       SyscallErrorCode::kSyscallErrorCodeNone)
+                ? InvokeStatus<void>{}
+                : InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        });
     auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -173,11 +171,11 @@ TEST_F(NativeContractTest, BasicInstantiate)
   auto runtime = std::move(runtime_res.value());
   ASSERT_TRUE(runtime != nullptr);
 
-  auto res = runtime->invoke(0, UINT64_MAX);
+  auto res = runtime->invoke(0, UINT64_MAX)();
 
   ASSERT_TRUE(res.result_);
 
-  res = runtime->invoke(1, UINT64_MAX);
+  res = runtime->invoke(1, UINT64_MAX)();
 
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
@@ -862,7 +860,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
-                [](NativeSyscallContext & /*unused*/) noexcept
+                [](NativeSyscallContext & /*unused*/)
                     -> x23::Async<InvokeStatus<void>> {
                   co_return InvokeStatus<void>{};
                 });
@@ -922,7 +920,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent
       .emplace(0,
-               [kAddrChild](NativeSyscallContext &ctx) noexcept
+               [kAddrChild](NativeSyscallContext &ctx)
                    -> x23::Async<InvokeStatus<void>> {
                  CopyableInvokeInputs inputs{
                      .entrypoint_id = 0,
