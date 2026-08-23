@@ -115,9 +115,11 @@ operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
   return !f;
 }
 
-// Same as the const noexcept specialization below, minus the noexcept: a
-// coroutine-returning target cannot be noexcept, because its frame allocation
-// happens in the ramp function and can throw before the body runs.
+// The const specialization that std::move_only_function has and this shim was
+// missing.  NativeContract::function_t needs it: its targets return x23::Async,
+// whose frame is allocated in the ramp function, so an allocation failure
+// escapes the call instead of reaching the promise -- and a noexcept target
+// would turn that into a terminate.
 template<typename Ret, typename... Args>
 class UniqueFunction<Ret(Args...) const> {
 public:

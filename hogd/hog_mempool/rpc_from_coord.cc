@@ -1795,7 +1795,7 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
            x23::span<const NondeterministicProposalData> tx_nominations,
            x23::Vec<ProposedTransaction> &proposed_txs,
            x23::Vec<bool> &tx_found,
-           std::shared_ptr<Scheduler> scheduler) -> x23::Async<void> {
+           std::shared_ptr<Scheduler> scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           for (size_t i = lookup_chunk->start; i < lookup_chunk->end; i++) {
@@ -1811,7 +1811,8 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
           }
           co_return;
         }(&lookup_chunk, tx_hashes, tx_nominations, prepared.proposed_txs,
-                                                 tx_found, scheduler_));
+                                                          tx_found,
+                                                          scheduler_));
   }
   std::exception_ptr first_exception;
   for (x23::Async<void> &handle : lookup_handles) {
