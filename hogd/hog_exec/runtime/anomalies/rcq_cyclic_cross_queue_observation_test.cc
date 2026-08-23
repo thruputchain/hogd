@@ -114,7 +114,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   auto contract = make_contract(
       // method 0 (TX_A): peek queue_a, require {kValA}, insert {kValB} into
       // queue_b
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_a = make_storage_key("queue_a");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true)();
         if (!peek_res.has_value())
@@ -144,7 +144,7 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
       },
       // method 1 (TX_B): peek queue_b, require {kValB}, insert {kValA} into
       // queue_a
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key_b = make_storage_key("queue_b");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true)();
         if (!peek_res.has_value())

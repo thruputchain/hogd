@@ -16,6 +16,7 @@
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 
 namespace hogd {
@@ -29,7 +30,7 @@ MockRuntimeContext::set_trampoline(int32_t contract,
                                                             foreign_context));
 }
 
-std::pair<InvokeStatus<void>, GasAmount>
+x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   reset_gas(gas_limit);
@@ -51,7 +52,7 @@ MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
   return {res, gas_consumed()};
 }
 
-SystemStatus<std::unique_ptr<Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
                                      SystemCallHandler *syscall_handler)
 {
@@ -61,31 +62,32 @@ MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
     auto contract =
         syscall_handler->resolve_contract(deployed_contract_hash.hash);
     if (!contract.has_value()) {
-      return contract.error();
+      co_return contract.error();
     }
     if (contract.value() == nullptr) {
       error("Unrecoverable: Contract lookup failed: {}",
             show_byte_array(deployed_contract_hash.hash));
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
 
     if (contract.value()->contract_type() != ContractType::kMockTest) {
       error("Unrecoverable: Attempt made to access a non-mock test contract "
             "from MockRuntimeContext: {}",
             contract.value()->contract_type());
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
 
     int32_t mock_contract = contract.value()->mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
-      return std::make_unique<MockRuntime>(it->second);
+      co_return std::make_unique<MockRuntime>(it->second);
     }
-    return nullptr;
+    co_return nullptr;
   }
   // otherwise some other contract type; returns whatever the base context
   // wants to do with the contract.
-  return base_context_->make_new_runtime(deployed_contract, syscall_handler);
+  co_return co_await base_context_->make_new_runtime(deployed_contract,
+                                                     syscall_handler);
 }
 
 } // namespace hogd

@@ -73,8 +73,7 @@ TEST_F(EventTest, EventSuccess)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_emitter;
   fns_emitter.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "test 0 topics";
 
         auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
@@ -93,8 +92,7 @@ TEST_F(EventTest, EventSuccess)
         co_return InvokeStatus<void>{};
       });
   fns_emitter.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "test 1 topic";
 
         SHA256Hash topic = sha256(std::string("topic"));
@@ -235,8 +233,7 @@ TEST_F(EventTest, BadEventInputs)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         SHA256Hash topic0 = sha256(std::string("topic"));
         SHA256Hash topic1 = sha256(std::string("topic"));
         SHA256Hash topic2 = sha256(std::string("topic"));
@@ -339,8 +336,7 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         SHA256Hash topic = sha256(std::string("topic"));
 
         x23::Vec<uint8_t> max_event_data;
@@ -426,8 +422,7 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "event-count-limit";
 
         for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
@@ -512,8 +507,7 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "child-event-count-limit";
 
         for (uint32_t i = 0; i < kChildEventCount; ++i) {
@@ -1418,24 +1412,23 @@ TEST(EventRpcValidationProposalData,
       false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                for (size_t i = 0; i < kValidationProposalObservationCount;
+                     ++i) {
+                  QueueEntry entry;
+                  entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
+                  auto status = ctx.handler().retrocausal_queue_insert(
+                      make_validation_proposal_observation_key(i),
+                      std::as_bytes(std::span(entry.data(), entry.size())))();
+                  if (!status.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Unrecoverable};
+                  }
+                }
+                co_return InvokeStatus<void>{};
+              });
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
-          QueueEntry entry;
-          entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
-          auto status = ctx.handler().retrocausal_queue_insert(
-              make_validation_proposal_observation_key(i),
-              std::as_bytes(std::span(entry.data(), entry.size())))();
-          if (!status.has_value()) {
-            co_return InvokeError{InvokeErrorCode::Unrecoverable};
-          }
-        }
-        co_return InvokeStatus<void>{};
-      });
-  fns.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
           RuntimeMemoryLength len = 0;
           auto status =

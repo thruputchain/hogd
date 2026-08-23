@@ -246,8 +246,9 @@ TEST_F(TryInvokeAdmissionTrustedTest,
         }
 
         auto token = ContractTraitClient<itc_erc20::ERC20>(kAddrToken);
-        auto transfer_res = co_await token.invoke_opt<u8"transfer">(ctx, kAddrChild,
-                                                           transfer_amount_xdr);
+        auto transfer_res =
+            co_await token.invoke_opt<u8"transfer">(ctx, kAddrChild,
+                                                    transfer_amount_xdr);
         if (!transfer_res.has_value() || !transfer_res.value().has_value() ||
             !transfer_res.value().value().has_value() ||
             !transfer_res.value().value().value().is_ok()) {
@@ -332,7 +333,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
 
   auto child = make_contract(make_child_write(kPayload), make_child_delete());
   auto parent = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs outputs{};
         auto child_res = try_invoke_child(ctx, kChildWrite, outputs);
         if (!child_res.has_value()) {
@@ -410,7 +411,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
   // Child method 0: affordable write to its own "child-key".
   auto child = make_contract(make_child_write("affordable"));
   auto parent = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs outputs{};
         auto child_res = try_invoke_child(ctx, kChildWrite, outputs);
         if (!child_res.has_value()) {

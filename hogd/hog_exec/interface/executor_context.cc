@@ -48,7 +48,10 @@ ExecutorContext::propose_transaction(SignedTransaction signed_tx,
                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
-  co_return co_await run_propose_transaction(std::move(signed_tx), tx_id);
+  // Forwarded, not awaited: run_propose_transaction already returns this exact
+  // Async, so co_return co_await would only add a frame and a resume hop. Its
+  // ramp runs at the call and moves signed_tx into its own frame.
+  return run_propose_transaction(std::move(signed_tx), tx_id);
 }
 
 x23::Async<ExecProposeBatchResult>
@@ -70,7 +73,10 @@ x23::Async<ExpectedViewResult>
 ExecutorContext::view_transaction(TransactionViewQuery const &query)
 {
   assert(mode_ == ExecutionMode::kViewing);
-  co_return co_await run_view_transaction(query);
+  // Forwarded, not awaited (see propose_transaction). query stays borrowed
+  // from the caller either way -- a coroutine would not copy a reference
+  // parameter into its frame.
+  return run_view_transaction(query);
 }
 
 x23::Async<ExecValidateBatchResult>
@@ -93,7 +99,8 @@ ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
                                       TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
-  co_return co_await run_validate_transaction(std::move(proposed_tx), tx_id);
+  // Forwarded, not awaited (see propose_transaction).
+  return run_validate_transaction(std::move(proposed_tx), tx_id);
 }
 
 // Stale-block execution during propose/validate is benign.

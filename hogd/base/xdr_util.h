@@ -333,7 +333,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
     handles.push_back([](const ChunkRange &chunk, size_t i,
                          size_t segment_offset, ParallelBatch &parallel,
                          x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs,
-                         x23::span<T> &objs) noexcept -> x23::Async<void> {
+                         x23::span<T> &objs) -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
 
       const size_t segment_idx = segment_offset + i;

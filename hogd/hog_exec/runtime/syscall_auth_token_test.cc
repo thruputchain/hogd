@@ -276,8 +276,7 @@ TEST_F(SyscallAuthTokenTest, GetCalldataRejectsPartialAuthTokenOutputSpan)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         RuntimeMemoryLength calldata_len = 0;
         uint32_t auth_token_count = 0;
         auto len_res =
@@ -2193,8 +2192,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
   // Read-only child: explicitly returns the forwarded token via kReturn.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &calldata = ctx.handler().get_calldata();
         uint32_t token_id = 0;
         std::memcpy(&token_id, calldata.data(), sizeof(token_id));
@@ -2325,8 +2323,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotConsumeForwardedToken)
   // Read-only child: tries to consume the forwarded token, should be rejected.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &calldata = ctx.handler().get_calldata();
         uint32_t token_id = 0;
         std::memcpy(&token_id, calldata.data(), sizeof(token_id));
@@ -2640,8 +2637,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
   // Read-only child: manually reverts via kReturn with revert_frame=true.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
             std::span<const std::byte>{}, true, std::span<const std::byte>{});
         EXPECT_FALSE(ret.has_value());
@@ -2883,7 +2879,7 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_leaf;
   fns_leaf.emplace(
-      0, [](NativeSyscallContext &) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
         co_return InvokeStatus<void>{};
       });
   auto leaf_contract = std::make_unique<NativeContract>(std::move(fns_leaf));

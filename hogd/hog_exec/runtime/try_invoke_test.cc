@@ -371,8 +371,7 @@ make_try_invoke_handle_errors_context()
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_w;
   fns_w.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("test");
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), key, std::as_bytes(std::span{"hello"}),
@@ -386,8 +385,7 @@ make_try_invoke_handle_errors_context()
         co_return InvokeStatus<void>{};
       });
   fns_w.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("test");
         auto [res, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), key, std::as_bytes(std::span{"world"}),
@@ -405,8 +403,7 @@ make_try_invoke_handle_errors_context()
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -436,8 +433,7 @@ make_try_invoke_handle_errors_context()
         co_return InvokeStatus<void>{};
       });
   fns_o.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -458,8 +454,7 @@ make_try_invoke_handle_errors_context()
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_f;
   fns_f.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -480,8 +475,7 @@ make_try_invoke_handle_errors_context()
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
   fns_b.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -1838,8 +1832,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // First, try_invoke writer method 1 (should fail)
         CopyableInvokeOutputs r1_outputs{};
         auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -2023,8 +2016,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0
         CopyableInvokeOutputs r0_outputs{};
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -2244,8 +2236,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0 (short)
         CopyableInvokeOutputs r0_outputs{};
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -2433,8 +2424,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0 (long)
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -2600,8 +2590,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_tie;
   fns_tie.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 1 (short write)
         CopyableInvokeOutputs r1_outputs{};
         auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -2629,8 +2618,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
       std::make_unique<NativeContract>(std::move(fns_tie));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_o;
   fns_o.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0 (long write)
         CopyableInvokeOutputs r0_outputs{};
         auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
@@ -2803,9 +2791,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
         uint128_t amount = write_cost;
 
-        auto r_transfer = co_await
-            native_token_client.invoke_opt<u8"transfer">(ctx, receiver_addr,
-                                                         make_amount(amount));
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, receiver_addr, make_amount(amount));
 
         auto transfer_result = check_result(r_transfer);
         if (!transfer_result.is_ok()) {
@@ -2831,7 +2818,8 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r_balance = co_await native_token_client.invoke_opt<u8"get_balance">(ctx);
+        auto r_balance =
+            co_await native_token_client.invoke_opt<u8"get_balance">(ctx);
         auto balance_result = check_result(r_balance);
         if (!balance_result.is_ok()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -3263,10 +3251,10 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                     }
                     co_return InvokeError{InvokeErrorCode::Deterministic};
                   });
-  fns_err.emplace(
-      1, [](NativeSyscallContext &) noexcept -> x23::Async<InvokeStatus<void>> {
-        co_return InvokeStatus<void>{};
-      });
+  fns_err.emplace(1,
+                  [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+                    co_return InvokeStatus<void>{};
+                  });
   auto error_contract = std::make_unique<NativeContract>(std::move(fns_err));
 
   // Contract 1: performs the four try_invoke error cases
@@ -3475,8 +3463,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
       std::make_unique<NativeContract>(std::move(fns_w));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_m;
   fns_m.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke writer method 0
         auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -3504,8 +3491,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
       std::make_unique<NativeContract>(std::move(fns_m));
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_e;
   fns_e.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Try invoke middle method 0
         CopyableInvokeOutputs r1_outputs{};
         auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {

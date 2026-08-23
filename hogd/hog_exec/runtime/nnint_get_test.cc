@@ -63,23 +63,24 @@ protected:
 TEST_P(NNIntGetTest, GetOnNonExistentKey)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("nonexistent");
-        int128_t output_set{};
-        bool output_set_opt{};
-        int128_t output_add{};
-        auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            key, false, output_set, output_set_opt, output_add);
-        if (!res.has_value() ||
-            *res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return check_nnint_get_result(
-            output_set_opt ? std::optional<int128_t>(output_set) : std::nullopt,
-            output_add, std::nullopt, 0);
-      });
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto key = make_storage_key("nonexistent");
+                int128_t output_set{};
+                bool output_set_opt{};
+                int128_t output_add{};
+                auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                    key, false, output_set, output_set_opt, output_add);
+                if (!res.has_value() ||
+                    *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                co_return check_nnint_get_result(output_set_opt
+                                                     ? std::optional<int128_t>(
+                                                           output_set)
+                                                     : std::nullopt,
+                                                 output_add, std::nullopt, 0);
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -119,8 +120,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("deleted_key");
         // First, set a value
         int128_t set_value = 100;
@@ -190,8 +190,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("nnint_with_base");
         int128_t set_value = 200;
         auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
@@ -252,32 +251,35 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
 TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("nnint_add_only");
-        // Set with nullopt base, just add value
-        auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-            key, static_cast<int128_t const *>(nullptr), 75,
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto key = make_storage_key("nnint_add_only");
+                // Set with nullopt base, just add value
+                auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                    key, static_cast<int128_t const *>(nullptr), 75,
+                    std::to_underlying(StorageDeltaFlags::None));
+                if (!r.has_value() ||
+                    *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        // Get with force_load_snapshot=false should co_return (nullopt, 75)
-        int128_t output_set{};
-        bool output_set_opt{};
-        int128_t output_add{};
-        auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            key, false, output_set, output_set_opt, output_add);
-        if (!res.has_value() ||
-            *res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return check_nnint_get_result(
-            output_set_opt ? std::optional<int128_t>(output_set) : std::nullopt,
-            output_add, std::nullopt, 75);
-      });
+                // Get with force_load_snapshot=false should co_return (nullopt,
+                // 75)
+                int128_t output_set{};
+                bool output_set_opt{};
+                int128_t output_add{};
+                auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                    key, false, output_set, output_set_opt, output_add);
+                if (!res.has_value() ||
+                    *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                co_return check_nnint_get_result(output_set_opt
+                                                     ? std::optional<int128_t>(
+                                                           output_set)
+                                                     : std::nullopt,
+                                                 output_add, std::nullopt, 75);
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -316,34 +318,36 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
 TEST_P(NNIntGetTest, GetOnBytestringKey)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("bytestring_key");
-        // First, set a bytestring value
-        Bytestring bytestring_data = make_bytestring("test_data");
-        auto r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
-            key, std::as_bytes(std::span(bytestring_data)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!r.has_value() || *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto key = make_storage_key("bytestring_key");
+                // First, set a bytestring value
+                Bytestring bytestring_data = make_bytestring("test_data");
+                auto r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                    key, std::as_bytes(std::span(bytestring_data)),
+                    std::to_underlying(StorageDeltaFlags::None));
+                if (!r.has_value() ||
+                    *r != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        // Get with force_load_snapshot=false should co_return (nullopt, 0)
-        // because the type doesn't match
-        int128_t output_set{};
-        bool output_set_opt{};
-        int128_t output_add{};
-        auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            key, false, output_set, output_set_opt, output_add);
-        if (!res.has_value() ||
-            *res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return check_nnint_get_result(
-            output_set_opt ? std::optional<int128_t>(output_set) : std::nullopt,
-            output_add, std::nullopt, 0);
-      });
+                // Get with force_load_snapshot=false should co_return (nullopt,
+                // 0) because the type doesn't match
+                int128_t output_set{};
+                bool output_set_opt{};
+                int128_t output_add{};
+                auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                    key, false, output_set, output_set_opt, output_add);
+                if (!res.has_value() ||
+                    *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                co_return check_nnint_get_result(output_set_opt
+                                                     ? std::optional<int128_t>(
+                                                           output_set)
+                                                     : std::nullopt,
+                                                 output_add, std::nullopt, 0);
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -392,25 +396,26 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
   advance_block();
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-        auto key = make_storage_key("snapshot_key");
-        // Get with force_load_snapshot=false should co_return (nullopt, 0)
-        // without loading from snapshot
-        int128_t output_set{};
-        bool output_set_opt{};
-        int128_t output_add{};
-        auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-            key, false, output_set, output_set_opt, output_add);
-        if (!res.has_value() ||
-            *res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        co_return check_nnint_get_result(
-            output_set_opt ? std::optional<int128_t>(output_set) : std::nullopt,
-            output_add, std::nullopt, 0);
-      });
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto key = make_storage_key("snapshot_key");
+                // Get with force_load_snapshot=false should co_return (nullopt,
+                // 0) without loading from snapshot
+                int128_t output_set{};
+                bool output_set_opt{};
+                int128_t output_add{};
+                auto res = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+                    key, false, output_set, output_set_opt, output_add);
+                if (!res.has_value() ||
+                    *res != SyscallErrorCode::kSyscallErrorCodeNone) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
+                co_return check_nnint_get_result(output_set_opt
+                                                     ? std::optional<int128_t>(
+                                                           output_set)
+                                                     : std::nullopt,
+                                                 output_add, std::nullopt, 0);
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -448,8 +453,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("multi_op_key");
         // First set with base value
         int128_t set_value = 100;
@@ -541,8 +545,7 @@ TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("force_load_deleted");
         // First, set a value
         int128_t set_value = 100;
@@ -614,8 +617,7 @@ TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("force_load_bytestring");
         // First, set a bytestring value
         Bytestring bytestring_data = make_bytestring("test_data");

@@ -25,6 +25,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/rpc_common.h"
 
@@ -49,11 +50,11 @@ public:
     return InvokeErrorCode::None;
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
                    SystemCallHandler * /*unused*/) override
   {
-    return nullptr;
+    co_return nullptr;
   }
 };
 
@@ -90,9 +91,9 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [contract_hash](
-                  NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-                auto r =
-                    ctx.handler().deploy_contract(kDeployNonce, contract_hash)();
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto r = ctx.handler().deploy_contract(kDeployNonce,
+                                                       contract_hash)();
                 if (!r.has_value())
                   co_return r.error().to_invoke_error();
                 if (!r.value().has_value())

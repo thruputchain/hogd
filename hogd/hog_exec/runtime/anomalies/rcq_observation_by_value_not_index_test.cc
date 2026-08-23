@@ -113,7 +113,7 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   std::vector<uint8_t> observed_values;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
@@ -125,7 +125,7 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
         co_return InvokeStatus<void>{};
       },
       [&observed_values](
-          NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
@@ -233,7 +233,7 @@ TEST_F(RCQObservationByValueTest,
   std::vector<uint8_t> consumed_values;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
@@ -245,7 +245,7 @@ TEST_F(RCQObservationByValueTest,
         co_return InvokeStatus<void>{};
       },
       [&consumed_values](
-          NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto consume_res =
             ctx.handler().retrocausal_queue_consume(key, false)();
@@ -342,7 +342,7 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
   static constexpr uint8_t kEntry = 0xA7;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
 
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
@@ -431,7 +431,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
 {
   auto contract = make_contract(
       // method 0: peek and write what we see
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
@@ -450,7 +450,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
         co_return InvokeStatus<void>{};
       },
       // method 1: insert calldata bytes as RCQ entries
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {

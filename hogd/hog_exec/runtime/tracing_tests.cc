@@ -618,8 +618,7 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         StorageKeyContractData key{};
         std::array<std::byte, kQueueEntryMaxLen + 1> oversized{};
         auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
@@ -670,8 +669,7 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   // Child: return a 9-byte buffer to its parent.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<std::byte, 9> ret_buf{};
         std::memcpy(ret_buf.data(), "RETURNED!", 9);
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(

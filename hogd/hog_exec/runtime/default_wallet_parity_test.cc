@@ -953,8 +953,7 @@ TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)
   constexpr int32_t kTokenReturnId = 64;
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         AuthTokenNode root_node{.consumer_address = kTokenReturnAddr,
                                 .payload = x23::serialize(2U),
                                 .child_nodes = {}};

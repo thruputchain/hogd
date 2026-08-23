@@ -237,7 +237,7 @@ AuthServer::verify_transactions(BlockHeight height,
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     SipHash24Hasher> &auth_data,
-           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
+           AuthErrorCodeBatch &results) -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           for (size_t i = chunk.start; i < chunk.end; i++) {

@@ -143,7 +143,8 @@ TEST_F(DirectStalenessTest, DbTipReadOnStaleBlockReturnsAbandon)
 
   auto [block_a, block_b] = create_and_commit_sibling();
 
-  auto stale_snapshot_res = get_db_proxy().get_contract(block_b, SHA256Hash{})();
+  auto stale_snapshot_res =
+      get_db_proxy().get_contract(block_b, SHA256Hash{})();
   ASSERT_FALSE(stale_snapshot_res.has_value());
   EXPECT_EQ(stale_snapshot_res.error().code(), SystemErrorCode::Abandon);
 
@@ -519,20 +520,23 @@ TEST_F(DirectStalenessTest,
   constexpr ContractAddress kContractAddr = make_contract_address(0);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-    auto observed = ctx.handler().retrocausal_queue_consume(
-        NativeContractTestFramework::make_storage_key("rcq0"), true)();
-    if (!observed.has_value()) {
-      co_return observed.error().to_invoke_error();
-    }
-    if (!observed.value().has_value() || observed.value().value().size() != 1 ||
-        observed.value().value()[0] != kForgedEntry) {
-      co_return InvokeError{InvokeErrorCode::Deterministic};
-    }
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto observed = ctx.handler().retrocausal_queue_consume(
+                    NativeContractTestFramework::make_storage_key("rcq0"),
+                    true)();
+                if (!observed.has_value()) {
+                  co_return observed.error().to_invoke_error();
+                }
+                if (!observed.value().has_value() ||
+                    observed.value().value().size() != 1 ||
+                    observed.value().value()[0] != kForgedEntry) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-    ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-    co_return InvokeStatus<void>{};
-  });
+                ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+                co_return InvokeStatus<void>{};
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));

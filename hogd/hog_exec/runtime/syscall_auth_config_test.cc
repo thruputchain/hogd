@@ -51,8 +51,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
   // Create a native contract with a method that calls the syscall
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto status =
             co_await ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(
                 Weight{1});
@@ -201,8 +200,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // scheme=null, weight!=null — should be rejected
         uint32_t key_weight = 5;
         auto status =
@@ -333,8 +331,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
       });
   fns.emplace(
       // Method 1: Delete the key via all-null args
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto status =
             co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
                 0, static_cast<const int32_t *>(nullptr),

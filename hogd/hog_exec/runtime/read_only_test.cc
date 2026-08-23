@@ -91,29 +91,27 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   fns.emplace(0,
               [&](NativeSyscallContext &ctx) noexcept
                   -> x23::Async<InvokeStatus<void>> {
-                auto res = co_await
-                    client_.invoke_opt<u8"read_only_bytestring_set">(ctx,
-                                                                     false);
+                auto res =
+                    co_await client_.invoke_opt<u8"read_only_bytestring_set">(
+                        ctx, false);
                 if (!check_result(res)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
 
                 co_return InvokeStatus<void>{};
               });
-  fns.emplace(
-      1,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await
-            client_.invoke_opt<u8"read_only_bytestring_set",
-                               std::to_underlying(InvokeFlag::ReadOnly)>(ctx,
-                                                                         true);
-        if (!check_result(res)) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(1,
+              [&](NativeSyscallContext &ctx) noexcept
+                  -> x23::Async<InvokeStatus<void>> {
+                auto res = co_await client_.invoke_opt<
+                    u8"read_only_bytestring_set",
+                    std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
+                if (!check_result(res)) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        co_return InvokeStatus<void>{};
-      });
+                co_return InvokeStatus<void>{};
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -180,28 +178,27 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
   fns.emplace(0,
               [&](NativeSyscallContext &ctx) noexcept
                   -> x23::Async<InvokeStatus<void>> {
-                auto res = co_await
-                    client_.invoke_opt<u8"read_only_log_event">(ctx, false);
+                auto res =
+                    co_await client_.invoke_opt<u8"read_only_log_event">(ctx,
+                                                                         false);
                 if (!check_result(res)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
 
                 co_return InvokeStatus<void>{};
               });
-  fns.emplace(
-      1,
-      [&](NativeSyscallContext &ctx) noexcept
-          -> x23::Async<InvokeStatus<void>> {
-        auto res = co_await
-            client_.invoke_opt<u8"read_only_log_event",
-                               std::to_underlying(InvokeFlag::ReadOnly)>(ctx,
-                                                                         true);
-        if (!check_result(res)) {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns.emplace(1,
+              [&](NativeSyscallContext &ctx) noexcept
+                  -> x23::Async<InvokeStatus<void>> {
+                auto res = co_await client_.invoke_opt<
+                    u8"read_only_log_event",
+                    std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
+                if (!check_result(res)) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-        co_return InvokeStatus<void>{};
-      });
+                co_return InvokeStatus<void>{};
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -289,8 +286,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_middle;
   fns_middle.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (!ctx.handler().is_read_only()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -316,8 +312,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_root;
   fns_root.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto res =
             co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
@@ -442,18 +437,19 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         }
         co_return InvokeStatus<void>{};
       });
-  fns_caller.emplace(2,
-                     [&](NativeSyscallContext &ctx) noexcept
-                         -> x23::Async<InvokeStatus<void>> {
-                       auto res = co_await native_token_client.invoke_opt<u8"transfer">(
-                           ctx, kReceiverAddr, make_amount(transfer_amount));
-                       if (!res.has_value() || !res.value().has_value() ||
-                           !res.value().value().has_value() ||
-                           !res.value().value().value().is_ok()) {
-                         co_return InvokeError{InvokeErrorCode::Deterministic};
-                       }
-                       co_return InvokeStatus<void>{};
-                     });
+  fns_caller.emplace(
+      2,
+      [&](NativeSyscallContext &ctx) noexcept
+          -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await native_token_client.invoke_opt<u8"transfer">(
+            ctx, kReceiverAddr, make_amount(transfer_amount));
+        if (!res.has_value() || !res.value().has_value() ||
+            !res.value().value().has_value() ||
+            !res.value().value().value().is_ok()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
 

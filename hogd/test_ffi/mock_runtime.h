@@ -13,6 +13,7 @@
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -34,7 +35,7 @@ public:
       base_context_(std::move(base_context))
   {}
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) override;
 
@@ -137,7 +138,7 @@ public:
   ~MockRuntime() override = default;
 
 private:
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   MockContract backing_contract_;
@@ -152,7 +153,7 @@ public:
   ~EmptyRuntime() override = default;
 
 protected:
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID /*unused*/, uint64_t /*gas_limit*/) override
   {
     panic("unreachable: EmptyRuntime::invoke_internal called");

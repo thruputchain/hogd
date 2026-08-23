@@ -37,6 +37,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -68,11 +69,11 @@ public:
     return InvokeErrorCode::None;
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
                    SystemCallHandler * /*unused*/) override
   {
-    return nullptr;
+    co_return nullptr;
   }
 };
 
@@ -830,9 +831,8 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   // directed -- method 0 manually reverts, method 1 faults, method 2 (the
   // probe) also reverts so the test leaves no deployment behind.
   auto deploy_then =
-      [blob_hash,
-       deployed_addr](NativeSyscallContext &ctx,
-                      bool fault) noexcept -> x23::Async<InvokeStatus<void>> {
+      [blob_hash, deployed_addr](NativeSyscallContext &ctx,
+                                 bool fault) -> x23::Async<InvokeStatus<void>> {
     auto res = ctx.handler().deploy_contract(kNonce, blob_hash)();
     if (!res.has_value()) {
       co_return res.error().to_invoke_error();
@@ -1010,7 +1010,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   // or succeed (method 1).
   auto mid_body =
       [leaf_addr](NativeSyscallContext &ctx, Runtime::MethodID leaf_method,
-                  bool fault_after) noexcept -> x23::Async<InvokeStatus<void>> {
+                  bool fault_after) -> x23::Async<InvokeStatus<void>> {
     CopyableInvokeOutputs outputs{};
     CopyableInvokeInputs inputs{.entrypoint_id = leaf_method,
                                 .gas_limit = UINT64_MAX,

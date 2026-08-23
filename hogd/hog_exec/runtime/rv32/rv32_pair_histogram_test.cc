@@ -36,6 +36,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 // Offline analysis tool (NOT part of the main build): traces a real rv32
 // contract invocation on the canonical step-at-a-time Machine and builds a
@@ -290,7 +291,7 @@ private:
   rv32::ArtifactImage image_;
   PairHistogram *hist_;
 
-  std::pair<InvokeStatus<void>, GasAmount>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override
   {
     rv32::Machine machine(image_.program, image_.memory_bytes, gas_limit);
@@ -383,7 +384,7 @@ public:
     return delegate_.verify_contract(contract);
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) override
   {
@@ -395,21 +396,21 @@ public:
       auto contract =
           syscall_handler->resolve_contract(deployed_contract.hash.hash)();
       if (!contract.has_value()) {
-        return contract.error();
+        co_return contract.error();
       }
       if (contract.value() == nullptr) {
-        return SystemError{SystemErrorCode::Unrecoverable};
+        co_return SystemError{SystemErrorCode::Unrecoverable};
       }
       blob = &contract.value()->rv32_contract();
     }
 
     auto image = rv32::parse_artifact(blob->data);
     if (!image.has_value()) {
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
-    return std::make_unique<TracingRv32Runtime>(std::move(image.value()),
-                                                syscall_handler,
-                                                active_histogram);
+    co_return std::make_unique<TracingRv32Runtime>(std::move(image.value()),
+                                                   syscall_handler,
+                                                   active_histogram);
   }
 
 private:

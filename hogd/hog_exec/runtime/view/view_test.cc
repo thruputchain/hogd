@@ -271,8 +271,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractAddress sender{};
         auto r = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
         if (!r.has_value()) {
@@ -307,8 +306,7 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         ContractAddress sender{};
         auto r = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
         if (!r.has_value()) {
@@ -343,8 +341,7 @@ TEST_F(ViewTest, ViewFrameReverted)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
             std::as_bytes(std::span("hello", 5)), true,
             std::span<const std::byte>{});
@@ -377,8 +374,7 @@ TEST_F(ViewTest, ViewOutputCorrectWithParentFrame)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t val = 42;
         auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
             std::as_bytes(
@@ -449,8 +445,7 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenDefaulted)
                       co_return InvokeStatus<void>{};
                     });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
@@ -502,8 +497,7 @@ TEST_F(ViewTest, ViewTryInvokeSucceedsWhenSuppliedTrue)
                       co_return InvokeStatus<void>{};
                     });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
@@ -560,8 +554,7 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
                       co_return InvokeStatus<void>{};
                     });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
@@ -625,8 +618,7 @@ TEST_F(ViewTest, ViewTryInvokeDefaultReturnsDifferentBranchThanExplicitFalse)
                       co_return InvokeStatus<void>{};
                     });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
@@ -705,8 +697,7 @@ TEST_F(ViewTest, ViewRcqConsumeDefaultNotPresent)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry;
         RuntimeMemoryLength written_len = 0;
@@ -744,8 +735,7 @@ TEST_F(ViewTest, ViewRcqConsumeSuppliedNotPresent)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry;
         RuntimeMemoryLength written_len = 0;
@@ -788,8 +778,7 @@ TEST_F(ViewTest, ViewRcqConsumeSuppliedPresent)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry = {0};
         RuntimeMemoryLength written_len = 0;
@@ -837,8 +826,7 @@ TEST_F(ViewTest, ViewRcqConsumePresentButNoEntryData)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
         QueueEntry entry;
         RuntimeMemoryLength written_len = 0;
@@ -908,8 +896,7 @@ TEST_F(ViewTest, ViewSingleFrameEmitsMultipleEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (auto const *payload : {"first", "second", "third"}) {
           auto r = emit_event(ctx, std::string(payload));
           if (!r.has_value()) {
@@ -965,8 +952,7 @@ TEST_F(ViewTest, ViewNestedFrameEventsCombinedInOrder)
                       co_return emit_event(ctx, "inner_leaf");
                     });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "outer_before"); !r.has_value()) {
           co_return r;
         }
@@ -1034,8 +1020,7 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
                       co_return emit_event(ctx, "leaf");
                     });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "middle_pre"); !r.has_value()) {
           co_return r;
         }
@@ -1056,8 +1041,7 @@ TEST_F(ViewTest, ViewDeeplyNestedFrameEventsCombinedInOrder)
         co_return emit_event(ctx, "middle_post");
       });
   fns_setup.emplace(
-      2,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "outer_pre"); !r.has_value()) {
           co_return r;
         }
@@ -1123,8 +1107,7 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_setup;
   fns_setup.emplace(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "child_dropped"); !r.has_value()) {
           co_return r;
         }
@@ -1136,8 +1119,7 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
         co_return InvokeStatus<void>{};
       });
   fns_setup.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "before"); !r.has_value()) {
           co_return r;
         }
@@ -1212,8 +1194,7 @@ TEST_F(ViewTest, ViewForwardedTokenWithParentSucceeds)
       NativeContractTestFramework::make_contract_address(20);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // The first forwarded token receives id 0 from the registry.
         std::array<std::byte, 64> payload_buf{};
         ContractAddress minter{};
@@ -1320,8 +1301,7 @@ TEST_F(ViewTest, ViewForwardedTokenAtMaxDepthSucceeds)
   }
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<std::byte, 64> payload_buf{};
         ContractAddress minter{};
         RuntimeMemoryLength payload_written_len = 0;
@@ -1365,8 +1345,7 @@ TEST_F(ViewTest, RootManualRevertOmitsEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "reverted"); !r.has_value()) {
           co_return r;
         }
@@ -1400,8 +1379,7 @@ TEST_F(ViewTest, RootFaultOmitsEvents)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (auto r = emit_event(ctx, "faulted"); !r.has_value()) {
           co_return r;
         }
@@ -1436,8 +1414,7 @@ TEST_F(ViewTest, ViewForwardedExpiredTokenConsumeReturnsError)
       framework_.get_db_tip()().value.proposal_header.block_height - 1};
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<std::byte, 64> payload_buf{};
         ContractAddress minter{};
         RuntimeMemoryLength payload_written_len = 0;
@@ -1484,8 +1461,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height = -1;
         auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!r.has_value()) {
@@ -1541,8 +1517,7 @@ TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
       NativeContractTestFramework::make_contract_address(11);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height = -1;
         auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!r.has_value()) {
@@ -1600,8 +1575,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
       NativeContractTestFramework::make_contract_address(12);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height = -1;
         auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!r.has_value()) {
@@ -1675,8 +1649,7 @@ TEST_F(ViewTest, ViewReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
               });
 
   fns.emplace(
-      1,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<uint32_t, 1> forwarded{0};
 
         CopyableInvokeInputs inputs{
@@ -1746,8 +1719,7 @@ TEST_F(ViewTest, ViewRcqConsumeDeleteInsert)
       NativeContractTestFramework::make_contract_address(10);
 
   NativeViewSetup setup(
-      0,
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = NativeContractTestFramework::make_storage_key("rcq");
 
         QueueEntry entry = {0};

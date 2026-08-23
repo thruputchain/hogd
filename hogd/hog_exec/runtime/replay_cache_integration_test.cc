@@ -62,17 +62,20 @@ public:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
                 [](NativeSyscallContext & /*ctx*/) noexcept
-                    -> x23::Async<InvokeStatus<void>> { co_return InvokeStatus<void>{}; });
-    fns.emplace(1,
-                [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-                  ctx.handler().set_return_buffer(ReturnBuffer{},
-                                                  /*revert_frame=*/true);
+                    -> x23::Async<InvokeStatus<void>> {
                   co_return InvokeStatus<void>{};
                 });
     fns.emplace(
-        2, [](NativeSyscallContext & /*ctx*/) noexcept -> x23::Async<InvokeStatus<void>> {
-          co_return InvokeError{InvokeErrorCode::Deterministic};
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          ctx.handler().set_return_buffer(ReturnBuffer{},
+                                          /*revert_frame=*/true);
+          co_return InvokeStatus<void>{};
         });
+    fns.emplace(2,
+                [](NativeSyscallContext & /*ctx*/)
+                    -> x23::Async<InvokeStatus<void>> {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                });
     fns.emplace(3,
                 [this](NativeSyscallContext & /*ctx*/) noexcept
                     -> x23::Async<InvokeStatus<void>> {

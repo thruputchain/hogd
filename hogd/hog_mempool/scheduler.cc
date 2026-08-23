@@ -478,7 +478,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
-           Scheduler &scheduler) noexcept -> x23::Async<void> {
+           Scheduler &scheduler) -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           size_t num_added = 0;
@@ -800,7 +800,7 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
     handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
-                         Scheduler *scheduler) noexcept -> x23::Async<void> {
+                         Scheduler *scheduler) -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
       for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
         scheduler->process_transfers_helper(transfers->deltas[delta_idx],
@@ -1111,7 +1111,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
     handles.push_back(
         [](const ChunkRange *chunk, x23::span<const TransactionHash> tx_hashes,
            SynchronizedMap<ContractAddress, char, SipHash24Hasher> &accounts,
-           Scheduler &scheduler) noexcept -> x23::Async<size_t> {
+           Scheduler &scheduler) -> x23::Async<size_t> {
           co_await default_coropoll().pool_.bg();
 
           x23::span<const TransactionHash> hash_chunk(

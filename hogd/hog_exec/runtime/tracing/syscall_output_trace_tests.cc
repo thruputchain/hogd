@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -82,11 +83,11 @@ public:
     return InvokeErrorCode::None;
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
                    SystemCallHandler * /*unused*/) override
   {
-    return nullptr;
+    co_return nullptr;
   }
 };
 
@@ -151,7 +152,7 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   const auto executing_height = static_cast<BlockHeight>(get_block_number());
 
   auto context = make_single_contract_context(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height{};
         auto h = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!h.has_value() ||
@@ -183,7 +184,7 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kGetBlockHeight);
-    body.get_block_height()().outputs =
+    body.get_block_height().outputs =
         SyscallGetBlockHeightOutputs{.result = executing_height};
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
@@ -390,7 +391,8 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 
         uint32_t token_id = 0;
         auto m = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
-            BlockHeight{ctx.handler().get_block_height()().value() + 5},
+            BlockHeight{(co_await ctx.handler().get_block_height()).value() +
+                        5},
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(
                                            serialized_node.data()),
                                        serialized_node.size()),
@@ -521,8 +523,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueInsert);
-    body.retrocausal_queue_insert()().inputs.key = key;
-    body.retrocausal_queue_insert()().inputs.queue_entry = full_entry;
+    body.retrocausal_queue_insert().inputs.key = key;
+    body.retrocausal_queue_insert().inputs.queue_entry = full_entry;
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
   }
@@ -537,9 +539,9 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
-    body.retrocausal_queue_consume()().inputs.key = key;
-    body.retrocausal_queue_consume()().inputs.peek = false;
-    body.retrocausal_queue_consume()().outputs =
+    body.retrocausal_queue_consume().inputs.key = key;
+    body.retrocausal_queue_consume().inputs.peek = false;
+    body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));
@@ -632,9 +634,9 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   }
   {
     SyscallTraceBody body(SyscallNo::kDeployContract);
-    body.deploy_contract()().inputs.nonce = kNonce;
-    body.deploy_contract()().inputs.contract_hash = blob_hash;
-    body.deploy_contract()().outputs =
+    body.deploy_contract().inputs.nonce = kNonce;
+    body.deploy_contract().inputs.contract_hash = blob_hash;
+    body.deploy_contract().outputs =
         SyscallDeployContractOutputs{.deployed_address = expected_addr};
     expected.push_back(
         make_entry(100'000, 100'000, std::move(body), ok_status()));

@@ -66,32 +66,31 @@ public:
   static std::unique_ptr<NativeContext> make_ctx()
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  for (uint8_t val : cd) {
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)))();
-                    if (!res.has_value()) {
-                      co_return res.error().to_invoke_error();
-                    }
-                  }
-                  co_return InvokeStatus<void>{};
-                });
-    fns.emplace(1,
-                [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
-                  auto key = make_storage_key("rcq0");
-                  // Peek records an observation of a concurrent entry...
-                  auto peek =
-                      ctx.handler().retrocausal_queue_consume(key,
+    fns.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          for (uint8_t val : cd) {
+            auto res = ctx.handler().retrocausal_queue_insert(
+                key, std::as_bytes(std::span(&val, 1)))();
+            if (!res.has_value()) {
+              co_return res.error().to_invoke_error();
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq0");
+          // Peek records an observation of a concurrent entry...
+          auto peek = ctx.handler().retrocausal_queue_consume(key,
                                                               /*peek=*/true)();
-                  if (!peek.has_value()) {
-                    co_return peek.error().to_invoke_error();
-                  }
-                  // ...and then the transaction deterministically faults.
-                  co_return InvokeError{InvokeErrorCode::Deterministic};
-                });
+          if (!peek.has_value()) {
+            co_return peek.error().to_invoke_error();
+          }
+          // ...and then the transaction deterministically faults.
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
     cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));

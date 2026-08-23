@@ -293,7 +293,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   // B method 0: two destructive consumes from "rcq0", then deterministic
   // error to force the try_invoke child frame to revert.
   auto b_double_consume_fault = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto r1 = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!r1.has_value())
@@ -306,7 +306,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   // A method 0: try_invoke B.0 (which reverts after 2 consumes).
   auto a_try_invoke = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -332,7 +332,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   // TX_B: honest consume + peek at kAddrB.
   auto b_consume_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto r1 = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!r1.has_value())
@@ -420,7 +420,7 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
 {
   // B method 0: set_bytestring on "shared" with ExclusiveLock.
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
@@ -442,7 +442,7 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   // "shared" (modifies the key, so the child frame needs lock
   // acquisition at commit time).
   auto b_peek_and_insert = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek.has_value())
@@ -456,7 +456,7 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
       });
 
   auto a_try_peek_insert = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -522,7 +522,7 @@ TEST_F(RcqDoctoredProposalDataTest,
        PermExclusiveWriteBlocksDoctoredPeekOnlyObservation)
 {
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
@@ -542,7 +542,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   // B method 0: peek only — no insert, so the child frame has no
   // modified items and try_invoke lock acquisition trivially succeeds.
   auto b_peek_only = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek.has_value())
@@ -551,7 +551,7 @@ TEST_F(RcqDoctoredProposalDataTest,
       });
 
   auto a_try_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -647,7 +647,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 {
   // B method 0: set_bytestring on "shared" with ExclusiveLock.
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
@@ -668,7 +668,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   // goes through the concurrent-entry path and consumes a nondeterministic
   // bit + observation).
   auto b_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek.has_value())
@@ -677,7 +677,7 @@ TEST_F(RcqDoctoredProposalDataTest,
       });
 
   auto a_try_peek = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
           co_return InvokeError{InvokeErrorCode::Unrecoverable};
@@ -754,7 +754,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 {
   // TX_EXCL: B method 0 does set_bytestring with ExclusiveLock on "shared".
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
@@ -775,7 +775,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   // it triggers manual root-frame revert.  Otherwise it writes a marker.
   static constexpr uint8_t kForgedVal = 0xAB;
   auto b_peek_and_maybe_revert = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto peek = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek.has_value())
@@ -1119,7 +1119,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 {
   // B method 0: set_bytestring on "shared" with ExclusiveLock.
   auto b_excl_write = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
@@ -1138,7 +1138,7 @@ TEST_F(RcqDoctoredProposalDataTest,
 
   // B method 0: destructive consume (peek=false) on "shared".
   auto b_consume = build_contract(
-      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("shared");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
