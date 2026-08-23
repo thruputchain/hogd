@@ -34,9 +34,7 @@ public:
 
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override;
 
-  [[nodiscard]] std::optional<
-      std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>>
-  last_result() const
+  [[nodiscard]] std::optional<SyscallResult> last_result() const
   {
     return last_result_;
   }
@@ -44,8 +42,7 @@ public:
 private:
   ExternHostCallContext context_ = nullptr;
   SyscallFunction entry_ = nullptr;
-  std::optional<std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>>
-      last_result_;
+  std::optional<SyscallResult> last_result_;
 };
 
 } // namespace hogd::rv32

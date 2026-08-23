@@ -1,8 +1,12 @@
 #pragma once
 
 #include <cstdio>
+#include <utility>
 
+#include "hogd/hog_exec/common/status.h"
+#include "syscall_error.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -16,6 +20,17 @@ public:
 private:
   GasAmount gas_amount_;
 };
+
+// What an inner syscall body produces: the host-function status the sandbox
+// observes, plus the gas the body wants charged.
+using SyscallInnerResult =
+    std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>;
+
+// What wrap_after_parse() awaits.  A body that can answer immediately -- every
+// one of them today -- just returns its SyscallInnerResult, which lands in the
+// value arm and costs nothing to await.  A body that has to wait, e.g. on a
+// database RPC, declares this as its return type and returns an Async instead.
+using MaybeAsyncSyscallInnerResult = x23::MaybeAsync<SyscallInnerResult>;
 
 // Report a syscall-trace diagnostic straight to stderr without allocating (same
 // fallback pattern as test_ffi's do_ffi_trace).

@@ -350,7 +350,7 @@ private:
         };
         result = machine.complete_ecall(to_host_result(
             syscall_entry(host_fn_ctx, context, args.a0, args.a1, args.a2,
-                          args.a3, args.a4, args.a5, args.a6, args.a7)));
+                          args.a3, args.a4, args.a5, args.a6, args.a7)()));
         if (result == rv32::StepResult::kContinue) {
           continue;
         }

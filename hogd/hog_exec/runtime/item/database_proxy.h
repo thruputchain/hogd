@@ -108,17 +108,20 @@ public:
   PerTransactionDatabaseProxy(DatabaseProxy &db_proxy, BlockID block_id,
                               TransactionID tx_id)
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
-  {
-    current_subtransaction_batch_.clear();
-  }
+  {}
 
-  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  // A copy would fork the staged delta batch below, which used to be a shared
+  // thread_local. Several signatures take this by value.
+  PerTransactionDatabaseProxy(PerTransactionDatabaseProxy &&) = default;
+  PerTransactionDatabaseProxy(const PerTransactionDatabaseProxy &) = delete;
+  PerTransactionDatabaseProxy &
+  operator=(const PerTransactionDatabaseProxy &) = delete;
+
   void reserve(size_t delta_count)
   {
     current_subtransaction_batch_.reserve(delta_count);
   }
 
-  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
@@ -189,7 +192,23 @@ public:
   }
 
 private:
-  inline static thread_local StorageDeltaBatch current_subtransaction_batch_;
+  // Deltas staged for the next try_push_current_subtransaction().
+  //
+  // This used to be a `static thread_local`, which reuses one heap buffer for
+  // every transaction a worker thread runs.  That is only sound while a
+  // transaction owns its thread from start to finish, as it does on a
+  // DispatchPool worker.  Syscalls can now suspend (see syscall_entry), so two
+  // transactions interleave on one thread and the second would clear and
+  // overwrite the first's staged deltas while it is parked in
+  // try_push_new_subtransaction().  Per-proxy state is the only shape that
+  // survives interleaving.
+  //
+  // The cost is that the buffer is reallocated per transaction rather than per
+  // thread.  If that shows up, hand the buffer out of a thread-local free list
+  // (cf. rv32::MemorySlot) rather than putting the batch itself back in TLS --
+  // acquire and release both touch only the running thread's pool, so that
+  // stays correct under interleaving.
+  StorageDeltaBatch current_subtransaction_batch_;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
