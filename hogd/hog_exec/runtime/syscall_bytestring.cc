@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <span>
-#include <utility>
 
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"

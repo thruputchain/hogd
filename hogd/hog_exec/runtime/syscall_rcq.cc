@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstring>
 #include <span>
-#include <utility>
 
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"

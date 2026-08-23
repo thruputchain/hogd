@@ -84,9 +84,10 @@ private:
   const function_t *find_function(Runtime::MethodID method) const;
 
   // Body of invoke(); owns the NativeSyscallContext across suspensions.
-  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  // Static: it works entirely from the resolved function and the handler.
+  static x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_impl(function_t const &fn, SystemCallHandler &syscall_handler,
-              uint64_t gas_limit) const;
+              uint64_t gas_limit);
 
   const std::vector<function_entry_t> functions_;
 };

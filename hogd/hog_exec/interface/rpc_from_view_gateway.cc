@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -32,6 +33,7 @@
 #include "view.hh"
 #include "view_gateway.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 

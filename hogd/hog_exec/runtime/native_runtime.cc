@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -57,7 +58,7 @@ NativeContract::invoke(Runtime::MethodID method,
 x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
 NativeContract::invoke_impl(function_t const &fn,
                             SystemCallHandler &syscall_handler,
-                            uint64_t gas_limit) const
+                            uint64_t gas_limit)
 {
   // ctx lives in this frame: the body suspends while holding a reference to it.
   NativeSyscallContext ctx(syscall_handler, gas_limit);
