@@ -36,7 +36,8 @@ syscall_SHA256_inner(SystemCallHandler &handler,
     trace_data->outputs.emplace(SyscallSHA256Outputs{.hash = output_hash});
   }
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{SHA256HashCost(input_buffer.size())}};
+                               WrappedGasAmount{
+                                   SHA256HashCost(input_buffer.size())}};
 };
 
 AsyncSyscallInnerResult
@@ -49,7 +50,8 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
     co_return SyscallInnerResult{r.error().code(), WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult
@@ -66,7 +68,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
     trace_data->outputs.emplace(
         SyscallSHA256FinalizeOutputs{.hash = output_output});
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 // Verifies a cryptographic signature against a message using the provided
@@ -85,20 +88,24 @@ syscall_VerifySignature_inner(int32_t input_scheme,
   case CryptographicScheme::Ed25519:
     if (input_public_key.size() != sizeof(Ed25519PublicKey) ||
         input_signature.size() != sizeof(Ed25519Signature)) {
-      co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-              WrappedGasAmount{0}};
+      co_return SyscallInnerResult{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+          WrappedGasAmount{0}};
     }
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {
       trace("Signature verification failed");
-      co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-              WrappedGasAmount{0}};
+      co_return SyscallInnerResult{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+          WrappedGasAmount{0}};
     }
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                                 WrappedGasAmount{0}};
   default:
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 }
 

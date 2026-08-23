@@ -47,8 +47,7 @@ constexpr auto kSyscallTable =
 template<std::same_as<uint32_t>... Args>
 AsyncSyscallResult
 syscall_entry_inner(SystemCallHandler *syscall_handler,
-                    ExecutionContext context, uint32_t syscall_no,
-                    Args... args)
+                    ExecutionContext context, uint32_t syscall_no, Args... args)
 {
   SyscallFunc syscall_fn = nullptr;
   assert(syscall_handler);

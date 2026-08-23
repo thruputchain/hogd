@@ -35,7 +35,8 @@ syscall_GetDeployAddress_inner(
     trace_data->outputs.emplace(SyscallGetDeployAddressOutputs{
         .to_be_deployed = output_to_be_deployed});
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult

@@ -134,7 +134,8 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetAuthClaimOutputs{.auth_claim = claim});
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 AsyncSyscallInnerResult

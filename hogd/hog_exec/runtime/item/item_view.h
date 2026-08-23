@@ -240,7 +240,7 @@ public:
 
   // Populates base_item_ from the snapshot cache.
   x23::Async<SystemStatus<void>> load(StorageSnapshotCache &snapshot_cache,
-                                           AddressAndKey const &addrkey) const;
+                                      AddressAndKey const &addrkey) const;
 
 private:
   // Shared tail of both load() paths.

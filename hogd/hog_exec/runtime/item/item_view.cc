@@ -445,7 +445,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     // Only proposal mode reads the database here; viewing and validation
     // replay recorded observations below and never suspend.
     co_return co_await get_next_concurrent_entry_proposing(index,
-                                                        *proposal_data);
+                                                           *proposal_data);
   }
 
   if (auto *viewing_data = std::get_if<ViewingModeData>(&execution_mode_data)) {
@@ -596,7 +596,8 @@ x23::Async<SystemStatus<void>>
 UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
                      AddressAndKey const &addrkey) const
 {
-  co_return store_loaded(co_await snapshot_cache.try_get_snapshot_item(addrkey));
+  co_return store_loaded(
+      co_await snapshot_cache.try_get_snapshot_item(addrkey));
 }
 
 SystemStatus<void>

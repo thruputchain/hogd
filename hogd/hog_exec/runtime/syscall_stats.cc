@@ -28,10 +28,12 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallGetTransactionStatisticsOutputs{.result = output_result});
     }
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                                 WrappedGasAmount{0}};
   default:
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 };
 

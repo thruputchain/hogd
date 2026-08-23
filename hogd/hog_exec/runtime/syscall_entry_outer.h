@@ -546,8 +546,9 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
   // coroutine, so it cannot be noexcept -- its own frame allocation happens in
   // the ramp and can throw.  The caller builds and awaits it inside one try
   // instead, which keeps those checks on the throwing path too.
-  auto make_body = [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/)
-      -> AsyncSyscallInnerResult {
+  auto make_body =
+      [&]<size_t... Is>(
+          std::index_sequence<Is...> /*unused*/) -> AsyncSyscallInnerResult {
     // check whether any loads failed
     if (!(SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
               std::get<Is>(args)) &&
@@ -642,14 +643,14 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
     // lands in this coroutine's promise and is rethrown at the caller's
     // co_await, which translates it into a structured Unrecoverable there
     // (issue #3400 and siblings).
-    co_return co_await [&]<size_t... ExtraArgs>(
-                           std::index_sequence<ExtraArgs...> /*unused*/)
-        -> AsyncSyscallInnerResult {
-      return SyscallMeta::kInnerFunc(
-          std::get<ExtraArgs>(extra_args)...,
-          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-              std::get<Is>(args))...);
-    }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
+    co_return co_await
+        [&]<size_t... ExtraArgs>(std::index_sequence<ExtraArgs...> /*unused*/)
+            -> AsyncSyscallInnerResult {
+          return SyscallMeta::kInnerFunc(
+              std::get<ExtraArgs>(extra_args)...,
+              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                  std::get<Is>(args))...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
   };
 
   // Nothing may escape: the body's frame allocation, anything its inner
@@ -813,8 +814,8 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
-             -> AsyncSyscallResult {
+  return [&]<size_t... Is>(
+             TupleIndexSequence<Is...> /*unused*/) -> AsyncSyscallResult {
     // Attempt to load syscall arguments from contract memory.
     AliasGuard guard;
     auto parsed_args = std::tuple{

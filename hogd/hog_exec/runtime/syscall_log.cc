@@ -27,7 +27,8 @@ syscall_ConsoleLog_inner(std::span<const std::byte> input_buffer)
 
   // TODO(geoff): maybe entirely disable this call in release builds?  Unclear
   // if spinning on this could be e.g. a DoS vector, if we charge 0 gas forit.
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 };
 
 AsyncSyscallInnerResult
@@ -37,8 +38,9 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
 {
   if ((topic1 && !topic0) || (topic2 && (!topic1 || !topic0))) {
     // can't have a topicN without topicN-1
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
   auto r = syscall_handler.log_event(topic0, topic1, topic2, data);
@@ -46,7 +48,8 @@ syscall_LogEvent_inner(SystemCallHandler &syscall_handler, Topic const *topic0,
     co_return SyscallInnerResult{r.error().code(), WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 } // namespace hogd

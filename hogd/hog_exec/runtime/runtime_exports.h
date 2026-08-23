@@ -28,8 +28,10 @@ using SyscallResult = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>;
 // that is no longer a frame.
 using AsyncSyscallResult = x23::Async<SyscallResult>;
 
-using SyscallFunction = AsyncSyscallResult (*)(
-    ExternHostCallContext, ExecutionContext, uint32_t, uint32_t, uint32_t,
-    uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+using SyscallFunction = AsyncSyscallResult (*)(ExternHostCallContext,
+                                               ExecutionContext, uint32_t,
+                                               uint32_t, uint32_t, uint32_t,
+                                               uint32_t, uint32_t, uint32_t,
+                                               uint32_t);
 
 } // namespace hogd

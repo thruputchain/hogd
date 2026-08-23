@@ -121,9 +121,9 @@ public:
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
               std::span<uint32_t const> owned_auth_token_ids) noexcept;
-  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame(
-      InvokeStatus<void> result,
-      std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+  finish_frame(InvokeStatus<void> result,
+               std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
 
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
