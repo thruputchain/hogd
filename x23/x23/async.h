@@ -763,9 +763,29 @@ template<is_awaitable A> MaybeAsync(A) -> MaybeAsync<detail::resume_type<A>, A>;
 
 } // namespace x23
 
+#if HAVE_BROKEN_CORO_GRO_CLEANUP
+// This works around the following bug in clang 21.  The code should
+// be deleted once clang21 is obsolete.
+// https://github.com/llvm/llvm-project/issues/193412
+template<typename T, typename A, typename... Args>
+struct std::coroutine_traits<x23::MaybeAsync<T, A>, Args...> {
+  using async_promise =
+      typename std::coroutine_traits<A, Args...>::promise_type;
+  struct promise_type : async_promise {
+    using async_promise::async_promise;
+    x23::MaybeAsync<T, A> get_return_object()
+    {
+      return async_promise::get_return_object();
+    }
+  };
+};
+
+#else // HAVE_BROKEN_CORO_GRO_CLEANUP
 template<typename T, typename A, typename... Args>
 struct std::coroutine_traits<x23::MaybeAsync<T, A>, Args...>
   : std::coroutine_traits<A, Args...> {};
+
+#endif // !HAVE_BROKEN_CORO_GRO_CLEANUP
 
 namespace x23 {
 
