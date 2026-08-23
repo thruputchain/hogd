@@ -33,6 +33,7 @@
 #include "transaction_trace.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -75,7 +76,7 @@ public:
 
   // Mark the current frame as failed.
   // Used to clean up failed try_invoke frames.
-  SystemStatus<void>
+  x23::Async<SystemStatus<void>>
   mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
@@ -140,7 +141,7 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
-  SystemStatus<bool> try_acquire_frame_locks(
+  x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
 
@@ -325,7 +326,7 @@ public:
   // is still popped and an Unrecoverable SystemError is returned, so the
   // noexcept caller (SystemCallHandler::finish_frame) is never terminated
   // (#3378).
-  SystemStatus<std::pair<InvokeResult, bool>>
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data,
                DbConflictResult *try_invoke_conflict_out = nullptr);

@@ -98,17 +98,17 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   most_recent_child_frame_forwarded_auth_tokens_.clear();
 }
 
-SystemStatus<void>
+x23::Async<SystemStatus<void>>
 InvocationFrame::mark_frame_as_failed(
     PerTransactionDatabaseProxy &db_proxy) const
 {
   if (try_invoke_frame_count_ > 0) {
-    auto st = db_proxy.pop_subtransactions(try_invoke_frame_count_);
+    auto st = co_await db_proxy.pop_subtransactions(try_invoke_frame_count_);
     if (!st.has_value()) {
-      return st.error();
+      co_return st.error();
     }
   }
-  return {};
+  co_return SystemStatus<void>{};
 }
 
 void
@@ -162,7 +162,7 @@ InvocationFrame::note_validation_try_invoke_success()
   total_try_invoke_depth_++;
 }
 
-SystemStatus<bool>
+x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
     std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
@@ -193,7 +193,7 @@ InvocationFrame::try_acquire_frame_locks(
     auto [delta, flags] = item_view.get_delta(uncovered_obs);
     if (has_observations && delta &&
         delta->type() != StorageDeltaType::kDeltaTypeRetrocausalQueue) {
-      return {false};
+      co_return SystemStatus<bool>{false};
     }
     if (delta) {
       db_proxy.add_delta(addrkey, std::move(*delta), flags);
@@ -217,15 +217,15 @@ InvocationFrame::try_acquire_frame_locks(
                        std::to_underlying(StorageDeltaFlags::None));
   }
 
-  auto res = db_proxy.try_push_current_subtransaction();
+  auto res = co_await db_proxy.try_push_current_subtransaction();
   if (!res.has_value()) {
-    return res.error();
+    co_return res.error();
   }
   if (res.value()) {
     try_invoke_frame_count_++;
     total_try_invoke_depth_++;
   }
-  return res.value();
+  co_return res.value();
 }
 
 void
@@ -302,7 +302,7 @@ InvocationFrameStack::start_frame(
   return {};
 }
 
-SystemStatus<std::pair<InvokeResult, bool>>
+x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
 InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                                    ExecutionModeData &execution_mode_data,
                                    DbConflictResult *try_invoke_conflict_out)
@@ -336,11 +336,11 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
-        auto acq_res =
+        auto acq_res = co_await
             frame_stack_.back().try_acquire_frame_locks(db_proxy_, no_obs);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
-          return acq_res.error();
+          co_return acq_res.error();
         }
         acq_success = acq_res.value();
 
@@ -364,7 +364,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                        .consume_nondeterministic_bit();
         if (!res.has_value()) {
           frame_stack_.pop_back();
-          return SystemError{SystemErrorCode::ValidationFailure};
+          co_return SystemError{SystemErrorCode::ValidationFailure};
         }
         acq_success = res.value().get();
         if (acq_success) {
@@ -382,7 +382,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
             if (view && !view->get<RetrocausalQueueItem>() &&
                 !view->get<UnmodifiedItem>()) {
               frame_stack_.pop_back();
-              return SystemError{SystemErrorCode::ValidationFailure};
+              co_return SystemError{SystemErrorCode::ValidationFailure};
             }
           }
           frame_stack_.back().note_validation_try_invoke_success();
@@ -404,10 +404,10 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   }
 
   if (frame_result.should_frame_revert() || manually_reverted) {
-    auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
+    auto st = co_await frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
       frame_stack_.pop_back();
-      return st.error();
+      co_return st.error();
     }
   }
 
@@ -423,11 +423,12 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       try {
         frame_stack_.back().commit_failed_child_frame();
       } catch (...) {
-        return SystemError{SystemErrorCode::Unrecoverable};
+        co_return SystemError{SystemErrorCode::Unrecoverable};
       }
     }
 
-    return {{frame_result, manually_reverted}};
+    co_return SystemStatus<std::pair<InvokeResult, bool>>{
+      std::pair{frame_result, manually_reverted}};
   }
 
   // commit child invocation frame successfully
@@ -450,7 +451,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
     } catch (...) {
       frame_stack_.pop_back();
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
   else {
@@ -462,7 +463,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
 
   frame_stack_.pop_back();
 
-  return {{frame_result, manually_reverted}};
+  co_return SystemStatus<std::pair<InvokeResult, bool>>{
+      std::pair{frame_result, manually_reverted}};
 }
 
 void

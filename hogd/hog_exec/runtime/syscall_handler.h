@@ -108,7 +108,7 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Must only be called once per transaction.
-  InvokeResult root_invoke();
+  x23::Async<InvokeResult> root_invoke();
 
   // Lower level functions to manipulate the invocation stack.
   // These should ONLY be used within the testing framework
@@ -121,9 +121,15 @@ public:
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
   start_frame(Invocation invocation, InvokeFlagSet flags,
               std::span<uint32_t const> owned_auth_token_ids) noexcept;
-  SystemStatus<std::pair<InvokeResult, bool>> finish_frame(
+  x23::MaybeAsync<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame(
       InvokeStatus<void> result,
       std::unique_ptr<InvocationFrameTrace> stashed_parent_trace) noexcept;
+
+  // Body of finish_frame(). Not noexcept: it is the coroutine, and its frame
+  // allocation is what finish_frame() catches on its behalf.
+  x23::Async<SystemStatus<std::pair<InvokeResult, bool>>> finish_frame_impl(
+      InvokeStatus<void> result,
+      std::unique_ptr<InvocationFrameTrace> stashed_parent_trace);
 
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
@@ -203,7 +209,7 @@ public:
   // Requirement: root_invoke() must be called first.
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
-  ExecResult try_commit_transaction();
+  x23::Async<ExecResult> try_commit_transaction();
 
   // The two-phase-commit conflict diagnostic from the most recent failed commit
   // push (the root lock-acquire / 2pc push, or the commit_body_discarded RCQ /
@@ -218,21 +224,21 @@ public:
   // ExecResultTxNonDeterministicError) before interpreting this value.
   DbConflictResult const &last_commit_conflict() const;
 
-  SystemStatus<void> abort_transaction();
+  x23::Async<SystemStatus<void>> abort_transaction();
 
   // Adds the replay-nonce consume delta for the root invoked address to the
   // current subtransaction batch (no-op when there is no uniquifier). The delta
   // rides in the same batch/push as the surrounding deltas, so a duplicate or
   // expired nonce makes that batch's reservation fail and the transaction is
   // rejected as a replay.
-  void add_replay_nonce_delta();
+  x23::Async<void> add_replay_nonce_delta();
 
   // Commits a transaction whose body effects are discarded (a manual revert or
   // a deterministic fault). Adds validation-mode RCQ observation deltas and the
   // replay nonce to one batch, pushes it, then commits. A reservation conflict
   // (forged observation or replay) aborts the transaction and returns
   // ExecResultTxNonDeterministicError; otherwise returns success_result.
-  ExecResult commit_body_discarded(ExecResult success_result);
+  x23::Async<ExecResult> commit_body_discarded(ExecResult success_result);
   // Emit the transaction's event log to the event server.
   // Called for all deterministic outcomes (OK, DeterministicError, Reverted).
   //
@@ -274,7 +280,9 @@ public:
   //  - value (InvocationFrameStatusCode): a child frame ran; the value is how
   //    it ended (Return / Abort / Fault).
   [[nodiscard]]
-  std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
+  x23::Async<
+      std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>,
+                GasAmount>>
   invoke(ContractAddress const &address, Runtime::MethodID method,
          GasAmount gas_limit, Calldata calldata, InvokeFlagSet flags,
          std::span<uint32_t const> owned_auth_token_ids);
@@ -320,7 +328,7 @@ public:
                             SHA256Hash const &nonce,
                             SHA256Hash const &contract_hash);
 
-  SystemStatus<SyscallStatus<ContractAddress>>
+  x23::Async<SystemStatus<SyscallStatus<ContractAddress>>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   bool is_read_only() const
@@ -336,9 +344,9 @@ public:
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
-  SystemStatus<SyscallStatus<const Bytestring *>>
+  x23::Async<SystemStatus<SyscallStatus<const Bytestring *>>>
   get_bytestring(StorageKeyContractData const &storage_key);
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   set_bytestring(StorageKeyContractData const &storage_key,
                  std::span<const std::byte> input_bytestring,
                  StorageDeltaFlagSet input_flags);
@@ -348,39 +356,40 @@ public:
   // Returns the base value from the snapshot if load_from_snapshot is true.
   // Otherwise, returns a tx-local written set value, if one exists,
   // or nullopt if not.
-  SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+  x23::Async<
+      SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   set_nnint(StorageKeyContractData const &storage_key,
             std::optional<int128_t> set_value, const int128_t &add_value,
             StorageDeltaFlagSet input_flags);
 
   // === Delete syscall ===
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   delete_object(StorageKeyContractData const &storage_key,
                 StorageDeltaFlagSet flags);
 
   // === Retrocausal Queue syscalls ===
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
-  SystemStatus<SyscallStatus<QueueEntry>>
+  x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  SystemStatus<SyscallStatus<int128_t>>
+  x23::Async<SystemStatus<SyscallStatus<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   modify_native_token_balance(ContractAddress const &contract_address,
                               int128_t transfer_amount);
 
   // == Authentication syscalls ==
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
 
-  SystemStatus<SyscallStatus<void>>
+  x23::Async<SystemStatus<SyscallStatus<void>>>
   set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls
@@ -390,12 +399,13 @@ public:
 
   // == Block statistics syscalls ==
   // These are based on reading the db tip.
-  SystemStatus<BlockHeight> get_block_height() const;
+  x23::Async<SystemStatus<BlockHeight>> get_block_height() const;
 
   // == General access methods ==
   //
   // returns nullptr if the contract does not exist
-  SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
+  x23::Async<SystemStatus<const Contract *>>
+  resolve_contract(SHA256Hash const &hash) const;
 
   // Returns a translated rv32 contract for a transaction-local deployment,
   // translating and caching it in this handler on first use. The returned
@@ -470,7 +480,7 @@ private:
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.
   static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
                                         BlockHeight executing_height);
-  SystemStatus<bool> root_is_legacy_initial_token_claim();
+  x23::Async<SystemStatus<bool>> root_is_legacy_initial_token_claim();
 
   // Whether this handler's transaction has an already-expired replay uniquifier
   // (reads the db tip via get_block_height(); a tip-read failure is
@@ -478,7 +488,7 @@ private:
   // uniquifier). Used by perform_initial_validation() to reject the transaction
   // before the body runs, and by try_commit_transaction()'s debug-only check
   // that a proposal-mode ValidationFailure is in fact a bad expiry height.
-  SystemStatus<bool> replay_uniquifier_expired();
+  x23::Async<SystemStatus<bool>> replay_uniquifier_expired();
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid, and that the replay
@@ -486,7 +496,7 @@ private:
   // Sets cumulative_invoke_result_ to the appropriate error on a deterministic
   // validation failure; returns a system error (e.g. an unreadable db tip)
   // through the SystemStatus so the caller can surface it rather than drop it.
-  SystemStatus<void> perform_initial_validation();
+  x23::Async<SystemStatus<void>> perform_initial_validation();
 
   // check the validation data at the end of a transaction, if in validation
   // mode
@@ -502,7 +512,7 @@ private:
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   resolve_runtime(ContractAddress const &addr);
 
   // Commit the last call frame, if the last call frame succeeds.
@@ -519,8 +529,9 @@ private:
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right
   // after each 2pc push failure site sets two_phase_commit_failed_. Never
-  // blocks and never fails.
-  void report_db_conflict_diagnostic() const;
+  // fails; suspends only on the db-tip read the diagnostic's attempt height
+  // needs, and the send itself stays fire-and-forget.
+  x23::Async<void> report_db_conflict_diagnostic() const;
 
   BlockExecutionMode get_block_execution_mode() const
   {
