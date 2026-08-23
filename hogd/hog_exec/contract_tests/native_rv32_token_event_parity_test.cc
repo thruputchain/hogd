@@ -105,7 +105,7 @@ public:
                                     ContractAddress target, Args... args)
   {
     auto client = ContractTraitClient<itc_erc20::ERC20>(target);
-    auto r = client.template invoke_opt<Name>(ctx, args...);
+    auto r = co_await client.template invoke_opt<Name>(ctx, args...);
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value() || !r.value().value().value().is_ok()) {
       ADD_FAILURE() << "itc_erc20 call did not return Ok: "
@@ -132,7 +132,7 @@ public:
         std::string_view(reinterpret_cast<const char *>(Name.get().data()),
                          Name.get().size());
     auto client = ContractTraitClient<itc_erc20::ERC20>(target);
-    auto r = client.template invoke_opt<Name>(ctx, args...);
+    auto r = co_await client.template invoke_opt<Name>(ctx, args...);
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value()) {
       ADD_FAILURE() << "itc_erc20 call faulted instead of returning an ERC20 "
@@ -200,36 +200,36 @@ protected:
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodTransfer,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"transfer">(ctx, target, kBob,
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return call_ok<u8"transfer">(ctx, target, kBob,
                                        make_amount(kTransferAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodAdjustAllowance,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
                                                make_difference(
                                                    kAllowanceAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodTransferFrom,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"transfer_from">(ctx, target, kAlice, kBob,
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return call_ok<u8"transfer_from">(ctx, target, kAlice, kBob,
                                             make_amount(kTransferFromAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodInitialize,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"initialize">(ctx, target, kAlice);
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return call_ok<u8"initialize">(ctx, target, kAlice);
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodMint,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"mint">(ctx, target, kAlice,
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return call_ok<u8"mint">(ctx, target, kAlice,
                                    make_amount(kMintAmount));
         });
     // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
@@ -240,14 +240,14 @@ protected:
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodNettedNegativeApproval,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           auto rejected = call_expect_err<u8"adjust_allowance">(
               ctx, target, itc_erc20::ERC20Error::TooLarge, kSpender,
               make_difference(-kAllowanceAmount));
           if (!rejected.has_value()) {
-            return rejected.error();
+            co_return rejected.error();
           }
-          return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
+          co_return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
                                                make_difference(
                                                    kAllowanceAmount));
         });

@@ -114,24 +114,24 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
   auto contract = make_contract(
       // method 0 (TX_A): peek queue_a, require {kValA}, insert {kValB} into
       // queue_b
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key_a = make_storage_key("queue_a");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key_a, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = peek_res.value().value();
         if (entry.size() != 1 || entry[0] != kValA)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t val = kValB;
         auto key_b = make_storage_key("queue_b");
         auto ins = ctx.handler().retrocausal_queue_insert(
             key_b, std::as_bytes(std::span(&val, 1)))();
         if (!ins.has_value())
-          return ins.error().to_invoke_error();
+          co_return ins.error().to_invoke_error();
 
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_a"),
@@ -139,29 +139,29 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
             std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       },
       // method 1 (TX_B): peek queue_b, require {kValB}, insert {kValA} into
       // queue_a
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key_b = make_storage_key("queue_b");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key_b, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = peek_res.value().value();
         if (entry.size() != 1 || entry[0] != kValB)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t val = kValA;
         auto key_a = make_storage_key("queue_a");
         auto ins = ctx.handler().retrocausal_queue_insert(
             key_a, std::as_bytes(std::span(&val, 1)))();
         if (!ins.has_value())
-          return ins.error().to_invoke_error();
+          co_return ins.error().to_invoke_error();
 
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker_b"),
@@ -169,8 +169,8 @@ TEST_F(RCQCyclicCrossQueueTest, CyclicCrossQueueObservationsSucceed)
             std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;

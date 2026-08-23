@@ -90,14 +90,14 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [contract_hash](
-                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                 auto r =
                     ctx.handler().deploy_contract(kDeployNonce, contract_hash)();
                 if (!r.has_value())
-                  return r.error().to_invoke_error();
+                  co_return r.error().to_invoke_error();
                 if (!r.value().has_value())
-                  return InvokeError{InvokeErrorCode::Deterministic};
-                return {};
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                co_return InvokeStatus<void>{};
               });
 
   auto native = std::make_unique<NativeContract>(std::move(fns));

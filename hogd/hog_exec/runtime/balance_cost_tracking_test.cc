@@ -102,7 +102,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -195,7 +195,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
 
@@ -212,7 +212,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
 
@@ -828,7 +828,7 @@ TEST_F(BalanceCostTrackingTest,
         auto client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto first =
+        auto first = co_await
             client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
                                             make_amount(static_cast<uint128_t>(
                                                 kFirstTransfer)));
@@ -839,7 +839,7 @@ TEST_F(BalanceCostTrackingTest,
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto second =
+        auto second = co_await
             client.invoke_opt<u8"transfer">(ctx, kReceiverAddr,
                                             make_amount(static_cast<uint128_t>(
                                                 kSecondTransfer)));
@@ -851,7 +851,7 @@ TEST_F(BalanceCostTrackingTest,
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto balance = client.invoke_opt<u8"get_balance">(ctx);
+        auto balance = co_await client.invoke_opt<u8"get_balance">(ctx);
         if (!balance.has_value() || !balance.value().has_value() ||
             !balance.value().value().has_value() ||
             !balance.value().value().value().is_ok()) {
@@ -1215,7 +1215,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -1226,7 +1226,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r_balance =
+        auto r_balance = co_await
             native_token_client.invoke_opt<u8"get_balance_of">(ctx,
                                                                kReceiverAddr);
 
@@ -1320,7 +1320,7 @@ TEST_F(BalanceCostTrackingTest,
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -1331,7 +1331,7 @@ TEST_F(BalanceCostTrackingTest,
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r_balance =
+        auto r_balance = co_await
             native_token_client.invoke_opt<u8"get_balance_of">(ctx,
                                                                kReceiverAddr);
 
@@ -1424,7 +1424,7 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
         auto native_token_client = ContractTraitClient<itc_erc20::ERC20>(
             GenesisConfigurationLoader::kPresetNativeTokenAddress);
 
-        auto r_transfer = native_token_client.invoke_opt<u8"transfer">(
+        auto r_transfer = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
 
@@ -1526,7 +1526,7 @@ TEST_F(BalanceCostTrackingTest,
             uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility});
 
         // total_supply() before the transfer is the fixed native HOG supply.
-        auto ts_before = client.invoke_opt<u8"total_supply">(ctx);
+        auto ts_before = co_await client.invoke_opt<u8"total_supply">(ctx);
         if (!ts_before.has_value() || !ts_before.value().has_value() ||
             !ts_before.value().value().has_value() ||
             !ts_before.value().value().value().is_ok() ||
@@ -1537,7 +1537,7 @@ TEST_F(BalanceCostTrackingTest,
         }
 
         // Transfer to the all-zero address. This is accepted, not rejected.
-        auto r_transfer =
+        auto r_transfer = co_await
             client.invoke_opt<u8"transfer">(ctx, kZeroAddr,
                                             make_amount(static_cast<uint128_t>(
                                                 kTransferAmount)));
@@ -1549,7 +1549,7 @@ TEST_F(BalanceCostTrackingTest,
         }
 
         // total_supply() is unchanged: the native token does not burn.
-        auto ts_after = client.invoke_opt<u8"total_supply">(ctx);
+        auto ts_after = co_await client.invoke_opt<u8"total_supply">(ctx);
         if (!ts_after.has_value() || !ts_after.value().has_value() ||
             !ts_after.value().value().has_value() ||
             !ts_after.value().value().value().is_ok() ||

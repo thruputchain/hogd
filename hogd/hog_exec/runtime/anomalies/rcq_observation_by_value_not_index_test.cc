@@ -113,29 +113,29 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   std::vector<uint8_t> observed_values;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
           auto res = ctx.handler().retrocausal_queue_insert(
               key, std::as_bytes(std::span(&val, 1)))();
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
         }
-        return {};
+        co_return InvokeStatus<void>{};
       },
       [&observed_values](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         QueueEntry const &entry = peek_res.value().value();
         if (entry.size() != 1)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         observed_values.push_back(entry[0]);
 
         auto [ws, _wg] = syscall_BytestringSet_inner(
@@ -144,8 +144,8 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
             std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -233,30 +233,30 @@ TEST_F(RCQObservationByValueTest,
   std::vector<uint8_t> consumed_values;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
           auto res = ctx.handler().retrocausal_queue_insert(
               key, std::as_bytes(std::span(&val, 1)))();
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
         }
-        return {};
+        co_return InvokeStatus<void>{};
       },
       [&consumed_values](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto consume_res =
             ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
+          co_return consume_res.error().to_invoke_error();
         if (!consume_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = consume_res.value().value();
         if (entry.size() != 1)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         consumed_values.push_back(entry[0]);
 
         auto [ws, _wg] = syscall_BytestringSet_inner(
@@ -265,8 +265,8 @@ TEST_F(RCQObservationByValueTest,
             std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -342,24 +342,24 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
   static constexpr uint8_t kEntry = 0xA7;
 
   auto contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
 
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &peeked = peek_res.value().value();
         if (peeked.size() != 1 || peeked[0] != kEntry)
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         uint8_t entry = kEntry;
         auto insert_res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&entry, 1)))();
         if (!insert_res.has_value())
-          return insert_res.error().to_invoke_error();
+          co_return insert_res.error().to_invoke_error();
 
         auto marker = std::string_view("ok");
         auto [ws, _wg] = syscall_BytestringSet_inner(
@@ -368,8 +368,8 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
             std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -431,13 +431,13 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
 {
   auto contract = make_contract(
       // method 0: peek and write what we see
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         if (!peek_res.value().has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         auto const &entry = peek_res.value().value();
         auto [ws, _wg] = syscall_BytestringSet_inner(
@@ -446,20 +446,20 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
             std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       },
       // method 1: insert calldata bytes as RCQ entries
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto const &cd = ctx.handler().get_calldata();
         auto key = make_storage_key("rcq0");
         for (uint8_t val : cd) {
           auto res = ctx.handler().retrocausal_queue_insert(
               key, std::as_bytes(std::span(&val, 1)))();
           if (!res.has_value())
-            return res.error().to_invoke_error();
+            co_return res.error().to_invoke_error();
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;

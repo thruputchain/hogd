@@ -121,17 +121,17 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx, uint32_t input,
-         uint32_t expect) -> InvokeStatus<void> {
+         uint32_t expect) -> x23::Async<InvokeStatus<void>> {
         fib_client_t client(kFibContractAddr);
-        auto decoded = client.template invoke_opt<u8"fibonacci">(ctx, input);
+        auto decoded = co_await client.template invoke_opt<u8"fibonacci">(ctx, input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (decoded.value().value().value() != expect) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();

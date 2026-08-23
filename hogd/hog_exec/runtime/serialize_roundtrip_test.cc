@@ -51,137 +51,137 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
                 [this](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                    NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   ::cxs_test::Foo foo{0xABCD};
                   roundtrip_test<u8"roundtrip_foo">(foo, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(1,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
                   roundtrip_test<u8"roundtrip_senum">(senum, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(2,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
                   sunion.pos() = 5;
                   roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   sunion.d(static_cast<::cxs_test::senum>(0)); // default case
                   roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   sunion.d(
                       static_cast<::cxs_test::senum>(1000)); // default case
                   roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(3,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   int32_t value = -1;
                   roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   value = 1;
                   roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   value = 0;
                   roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   value = std::numeric_limits<int32_t>::max();
                   roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   value = std::numeric_limits<int32_t>::min();
                   roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(
-        4, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        4, [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
           bool success = false;
           ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
           sunion.neg() = true;
           roundtrip_test<u8"roundtrip_sunion_no_void">(sunion, ctx, success);
           if (!success) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns.emplace(5,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   ::cxs_test::uunion uunion(1);
                   uunion.one() = true;
                   roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   uunion.d(2);
                   uunion.two() = true;
                   roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   uunion.d(4);
                   uunion.four() = "hello";
                   roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(
-        6, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        6, [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
           bool success = false;
           ::cxs_test::uunion_bool uunion_bool{true};
           uunion_bool.one() = false;
           roundtrip_test<u8"roundtrip_uunion_bool">(uunion_bool, ctx, success);
           if (!success) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           uunion_bool.d(false);
           uunion_bool.two() = true;
           roundtrip_test<u8"roundtrip_uunion_bool">(uunion_bool, ctx, success);
           if (!success) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns.emplace(7,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   ::cxs_test::test_recursive test_recursive;
 
@@ -190,7 +190,7 @@ protected:
                   roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
                                                                ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   // with a box ptr
@@ -199,7 +199,7 @@ protected:
                   roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
                                                                ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   // with some elements in a vec
@@ -209,29 +209,29 @@ protected:
                   roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
                                                                ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     // Methods 8, 9, 10 removed: Error, ContractError, StorageError types
     // were removed/restructured in SDK Exceptions PR (#101).
     fns.emplace(11,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [&](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   bool success = false;
                   x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
                   roundtrip_test<u8"roundtrip_opaque_vector">(vec, ctx,
                                                               success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
                   roundtrip_test<u8"roundtrip_opaque_slice">(vec, ctx, success);
                   if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     std::unique_ptr<NativeContract> native_contract =
         std::make_unique<NativeContract>(std::move(fns));
@@ -290,7 +290,7 @@ protected:
       // CXS
       auto calldata = Serializer<SerializationFormat::kCxs>::serialize(value);
       ASSERT_TRUE(calldata.has_value());
-      auto res = cxs_client_.invoke_opt<MethodName>(ctx, *calldata);
+      auto res = co_await cxs_client_.invoke_opt<MethodName>(ctx, *calldata);
       auto return_buf = check_result(res);
       auto roundtrip_value =
           Serializer<SerializationFormat::kCxs>::deserialize<T>(
@@ -302,7 +302,7 @@ protected:
       // TXS
       auto calldata = Serializer<SerializationFormat::kTxs>::serialize(value);
       ASSERT_TRUE(calldata.has_value());
-      auto res = txs_client_.invoke_opt<MethodName>(ctx, *calldata);
+      auto res = co_await txs_client_.invoke_opt<MethodName>(ctx, *calldata);
       auto return_buf = check_result(res);
       auto roundtrip_value =
           Serializer<SerializationFormat::kTxs>::deserialize<T>(

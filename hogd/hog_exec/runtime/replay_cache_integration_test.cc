@@ -62,22 +62,22 @@ public:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
                 [](NativeSyscallContext & /*ctx*/) noexcept
-                    -> InvokeStatus<void> { return {}; });
+                    -> x23::Async<InvokeStatus<void>> { co_return InvokeStatus<void>{}; });
     fns.emplace(1,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
                   ctx.handler().set_return_buffer(ReturnBuffer{},
                                                   /*revert_frame=*/true);
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(
-        2, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        2, [](NativeSyscallContext & /*ctx*/) noexcept -> x23::Async<InvokeStatus<void>> {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
     fns.emplace(3,
                 [this](NativeSyscallContext & /*ctx*/) noexcept
-                    -> InvokeStatus<void> {
+                    -> x23::Async<InvokeStatus<void>> {
                   body_ran_ = true;
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;

@@ -91,7 +91,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   fns.emplace(0,
               [&](NativeSyscallContext &ctx) noexcept
                   -> x23::Async<InvokeStatus<void>> {
-                auto res =
+                auto res = co_await
                     client_.invoke_opt<u8"read_only_bytestring_set">(ctx,
                                                                      false);
                 if (!check_result(res)) {
@@ -104,7 +104,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
       1,
       [&](NativeSyscallContext &ctx) noexcept
           -> x23::Async<InvokeStatus<void>> {
-        auto res =
+        auto res = co_await
             client_.invoke_opt<u8"read_only_bytestring_set",
                                std::to_underlying(InvokeFlag::ReadOnly)>(ctx,
                                                                          true);
@@ -180,7 +180,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
   fns.emplace(0,
               [&](NativeSyscallContext &ctx) noexcept
                   -> x23::Async<InvokeStatus<void>> {
-                auto res =
+                auto res = co_await
                     client_.invoke_opt<u8"read_only_log_event">(ctx, false);
                 if (!check_result(res)) {
                   co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -192,7 +192,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
       1,
       [&](NativeSyscallContext &ctx) noexcept
           -> x23::Async<InvokeStatus<void>> {
-        auto res =
+        auto res = co_await
             client_.invoke_opt<u8"read_only_log_event",
                                std::to_underlying(InvokeFlag::ReadOnly)>(ctx,
                                                                          true);
@@ -410,7 +410,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
       0,
       [&](NativeSyscallContext &ctx) noexcept
           -> x23::Async<InvokeStatus<void>> {
-        auto res = native_token_client.invoke_opt<
+        auto res = co_await native_token_client.invoke_opt<
             u8"get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kObserverAddr);
         if (!res.has_value() || !res.value().has_value() ||
@@ -428,7 +428,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
       1,
       [&](NativeSyscallContext &ctx) noexcept
           -> x23::Async<InvokeStatus<void>> {
-        auto res = native_token_client.invoke_opt<
+        auto res = co_await native_token_client.invoke_opt<
             u8"transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kReceiverAddr, make_amount(transfer_amount));
         // The invoke should fail because modify_native_token_balance
@@ -445,7 +445,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   fns_caller.emplace(2,
                      [&](NativeSyscallContext &ctx) noexcept
                          -> x23::Async<InvokeStatus<void>> {
-                       auto res = native_token_client.invoke_opt<u8"transfer">(
+                       auto res = co_await native_token_client.invoke_opt<u8"transfer">(
                            ctx, kReceiverAddr, make_amount(transfer_amount));
                        if (!res.has_value() || !res.value().has_value() ||
                            !res.value().value().has_value() ||

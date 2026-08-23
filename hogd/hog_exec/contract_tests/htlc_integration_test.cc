@@ -400,25 +400,25 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kBalanceCheckerContractId,
         [](NativeSyscallContext &ctx,
-           uint128_xdr expected_balance) -> InvokeStatus<void> {
+           uint128_xdr expected_balance) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> erc20_client(
               kERC20ContractAddress);
-          auto result = erc20_client.template invoke_opt<u8"get_balance_of">(
+          auto result = co_await erc20_client.template invoke_opt<u8"get_balance_of">(
               ctx, kReceiverAddress);
           if (!result.has_value() || !result.value().has_value() ||
               !result.value().value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (!result.value().value().value().is_ok()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto balance = result.value().value().value().ok();
           uint128_t balance_unsigned_int =
               uint128_t{std::get<0>(balance)} << 64 | std::get<1>(balance);
           if (balance_unsigned_int != from_xdr(expected_balance)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     auto native_contract = builder.build();

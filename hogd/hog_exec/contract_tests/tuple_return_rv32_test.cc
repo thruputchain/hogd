@@ -57,7 +57,7 @@ public:
     using tuple_return_client_t =
         ContractTraitClient<tuple_return::TupleReturn>;
     tuple_return_client_t rv32_client(kRv32ContractAddress);
-    auto decoded = rv32_client.template invoke_opt<MethodName>(ctx, args...);
+    auto decoded = co_await rv32_client.template invoke_opt<MethodName>(ctx, args...);
     if (!decoded.has_value() || !decoded.value().has_value() ||
         !decoded.value().value().has_value()) {
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -83,34 +83,34 @@ protected:
 
     // Method 0: BasicTwoTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        0, [](NativeSyscallContext &ctx, uint32_t input) -> InvokeStatus<void> {
-          return check_result<u8"call1">(ctx, std::make_tuple(1U, 2U), input);
+        0, [](NativeSyscallContext &ctx, uint32_t input) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"call1">(ctx, std::make_tuple(1U, 2U), input);
         });
 
     // Method 1: NestedTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        1, [](NativeSyscallContext &ctx, uint32_t input) -> InvokeStatus<void> {
-          return check_result<u8"call2">(
+        1, [](NativeSyscallContext &ctx, uint32_t input) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"call2">(
               ctx, std::make_tuple(3U, std::make_tuple(4ULL, 5ULL)), input);
         });
 
     // Method 2: SingleElementTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"single_element_tuple">(ctx, 42U);
+        2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"single_element_tuple">(ctx, 42U);
         });
 
     // Method 3: ThreeElementTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        3, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"three_element_tuple">(
+        3, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"three_element_tuple">(
               ctx, std::make_tuple(10U, 20ULL, true));
         });
 
     // Method 4: DeeplyNested
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        4, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"deeply_nested">(
+        4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"deeply_nested">(
               ctx,
               std::make_tuple(1U, std::make_tuple(2ULL,
                                                   std::make_tuple(true, -3))));
@@ -118,53 +118,53 @@ protected:
 
     // Method 5: TupleWithFixedArray
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        5, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        5, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<uint32_t, 4> expected_array = {1, 2, 3, 4};
-          return check_result<u8"tuple_with_fixed_array">(
+          co_return check_result<u8"tuple_with_fixed_array">(
               ctx, std::make_tuple(expected_array, 100ULL));
         });
 
     // Method 6: TupleWithVariableArray
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        6, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        6, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           x23::Vec<uint32_t, 100> expected_vec = {10U, 20U, 30U};
-          return check_result<u8"tuple_with_variable_array">(
+          co_return check_result<u8"tuple_with_variable_array">(
               ctx, std::make_tuple(expected_vec, 200ULL));
         });
 
     // Method 7: NestedArrays
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        7, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        7, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<uint32_t, 2> expected_arr1 = {5, 6};
           std::array<uint64_t, 3> expected_arr2 = {7, 8, 9};
-          return check_result<u8"nested_arrays">(
+          co_return check_result<u8"nested_arrays">(
               ctx, std::make_tuple(expected_arr1, expected_arr2));
         });
 
     // Method 8: ArrayOfTuples
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        8, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        8, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::tuple<uint32_t, uint64_t>, 4> expected = {
               std::make_tuple(1U, 10ULL), std::make_tuple(2U, 20ULL),
               std::make_tuple(3U, 30ULL), std::make_tuple(4U, 40ULL)};
-          return check_result<u8"array_of_tuples">(ctx, expected);
+          co_return check_result<u8"array_of_tuples">(ctx, expected);
         });
 
     // Method 9: NestedArray2D
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        9, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        9, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::array<uint8_t, 4>, 5> expected = {
               std::array<uint8_t, 4>({1, 2, 3, 4}),
               std::array<uint8_t, 4>({5, 6, 7, 8}),
               std::array<uint8_t, 4>({9, 10, 11, 12}),
               std::array<uint8_t, 4>({13, 14, 15, 16}),
               std::array<uint8_t, 4>({17, 18, 19, 20})};
-          return check_result<u8"nested_array_2d">(ctx, expected);
+          co_return check_result<u8"nested_array_2d">(ctx, expected);
         });
 
     // Method 10: NestedArray3D
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        10, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        10, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::array<std::array<uint32_t, 2>, 3>, 4> expected = {};
           expected[0][0] = std::array<uint32_t, 2>({1, 2});
           expected[0][1] = std::array<uint32_t, 2>({3, 4});
@@ -178,12 +178,12 @@ protected:
           expected[3][0] = std::array<uint32_t, 2>({19, 20});
           expected[3][1] = std::array<uint32_t, 2>({21, 22});
           expected[3][2] = std::array<uint32_t, 2>({23, 24});
-          return check_result<u8"nested_array_3d">(ctx, expected);
+          co_return check_result<u8"nested_array_3d">(ctx, expected);
         });
 
     // Method 11: DeeplyNestedArray
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        11, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        11, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<
               std::array<std::array<std::array<std::array<uint8_t, 2>, 2>, 2>,
                          2>,
@@ -205,120 +205,120 @@ protected:
           expected[1][1][0][1] = std::array<uint8_t, 2>({27, 28});
           expected[1][1][1][0] = std::array<uint8_t, 2>({29, 30});
           expected[1][1][1][1] = std::array<uint8_t, 2>({31, 32});
-          return check_result<u8"deeply_nested_array">(ctx, expected);
+          co_return check_result<u8"deeply_nested_array">(ctx, expected);
         });
 
     // Method 12: TupleWithOption
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        12, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"tuple_with_option">(
+        12, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"tuple_with_option">(
               ctx, std::make_tuple(x23::Ptr<uint32_t>(123), 456ULL));
         });
 
     // Method 13: TupleAllOptional
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        13, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"tuple_all_optional">(
+        13, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"tuple_all_optional">(
               ctx, std::make_tuple(x23::Ptr<uint32_t>(111),
                                    x23::Ptr<uint64_t>(222)));
         });
 
     // Method 14: NestedOptionTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        14, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        14, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto expected =
               std::make_tuple(99U, x23::Ptr<std::tuple<uint64_t, bool>>(
                                        std::make_tuple(88ULL, false)));
-          return check_result<u8"nested_option_tuple">(ctx, expected);
+          co_return check_result<u8"nested_option_tuple">(ctx, expected);
         });
 
     // Method 15: KitchenSink
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        15, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        15, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<uint64_t, 2> b_array = {10ULL, 20ULL};
           x23::Vec<int, 50> c_vec = {1, 2, 3};
           auto expected =
               std::make_tuple(1U, x23::Ptr<std::array<uint64_t, 2>>(b_array),
                               std::make_tuple(true, c_vec));
-          return check_result<u8"kitchen_sink">(ctx, expected);
+          co_return check_result<u8"kitchen_sink">(ctx, expected);
         });
 
     // Method 16: ArraysAndTuples
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        16, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        16, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::array<std::tuple<uint32_t, uint64_t>, 2>, 3> nested =
               {{{std::make_tuple(1U, 2ULL), std::make_tuple(3U, 4ULL)},
                 {std::make_tuple(5U, 6ULL), std::make_tuple(7U, 8ULL)},
                 {std::make_tuple(9U, 10ULL), std::make_tuple(11U, 12ULL)}}};
-          return check_result<u8"arrays_and_tuples">(ctx,
+          co_return check_result<u8"arrays_and_tuples">(ctx,
                                                      std::make_tuple(nested,
                                                                      true));
         });
 
     // Method 17: TupleWithNestedArray
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        17, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        17, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::array<uint32_t, 2>, 3> nested_arr = {
               std::array<uint32_t, 2>({1, 2}), std::array<uint32_t, 2>({3, 4}),
               std::array<uint32_t, 2>({5, 6})};
-          return check_result<u8"tuple_with_nested_array">(
+          co_return check_result<u8"tuple_with_nested_array">(
               ctx, std::make_tuple(nested_arr, 999ULL));
         });
 
     // Method 18: Tuple8Elements
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        18, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"tuple_8_elements">(
+        18, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"tuple_8_elements">(
               ctx, std::make_tuple(1U, 2U, 3U, 4U, 5ULL, 6ULL, 7ULL, 8ULL));
         });
 
     // Method 19: Tuple16Elements
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        19, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"tuple_16_elements">(
+        19, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"tuple_16_elements">(
               ctx, std::make_tuple(1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9ULL, 10ULL,
                                    11ULL, 12ULL, 13ULL, 14ULL, 15ULL, 16ULL));
         });
 
     // Method 20: EmptyTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        20, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          return check_result<u8"empty_tuple">(ctx, std::tuple<>{});
+        20, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"empty_tuple">(ctx, std::tuple<>{});
         });
 
     // Method 21: TupleWithBytes
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        21, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        21, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<uint8_t, 32> bytes = {};
           bytes.fill(0xFF);
-          return check_result<u8"tuple_with_bytes">(ctx, std::make_tuple(bytes,
+          co_return check_result<u8"tuple_with_bytes">(ctx, std::make_tuple(bytes,
                                                                          999U));
         });
 
     // Method 22: TupleWithVariableBytes
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        22, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        22, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           x23::Vec<uint8_t, 1000> bytes = {0xAA, 0xBB, 0xCC, 0xDD};
-          return check_result<u8"tuple_with_variable_bytes">(
+          co_return check_result<u8"tuple_with_variable_bytes">(
               ctx, std::make_tuple(bytes, 777U));
         });
 
     // Method 23: NestedBytesArray
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        23, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        23, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::array<uint8_t, 32>, 3> expected = {};
           expected[0].fill(0x11);
           expected[1].fill(0x22);
           expected[2].fill(0x33);
-          return check_result<u8"nested_bytes_array">(ctx, expected);
+          co_return check_result<u8"nested_bytes_array">(ctx, expected);
         });
 
     // Method 24: TupleArrayOption
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        24, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        24, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<x23::Ptr<uint64_t>, 2> arr_opt = {x23::Ptr<uint64_t>(10),
                                                        x23::Ptr<uint64_t>(20)};
-          return check_result<u8"tuple_array_option">(
+          co_return check_result<u8"tuple_array_option">(
               ctx, std::make_tuple(x23::Ptr<std::array<uint32_t, 4>>(
                                        std::array<uint32_t, 4>({1, 2, 3, 4})),
                                    arr_opt));
@@ -326,7 +326,7 @@ protected:
 
     // Method 25: NestedEverything
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        25, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        25, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<std::array<std::tuple<uint32_t, x23::Ptr<uint64_t>>, 2>, 3>
               nested_all = {};
           nested_all[0][0] = std::make_tuple(1U, x23::Ptr<uint64_t>(10));
@@ -337,7 +337,7 @@ protected:
           nested_all[2][1] = std::make_tuple(6U, x23::Ptr<uint64_t>(60));
           auto opt_tuple = x23::Ptr<std::tuple<bool, std::array<int32_t, 4>>>(
               std::make_tuple(true, std::array<int32_t, 4>({-1, -2, -3, -4})));
-          return check_result<u8"nested_everything">(
+          co_return check_result<u8"nested_everything">(
               ctx, std::make_tuple(nested_all, opt_tuple));
         });
 

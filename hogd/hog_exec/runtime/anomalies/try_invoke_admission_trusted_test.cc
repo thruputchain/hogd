@@ -246,7 +246,7 @@ TEST_F(TryInvokeAdmissionTrustedTest,
         }
 
         auto token = ContractTraitClient<itc_erc20::ERC20>(kAddrToken);
-        auto transfer_res = token.invoke_opt<u8"transfer">(ctx, kAddrChild,
+        auto transfer_res = co_await token.invoke_opt<u8"transfer">(ctx, kAddrChild,
                                                            transfer_amount_xdr);
         if (!transfer_res.has_value() || !transfer_res.value().has_value() ||
             !transfer_res.value().value().has_value() ||
