@@ -19,7 +19,7 @@ public:
       std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
           contexts);
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) override;
 

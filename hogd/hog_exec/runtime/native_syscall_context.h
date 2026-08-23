@@ -19,6 +19,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "x23/vec.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -31,8 +32,10 @@ public:
     : handler_(h), initial_gas_amount_(gas_limit)
   {}
 
+  // A coroutine: the syscall it routes to may suspend on a database read, so
+  // native contract bodies await this rather than blocking a thread on it.
   template<SyscallNo Syscall, typename... Args>
-  HostFnStatus<SyscallErrorCode> syscall(Args &&...args)
+  x23::Async<HostFnStatus<SyscallErrorCode>> syscall(Args &&...args)
   {
     using Meta = SyscallMeta<Syscall>;
     using syscall_t =
@@ -46,15 +49,12 @@ public:
           std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
-    // Native contract bodies are plain noexcept functions, so they block on
-    // the syscall rather than awaiting it; see the same note in
-    // Rv32Runtime::invoke_internal().
-    auto [res, gas_consumed] =
+    auto [res, gas_consumed] = co_await
         wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
-                               Meta::kSyscallNo, std::move(parsed))();
+                               Meta::kSyscallNo, std::move(parsed));
 
     consume_gas(gas_consumed);
-    return res;
+    co_return res;
   }
 
   SystemCallHandler &handler() { return handler_; }

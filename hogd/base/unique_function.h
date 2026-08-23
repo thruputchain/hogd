@@ -115,6 +115,50 @@ operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
   return !f;
 }
 
+// Same as the const noexcept specialization below, minus the noexcept: a
+// coroutine-returning target cannot be noexcept, because its frame allocation
+// happens in the ramp function and can throw before the body runs.
+template<typename Ret, typename... Args>
+class UniqueFunction<Ret(Args...) const> {
+public:
+  UniqueFunction() = default;
+  template<typename F> requires invocable_r<Ret, F, Args...>
+  UniqueFunction(F &&func)
+  {
+    using Invoker = detail::Invoker<std::decay_t<F>, Ret, Args...>;
+    invoker_ = std::make_unique<Invoker>(std::forward<F>(func));
+  }
+  ~UniqueFunction() = default;
+
+  UniqueFunction(UniqueFunction &&uf) noexcept
+    : invoker_(std::move(uf.invoker_))
+  {}
+  UniqueFunction &operator=(UniqueFunction &&uf) noexcept
+  {
+    invoker_ = std::move(uf.invoker_);
+    return *this;
+  }
+  UniqueFunction &operator=(std::nullptr_t) noexcept
+  {
+    invoker_.reset();
+    return *this;
+  }
+  UniqueFunction(const UniqueFunction &uf) = delete;
+  UniqueFunction &operator=(const UniqueFunction &uf) = delete;
+
+  void swap(UniqueFunction &other) noexcept { invoker_.swap(other.invoker_); }
+
+  explicit operator bool() const noexcept { return !!invoker_; }
+
+  Ret operator()(Args &&...args) const
+  {
+    return invoker_->operator()(std::forward<Args>(args)...);
+  }
+
+private:
+  std::unique_ptr<detail::InvokerBase<Ret, Args...>> invoker_;
+};
+
 template<typename Ret, typename... Args>
 class UniqueFunction<Ret(Args...) const noexcept> {
 public:

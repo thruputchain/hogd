@@ -71,7 +71,7 @@ compute_event_signature(std::u8string_view qualified_name)
 // make_event_from_cxs_struct). num_topics topics of sizeof(Topic) bytes each
 // are split off the front; the remainder is data.
 template<uint32_t NumTopics>
-InvokeStatus<void>
+x23::Async<InvokeStatus<void>>
 emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
 {
   static_assert(NumTopics <= 3);
@@ -93,29 +93,29 @@ emit_event(NativeSyscallContext &ctx, x23::Buf const &event_buf)
     t2 = &topics[2];
 
   auto data = buf.subspan(NumTopics * sizeof(Topic));
-  auto r = ctx.syscall<SyscallNo::kLogEvent>(t0, t1, t2, data);
+  auto r = co_await ctx.syscall<SyscallNo::kLogEvent>(t0, t1, t2, data);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  return {};
+  co_return InvokeStatus<void>{};
 }
 
 // Get the msg_sender via the kGetMsgSender syscall.
-InvokeStatus<ContractAddress>
+x23::Async<InvokeStatus<ContractAddress>>
 get_msg_sender(NativeSyscallContext &ctx)
 {
   ContractAddress sender{};
-  auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+  auto r = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  return sender;
+  co_return sender;
 }
 
 StorageKeyContractData
@@ -128,10 +128,10 @@ allowance_key(ContractAddress owner, ContractAddress spender)
 
 // Return an ERC20 contract-level revert carrying `code`, byte-identical to the
 // reference contract throwing the same ERC20Error (same selector + CXS body).
-InvokeStatus<Result<void, ERC20Exception>>
+x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 erc20_error(itc_erc20::ERC20Error code)
 {
-  return {Result<void, ERC20Exception>::make_err(ERC20Exception{code})};
+  co_return {Result<void, ERC20Exception>::make_err(ERC20Exception{code})};
 }
 
 // Strict allowance adjustment, mirroring itc_erc20::add_to_allowance (the SDK's
@@ -139,7 +139,7 @@ erc20_error(itc_erc20::ERC20Error code)
 // reject an out-of-range running total at invoke (returns false), rather than
 // deferring to commit. The balance debit in transfer_impl / transfer_from_impl
 // mirrors the same SDK primitive.
-InvokeStatus<bool>
+x23::Async<InvokeStatus<bool>>
 adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
 {
@@ -149,12 +149,12 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
   bool output_set_opt{};
   int128_t output_add{};
   auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key,
+      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key,
                                                  /*load_from_snapshot=*/true,
                                                  output_set, output_set_opt,
                                                  output_add);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
     // Never-written allowance: treat as an explicit zero, matching
@@ -168,25 +168,25 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
     // a storage anomaly, not an insufficient allowance: surface it as a
     // deterministic fault rather than letting callers report ERC20Error::
     // TooLarge, matching get_allowance_impl.
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   if (integer_add_overflow(output_add, amount)) {
-    return false;
+    co_return false;
   }
   int128_t new_add = output_add + amount;
   // Strict non-negativity on the committed base + net in-tx delta.
   if (integer_add_overflow(output_set, new_add) || (output_set + new_add) < 0) {
-    return false;
+    co_return false;
   }
 
   const int128_t *set_ptr = output_set_opt ? &output_set : nullptr;
-  auto r2 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+  auto r2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
       allow_key, set_ptr, new_add, std::to_underlying(StorageDeltaFlags::None));
   if (!r2.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r2.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r2.error());
   }
-  return *r2 == SyscallErrorCode::kSyscallErrorCodeNone;
+  co_return *r2 == SyscallErrorCode::kSyscallErrorCodeNone;
 }
 
 // For now, the typedefs exported by a contract aren't added to the generated
@@ -196,24 +196,24 @@ using difference_t = std::tuple<int64_t, uint64_t>;
 
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
 
-InvokeStatus<Result<void, ERC20Exception>>
+x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
 {
   if (!ctx.consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::OutOfGas};
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
-  auto sender = get_msg_sender(ctx);
+  auto sender = co_await get_msg_sender(ctx);
   if (!sender) {
-    return sender.error();
+    co_return sender.error();
   }
   if (*sender != kGenesisRootContractAddress) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   const uint128_t unsigned_amount =
       uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
   if (unsigned_amount > kMaxInt128) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   const int128_t signed_amount = unsigned_amount;
 
@@ -221,12 +221,12 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   bool supply_base_present{};
   int128_t supply_add{};
   auto get =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
+      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
                                                  true, supply_base,
                                                  supply_base_present,
                                                  supply_add);
   if (!get) {
-    return NativeContractBuilder::host_fn_error_conversion(get.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
   if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
     supply_base = 0;
@@ -235,31 +235,31 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   }
   if (*get != SyscallErrorCode::kSyscallErrorCodeNone &&
       *get != SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (!supply_base_present || integer_add_overflow(supply_add, signed_amount) ||
       integer_add_overflow(supply_base, supply_add + signed_amount)) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   auto credit =
-      ctx.handler().modify_native_token_balance(receiver, signed_amount);
+      co_await ctx.handler().modify_native_token_balance(receiver, signed_amount);
   if (!credit) {
-    return credit.error().to_invoke_error();
+    co_return credit.error().to_invoke_error();
   }
   if (!credit.value().has_value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   const int128_t new_add = supply_add + signed_amount;
-  auto set = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+  auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
       kNativeTokenTotalSupplyKey, &supply_base, new_add,
       std::to_underlying(StorageDeltaFlags::None));
   if (!set) {
-    return NativeContractBuilder::host_fn_error_conversion(set.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(set.error());
   }
   if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   ContractAddress zero{};
@@ -270,85 +270,85 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
                                                .amount =
                                                    to_xdr(signed_amount)});
   if (!event_buf) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
-    return emitted.error();
+    co_return emitted.error();
   }
-  return {Result<void, ERC20Exception>::make_ok()};
+  co_return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<void, ERC20Exception>>
+x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
 {
   if (!ctx.consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::OutOfGas};
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
-  auto sender = get_msg_sender(ctx);
+  auto sender = co_await get_msg_sender(ctx);
   if (!sender) {
-    return sender.error();
+    co_return sender.error();
   }
   if (*sender != kGenesisRootContractAddress) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   const uint128_t unsigned_amount =
       uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
   if (unsigned_amount > kMaxInt128) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   const int128_t signed_amount = unsigned_amount;
 
   // Match the reference ERC20's strict balance debit: reject before staging
   // any state if the requested burn exceeds the owner's running balance.
-  auto owner_balance = ctx.handler().get_native_token_balance(owner);
+  auto owner_balance = co_await ctx.handler().get_native_token_balance(owner);
   if (!owner_balance) {
-    return owner_balance.error().to_invoke_error();
+    co_return owner_balance.error().to_invoke_error();
   }
   if (!owner_balance.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (signed_amount > owner_balance.value().value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   int128_t supply_base{};
   bool supply_base_present{};
   int128_t supply_add{};
   auto get =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
+      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(kNativeTokenTotalSupplyKey,
                                                  true, supply_base,
                                                  supply_base_present,
                                                  supply_add);
   if (!get) {
-    return NativeContractBuilder::host_fn_error_conversion(get.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(get.error());
   }
   const int128_t supply_delta = -signed_amount;
   if (*get != SyscallErrorCode::kSyscallErrorCodeNone || !supply_base_present ||
       integer_add_overflow(supply_add, supply_delta)) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   const int128_t new_add = supply_add + supply_delta;
   if (integer_add_overflow(supply_base, new_add) || supply_base + new_add < 0) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  auto debit = ctx.handler().modify_native_token_balance(owner, supply_delta);
+  auto debit = co_await ctx.handler().modify_native_token_balance(owner, supply_delta);
   if (!debit) {
-    return debit.error().to_invoke_error();
+    co_return debit.error().to_invoke_error();
   }
   if (!debit.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  auto set = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+  auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
       kNativeTokenTotalSupplyKey, &supply_base, new_add,
       std::to_underlying(StorageDeltaFlags::None));
   if (!set) {
-    return NativeContractBuilder::host_fn_error_conversion(set.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(set.error());
   }
   if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   ContractAddress zero{};
@@ -359,23 +359,23 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
                                                .amount =
                                                    to_xdr(signed_amount)});
   if (!event_buf) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (auto emitted = emit_event<3>(ctx, *event_buf); !emitted) {
-    return emitted.error();
+    co_return emitted.error();
   }
-  return {Result<void, ERC20Exception>::make_ok()};
+  co_return {Result<void, ERC20Exception>::make_ok()};
 }
 
 // implementation functions
-InvokeStatus<Result<void, ERC20Exception>>
+x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
               amount_t amount)
 {
   trace("native token transfer: receiver {} amount {}", x23::show(receiver),
         x23::show(amount));
   if (!ctx.consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::OutOfGas};
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   // For now, amount_t is a uint, so we do not need to check for negative
@@ -383,15 +383,15 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   uint128_t amount_unsigned_int =
       uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
-  auto owner = get_msg_sender(ctx);
+  auto owner = co_await get_msg_sender(ctx);
   if (!owner.has_value()) {
-    return owner.error();
+    co_return owner.error();
   }
 
   // An amount above INT128_MAX cannot be represented as a signed balance delta;
   // reject with TooLarge, matching the itc_erc20 reference's observable result.
   if (amount_unsigned_int > kMaxInt128) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
@@ -399,18 +399,18 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // non_negative_int_try_strict_inc: the running balance (committed base +
   // net in-tx delta) may not go below zero. A debit landing exactly at
   // zero is accepted -- the reference's only rejection is `total < 0`.
-  auto owner_avail = ctx.handler().get_native_token_balance(*owner);
+  auto owner_avail = co_await ctx.handler().get_native_token_balance(*owner);
   if (!owner_avail.has_value()) {
-    return owner_avail.error().to_invoke_error();
+    co_return owner_avail.error().to_invoke_error();
   }
   if (!owner_avail.value().has_value()) {
     // Staged-negative balance (system-path state the WASM reference can never
     // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
     // carve-out from byte parity.
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (amount_signed_int > owner_avail.value().value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   // No credit-side overflow check: total supply (~2^59) keeps any reachable
@@ -418,10 +418,10 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // checked add on the credit leg cannot fire. HogDb's commit-time
   // add-capacity bound remains the backstop for hand-crafted states.
 
-  if (auto moved = native_token_unchecked_transfer(ctx.handler(), *owner,
+  if (auto moved = co_await native_token_unchecked_transfer(ctx.handler(), *owner,
                                                    receiver, amount_signed_int);
       !moved.has_value()) {
-    return moved.error();
+    co_return moved.error();
   }
 
   auto event_buf =
@@ -432,39 +432,39 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
                                      .amount = to_xdr(amount_signed_int),
                                  });
   if (!event_buf)
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
 
   if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log transfer event in native token transfer");
-    return err.error();
+    co_return err.error();
   }
 
-  return {Result<void, ERC20Exception>::make_ok()};
+  co_return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<void, ERC20Exception>>
+x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
                    ContractAddress receiver, amount_t amount)
 {
   trace("native token transfer_from: owner {} receiver {} amount {}",
         x23::show(owner), x23::show(receiver), x23::show(amount));
   if (!ctx.consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::OutOfGas};
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   uint128_t amount_unsigned_int =
       uint128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
   // get spender
-  auto spender = get_msg_sender(ctx);
+  auto spender = co_await get_msg_sender(ctx);
   if (!spender.has_value()) {
-    return spender.error();
+    co_return spender.error();
   }
 
   // An amount above INT128_MAX cannot be represented as a signed balance delta;
   // reject with TooLarge, matching the itc_erc20 reference's observable result.
   if (amount_unsigned_int > kMaxInt128) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
   int128_t amount_signed_int = amount_unsigned_int;
 
@@ -473,30 +473,30 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // debit, then the receiver credit. Any failure aborts the frame and
   // reverts the staged allowance debit.
   if (owner != *spender) {
-    auto allow_res = adjust_allowance(ctx, owner, *spender, -amount_signed_int);
+    auto allow_res = co_await adjust_allowance(ctx, owner, *spender, -amount_signed_int);
     if (!allow_res.has_value()) {
-      return allow_res.error();
+      co_return allow_res.error();
     }
     if (!allow_res.value()) {
-      return erc20_error(itc_erc20::ERC20Error::TooLarge);
+      co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
     }
   }
 
   // Strict per-debit balance check; see transfer_impl for the semantics
   // (fail iff amount > committed base + net in-tx delta; exact-zero
   // landings succeed).
-  auto owner_avail = ctx.handler().get_native_token_balance(owner);
+  auto owner_avail = co_await ctx.handler().get_native_token_balance(owner);
   if (!owner_avail.has_value()) {
-    return owner_avail.error().to_invoke_error();
+    co_return owner_avail.error().to_invoke_error();
   }
   if (!owner_avail.value().has_value()) {
     // Staged-negative balance (system-path state the WASM reference can never
     // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
     // carve-out from byte parity.
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   if (amount_signed_int > owner_avail.value().value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   // No credit-side overflow check: total supply (~2^59) keeps any reachable
@@ -504,10 +504,10 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // checked add on the credit leg cannot fire. HogDb's commit-time
   // add-capacity bound remains the backstop for hand-crafted states.
 
-  if (auto moved = native_token_unchecked_transfer(ctx.handler(), owner,
+  if (auto moved = co_await native_token_unchecked_transfer(ctx.handler(), owner,
                                                    receiver, amount_signed_int);
       !moved.has_value()) {
-    return moved.error();
+    co_return moved.error();
   }
 
   auto event_buf =
@@ -518,46 +518,46 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
                                      .amount = to_xdr(amount_signed_int),
                                  });
   if (!event_buf)
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
 
   if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log transfer_from event in native token transfer_from");
-    return err.error();
+    co_return err.error();
   }
 
-  return {Result<void, ERC20Exception>::make_ok()};
+  co_return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<void, ERC20Exception>>
+x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
                       difference_t amount)
 {
   trace("native token adjust_allowance: spender {} amount {}",
         x23::show(spender), x23::show(amount));
   if (!ctx.consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::OutOfGas};
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
-  auto owner = get_msg_sender(ctx);
+  auto owner = co_await get_msg_sender(ctx);
   if (!owner.has_value()) {
-    return owner.error();
+    co_return owner.error();
   }
 
   // Granting oneself an allowance is meaningless; itc_erc20 rejects it at
   // get_allowance_key with ERC20Error::Internal -- mirror that.
   if (*owner == spender) {
-    return erc20_error(itc_erc20::ERC20Error::Internal);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::Internal);
   }
 
   int128_t amount_signed_int =
       int128_t{std::get<0>(amount)} << 64 | std::get<1>(amount);
 
-  auto r = adjust_allowance(ctx, *owner, spender, amount_signed_int);
+  auto r = co_await adjust_allowance(ctx, *owner, spender, amount_signed_int);
   if (!r.has_value()) {
-    return r.error();
+    co_return r.error();
   }
   if (!r.value()) {
-    return erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   auto event_buf =
@@ -568,25 +568,25 @@ adjust_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender,
                                      .amount = to_xdr(amount_signed_int),
                                  });
   if (!event_buf)
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
 
   if (auto err = emit_event<3>(ctx, *event_buf); !err.has_value()) {
     warn("failed to log adjust_allowance event in native token "
          "adjust_allowance");
-    return err.error();
+    co_return err.error();
   }
 
-  return {Result<void, ERC20Exception>::make_ok()};
+  co_return {Result<void, ERC20Exception>::make_ok()};
 }
 
-InvokeStatus<Result<amount_t, ERC20Exception>>
+x23::Async<InvokeStatus<Result<amount_t, ERC20Exception>>>
 get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
                    ContractAddress spender)
 {
   trace("native token get_allowance: owner {} spender {}", x23::show(owner),
         x23::show(spender));
   if (!ctx.consume_gas(1)) {
-    return InvokeError{InvokeErrorCode::OutOfGas};
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
 
   auto allow_key = allowance_key(owner, spender);
@@ -595,32 +595,32 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   bool output_set_opt{};
   int128_t output_add{};
   auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
+      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(allow_key, true, output_set,
                                                  output_set_opt, output_add);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-    return {Result<amount_t, ERC20Exception>::make_ok(
+    co_return {Result<amount_t, ERC20Exception>::make_ok(
         std::make_tuple(uint64_t{0}, uint64_t{0}))};
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   CHECK(output_set_opt);
   auto [total, of] = overflowing_add(output_set, output_add);
   if (of) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   uint128_t utotal = std::max<int128_t>(total, 0);
-  return {Result<amount_t, ERC20Exception>::make_ok(
+  co_return {Result<amount_t, ERC20Exception>::make_ok(
       std::make_tuple(utotal >> 64, utotal & 0xffffffffffffffffULL))};
 }
 
 } // namespace
 
-InvokeStatus<void>
+x23::Async<InvokeStatus<void>>
 native_token_unchecked_transfer(SystemCallHandler &handler,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount)
@@ -631,19 +631,19 @@ native_token_unchecked_transfer(SystemCallHandler &handler,
   CHECK(amount >= 0);
   auto r1 = handler.modify_native_token_balance(from, -amount);
   if (!r1.has_value()) {
-    return r1.error().to_invoke_error();
+    co_return r1.error().to_invoke_error();
   }
   if (!r1.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
   auto r2 = handler.modify_native_token_balance(to, amount);
   if (!r2.has_value()) {
-    return r2.error().to_invoke_error();
+    co_return r2.error().to_invoke_error();
   }
   if (!r2.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  return {};
+  co_return InvokeStatus<void>{};
 }
 
 Topic const &
@@ -686,49 +686,49 @@ make_native_token_contract()
   // get_balance_of
   builder.add<itc_erc20::ERC20, u8"get_balance_of">(
       [](NativeSyscallContext &ctx, ContractAddress contract_address)
-          -> InvokeStatus<Result<amount_t, ERC20Exception>> {
+          -> x23::Async<InvokeStatus<Result<amount_t, ERC20Exception>>> {
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
         if (!ctx.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        auto balance = ctx.handler().get_native_token_balance(contract_address);
+        auto balance = co_await ctx.handler().get_native_token_balance(contract_address);
         if (!balance.has_value()) {
-          return balance.error().to_invoke_error();
+          co_return balance.error().to_invoke_error();
         }
         if (!balance.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return {Result<amount_t, ERC20Exception>::make_ok(
+        co_return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
 
   // get_balance
   builder.add<itc_erc20::ERC20, u8"get_balance">(
       [](NativeSyscallContext &ctx)
-          -> InvokeStatus<Result<amount_t, ERC20Exception>> {
+          -> x23::Async<InvokeStatus<Result<amount_t, ERC20Exception>>> {
         trace("native token get_balance");
         if (!ctx.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
-        auto caller_address = get_msg_sender(ctx);
+        auto caller_address = co_await get_msg_sender(ctx);
         if (!caller_address.has_value()) {
-          return caller_address.error();
+          co_return caller_address.error();
         }
 
-        auto balance = ctx.handler().get_native_token_balance(*caller_address);
+        auto balance = co_await ctx.handler().get_native_token_balance(*caller_address);
         if (!balance.has_value()) {
-          return balance.error().to_invoke_error();
+          co_return balance.error().to_invoke_error();
         }
         if (!balance.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return {Result<amount_t, ERC20Exception>::make_ok(
+        co_return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
 
@@ -741,20 +741,20 @@ make_native_token_contract()
   // total_supply
   builder.add<itc_erc20::ERC20, u8"total_supply">(
       [](NativeSyscallContext &runtime)
-          -> InvokeStatus<Result<amount_t, ERC20Exception>> {
+          -> x23::Async<InvokeStatus<Result<amount_t, ERC20Exception>>> {
         trace("native token total_supply");
         // TODO(geoff): gas costs
         if (!runtime.consume_gas(1)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
         int128_t supply_base{};
         bool supply_base_present{};
         int128_t supply_add{};
-        auto get = runtime.syscall<SyscallNo::kNonnegativeIntGet>(
+        auto get = co_await runtime.syscall<SyscallNo::kNonnegativeIntGet>(
             kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
             supply_add);
         if (!get.has_value()) {
-          return NativeContractBuilder::host_fn_error_conversion(get.error());
+          co_return NativeContractBuilder::host_fn_error_conversion(get.error());
         }
         uint128_t total_supply;
         if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
@@ -766,12 +766,12 @@ make_native_token_contract()
                  !supply_base_present ||
                  integer_add_overflow(supply_base, supply_add) ||
                  supply_base + supply_add < 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         else {
           total_supply = supply_base + supply_add;
         }
-        return {Result<amount_t, ERC20Exception>::make_ok(
+        co_return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(total_supply >> 64,
                             total_supply & 0xffffffffffffffffULL))};
       });

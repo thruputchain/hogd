@@ -72,7 +72,7 @@ calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
   return sha256(key_data);
 }
 
-InvokeStatus<uint128_t>
+x23::Async<InvokeStatus<uint128_t>>
 load_allocation(NativeSyscallContext &ctx,
                 StorageKeyContractData const &contract_data_key)
 {
@@ -80,14 +80,14 @@ load_allocation(NativeSyscallContext &ctx,
   bool output_set_opt{};
   int128_t output_add{};
   auto r =
-      ctx.syscall<SyscallNo::kNonnegativeIntGet>(contract_data_key, true,
+      co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(contract_data_key, true,
                                                  output_set, output_set_opt,
                                                  output_add);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
   if (!output_set_opt) {
@@ -98,24 +98,24 @@ load_allocation(NativeSyscallContext &ctx,
   if (of || total < 0) {
     trace("overflowing_add failed in load_allocation; we must have configured "
           "genesis incorrectly");
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  return total;
+  co_return total;
 }
 
-InvokeStatus<void>
+x23::Async<InvokeStatus<void>>
 delete_storage_key(NativeSyscallContext &ctx,
                    StorageKeyContractData const &contract_data_key)
 {
-  auto r = ctx.syscall<SyscallNo::kDeleteObject>(
+  auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(
       contract_data_key, std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return InvokeError{InvokeErrorCode::Deterministic};
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  return {};
+  co_return InvokeStatus<void>{};
 }
 
 } // namespace
@@ -128,7 +128,7 @@ make_native_initial_token_claim_contract()
   builder.add<initial_token_claim::InitialTokenClaim, u8"claim_initial_tokens">(
       [](NativeSyscallContext &ctx, SHA256Hash hash, SHA256Hash nonce,
          ContractEntrypointID entrypoint,
-         x23::BufView calldata) -> InvokeStatus<void> {
+         x23::BufView calldata) -> x23::Async<InvokeStatus<void>> {
         trace("initial token claim claim_initial_tokens");
 
         // Create storage key: sha256("Initial Deployment" || hash || nonce ||
@@ -136,15 +136,15 @@ make_native_initial_token_claim_contract()
         StorageKeyContractData const &contract_data_key =
             calculate_storage_key(hash, nonce, entrypoint, calldata);
 
-        auto allocation = load_allocation(ctx, contract_data_key);
+        auto allocation = co_await load_allocation(ctx, contract_data_key);
         if (!allocation.has_value()) {
-          return allocation.error();
+          co_return allocation.error();
         }
 
         // Delete the storage key, to prevent double claiming
-        if (auto err = delete_storage_key(ctx, contract_data_key);
+        if (auto err = co_await delete_storage_key(ctx, contract_data_key);
             !err.has_value()) {
-          return err;
+          co_return err;
         }
 
         // Calculate receiver address from contract hash and nonce
@@ -158,23 +158,23 @@ make_native_initial_token_claim_contract()
         // validates the claim's net balance at commit, where the
         // exclusive-delete refund nets against this debit exactly.
         auto self_addr = ctx.handler().get_current_address();
-        if (auto moved = native_token_unchecked_transfer(
+        if (auto moved = co_await native_token_unchecked_transfer(
                 ctx.handler(), self_addr, receiver_addr,
                 static_cast<int128_t>(*allocation));
             !moved.has_value()) {
-          return moved.error();
+          co_return moved.error();
         }
 
         // Deploy the contract using hash and nonce
         ContractAddress deployed_addr{};
         auto deploy_res =
-            ctx.syscall<SyscallNo::kDeployContract>(nonce, hash, deployed_addr);
+            co_await ctx.syscall<SyscallNo::kDeployContract>(nonce, hash, deployed_addr);
         if (!deploy_res.has_value()) {
-          return NativeContractBuilder::host_fn_error_conversion(
+          co_return NativeContractBuilder::host_fn_error_conversion(
               deploy_res.error());
         }
         if (*deploy_res != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Call the initialize entrypoint with provided calldata
@@ -185,12 +185,12 @@ make_native_initial_token_claim_contract()
         };
         CopyableInvokeOutputs outputs{};
 
-        auto invoke_result = ctx.syscall<SyscallNo::kInvoke>(
+        auto invoke_result = co_await ctx.syscall<SyscallNo::kInvoke>(
             deployed_addr, std::as_bytes(std::span(calldata)),
             /*auth tokens*/ std::span<uint32_t>{}, inputs, outputs);
 
         if (!invoke_result.has_value()) {
-          return NativeContractBuilder::host_fn_error_conversion(
+          co_return NativeContractBuilder::host_fn_error_conversion(
               invoke_result.error());
         }
         // Propagate a failed initializer: a nonzero code means it was rejected
@@ -198,9 +198,9 @@ make_native_initial_token_claim_contract()
         // normally (Abort/Fault) must revert the whole claim too.
         if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   assert(builder.check_methods<initial_token_claim::InitialTokenClaim>());

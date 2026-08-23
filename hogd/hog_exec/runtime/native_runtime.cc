@@ -30,16 +30,37 @@ NativeContract::find_function(Runtime::MethodID method) const
   return &it->second;
 }
 
-std::pair<InvokeStatus<void>, GasAmount>
+x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 NativeContract::invoke(Runtime::MethodID method,
                        SystemCallHandler &syscall_handler,
                        uint64_t gas_limit) const noexcept
 {
+  using result_t = std::pair<InvokeStatus<void>, GasAmount>;
   const auto *fn = find_function(method);
   if (fn == nullptr)
-    return {InvokeError{InvokeErrorCode::Deterministic}, 0};
+    return result_t{InvokeError{InvokeErrorCode::Deterministic}, 0};
+  // Creating the body coroutine allocates its frame and can throw; this
+  // function is noexcept, so translate that into the same structured failure
+  // the body itself would report.
+  try {
+    return invoke_impl(*fn, syscall_handler, gas_limit);
+  } catch (std::exception const &e) {
+    error("Unrecoverable: could not start native contract body: {}", e.what());
+    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  } catch (...) {
+    report_dropped_log("non-std exception starting native contract body");
+    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  }
+}
+
+x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+NativeContract::invoke_impl(function_t const &fn,
+                            SystemCallHandler &syscall_handler,
+                            uint64_t gas_limit) const
+{
+  // ctx lives in this frame: the body suspends while holding a reference to it.
   NativeSyscallContext ctx(syscall_handler, gas_limit);
-  auto status = (*fn)(ctx);
+  auto status = co_await fn(ctx);
 
   GasAmount gas_consumed = ctx.total_gas_consumed();
   CHECK(gas_consumed <= gas_limit);
@@ -50,7 +71,7 @@ NativeContract::invoke(Runtime::MethodID method,
     case InvokeErrorCode::ValidationFailure:
     case InvokeErrorCode::Abandon:
     case InvokeErrorCode::OutOfGas:
-      return {status, gas_consumed};
+      co_return std::pair{status, gas_consumed};
     case InvokeErrorCode::None:
     case InvokeErrorCode::Deterministic:
       break;
@@ -59,12 +80,14 @@ NativeContract::invoke(Runtime::MethodID method,
 
   // These are the only error codes that can get upgraded to OutOfGas
   if (gas_limit == gas_consumed) {
-    return {InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
+    co_return std::pair{InvokeStatus<void>{InvokeError{
+                            InvokeErrorCode::OutOfGas}},
+                        gas_consumed};
   }
-  return {status, gas_consumed};
+  co_return std::pair{status, gas_consumed};
 }
 
-SystemStatus<std::unique_ptr<Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 NativeContext::make_new_runtime(DeployedContract const &deployed_contract,
                                 SystemCallHandler *syscall_handler)
 {
@@ -73,19 +96,19 @@ NativeContext::make_new_runtime(DeployedContract const &deployed_contract,
     error("Unrecoverable: Attempt made to access a non-native contract from "
           "NativeContext: {}",
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
   assert(syscall_handler != nullptr);
 
   auto contract =
-      syscall_handler->resolve_contract(deployed_contract_hash.hash);
+      co_await syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
-    return contract.error();
+    co_return contract.error();
   }
   if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
           show_byte_array(deployed_contract_hash.hash));
-    return SystemError(SystemErrorCode::Unrecoverable);
+    co_return SystemError(SystemErrorCode::Unrecoverable);
   }
 
   if (contract.value()->contract_type() != deployed_contract_hash.contract_type)
@@ -93,7 +116,7 @@ NativeContext::make_new_runtime(DeployedContract const &deployed_contract,
     error("Unrecoverable: Mismatch in contract type: {} != {}",
           contract.value()->contract_type(),
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   auto host_index = contract.value()->native_contract_id();
@@ -102,10 +125,10 @@ NativeContext::make_new_runtime(DeployedContract const &deployed_contract,
   if (it == contracts_.end()) {
     warn("Attempt made to access a native contract that is not defined: {}",
          host_index);
-    return nullptr;
+    co_return nullptr;
   }
 
-  return std::make_unique<NativeRuntime>(*it->second, syscall_handler);
+  co_return std::make_unique<NativeRuntime>(*it->second, syscall_handler);
 }
 
 NativeRuntime::NativeRuntime(NativeContract &contract,
@@ -113,7 +136,7 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
   : Runtime(syscall_handler), contract_(contract)
 {}
 
-std::pair<InvokeStatus<void>, GasAmount>
+x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 NativeRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   return contract_.invoke(method_id, *syscall_handler_, gas_limit);

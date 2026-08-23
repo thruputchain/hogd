@@ -19,7 +19,7 @@ MultiplexedContext::MultiplexedContext(
   : contexts_(std::move(contexts))
 {}
 
-SystemStatus<std::unique_ptr<Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
                                      SystemCallHandler *syscall_handler)
 {
@@ -30,9 +30,10 @@ MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
     // contract fault.
     error("Unrecoverable: no runtime context registered for contract type {}",
           deployed_contract.hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
-  return it->second.first->make_new_runtime(deployed_contract, syscall_handler);
+  co_return co_await it->second.first->make_new_runtime(deployed_contract,
+                                                        syscall_handler);
 }
 
 InvokeErrorCode

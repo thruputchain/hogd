@@ -57,9 +57,10 @@ Rv32Contract::instantiate(uint64_t gas) const
   return rv32::ThreadedMachine(pre_instantiation_, gas);
 }
 
-std::pair<InvokeStatus<void>, GasAmount>
+x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 {
+  using result_t = std::pair<InvokeStatus<void>, GasAmount>;
   auto machine_noexcept =
       [&]() noexcept -> InvokeStatus<rv32::ThreadedMachine> {
     try {
@@ -72,11 +73,29 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
     }
   }();
   if (!machine_noexcept.has_value()) {
-    return {machine_noexcept.error(), 0};
+    return result_t{machine_noexcept.error(), 0};
   }
 
-  auto &machine = *machine_noexcept;
+  // Creating the loop coroutine allocates its frame and can throw; this
+  // function is noexcept, so translate that the same way an instantiation
+  // failure is translated above.
+  try {
+    return run_ecall_loop(std::move(*machine_noexcept), gas_limit);
+  } catch (std::exception const &e) {
+    error("Unrecoverable: could not start rv32 ecall loop: {}", e.what());
+    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  } catch (...) {
+    report_dropped_log("non-std exception starting rv32 ecall loop");
+    return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
+  }
+}
 
+// The machine is moved into this coroutine's frame: syscalls suspend the loop,
+// so it cannot live on the caller's stack.
+x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
+{
+  using result_t = std::pair<InvokeStatus<void>, GasAmount>;
   rv32::StepResult result = machine.start();
 
   while (result == rv32::StepResult::kEcall) {
@@ -96,16 +115,11 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
         .gas_remaining = machine.gas_remaining(),
     };
 
-    // Syscalls are coroutinized, but this loop is not yet: block until the
-    // result is ready.  That is legal here only because contract execution
-    // still runs on a DispatchPool worker rather than an x23 ThreadPool thread
-    // (Async::operator() asserts as much).  Awaiting instead of blocking is
-    // what removes the DispatchPool.
-    auto [host_result, gas_consumed] =
+    auto [host_result, gas_consumed] = co_await
         syscall_entry(host_fn_ctx, context, pending_ecall->a0,
                       pending_ecall->a1, pending_ecall->a2, pending_ecall->a3,
                       pending_ecall->a4, pending_ecall->a5, pending_ecall->a6,
-                      pending_ecall->a7)();
+                      pending_ecall->a7);
 
     if (host_result.has_value()) {
       result = machine.resume_from_ecall(
@@ -131,21 +145,21 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
       assert(false);
       error("Unrecoverable: HostFnErrorCode::NoneOrRecoverable is not expected "
             "from TrampolineResult");
-      return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
     case HostFnErrorCode::Unrecoverable:
-      return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
     case HostFnErrorCode::ValidationFailure:
-      return {InvokeError{InvokeErrorCode::ValidationFailure},
+      co_return result_t{InvokeError{InvokeErrorCode::ValidationFailure},
               total_gas_consumed};
     case HostFnErrorCode::Abandon:
-      return {InvokeError{InvokeErrorCode::Abandon}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Abandon}, total_gas_consumed};
     case HostFnErrorCode::Return:
       // Successful return: the value (not error) state of InvokeStatus<void>.
-      return {{}, total_gas_consumed};
+      co_return result_t{{}, total_gas_consumed};
     case HostFnErrorCode::OutOfGas:
-      return {InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
     case HostFnErrorCode::Exit:
-      return {InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
+      co_return result_t{InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
     }
   }
 
@@ -155,13 +169,13 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 
   if (result == rv32::StepResult::kContinue) [[unlikely]] {
     error("Unrecoverable: rv32::StepResult::kContinue when halt expected");
-    return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+    co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
   }
 
   if (result == rv32::StepResult::kHalted) [[unlikely]] {
     error("Unrecoverable: rv32::StepResult::kHalted is not expected from "
           "ThreadedMachine");
-    return {InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
+    co_return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, total_gas_consumed};
   }
 
   assert(result == rv32::StepResult::kTrap);
@@ -169,10 +183,10 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   assert(machine.trap() != rv32::Trap::kHostTrap);
 
   if (machine.trap() == rv32::Trap::kOutOfGas) {
-    return {InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
+    co_return result_t{InvokeError{InvokeErrorCode::OutOfGas}, total_gas_consumed};
   }
 
-  return {InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
+  co_return result_t{InvokeError{InvokeErrorCode::Deterministic}, total_gas_consumed};
 }
 
 InvokeErrorCode
@@ -194,7 +208,7 @@ Rv32Context::verify_contract(Contract const &contract) const
   return InvokeErrorCode::None;
 }
 
-SystemStatus<std::unique_ptr<Runtime>>
+x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
                               SystemCallHandler *syscall_handler)
 {
@@ -203,7 +217,7 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
     error("Unrecoverable: Attempt made to access a non-rv32 contract from "
           "Rv32Context: {}",
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
   assert(syscall_handler != nullptr);
 
@@ -217,9 +231,9 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
     if (!deployed_contract.entry->translated.has_value()) [[unlikely]] {
       error("Unrecoverable: rv32 contract is not translatable: {}",
             show_byte_array(deployed_contract_hash.hash));
-      return SystemError{SystemErrorCode::Unrecoverable};
+      co_return SystemError{SystemErrorCode::Unrecoverable};
     }
-    return std::make_unique<Rv32Runtime>(&*deployed_contract.entry->translated,
+    co_return std::make_unique<Rv32Runtime>(&*deployed_contract.entry->translated,
                                          syscall_handler);
   }
 
@@ -228,21 +242,21 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   // handler (which memoizes failures too, so we never retranslate) -- the
   // runtime never owns its Rv32Contract.
   auto contract =
-      syscall_handler->resolve_contract(deployed_contract_hash.hash);
+      co_await syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
-    return contract.error();
+    co_return contract.error();
   }
   if (contract.value() == nullptr) [[unlikely]] {
     error("Unrecoverable: Contract lookup failed: {}",
           show_byte_array(deployed_contract_hash.hash));
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
   if (contract.value()->contract_type() != deployed_contract_hash.contract_type)
       [[unlikely]] {
     error("Unrecoverable: Mismatch in contract type: {} != {}",
           contract.value()->contract_type(),
           deployed_contract_hash.contract_type);
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 
   const Rv32Contract *translated =
@@ -251,10 +265,10 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
   if (translated == nullptr) [[unlikely]] {
     error("Unrecoverable: failed to translate rv32 contract: {}",
           show_byte_array(deployed_contract_hash.hash));
-    return SystemError{SystemErrorCode::Unrecoverable};
+    co_return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  return std::make_unique<Rv32Runtime>(translated, syscall_handler);
+  co_return std::make_unique<Rv32Runtime>(translated, syscall_handler);
 }
 
 } // namespace hogd

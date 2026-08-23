@@ -25,6 +25,7 @@
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -40,9 +41,11 @@ struct TupleSerializesLike<std::tuple<Es...>, std::tuple<As...>>
 
 template<typename T> struct NativeContractArgs;
 
+// Contract bodies are coroutines (they await syscalls), so they return
+// x23::Async<InvokeStatus<R>> rather than InvokeStatus<R>.
 template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(NativeSyscallContext &,
-                                              Args...)> {
+struct NativeContractArgs<x23::Async<InvokeStatus<R>> (*)(NativeSyscallContext &,
+                                                          Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -53,7 +56,7 @@ struct NativeContractArgs<InvokeStatus<R> (*)(NativeSyscallContext &,
 };
 
 template<typename R, typename... Args>
-struct NativeContractArgs<InvokeStatus<R> (*)(Args...)> {
+struct NativeContractArgs<x23::Async<InvokeStatus<R>> (*)(Args...)> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
 
@@ -74,9 +77,9 @@ struct AlwaysErrorMethod {
     return []<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
       return [](NativeSyscallContext &ctx,
                 std::tuple_element_t<Is, args_t>... /*unused*/)
-                 -> InvokeStatus<return_t> {
+                 -> x23::Async<InvokeStatus<return_t>> {
         ctx.consume_gas(Gas);
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
   }
@@ -152,9 +155,11 @@ public:
     // TODO(geoff): figure out gas costs for native contracts like this
     constexpr static GasAmount kErrorGas = 0;
 
+    // A coroutine, so not noexcept: NativeContract::invoke() re-establishes
+    // that boundary around its frame allocation.
     auto wrapped_f =
         [f = std::forward<decltype(lambda)>(lambda)](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       try {
         // Mirror the sdk entrypoint glue: an args-decode failure (parse
         // error, trailing bytes) or unconsumed forwarded auth handles
@@ -180,24 +185,26 @@ public:
         auto args = Serializer<Format>::template deserialize<args_t>(
             std::as_bytes(std::span(calldata)));
         if (!args.has_value()) {
-          return decoding_args_abort();
+          co_return decoding_args_abort();
         }
         if (!ctx.handler().get_parent_supplied_auth_tokens().empty()) {
-          return decoding_args_abort();
+          co_return decoding_args_abort();
         }
 
-        // invoke the lambda, and return the error if there is one
-        auto return_value =
-            [&]<size_t... Is>(
-                std::index_sequence<Is...>) -> InvokeStatus<return_t> {
-          auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
+        // Invoke the body and await it. extra_args is hoisted into this
+        // frame because the body holds references into it across suspensions;
+        // the inner lambda only forwards the call, so it is not itself a
+        // coroutine.
+        auto extra_args = detail::NativeContractArgs<fn_t>::extra_args(ctx);
+        auto return_value = co_await [&]<size_t... Is>(
+            std::index_sequence<Is...>) -> x23::Async<InvokeStatus<return_t>> {
           return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
             return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
           }(std::make_index_sequence<
                      std::tuple_size_v<decltype(extra_args)>>());
         }(std::make_index_sequence<std::tuple_size_v<args_t>>());
         if (!return_value.has_value()) {
-          return return_value.error();
+          co_return return_value.error();
         }
 
         // Now we check whether the return value is a plain value,
@@ -227,26 +234,26 @@ public:
           if (r.is_ok()) {
             // void is so annoying
             if constexpr (std::is_same_v<decltype(r.ok()), void>) {
-              return do_return(std::tuple<>{});
+              co_return do_return(std::tuple<>{});
             }
             else {
-              return do_return(r.ok());
+              co_return do_return(r.ok());
             }
           }
-          return do_revert(r.err());
+          co_return do_revert(r.err());
         }
         else {
           // otherwise, return the received value
           if constexpr (std::is_same_v<decltype(*return_value), void>) {
-            return do_return(std::tuple<>{});
+            co_return do_return(std::tuple<>{});
           }
           else {
-            return do_return(*return_value);
+            co_return do_return(*return_value);
           }
         }
       } catch (...) {
         error("unrecoverable: unexpected exception in native contract");
-        return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeError{InvokeErrorCode::Unrecoverable};
       }
     };
 
