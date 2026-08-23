@@ -58,7 +58,7 @@ MockContract::invoke(Runtime::MethodID method_id)
   //
   //   * root_invoke() -- the root mock frame's own callback (#2693),
   //   * a nested Invoke syscall from a Wasmtime or RV32 parent, which runs in
-  //     syscall_Invoke_inner(...) noexcept below the Wasmtime host import /
+  //     syscall_Invoke_inner(...)() noexcept below the Wasmtime host import /
   //     RV32 ecall trampoline, and
   //   * mock_syscall_entrypoint(kInvoke, ...), whose own catch sits above
   //     wrap_after_parse()'s noexcept syscall body.

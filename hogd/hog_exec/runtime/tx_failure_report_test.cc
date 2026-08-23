@@ -59,29 +59,33 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0, // set_add on (0, 200)
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key = make_storage_key("test");
                   int128_t set_value = 0;
-                  auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                      key, &set_value, 200,
-                      std::to_underlying(StorageDeltaFlags::None));
+                  auto r =
+                      co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                          key, &set_value, 200,
+                          std::to_underlying(StorageDeltaFlags::None));
                   if (!r.has_value() ||
                       *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(1, // add on (-100)
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
                   auto key = make_storage_key("test");
-                  auto r = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-                      key, static_cast<int128_t const *>(nullptr), -100,
-                      std::to_underlying(StorageDeltaFlags::None));
+                  auto r =
+                      co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                          key, static_cast<int128_t const *>(nullptr), -100,
+                          std::to_underlying(StorageDeltaFlags::None));
                   if (!r.has_value() ||
                       *r != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;

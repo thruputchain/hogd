@@ -53,22 +53,23 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         BlockHeight expected_height) -> InvokeStatus<void> {
+         BlockHeight expected_height) -> x23::Async<InvokeStatus<void>> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 100;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Verify the returned height matches expected
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -129,22 +130,23 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         BlockHeight expected_height) -> InvokeStatus<void> {
+         BlockHeight expected_height) -> x23::Async<InvokeStatus<void>> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Verify the returned height matches expected
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -205,20 +207,21 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         BlockHeight expected_height) -> InvokeStatus<void> {
+         BlockHeight expected_height) -> x23::Async<InvokeStatus<void>> {
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();

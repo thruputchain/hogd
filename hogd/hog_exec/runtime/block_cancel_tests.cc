@@ -60,7 +60,9 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
                 [](NativeSyscallContext & /*unused*/) noexcept
-                    -> InvokeStatus<void> { return {}; });
+                    -> x23::Async<InvokeStatus<void>> {
+                  co_return InvokeStatus<void>{};
+                });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -126,8 +128,8 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommitDiscardedBody)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(0,
                 [](NativeSyscallContext & /*unused*/) noexcept
-                    -> InvokeStatus<void> {
-                  return InvokeError{InvokeErrorCode::Deterministic};
+                    -> x23::Async<InvokeStatus<void>> {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
                 });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -179,17 +181,19 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_writer;
     fns_writer.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0,
+        [](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           auto [res, _gas] = syscall_BytestringSet_inner(
               ctx.handler(), key, std::as_bytes(std::span{"hello"}),
-              std::to_underlying(StorageDeltaFlags::None));
+              std::to_underlying(StorageDeltaFlags::None))();
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto contract_writer =
         std::make_unique<NativeContract>(std::move(fns_writer));
@@ -198,28 +202,27 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
         fns_caller;
     fns_caller.emplace(
         0,
-        [addr_writer](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r0 = [&]() {
+        [addr_writer](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(addr_writer,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                addr_writer, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
 
           if (r0.has_value() || r0.error().code() != HostFnErrorCode::Abandon) {
-            ADD_FAILURE() << "Unexpected return value from try_invoke: "
+            ADD_FAILURE() << "Unexpected co_return value from try_invoke: "
                           << r0.error().error_code().message();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return InvokeError{InvokeErrorCode::Abandon};
+          co_return InvokeError{InvokeErrorCode::Abandon};
         });
     auto contract_caller =
         std::make_unique<NativeContract>(std::move(fns_caller));

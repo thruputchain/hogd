@@ -332,8 +332,8 @@ protected:
     auto calldata = wallet_meta::make_calldata<u8"execute">(calls);
     Runtime::MethodID method_id = wallet_meta::method_id<u8"execute">();
     return [target, result_key, method_id, mint_and_forward_token,
-            calldata = std::move(calldata)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            calldata = std::move(calldata)](NativeSyscallContext &ctx) noexcept
+               -> x23::Async<InvokeStatus<void>> {
       // Optionally mint an auth token and forward its handle: execute takes
       // no Signer args, so the wallet must reject the unconsumed handle.
       uint32_t token_id = 0;
@@ -343,7 +343,7 @@ protected:
                                 .payload = x23::serialize(1U),
                                 .child_nodes = {}};
         auto serialized_root = x23::serialize(root_node);
-        auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+        auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
             BlockHeight{1000},
             std::span<const std::byte>{reinterpret_cast<const std::byte *>(
                                            serialized_root.data()),
@@ -352,7 +352,7 @@ protected:
         if (!mint_res.has_value() ||
             mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "MintAuthToken failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         forwarded = std::span<uint32_t>{&token_id, 1};
       }
@@ -363,7 +363,7 @@ protected:
           .gas_limit = static_cast<GasAmount>(UINT64_MAX),
           .flags = std::to_underlying(InvokeFlag::None),
       };
-      auto r = ctx.syscall<SyscallNo::kInvoke>(
+      auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
           target, std::as_bytes(std::span(calldata.data(), calldata.size())),
           forwarded, inputs, outputs);
 
@@ -391,15 +391,15 @@ protected:
         }
       }
 
-      auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
+      auto set_r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
           result_key, std::as_bytes(std::span(record.data(), record.size())),
           std::to_underlying(StorageDeltaFlags::None));
       if (!set_r.has_value() ||
           set_r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
         ADD_FAILURE() << "capture driver failed to persist result";
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       }
-      return {};
+      co_return InvokeStatus<void>{};
     };
   }
 
@@ -919,7 +919,9 @@ TEST_F(DefaultWalletParityTest, ZeroByteChildReturn)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [](NativeSyscallContext & /*unused*/) noexcept
-                  -> InvokeStatus<void> { return {}; });
+                  -> x23::Async<InvokeStatus<void>> {
+                co_return InvokeStatus<void>{};
+              });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
   extra.emplace(kEmptyReturnId,
                 std::make_unique<NativeContract>(std::move(fns)));
@@ -950,27 +952,29 @@ TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)
       make_contract_address(223);
   constexpr int32_t kTokenReturnId = 64;
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    AuthTokenNode root_node{.consumer_address = kTokenReturnAddr,
-                            .payload = x23::serialize(2U),
-                            .child_nodes = {}};
-    auto serialized_root = x23::serialize(root_node);
-    uint32_t token_id = 0;
-    auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
-        BlockHeight{1000},
-        std::span<const std::byte>{reinterpret_cast<const std::byte *>(
-                                       serialized_root.data()),
-                                   serialized_root.size()},
-        token_id);
-    if (!mint_res.has_value() ||
-        mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-      ADD_FAILURE() << "MintAuthToken failed";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    ctx.handler().set_return_buffer(ReturnBuffer{0xAA, 0xBB}, false,
-                                    {token_id});
-    return {};
-  });
+  fns.emplace(
+      0,
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
+        AuthTokenNode root_node{.consumer_address = kTokenReturnAddr,
+                                .payload = x23::serialize(2U),
+                                .child_nodes = {}};
+        auto serialized_root = x23::serialize(root_node);
+        uint32_t token_id = 0;
+        auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000},
+            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                           serialized_root.data()),
+                                       serialized_root.size()},
+            token_id);
+        if (!mint_res.has_value() ||
+            mint_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "MintAuthToken failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        ctx.handler().set_return_buffer(ReturnBuffer{0xAA, 0xBB}, false,
+                                        {token_id});
+        co_return InvokeStatus<void>{};
+      });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> extra;
   extra.emplace(kTokenReturnId,
                 std::make_unique<NativeContract>(std::move(fns)));

@@ -299,7 +299,7 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   }
 
   // Clamp the child's budget to what the parent still has, mirroring
-  // production kInvoke: syscall_Invoke_inner() hands
+  // production kInvoke: syscall_Invoke_inner()() hands
   // SystemCallHandler::invoke() min(requested gas_limit, remaining_gas), so a
   // child frame can never be admitted with a larger budget than its caller can
   // pay for. Without the clamp a mock child could spend past the parent's

@@ -79,91 +79,94 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 
   // Contract A: Calls Contract B and writes its own state
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_a;
-  fns_a.emplace(
-      0,
-      [contract_a_data, contract_a_key, contract_b_addr](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Contract A writes its own state
-        auto r0 = ctx.syscall<SyscallNo::kBytestringSet>(
-            contract_a_key, std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "Failed to set bytestring";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns_a.emplace(0,
+                [contract_a_data, contract_a_key,
+                 contract_b_addr](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
+                  // Contract A writes its own state
+                  auto r0 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                      contract_a_key, std::as_bytes(std::span(contract_a_data)),
+                      std::to_underlying(StorageDeltaFlags::None));
+                  if (!r0.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r0.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    ADD_FAILURE() << "Failed to set bytestring";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Call Contract B (which will revert)
-        CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          return ctx.syscall<SyscallNo::kInvoke>(contract_b_addr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
-        }();
-        if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        // A child frame ran, so Invoke returns None; the manual
-        // revert is reported via frame_status == Abort.
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          ADD_FAILURE() << "Expected Contract B to manually revert (Abort)";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Call Contract B (which will revert)
+                  CopyableInvokeOutputs r1_outputs{};
+                  auto r1 = co_await
+                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
+                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                        contract_b_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, r1_outputs);
+                  }();
+                  if (!r1.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  // A child frame ran, so Invoke returns None; the manual
+                  // revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract B to manually revert (Abort)";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Contract A should receive Contract B's return data
-        auto status = ctx.handler().get_return_buffer();
-        if (!status || !(*status)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Contract A should receive Contract B's co_return data
+                  auto status = ctx.handler().get_return_buffer();
+                  if (!status || !(*status)) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Verify return data matches expected
-        auto expected_data = make_bytestring("contract_b_error");
-        if ((**status)->size() != expected_data.size()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (std::memcmp((**status)->data(), expected_data.data(),
-                        expected_data.size()) != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Verify co_return data matches expected
+                  auto expected_data = make_bytestring("contract_b_error");
+                  if ((**status)->size() != expected_data.size()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (std::memcmp((**status)->data(), expected_data.data(),
+                                  expected_data.size()) != 0) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        return {};
-      });
+                  co_return InvokeStatus<void>{};
+                });
   auto contract_a = std::make_unique<NativeContract>(std::move(fns_a));
 
   // Contract B: Writes state and then reverts with return data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
   fns_b.emplace(0,
-                [contract_b_data, contract_b_return_data, contract_b_key](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [contract_b_data, contract_b_return_data,
+                 contract_b_key](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
                   // Contract B writes state that should be reverted
                   auto [res, _gas] = syscall_BytestringSet_inner(
                       ctx.handler(), contract_b_key,
                       std::as_bytes(std::span(contract_b_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      std::to_underlying(StorageDeltaFlags::None))();
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "Failed to set bytestring";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  // Contract B manually reverts with return data
+                  // Contract B manually reverts with co_return data
                   ReturnBuffer buffer;
                   buffer.resize_uninitialized(contract_b_return_data.size());
                   std::memcpy(buffer.data(), contract_b_return_data.data(),
                               contract_b_return_data.size());
                   ctx.handler().set_return_buffer(std::move(buffer), true, {});
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   auto contract_b = std::make_unique<NativeContract>(std::move(fns_b));
 
@@ -245,162 +248,166 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 
   // Contract A: Calls Contract B and writes its own state
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_a;
-  fns_a.emplace(
-      0,
-      [contract_a_data, contract_a_key, contract_b_addr](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Contract A writes its own state
-        auto [res, _gas] = syscall_BytestringSet_inner(
-            ctx.handler(), contract_a_key,
-            std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!res.has_value() ||
-            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "Failed to set bytestring";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns_a.emplace(0,
+                [contract_a_data, contract_a_key,
+                 contract_b_addr](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
+                  // Contract A writes its own state
+                  auto [res, _gas] = syscall_BytestringSet_inner(
+                      ctx.handler(), contract_a_key,
+                      std::as_bytes(std::span(contract_a_data)),
+                      std::to_underlying(StorageDeltaFlags::None))();
+                  if (!res.has_value() ||
+                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    ADD_FAILURE() << "Failed to set bytestring";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Call Contract B
-        CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          return ctx.syscall<SyscallNo::kInvoke>(contract_b_addr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
-        }();
-        if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        // A child frame ran, so Invoke returns None; Contract B's
-        // manual revert is reported via frame_status == Abort.
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          ADD_FAILURE() << "Expected Contract B to manually revert (Abort)";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Call Contract B
+                  CopyableInvokeOutputs r1_outputs{};
+                  auto r1 = co_await
+                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
+                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                        contract_b_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, r1_outputs);
+                  }();
+                  if (!r1.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  // A child frame ran, so Invoke returns None; Contract B's
+                  // manual revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract B to manually revert (Abort)";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Contract A should receive Contract B's processed return
-        // data
-        auto status = ctx.handler().get_return_buffer();
-        if (!status || !(*status)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Contract A should receive Contract B's processed return
+                  // data
+                  auto status = ctx.handler().get_return_buffer();
+                  if (!status || !(*status)) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Verify return data matches expected
-        auto expected_data = make_bytestring("contract_b_processed");
-        if ((**status)->size() != expected_data.size()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (std::memcmp((**status)->data(), expected_data.data(),
-                        expected_data.size()) != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Verify co_return data matches expected
+                  auto expected_data = make_bytestring("contract_b_processed");
+                  if ((**status)->size() != expected_data.size()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (std::memcmp((**status)->data(), expected_data.data(),
+                                  expected_data.size()) != 0) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        return {};
-      });
+                  co_return InvokeStatus<void>{};
+                });
   auto contract_a = std::make_unique<NativeContract>(std::move(fns_a));
 
   // Contract B: Calls Contract C, processes C's return data, and returns
   // processed data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
-  fns_b.emplace(
-      0,
-      [contract_b_data, contract_b_return_data, contract_b_key,
-       contract_c_addr](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Contract B writes state that should be reverted
-        auto [res, _gas] = syscall_BytestringSet_inner(
-            ctx.handler(), contract_b_key,
-            std::as_bytes(std::span(contract_b_data)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!res.has_value() ||
-            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "Failed to set bytestring";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns_b.emplace(0,
+                [contract_b_data, contract_b_return_data, contract_b_key,
+                 contract_c_addr](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
+                  // Contract B writes state that should be reverted
+                  auto [res, _gas] = syscall_BytestringSet_inner(
+                      ctx.handler(), contract_b_key,
+                      std::as_bytes(std::span(contract_b_data)),
+                      std::to_underlying(StorageDeltaFlags::None))();
+                  if (!res.has_value() ||
+                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    ADD_FAILURE() << "Failed to set bytestring";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Call Contract C (which will revert)
-        CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          return ctx.syscall<SyscallNo::kInvoke>(contract_c_addr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
-        }();
-        if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        // A child frame ran, so Invoke returns None; Contract C's
-        // manual revert is reported via frame_status == Abort.
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          ADD_FAILURE() << "Expected Contract C to manually revert (Abort)";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Call Contract C (which will revert)
+                  CopyableInvokeOutputs r1_outputs{};
+                  auto r1 = co_await
+                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
+                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                        contract_c_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, r1_outputs);
+                  }();
+                  if (!r1.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  // A child frame ran, so Invoke returns None; Contract C's
+                  // manual revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract C to manually revert (Abort)";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Contract B receives Contract C's return data
-        auto status = ctx.handler().get_return_buffer();
-        if (!status || !(*status)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Contract B receives Contract C's co_return data
+                  auto status = ctx.handler().get_return_buffer();
+                  if (!status || !(*status)) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Verify C's return data
-        auto expected_c_data = make_bytestring("contract_c_error");
-        if ((**status)->size() != expected_c_data.size()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (std::memcmp((**status)->data(), expected_c_data.data(),
-                        expected_c_data.size()) != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Verify C's co_return data
+                  auto expected_c_data = make_bytestring("contract_c_error");
+                  if ((**status)->size() != expected_c_data.size()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (std::memcmp((**status)->data(), expected_c_data.data(),
+                                  expected_c_data.size()) != 0) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Contract B returns processed data
-        ReturnBuffer buffer;
-        buffer.resize_uninitialized(contract_b_return_data.size());
-        std::memcpy(buffer.data(), contract_b_return_data.data(),
-                    contract_b_return_data.size());
-        ctx.handler().set_return_buffer(std::move(buffer), true, {});
-        return {};
-      });
+                  // Contract B returns processed data
+                  ReturnBuffer buffer;
+                  buffer.resize_uninitialized(contract_b_return_data.size());
+                  std::memcpy(buffer.data(), contract_b_return_data.data(),
+                              contract_b_return_data.size());
+                  ctx.handler().set_return_buffer(std::move(buffer), true, {});
+                  co_return InvokeStatus<void>{};
+                });
   auto contract_b = std::make_unique<NativeContract>(std::move(fns_b));
 
   // Contract C: Writes state and reverts with return data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_c;
   fns_c.emplace(0,
-                [contract_c_data, contract_c_return_data, contract_c_key](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                [contract_c_data, contract_c_return_data,
+                 contract_c_key](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
                   // Contract C writes state that should be reverted
                   auto [res, _gas] = syscall_BytestringSet_inner(
                       ctx.handler(), contract_c_key,
                       std::as_bytes(std::span(contract_c_data)),
-                      std::to_underlying(StorageDeltaFlags::None));
+                      std::to_underlying(StorageDeltaFlags::None))();
                   if (!res.has_value() ||
                       res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
                     ADD_FAILURE() << "Failed to set bytestring";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  // Contract C manually reverts with return data
+                  // Contract C manually reverts with co_return data
                   ReturnBuffer buffer;
                   buffer.resize_uninitialized(contract_c_return_data.size());
                   std::memcpy(buffer.data(), contract_c_return_data.data(),
                               contract_c_return_data.size());
                   ctx.handler().set_return_buffer(std::move(buffer), true, {});
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   auto contract_c = std::make_unique<NativeContract>(std::move(fns_c));
 
@@ -482,79 +489,81 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 
   // Contract A: Calls Contract B and writes its own state
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_a;
-  fns_a.emplace(
-      0,
-      [contract_a_data, contract_a_key, contract_b_addr](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Contract A writes its own state
-        auto [res, _gas] = syscall_BytestringSet_inner(
-            ctx.handler(), contract_a_key,
-            std::as_bytes(std::span(contract_a_data)),
-            std::to_underlying(StorageDeltaFlags::None));
-        if (!res.has_value() ||
-            res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "Failed to set bytestring";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+  fns_a.emplace(0,
+                [contract_a_data, contract_a_key,
+                 contract_b_addr](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
+                  // Contract A writes its own state
+                  auto [res, _gas] = syscall_BytestringSet_inner(
+                      ctx.handler(), contract_a_key,
+                      std::as_bytes(std::span(contract_a_data)),
+                      std::to_underlying(StorageDeltaFlags::None))();
+                  if (!res.has_value() ||
+                      res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    ADD_FAILURE() << "Failed to set bytestring";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Call Contract B (which will revert)
-        CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          return ctx.syscall<SyscallNo::kInvoke>(contract_b_addr,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
-        }();
-        if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        // A child frame ran, so Invoke returns None; the manual
-        // revert is reported via frame_status == Abort.
-        if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          ADD_FAILURE() << "Expected Contract B to manually revert (Abort)";
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Call Contract B (which will revert)
+                  CopyableInvokeOutputs r1_outputs{};
+                  auto r1 = co_await
+                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                    CopyableInvokeInputs inputs{
+                        .entrypoint_id = 0,
+                        .gas_limit = UINT64_MAX,
+                        .flags = std::to_underlying(InvokeFlag::None),
+                    };
+                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                        contract_b_addr, std::span<const std::byte>{},
+                        std::span<uint32_t>{}, inputs, r1_outputs);
+                  }();
+                  if (!r1.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  // A child frame ran, so Invoke returns None; the manual
+                  // revert is reported via frame_status == Abort.
+                  if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (r1_outputs.frame_status !=
+                      InvocationFrameStatusCode::Abort) {
+                    ADD_FAILURE()
+                        << "Expected Contract B to manually revert (Abort)";
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Contract A should receive Contract B's return data
-        auto status = ctx.handler().get_return_buffer();
-        if (!status || !(*status)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Contract A should receive Contract B's co_return data
+                  auto status = ctx.handler().get_return_buffer();
+                  if (!status || !(*status)) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        // Verify return data matches expected
-        auto expected_data = make_bytestring("contract_b_error");
-        if ((**status)->size() != expected_data.size()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        if (std::memcmp((**status)->data(), expected_data.data(),
-                        expected_data.size()) != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+                  // Verify co_return data matches expected
+                  auto expected_data = make_bytestring("contract_b_error");
+                  if ((**status)->size() != expected_data.size()) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
+                  if (std::memcmp((**status)->data(), expected_data.data(),
+                                  expected_data.size()) != 0) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
+                  }
 
-        return {};
-      });
+                  co_return InvokeStatus<void>{};
+                });
   auto contract_a = std::make_unique<NativeContract>(std::move(fns_a));
 
   // Contract B: Reverts with return data
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_b;
   fns_b.emplace(0,
-                [contract_b_return_data](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  // Contract B manually reverts with return data
+                [contract_b_return_data](NativeSyscallContext &ctx) noexcept
+                    -> x23::Async<InvokeStatus<void>> {
+                  // Contract B manually reverts with co_return data
                   ReturnBuffer buffer;
                   buffer.resize_uninitialized(contract_b_return_data.size());
                   std::memcpy(buffer.data(), contract_b_return_data.data(),
                               contract_b_return_data.size());
                   ctx.handler().set_return_buffer(std::move(buffer), true, {});
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   auto contract_b = std::make_unique<NativeContract>(std::move(fns_b));
 

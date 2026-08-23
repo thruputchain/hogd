@@ -151,29 +151,29 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   const auto executing_height = static_cast<BlockHeight>(get_block_number());
 
   auto context = make_single_contract_context(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         BlockHeight height{};
-        auto h = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+        auto h = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!h.has_value() ||
             h.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         uint64_t gas_out = 0;
-        auto s = ctx.syscall<SyscallNo::kGetTransactionStatistics>(
+        auto s = co_await ctx.syscall<SyscallNo::kGetTransactionStatistics>(
             TransactionStatistic::GasRemaining, gas_out);
         if (!s.has_value() ||
             s.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         ContractAddress sender{};
-        auto m = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+        auto m = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
         if (!m.has_value() ||
             m.value() != SyscallErrorCode::kSyscallErrorCodeIsRootTransaction) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
@@ -218,40 +218,36 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
       make_storage_key("trace_nnint_unset");
 
   auto context = make_single_contract_context(
-      [set_key,
-       unset_key](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [set_key, unset_key](NativeSyscallContext &ctx) noexcept
+          -> x23::Async<InvokeStatus<void>> {
         const int128_t set_value = 5;
-        auto w = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+        auto w = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             set_key, &set_value, int128_t{7},
             std::to_underlying(StorageDeltaFlags::None));
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         int128_t current_set = 0;
         bool current_set_opt = false;
         int128_t current_add = 0;
-        auto g1 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(set_key, false,
-                                                             current_set,
-                                                             current_set_opt,
-                                                             current_add);
+        auto g1 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+            set_key, false, current_set, current_set_opt, current_add);
         if (!g1.has_value() ||
             g1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             !current_set_opt || current_set != 5 || current_add != 7) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto g2 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(unset_key, false,
-                                                             current_set,
-                                                             current_set_opt,
-                                                             current_add);
+        auto g2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+            unset_key, false, current_set, current_set_opt, current_add);
         if (!g2.has_value() ||
             g2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             current_set_opt || current_add != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
@@ -307,28 +303,28 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   const SHA256Hash expected_hash = sha256(std::span(whole));
 
   auto context = make_single_contract_context(
-      [part1, part2, expected_hash](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto u1 = ctx.syscall<SyscallNo::kSHA256Update>(
+      [part1, part2, expected_hash](NativeSyscallContext &ctx) noexcept
+          -> x23::Async<InvokeStatus<void>> {
+        auto u1 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0U, std::as_bytes(std::span(part1)), true);
         if (!u1.has_value() ||
             u1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto u2 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto u2 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0U, std::as_bytes(std::span(part2)), false);
         if (!u2.has_value() ||
             u2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         SHA256Hash out{};
-        auto f = ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out);
+        auto f = co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out);
         if (!f.has_value() ||
             f.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             out != expected_hash) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
@@ -383,17 +379,17 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
   auto serialized_node = x23::serialize(node);
 
   auto context = make_single_contract_context(
-      [payload, serialized_node,
-       claim](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [payload, serialized_node, claim](NativeSyscallContext &ctx) noexcept
+          -> x23::Async<InvokeStatus<void>> {
         generated::AuthClaim claim_out{};
-        auto c = ctx.syscall<SyscallNo::kGetAuthClaim>(claim_out);
+        auto c = co_await ctx.syscall<SyscallNo::kGetAuthClaim>(claim_out);
         if (!c.has_value() ||
             c.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         uint32_t token_id = 0;
-        auto m = ctx.syscall<SyscallNo::kMintAuthToken>(
+        auto m = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
             BlockHeight{ctx.handler().get_block_height()().value() + 5},
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(
                                            serialized_node.data()),
@@ -401,7 +397,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
             token_id);
         if (!m.has_value() ||
             m.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // A 2-byte buffer for a 4-byte payload: written_len reports the FULL
@@ -412,19 +408,19 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
         RuntimeMemoryLength written_len = 0;
         uint32_t unwrapped_start = 0;
         uint32_t unwrapped_count = 0;
-        auto consume = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+        auto consume = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
             token_id, std::span<std::byte>(small_buffer), minter, written_len,
             unwrapped_start, unwrapped_count);
         if (!consume.has_value() ||
             consume.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != payload.size() ||
             small_buffer[0] != std::byte{payload[0]} ||
             small_buffer[1] != std::byte{payload[1]} || unwrapped_count != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto tx = make_tx();
@@ -478,21 +474,22 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   const std::array<uint8_t, 3> entry_bytes = {0xAA, 0xBB, 0xCC};
 
   auto context = make_single_contract_context(
-      [key,
-       entry_bytes](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto ins = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+      [key, entry_bytes](NativeSyscallContext &ctx) noexcept
+          -> x23::Async<InvokeStatus<void>> {
+        auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(entry_bytes)));
         if (!ins.has_value() ||
             ins.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         RuntimeMemoryLength len = 0;
-        auto peek = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(key, len);
+        auto peek =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(key, len);
         if (!peek.has_value() ||
             peek.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             len != entry_bytes.size()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // A 1-byte buffer for a 3-byte entry: written_len reports the full
@@ -500,17 +497,18 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
         // whole entry.
         std::array<std::byte, 1> small_buffer{};
         RuntimeMemoryLength written_len = 0;
-        auto consume = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-            key, false, std::span<std::byte>(small_buffer), written_len);
+        auto consume =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::span<std::byte>(small_buffer), written_len);
         if (!consume.has_value() ||
             consume.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != entry_bytes.size() ||
             small_buffer[0] != std::byte{entry_bytes[0]}) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
@@ -574,28 +572,29 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
-              [blob_hash, expected_addr](
-                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+              [blob_hash, expected_addr](NativeSyscallContext &ctx) noexcept
+                  -> x23::Async<InvokeStatus<void>> {
                 ContractAddress predicted{};
-                auto g = ctx.syscall<SyscallNo::kGetDeployAddress>(
+                auto g = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
                     static_cast<const ContractAddress *>(nullptr), kNonce,
                     blob_hash, predicted);
                 if (!g.has_value() ||
                     g.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                     predicted != expected_addr) {
-                  return InvokeError{InvokeErrorCode::Deterministic};
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
 
                 ContractAddress deployed{};
                 auto d =
-                    ctx.syscall<SyscallNo::kDeployContract>(kNonce, blob_hash,
-                                                            deployed);
+                    co_await ctx.syscall<SyscallNo::kDeployContract>(kNonce,
+                                                                     blob_hash,
+                                                                     deployed);
                 if (!d.has_value() ||
                     d.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                     deployed != expected_addr) {
-                  return InvokeError{InvokeErrorCode::Deterministic};
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                return {};
+                co_return InvokeStatus<void>{};
               });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
@@ -658,29 +657,30 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   const std::array<uint8_t, 8> value = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
   auto context = make_single_contract_context(
-      [key, value](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto w = ctx.syscall<SyscallNo::kBytestringSet>(
+      [key, value](NativeSyscallContext &ctx) noexcept
+          -> x23::Async<InvokeStatus<void>> {
+        auto w = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key, std::as_bytes(std::span(value)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         std::array<std::byte, 4> small_buffer{};
         RuntimeMemoryLength written_len = 0;
-        auto g = ctx.syscall<SyscallNo::kBytestringGet>(
+        auto g = co_await ctx.syscall<SyscallNo::kBytestringGet>(
             key, std::span<std::byte>(small_buffer), written_len);
         if (!g.has_value() ||
             g.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != value.size() ||
             small_buffer[0] != std::byte{value[0]} ||
             small_buffer[3] != std::byte{value[3]}) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);

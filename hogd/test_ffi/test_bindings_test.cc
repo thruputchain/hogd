@@ -1265,7 +1265,7 @@ namespace {
 //   std::span<const std::byte> input_calldata,
 //   std::span<const std::byte> input_owned_auth_token_ids_list,
 //   const CopyableInvokeInputs &input_inputs,
-//   CopyableInvokeOutputs &output_outputs) noexcept
+//   CopyableInvokeOutputs &output_outputs)() noexcept
 
 HostFnStatus<SyscallErrorCode>
 test_ffi_invoke(const ContractAddress &input_address,
@@ -1304,7 +1304,7 @@ test_ffi_invoke(const ContractAddress &input_address,
 // syscall_MintAuthToken_inner(SystemCallHandler &syscall_handler,
 //   const BlockHeight &input_expiry_height,
 //   std::span<const std::byte> input_serialized_auth_token,
-//   uint32_t &output_token_id) noexcept
+//   uint32_t &output_token_id)() noexcept
 HostFnStatus<SyscallErrorCode>
 test_ffi_mint_auth_token(BlockHeight input_expiry_height,
                          std::span<const std::byte> input_serialized_auth_token,
@@ -1332,7 +1332,7 @@ test_ffi_mint_auth_token(BlockHeight input_expiry_height,
 //   ContractAddress &output_token_minter,
 //   RuntimeMemoryLength &output_auth_payload_written_len,
 //   uint32_t &output_unwrapped_token_id_start,
-//   uint32_t &output_unwrapped_token_id_count) noexcept
+//   uint32_t &output_unwrapped_token_id_count)() noexcept
 HostFnStatus<SyscallErrorCode>
 test_ffi_consume_auth_token(
     uint32_t input_token_id, std::span<std::byte> output_auth_payload,

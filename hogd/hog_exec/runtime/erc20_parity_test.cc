@@ -241,7 +241,7 @@ protected:
         .gas_limit = static_cast<GasAmount>(UINT64_MAX),
         .flags = std::to_underlying(InvokeFlag::None),
     };
-    auto r = ctx.syscall<SyscallNo::kInvoke>(
+    auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
         target, std::as_bytes(std::span(calldata.data(), calldata.size())),
         std::span<uint32_t>{}, inputs, outputs);
 
@@ -280,7 +280,7 @@ protected:
                  StorageKeyContractData const &result_key,
                  std::vector<uint8_t> const &record)
   {
-    auto set_r = ctx.syscall<SyscallNo::kBytestringSet>(
+    auto set_r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
         result_key, std::as_bytes(std::span(record.data(), record.size())),
         std::to_underlying(StorageDeltaFlags::None));
     if (!set_r.has_value() ||
@@ -301,11 +301,12 @@ protected:
   {
     auto calldata = erc20_meta::make_calldata<Name>(args...);
     Runtime::MethodID method_id = erc20_meta::method_id<Name>();
-    return [target, result_key, method_id, calldata = std::move(calldata)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    return [target, result_key, method_id,
+            calldata = std::move(calldata)](NativeSyscallContext &ctx) noexcept
+               -> x23::Async<InvokeStatus<void>> {
       std::vector<uint8_t> record;
       append_invoke_record(ctx, target, method_id, calldata, record);
-      return persist_record(ctx, result_key, record);
+      co_return persist_record(ctx, result_key, record);
     };
   }
 
@@ -339,18 +340,18 @@ protected:
   static NativeContract::function_t
   make_multi_capture_driver(std::vector<CaptureStep> steps)
   {
-    return [steps = std::move(steps)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    return [steps = std::move(steps)](NativeSyscallContext &ctx) noexcept
+               -> x23::Async<InvokeStatus<void>> {
       for (auto const &step : steps) {
         std::vector<uint8_t> record;
         append_invoke_record(ctx, step.target, step.method_id, step.calldata,
                              record);
         if (auto r = persist_record(ctx, step.result_key, record);
             !r.has_value()) {
-          return r.error();
+          co_return r.error();
         }
       }
-      return {};
+      co_return InvokeStatus<void>{};
     };
   }
 
@@ -534,14 +535,16 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0,
+        [](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
           auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -635,8 +638,8 @@ protected:
     auto make_grant =
         [amount](ContractAddress token,
                  ContractAddress spender) -> NativeContract::function_t {
-      return [token, spender, amount](
-                 NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      return [token, spender, amount](NativeSyscallContext &ctx) noexcept
+                 -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amount)));
@@ -644,9 +647,9 @@ protected:
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE() << "grant allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       };
     };
 
@@ -685,12 +688,14 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [amount](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0,
+        [amount](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
           auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
                                                   make_amount(amount));
@@ -698,9 +703,9 @@ protected:
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -799,13 +804,13 @@ protected:
         rv32_admin_fns;
     rv32_admin_fns.emplace(
         0,
-        [start_balance](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [start_balance](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
           auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto mint = client.invoke_opt<u8"mint">(ctx, kRv32CallerAddr,
                                                   make_amount(start_balance));
@@ -813,9 +818,9 @@ protected:
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -904,8 +909,8 @@ protected:
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
                          uint128_t amt) -> NativeContract::function_t {
-      return [token, spender,
-              amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      return [token, spender, amt](NativeSyscallContext &ctx) noexcept
+                 -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amt)));
@@ -913,9 +918,9 @@ protected:
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE() << "grant allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       };
     };
 
@@ -955,13 +960,13 @@ protected:
         rv32_admin_fns;
     rv32_admin_fns.emplace(
         0,
-        [owner_balance](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [owner_balance](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
           auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
                                                   make_amount(owner_balance));
@@ -969,9 +974,9 @@ protected:
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -1043,8 +1048,8 @@ protected:
     // An owner driver that grants `spender` an allowance on `token`.
     auto make_grant = [](ContractAddress token, ContractAddress spender,
                          uint128_t amt) -> NativeContract::function_t {
-      return [token, spender,
-              amt](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      return [token, spender, amt](NativeSyscallContext &ctx) noexcept
+                 -> x23::Async<InvokeStatus<void>> {
         ContractTraitClient<itc_erc20::ERC20> client(token);
         auto r = client.invoke_opt<u8"adjust_allowance">(
             ctx, spender, make_difference(static_cast<int128_t>(amt)));
@@ -1052,9 +1057,9 @@ protected:
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE() << "grant allowance failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       };
     };
 
@@ -1094,13 +1099,13 @@ protected:
         rv32_admin_fns;
     rv32_admin_fns.emplace(
         0,
-        [owner_balance](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [owner_balance](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
           auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto mint = client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
                                                   make_amount(owner_balance));
@@ -1108,9 +1113,9 @@ protected:
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
             ADD_FAILURE() << "itc mint failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));
@@ -1198,14 +1203,16 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0,
+        [](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
           auto init = client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));

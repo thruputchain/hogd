@@ -92,17 +92,18 @@ protected:
   static NativeContract::function_t make_write_method(std::string_view key_name,
                                                       std::string_view value)
   {
-    return [k = std::string(key_name), v = std::string(value)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    return [k = std::string(key_name),
+            v = std::string(value)](NativeSyscallContext &ctx) noexcept
+               -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key(k);
       auto [ws, _wg] = syscall_BytestringSet_inner(
           ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))),
-          std::to_underlying(StorageDeltaFlags::None));
+          std::to_underlying(StorageDeltaFlags::None))();
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       }
-      return {};
+      co_return InvokeStatus<void>{};
     };
   }
 
@@ -168,9 +169,9 @@ protected:
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
-                                           std::span<uint32_t>{}, inputs,
-                                           CopyableInvokeOutputs{});
+    return co_await ctx.syscall<SyscallNo::kInvoke>(
+        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+        CopyableInvokeOutputs{});
   }
 
   // Same as try_invoke_b, but writes the child frame outcome into `outputs`
@@ -186,19 +187,19 @@ protected:
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
-                                           std::span<uint32_t>{}, inputs,
-                                           outputs);
+    return co_await ctx.syscall<SyscallNo::kInvoke>(
+        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+        outputs);
   }
 
   // Build a NativeContext with a single no-op contract (for structural
   // validation tests that don't need real execution).
   static std::unique_ptr<NativeContext> make_noop_context()
   {
-    auto noop = make_contract(
-        [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-          return {};
-        });
+    auto noop = make_contract([](NativeSyscallContext & /*unused*/) noexcept
+                                  -> x23::Async<InvokeStatus<void>> {
+      co_return InvokeStatus<void>{};
+    });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(noop));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -212,27 +213,29 @@ protected:
   static std::unique_ptr<RuntimeContext> make_rcq_context()
   {
     auto contract = make_contract(
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
             auto res = ctx.handler().retrocausal_queue_insert(
                 key, std::as_bytes(std::span(&val, 1)))();
             if (!res.has_value())
-              return res.error().to_invoke_error();
+              co_return res.error().to_invoke_error();
           }
-          return {};
+          co_return InvokeStatus<void>{};
         },
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx) noexcept
+            -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           uint8_t count = cd.empty() ? 1 : cd[0];
           auto key = make_storage_key("rcq0");
           for (uint8_t i = 0; i < count; i++) {
             auto res = ctx.handler().retrocausal_queue_consume(key, false)();
             if (!res.has_value())
-              return res.error().to_invoke_error();
+              co_return res.error().to_invoke_error();
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract));
@@ -311,22 +314,22 @@ protected:
 TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 {
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         if (auto r = try_invoke_b(ctx, kWriteWorld); !r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         // Write something to prove we survived both try_invokes
         auto key = make_storage_key("result");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key,
             std::as_bytes(std::span(std::string_view("ok"))),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -355,10 +358,10 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
 {
   // A: single try_invoke of B.write_hello → produces 1 nondeterministic bit.
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -393,11 +396,11 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
   // Both succeed in proposal → 2 bits.  Flipping bit 0 makes validator
   // skip the second try_invoke → 1 of 2 bits consumed → failure.
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs r0_outputs{};
         auto r0 = try_invoke_b(ctx, kWriteHello, r0_outputs);
         if (!r0.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         // Only do the second try_invoke if the first one actually committed.
         // A child frame that ran but rolled back also returns
@@ -407,9 +410,9 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
         if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
             r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
           if (auto r1 = try_invoke_b(ctx, kWriteWorld); !r1.has_value())
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -608,25 +611,25 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
   std::vector<uint8_t> consumed_values;
 
   // Custom contract: single method that inserts then consumes.
-  auto contract = make_contract(
-      [&consumed_values](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+  auto contract =
+      make_contract([&consumed_values](NativeSyscallContext &ctx) noexcept
+                        -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         consumed_values.clear();
         for (uint8_t val : {10, 20}) {
           auto r = ctx.handler().retrocausal_queue_insert(
               key, std::as_bytes(std::span(&val, 1)))();
           if (!r.has_value())
-            return r.error().to_invoke_error();
+            co_return r.error().to_invoke_error();
         }
         for (int i = 0; i < 3; i++) {
           auto r = ctx.handler().retrocausal_queue_consume(key, false)();
           if (!r.has_value())
-            return r.error().to_invoke_error();
+            co_return r.error().to_invoke_error();
           if (r.value().has_value() && r.value().value().size() == 1)
             consumed_values.push_back(r.value().value()[0]);
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract));
@@ -910,29 +913,29 @@ TEST_P(ProposeValidateRoundtripTest,
   static constexpr uint8_t kForgedEntry = 0xE7;
 
   auto revert_on_forged_observation = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto observed = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!observed.has_value())
-          return observed.error().to_invoke_error();
+          co_return observed.error().to_invoke_error();
 
         if (observed.value().has_value() &&
             observed.value().value().size() == 1 &&
             observed.value().value()[0] == kForgedEntry) {
           ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-          return {};
+          co_return InvokeStatus<void>{};
         }
 
         auto marker = std::string_view("honest");
         auto [write_status, _gas] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker"),
             std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!write_status.has_value() ||
             write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -1017,9 +1020,9 @@ TEST_P(ProposeValidateRoundtripTest,
     return proposal;
   };
 
-  auto contract_a = make_contract(
-      [make_index_calldata](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+  auto contract_a =
+      make_contract([make_index_calldata](NativeSyscallContext &ctx) noexcept
+                        -> x23::Async<InvokeStatus<void>> {
         uint32_t successes = 0;
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           CopyableInvokeInputs inputs{
@@ -1029,11 +1032,12 @@ TEST_P(ProposeValidateRoundtripTest,
           };
           CopyableInvokeOutputs outputs{};
           auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB, make_index_calldata(i),
-                                              std::span<uint32_t>{}, inputs,
-                                              outputs);
+              co_await ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                                       make_index_calldata(i),
+                                                       std::span<uint32_t>{},
+                                                       inputs, outputs);
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Count only try_invokes that actually committed. A child frame
           // that ran but rolled back (e.g. the depth-cap rejection on the
@@ -1045,29 +1049,29 @@ TEST_P(ProposeValidateRoundtripTest,
           }
         }
         if (successes != kMaxSavepointDepth + 1) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
-  auto contract_b = make_contract(
-      [make_depth_poc_key](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+  auto contract_b =
+      make_contract([make_depth_poc_key](NativeSyscallContext &ctx) noexcept
+                        -> x23::Async<InvokeStatus<void>> {
         auto const &calldata = ctx.handler().get_calldata();
         if (calldata.size() != 2) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         uint32_t index = static_cast<uint32_t>(calldata[0]) |
                          (static_cast<uint32_t>(calldata[1]) << 8);
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_depth_poc_key(index),
             std::as_bytes(std::span(calldata)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -1123,30 +1127,28 @@ TEST_P(ProposeValidateRoundtripTest,
   // proposal bit reaches finalize_after_root_frame instead of short-circuiting
   // in A's logic.
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
           // Tolerant: propagate system errors but ignore user-level failures
           // (including the deterministic depth-cap failure on the last try).
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
-  auto contract_b = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  auto contract_b = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
+                                      -> x23::Async<InvokeStatus<void>> {
+    co_return InvokeStatus<void>{};
+  });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1178,29 +1180,27 @@ TEST_P(ProposeValidateRoundtripTest,
 TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 {
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
-  auto contract_b = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  auto contract_b = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
+                                      -> x23::Async<InvokeStatus<void>> {
+    co_return InvokeStatus<void>{};
+  });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1232,30 +1232,28 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 {
   static constexpr uint32_t kAttempts = 2 * kMaxSavepointDepth;
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kAttempts; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
           // Tolerant: propagate system errors, ignore deterministic child
           // failures (including the depth-cap rejection past the cap).
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
-  auto contract_b = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  auto contract_b = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
+                                      -> x23::Async<InvokeStatus<void>> {
+    co_return InvokeStatus<void>{};
+  });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
   auto tx = make_invoke_a_tx(0);
@@ -1307,19 +1305,18 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   setup_grant_storage_token(kAddrC, 1'000'000'000);
 
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+            outputs);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // B's frame hits the depth cap and rolls back. The child frame still
         // ran, so the Invoke syscall returns kSyscallErrorCodeNone; the
@@ -1327,12 +1324,12 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         // deterministic failure.
         if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
             outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kChildCap; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -1340,27 +1337,26 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           CopyableInvokeOutputs outputs{};
-          auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrC,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrC, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, outputs);
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // These C invocations are expected to commit. A child frame that
           // ran but rolled back also returns kSyscallErrorCodeNone, so a
           // non-commit is detected via frame_status != Return.
           if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
               outputs.frame_status != InvocationFrameStatusCode::Return) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
-  auto contract_c = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
-      });
+  auto contract_c = make_contract([](NativeSyscallContext & /*ctx*/) noexcept
+                                      -> x23::Async<InvokeStatus<void>> {
+    co_return InvokeStatus<void>{};
+  });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract_a));
@@ -1405,13 +1401,13 @@ TEST_P(ProposeValidateRoundtripTest,
        DeterministicRootErrorSkipsExtraProposalBitCheck)
 {
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, kWriteHello);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   auto native_context =
@@ -1549,9 +1545,11 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
   auto run_case = [this, &tx](InvokeErrorCode root_error,
                               ExecResult expected_result) {
     auto make_error_context = [root_error] {
-      auto contract_a = make_contract(
-          [root_error](NativeSyscallContext & /*unused*/) noexcept
-              -> InvokeStatus<void> { return InvokeError{root_error}; });
+      auto contract_a =
+          make_contract([root_error](NativeSyscallContext & /*unused*/) noexcept
+                            -> x23::Async<InvokeStatus<void>> {
+            co_return InvokeError{root_error};
+          });
       return make_ab_context(std::move(contract_a), make_contract());
     };
 
@@ -1630,11 +1628,11 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
 
   // TX_B: consume concurrent entry, then overwrite with bytestring.
   auto consume_overwrite_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return res.error().to_invoke_error();
         // Overwrite with a bytestring
         uint8_t data[] = {0xAB};
         auto ws =
@@ -1642,8 +1640,8 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
                                          std::to_underlying(
                                              StorageDeltaFlags::None))();
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
-        return {};
+          co_return ws.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_overwrite_contract));
@@ -1695,17 +1693,17 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
 
   // TX_B: consume concurrent entry, then delete.
   auto consume_delete_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return res.error().to_invoke_error();
         auto del =
             ctx.handler().delete_object(key, std::to_underlying(
                                                  StorageDeltaFlags::None))();
         if (!del.has_value())
-          return del.error().to_invoke_error();
-        return {};
+          co_return del.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_delete_contract));
@@ -1754,15 +1752,16 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
 
   // TX_B: peek then consume.
   auto peek_then_consume_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false)();
+          co_return peek_res.error().to_invoke_error();
+        auto consume_res =
+            ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        return {};
+          co_return consume_res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_then_consume_contract));
@@ -1810,12 +1809,12 @@ TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
 
   // TX_B: peek only, no write.
   auto peek_only_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_only_contract));
@@ -1865,26 +1864,26 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
 
   // TX_B: A try_invokes B (which consumes + faults), then A re-consumes.
   auto contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return res.error().to_invoke_error();
         // Fault — frame will be reverted
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         // try_invoke B method 0 — it will fault
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         // B faulted, frame reverted. Now A re-consumes from rcq0.
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   auto native_ctx =
@@ -1936,22 +1935,22 @@ TEST_P(ProposeValidateRoundtripTest,
 
   // TX_B: A try_invokes B (which consumes + faults), A does nothing else.
   auto contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return res.error().to_invoke_error();
         // Fault — frame will be reverted
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         // try_invoke B method 0 — it will fault
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         // Do NOT re-consume — no observation generated in reverted child
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_ctx =
@@ -2006,11 +2005,11 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
 
   // TX_B: peek at concurrent entry, then overwrite with bytestring.
   auto peek_overwrite_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         // Overwrite with a bytestring
         uint8_t data[] = {0xAB};
         auto ws =
@@ -2018,8 +2017,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
                                          std::to_underlying(
                                              StorageDeltaFlags::None))();
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
-        return {};
+          co_return ws.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_overwrite_contract));
@@ -2068,19 +2067,19 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
 
   // TX_B: peek at concurrent entry, then overwrite with nnint.
   auto peek_nnint_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return peek_res.error().to_invoke_error();
         // Overwrite with set_nnint(set_value=0, add_value=42)
         auto ws = ctx.handler().set_nnint(key, std::optional<int128_t>{0},
                                           int128_t{42},
                                           std::to_underlying(
                                               StorageDeltaFlags::None))();
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
-        return {};
+          co_return ws.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_nnint_contract));
@@ -2130,15 +2129,16 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
 
   // TX_B: consume one, then peek the next.
   auto consume_then_peek_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto consume_res =
+            ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
+          co_return consume_res.error().to_invoke_error();
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        return {};
+          co_return peek_res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_then_peek_contract));
@@ -2176,17 +2176,18 @@ TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
 
   // Single TX: insert then consume from the same key.
   auto self_insert_consume_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 42;
         auto ins_res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!ins_res.has_value())
-          return ins_res.error().to_invoke_error();
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false)();
+          co_return ins_res.error().to_invoke_error();
+        auto consume_res =
+            ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        return {};
+          co_return consume_res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(self_insert_consume_contract));
@@ -2234,12 +2235,12 @@ TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
 
   // TX_B: peek only (no consume, no write).
   auto peek_only_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_only_contract));
@@ -2284,18 +2285,19 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
 
   // First, insert {10} into kAddrB's "rcq0" via a simple insert contract.
   auto insert_contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
         auto res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
-  auto insert_contract_a = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
+  auto insert_contract_a =
+      make_contract([](NativeSyscallContext & /*ctx*/) noexcept
+                        -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
   auto insert_ctx = make_ab_context(std::move(insert_contract_a),
                                     std::move(insert_contract_b));
@@ -2319,19 +2321,19 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
 
   // TX_B: A try_invokes B (which peeks at kAddrB's "rcq0"), B succeeds.
   auto peek_contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   auto invoke_contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_ctx =
@@ -2391,15 +2393,16 @@ TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
 
   // TX_B: consume one (gets past-block {10}), peek next (gets concurrent {20}).
   auto consume_peek_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto consume_res =
+            ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
+          co_return consume_res.error().to_invoke_error();
         auto peek_res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        return {};
+          co_return peek_res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_peek_contract));
@@ -2438,35 +2441,35 @@ TEST_P(ProposeValidateRoundtripTest,
 
   // B: method 0 = consume from "rcq0" then fault.
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return res.error().to_invoke_error();
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   // A: method 0 = try_invoke B.0 (faults), return success.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert at kAddrB (same block → concurrent entry visible to B).
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
         auto res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2525,51 +2528,51 @@ TEST_P(ProposeValidateRoundtripTest,
   // B: method 0 = consume from "rcq0" then fault.
   //    method 1 = write bytestring to "rcq0".
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return res.error().to_invoke_error();
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       },
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto overwrite = std::string_view("overwritten");
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), key, std::as_bytes(std::span(overwrite)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   // A: method 0 = try_invoke B.0 (faults), then try_invoke B.1.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         // Frame 1: B.0 consumes + faults
         auto r1 = try_invoke_b(ctx, 0);
         if (!r1.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         // Frame 2: B.1 writes bytestring
         auto r2 = try_invoke_b(ctx, 1);
         if (!r2.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert at kAddrB so B's consume can find the concurrent entry.
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
         auto res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2621,7 +2624,8 @@ TEST_P(ProposeValidateRoundtripTest,
   auto insert_handler =
       make_new_system_call_handler_validation(tx_insert, *insert_ctx, insert_p);
   EXPECT_TRUE(insert_handler.root_invoke()().is_root_success());
-  EXPECT_EQ(insert_handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  EXPECT_EQ(insert_handler.try_commit_transaction()(),
+            ExecResult::ExecResultOK);
 }
 
 // Malicious proposer scenario: contract A try_invokes B.  B peeks at a
@@ -2644,35 +2648,35 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
 
   // B: method 0 = peek at "rcq0", return success.
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   // A: method 0 = try_invoke B.0.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert at kAddrB (same block, concurrent entry for B's peek).
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
         auto res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2740,33 +2744,33 @@ TEST_P(ProposeValidateRoundtripTest,
     GTEST_SKIP() << "RCQ observation validation requires kHogDb";
 
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, true)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
 
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto r = try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
         auto res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2816,41 +2820,41 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
 
   // B: method 0 = consume from "rcq0" then fault.
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto res = ctx.handler().retrocausal_queue_consume(key, false)();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return res.error().to_invoke_error();
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   // A: method 0 = try_invoke B.0 three times, all fault.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto r1 = try_invoke_b(ctx, 0);
         if (!r1.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         auto r2 = try_invoke_b(ctx, 0);
         if (!r2.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         auto r3 = try_invoke_b(ctx, 0);
         if (!r3.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert one entry at kAddrB (same block → concurrent).
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) noexcept -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
         auto res = ctx.handler().retrocausal_queue_insert(
             key, std::as_bytes(std::span(&val, 1)))();
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return res.error().to_invoke_error();
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));

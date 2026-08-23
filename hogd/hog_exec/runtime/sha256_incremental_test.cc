@@ -49,37 +49,37 @@ TEST_F(Sha256IncrementalTest, BasicUpdateAndFinalize)
 
   // Simple incremental hash in a single invocation frame.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::array<uint8_t, 4> first_chunk = {0, 1, 2, 3};
         const std::array<uint8_t, 4> second_chunk = {4, 5, 6, 7};
 
-        auto r1 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto r1 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(first_chunk)), true);
         if (!r1.has_value() ||
             r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto r2 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto r2 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(second_chunk)), false);
         if (!r2.has_value() ||
             r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash digest{};
-        auto r3 = ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
+        auto r3 = co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
         if (!r3.has_value() ||
             r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         const auto expected_hash =
             sha256(std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
         if (digest != expected_hash) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -120,88 +120,88 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
   // buffer 0, then continues hashing to confirm isolation between frames.
   NativeContractBuilder builder_parent;
   builder_parent.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::array<uint8_t, 3> parent_prefix = {'p', 'a', 'r'};
         const std::array<uint8_t, 3> parent_suffix = {'e', 'n', 't'};
 
-        auto p1 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto p1 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(parent_prefix)), true);
         if (!p1.has_value() ||
             p1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto invoke_status = [&]() {
+        auto invoke_status =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kChildAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!invoke_status.has_value() ||
             invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto p2 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto p2 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(parent_suffix)), false);
         if (!p2.has_value() ||
             p2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash digest{};
-        auto p3 = ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
+        auto p3 = co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
         if (!p3.has_value() ||
             p3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         const auto expected_parent_hash =
             sha256(std::vector<uint8_t>{'p', 'a', 'r', 'e', 'n', 't'});
         if (digest != expected_parent_hash) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   NativeContractBuilder builder_child;
   builder_child.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::array<uint8_t, 3> child_prefix = {'c', 'h', 'i'};
         const std::array<uint8_t, 3> child_suffix = {'l', 'd', '1'};
 
-        auto c1 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto c1 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(child_prefix)), true);
         if (!c1.has_value() ||
             c1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto c2 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto c2 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0, std::as_bytes(std::span(child_suffix)), false);
         if (!c2.has_value() ||
             c2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash digest{};
-        auto c3 = ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
+        auto c3 = co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0, digest);
         if (!c3.has_value() ||
             c3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         const auto expected_child_hash =
             sha256(std::vector<uint8_t>{'c', 'h', 'i', 'l', 'd', '1'});
         if (digest != expected_child_hash) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract_parent = builder_parent.build();

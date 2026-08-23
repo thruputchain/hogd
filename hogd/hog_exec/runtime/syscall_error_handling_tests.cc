@@ -546,7 +546,8 @@ TEST_F(SyscallErrorHandlingTest,
                   .has_value());
 
   NativeSyscallContext ctx(handler, 10000);
-  auto status = ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
+  auto status =
+      co_await ctx.syscall<SyscallNo::kWriteAddressRequiredWeight>(Weight{1});
   ASSERT_TRUE(status.has_value());
   ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
@@ -821,7 +822,7 @@ TEST_F(SyscallErrorHandlingTest, MintAuthTokenAtZeroGasIsOutOfGas)
 
   NativeSyscallContext ctx(handler, 0);
   uint32_t token_id = 0;
-  auto mint_res = ctx.syscall<SyscallNo::kMintAuthToken>(
+  auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
       BlockHeight{1000},
       std::span<const std::byte>{reinterpret_cast<const std::byte *>(
                                      serialized_root.data()),
@@ -847,9 +848,8 @@ TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
 
   NativeSyscallContext ctx(handler, 0);
   std::array<std::byte, 4> ret_buf{};
-  auto ret_res =
-      ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{ret_buf},
-                                      false, std::span<const std::byte>{});
+  auto ret_res = co_await ctx.syscall<SyscallNo::kReturn>(
+      std::span<const std::byte>{ret_buf}, false, std::span<const std::byte>{});
 
   // OutOfGas, not Return: Return is what commits the frame to its parent.
   ASSERT_FALSE(ret_res.has_value());

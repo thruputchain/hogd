@@ -141,7 +141,7 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("result"),
             std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -247,7 +247,8 @@ TEST_F(RCQObservationByValueTest,
       [&consumed_values](
           NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false)();
+        auto consume_res =
+            ctx.handler().retrocausal_queue_consume(key, false)();
         if (!consume_res.has_value())
           return consume_res.error().to_invoke_error();
         if (!consume_res.value().has_value())
@@ -261,7 +262,7 @@ TEST_F(RCQObservationByValueTest,
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("result"),
             std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -364,7 +365,7 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("marker"),
             std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};
@@ -442,7 +443,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
         auto [ws, _wg] = syscall_BytestringSet_inner(
             ctx.handler(), make_storage_key("saw"),
             std::as_bytes(std::span(entry.data(), entry.size())),
-            std::to_underlying(StorageDeltaFlags::None));
+            std::to_underlying(StorageDeltaFlags::None))();
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
           return InvokeError{InvokeErrorCode::Deterministic};
