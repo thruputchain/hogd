@@ -123,7 +123,8 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
       [](NativeSyscallContext &ctx, uint32_t input,
          uint32_t expect) -> x23::Async<InvokeStatus<void>> {
         fib_client_t client(kFibContractAddr);
-        auto decoded = co_await client.template invoke_opt<u8"fibonacci">(ctx, input);
+        auto decoded =
+            co_await client.template invoke_opt<u8"fibonacci">(ctx, input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};

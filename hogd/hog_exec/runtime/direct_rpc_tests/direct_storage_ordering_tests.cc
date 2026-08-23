@@ -85,11 +85,13 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
       .delta = make_nnint_add_delta(cost_model_->get_nnint_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
+  auto r =
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())()
+      db_proxy
+          .commit_transaction(get_block_number(), 1, empty_contract_batch())()
           .has_value());
   advance_block();
 
@@ -207,11 +209,13 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
                                     cost_model_->get_balance_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
+  auto r =
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
-      db_proxy.commit_transaction(get_block_number(), 1, empty_contract_batch())()
+      db_proxy
+          .commit_transaction(get_block_number(), 1, empty_contract_batch())()
           .has_value());
   advance_block();
 
@@ -249,7 +253,8 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                        .delta = make_nnint_set_add_delta(0, 1),
                                        .flags = std::to_underlying(
                                            StorageDeltaFlags::None)});
-  auto r1 = db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner)();
+  auto r1 =
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner)();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 

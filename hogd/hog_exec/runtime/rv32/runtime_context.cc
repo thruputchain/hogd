@@ -100,31 +100,37 @@ protected:
       if (machine.halt_code() == 0) {
         return result_t{{}, gas_consumed};
       }
-      return result_t{InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+      return result_t{InvokeError{InvokeErrorCode::Deterministic},
+                      gas_consumed};
     case StepResult::kTrap:
       switch (machine.trap()) {
       case Trap::kOutOfGas:
         return result_t{InvokeError{InvokeErrorCode::OutOfGas}, gas_consumed};
       case Trap::kHostTrap:
         if (machine.host_trap_kind() == HostTrapKind::kDeterministic) {
-          return result_t{InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+          return result_t{InvokeError{InvokeErrorCode::Deterministic},
+                          gas_consumed};
         }
-        return result_t{host_trap_code_to_invoke_status(machine.host_trap_code()),
-                gas_consumed};
+        return result_t{host_trap_code_to_invoke_status(
+                            machine.host_trap_code()),
+                        gas_consumed};
       case Trap::kInvalidInstruction:
       case Trap::kBadPc:
       case Trap::kBadMemory:
       case Trap::kBreakpoint:
-        return result_t{InvokeError{InvokeErrorCode::Deterministic}, gas_consumed};
+        return result_t{InvokeError{InvokeErrorCode::Deterministic},
+                        gas_consumed};
       case Trap::kNone:
         CHECK(false);
-        return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
+        return result_t{InvokeError{InvokeErrorCode::Unrecoverable},
+                        gas_consumed};
       }
       break;
     case StepResult::kContinue:
     case StepResult::kEcall:
       CHECK(false);
-      return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
+      return result_t{InvokeError{InvokeErrorCode::Unrecoverable},
+                      gas_consumed};
     }
 
     return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, gas_consumed};
@@ -169,8 +175,8 @@ RuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
   }
   assert(syscall_handler != nullptr);
 
-  auto contract = co_await
-      syscall_handler->resolve_contract(deployed_contract_hash.hash);
+  auto contract =
+      co_await syscall_handler->resolve_contract(deployed_contract_hash.hash);
   if (!contract.has_value()) [[unlikely]] {
     co_return contract.error();
   }

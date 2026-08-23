@@ -403,8 +403,9 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
            uint128_xdr expected_balance) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> erc20_client(
               kERC20ContractAddress);
-          auto result = co_await erc20_client.template invoke_opt<u8"get_balance_of">(
-              ctx, kReceiverAddress);
+          auto result =
+              co_await erc20_client.template invoke_opt<u8"get_balance_of">(
+                  ctx, kReceiverAddress);
           if (!result.has_value() || !result.value().has_value() ||
               !result.value().value().has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};

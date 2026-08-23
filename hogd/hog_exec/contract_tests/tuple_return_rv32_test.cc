@@ -57,7 +57,8 @@ public:
     using tuple_return_client_t =
         ContractTraitClient<tuple_return::TupleReturn>;
     tuple_return_client_t rv32_client(kRv32ContractAddress);
-    auto decoded = co_await rv32_client.template invoke_opt<MethodName>(ctx, args...);
+    auto decoded =
+        co_await rv32_client.template invoke_opt<MethodName>(ctx, args...);
     if (!decoded.has_value() || !decoded.value().has_value() ||
         !decoded.value().value().has_value()) {
       return InvokeError{InvokeErrorCode::Deterministic};
@@ -83,13 +84,18 @@ protected:
 
     // Method 0: BasicTwoTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        0, [](NativeSyscallContext &ctx, uint32_t input) -> x23::Async<InvokeStatus<void>> {
-          co_return check_result<u8"call1">(ctx, std::make_tuple(1U, 2U), input);
+        0,
+        [](NativeSyscallContext &ctx,
+           uint32_t input) -> x23::Async<InvokeStatus<void>> {
+          co_return check_result<u8"call1">(ctx, std::make_tuple(1U, 2U),
+                                            input);
         });
 
     // Method 1: NestedTuple
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        1, [](NativeSyscallContext &ctx, uint32_t input) -> x23::Async<InvokeStatus<void>> {
+        1,
+        [](NativeSyscallContext &ctx,
+           uint32_t input) -> x23::Async<InvokeStatus<void>> {
           co_return check_result<u8"call2">(
               ctx, std::make_tuple(3U, std::make_tuple(4ULL, 5ULL)), input);
         });
@@ -251,8 +257,8 @@ protected:
                 {std::make_tuple(5U, 6ULL), std::make_tuple(7U, 8ULL)},
                 {std::make_tuple(9U, 10ULL), std::make_tuple(11U, 12ULL)}}};
           co_return check_result<u8"arrays_and_tuples">(ctx,
-                                                     std::make_tuple(nested,
-                                                                     true));
+                                                        std::make_tuple(nested,
+                                                                        true));
         });
 
     // Method 17: TupleWithNestedArray
@@ -291,8 +297,9 @@ protected:
         21, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::array<uint8_t, 32> bytes = {};
           bytes.fill(0xFF);
-          co_return check_result<u8"tuple_with_bytes">(ctx, std::make_tuple(bytes,
-                                                                         999U));
+          co_return check_result<u8"tuple_with_bytes">(ctx,
+                                                       std::make_tuple(bytes,
+                                                                       999U));
         });
 
     // Method 22: TupleWithVariableBytes

@@ -636,7 +636,8 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   write_contract(contract);
   write_deployment(addr, contract);
 
-  auto deployed = get_storage_snapshot_cache()->try_get_deployed_contract(addr)();
+  auto deployed =
+      get_storage_snapshot_cache()->try_get_deployed_contract(addr)();
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);

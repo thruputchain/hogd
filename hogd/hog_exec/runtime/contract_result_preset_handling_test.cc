@@ -61,9 +61,13 @@ make_test_contract()
 {
   NativeContractBuilder builder;
   builder.add<TestContract, u8"return_ok_void">(
-      []() -> x23::Async<InvokeStatus<void>> { co_return InvokeStatus<void>{}; });
+      []() -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
+      });
   builder.add<TestContract, u8"return_ok_int">(
-      []() -> x23::Async<InvokeStatus<int32_t>> { co_return InvokeStatus<int32_t>{123}; });
+      []() -> x23::Async<InvokeStatus<int32_t>> {
+        co_return InvokeStatus<int32_t>{123};
+      });
   return builder.build();
 }
 
@@ -76,7 +80,8 @@ make_caller_contract()
   builder.add<CallerContract, u8"call_return_ok_void">(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         test_contract_client_t client(kTestContractAddr);
-        auto result = co_await client.template invoke_opt<u8"return_ok_void">(ctx);
+        auto result =
+            co_await client.template invoke_opt<u8"return_ok_void">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -87,7 +92,8 @@ make_caller_contract()
   builder.add<CallerContract, u8"call_return_ok_int">(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         test_contract_client_t client(kTestContractAddr);
-        auto result = co_await client.template invoke_opt<u8"return_ok_int">(ctx);
+        auto result =
+            co_await client.template invoke_opt<u8"return_ok_int">(ctx);
         if (!result.has_value() || !result.value().has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }

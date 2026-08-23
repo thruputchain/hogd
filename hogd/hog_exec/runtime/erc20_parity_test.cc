@@ -539,7 +539,8 @@ protected:
         [](NativeSyscallContext &ctx) noexcept
             -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -692,13 +693,14 @@ protected:
         [amount](NativeSyscallContext &ctx) noexcept
             -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto mint = co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
-                                                  make_amount(amount));
+                                                           make_amount(amount));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
@@ -807,13 +809,15 @@ protected:
         [start_balance](NativeSyscallContext &ctx) noexcept
             -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = co_await client.invoke_opt<u8"mint">(ctx, kRv32CallerAddr,
-                                                  make_amount(start_balance));
+          auto mint =
+              co_await client.invoke_opt<u8"mint">(ctx, kRv32CallerAddr,
+                                                   make_amount(start_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
@@ -963,13 +967,15 @@ protected:
         [owner_balance](NativeSyscallContext &ctx) noexcept
             -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
-                                                  make_amount(owner_balance));
+          auto mint =
+              co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
+                                                   make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
@@ -1102,13 +1108,15 @@ protected:
         [owner_balance](NativeSyscallContext &ctx) noexcept
             -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          auto mint = co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
-                                                  make_amount(owner_balance));
+          auto mint =
+              co_await client.invoke_opt<u8"mint">(ctx, kRv32OwnerAddr,
+                                                   make_amount(owner_balance));
           if (!mint.has_value() || !mint.value().has_value() ||
               !mint.value().value().has_value() ||
               !mint.value().value().value().is_ok()) {
@@ -1207,7 +1215,8 @@ protected:
         [](NativeSyscallContext &ctx) noexcept
             -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init = co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
+          auto init =
+              co_await client.invoke_opt<u8"initialize">(ctx, kRv32AdminAddr);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
             co_return InvokeError{InvokeErrorCode::Deterministic};

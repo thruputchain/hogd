@@ -202,22 +202,23 @@ protected:
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           co_return call_ok<u8"transfer">(ctx, target, kBob,
-                                       make_amount(kTransferAmount));
+                                          make_amount(kTransferAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodAdjustAllowance,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           co_return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
-                                               make_difference(
-                                                   kAllowanceAmount));
+                                                  make_difference(
+                                                      kAllowanceAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodTransferFrom,
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           co_return call_ok<u8"transfer_from">(ctx, target, kAlice, kBob,
-                                            make_amount(kTransferFromAmount));
+                                               make_amount(
+                                                   kTransferFromAmount));
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodInitialize,
@@ -230,7 +231,7 @@ protected:
         [](NativeSyscallContext &ctx,
            ContractAddress target) -> x23::Async<InvokeStatus<void>> {
           co_return call_ok<u8"mint">(ctx, target, kAlice,
-                                   make_amount(kMintAmount));
+                                      make_amount(kMintAmount));
         });
     // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
     // allowance and then, as a sibling call in the same transaction, increment
@@ -248,8 +249,8 @@ protected:
             co_return rejected.error();
           }
           co_return call_ok<u8"adjust_allowance">(ctx, target, kSpender,
-                                               make_difference(
-                                                   kAllowanceAmount));
+                                                  make_difference(
+                                                      kAllowanceAmount));
         });
     auto wrapper_contract = builder.build();
 
