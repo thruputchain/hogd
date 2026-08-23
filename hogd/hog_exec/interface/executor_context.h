@@ -12,7 +12,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/interface/dispatch_pool.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
@@ -29,11 +28,10 @@ class ExecutorContext {
 public:
   ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
                   std::unique_ptr<StorageSnapshotCache> snapshot_cache,
-                  EventServerProxy &event_server_proxy,
-                  DispatchPool &worker_pool)
+                  EventServerProxy &event_server_proxy)
     : mode_(mode), block_id_(id), db_proxy_(db_proxy),
       event_server_proxy_(event_server_proxy),
-      snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
+      snapshot_cache_(std::move(snapshot_cache))
   {}
 
   // Disable copy and move
@@ -74,12 +72,14 @@ private:
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
-  ExecProposeResult run_propose_transaction(SignedTransaction signed_tx,
+  x23::Async<ExecProposeResult>
+  run_propose_transaction(SignedTransaction signed_tx,
                                             TransactionID tx_id);
-  ExecResult run_validate_transaction(ProposedTransaction tx,
+  x23::Async<ExecResult> run_validate_transaction(ProposedTransaction tx,
                                       TransactionID tx_id);
 
-  ExpectedViewResult run_view_transaction(TransactionViewQuery const &query);
+  x23::Async<ExpectedViewResult>
+  run_view_transaction(TransactionViewQuery const &query);
 
   void log_event_return(SystemStatus<void> error);
 
@@ -88,7 +88,6 @@ private:
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-  DispatchPool &worker_pool_;
 
   std::mutex event_accumulate_mutex_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;

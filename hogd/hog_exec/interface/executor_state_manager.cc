@@ -80,8 +80,7 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
       std::forward_as_tuple(mode, new_block_id, *db_proxy_,
-                            std::move(snapshot_cache), *event_server_proxy_,
-                            worker_pool_));
+                            std::move(snapshot_cache), *event_server_proxy_));
   assert(inserted);
 
   // Notify event server that we've opened a block

@@ -5,6 +5,7 @@
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "transaction.hh"
+#include "x23/async.h"
 #include "view.hh"
 
 namespace hogd {
@@ -13,7 +14,7 @@ class View {
 public:
   View() = delete;
 
-  static ExpectedViewResult run_view_transaction(
+  static x23::Async<ExpectedViewResult> run_view_transaction(
       StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy proxy,
       PerTransactionEventServerProxy event_proxy,
       TransactionViewQuery const &query, RuntimeContext &context,

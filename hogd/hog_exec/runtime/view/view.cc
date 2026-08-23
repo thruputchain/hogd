@@ -24,7 +24,7 @@
 
 namespace hogd {
 
-ExpectedViewResult
+x23::Async<ExpectedViewResult>
 View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
                            PerTransactionDatabaseProxy proxy,
                            PerTransactionEventServerProxy event_proxy,
@@ -43,7 +43,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
     result.error_code() =
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
-    return result;
+    co_return result;
   }
 
   if (query.parent_address) {
@@ -56,7 +56,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
 
     auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
     if (!r.has_value()) {
-      return ExpectedViewResult{TransactionViewStatus::InternalError};
+      co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }
     // the stashed parent trace is only non-null if tracing is on
     CHECK(!r.value());
@@ -69,12 +69,12 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
         ExpectedViewResult result(TransactionViewStatus::InvalidInput);
         result.error_code() =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
-        return result;
+        co_return result;
       }
     }
   } catch (...) {
     error("unrecoverable: failed to validate forwarded auth token depth");
-    return ExpectedViewResult{TransactionViewStatus::InternalError};
+    co_return ExpectedViewResult{TransactionViewStatus::InternalError};
   }
 
   // No expiry_height validation here: a token that expired before the current
@@ -85,12 +85,12 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   for (auto const &token : query.forwarded_tokens) {
     auto token_id = syscall_handler.mint_auth_token(token);
     if (!token_id.has_value()) {
-      return ExpectedViewResult{TransactionViewStatus::InternalError};
+      co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }
     forwarded_token_ids.push_back(token_id.value());
   }
 
-  auto [res, gas_consumed] =
+  auto [res, gas_consumed] = co_await
       syscall_handler.invoke(query.invocation.invoked_address,
                              sdk_method_id(query.invocation.entrypoint),
                              query.invocation.gas_limit,
@@ -101,13 +101,13 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
     switch (res.error().code()) {
     case SystemErrorCode::ValidationFailure:
       error("view transaction failed with SystemErrorCode::ValidationFailure");
-      return ExpectedViewResult(
+      co_return ExpectedViewResult(
           TransactionViewStatus::NondeterministicDataValidationFailure);
     case SystemErrorCode::Abandon:
-      return ExpectedViewResult{TransactionViewStatus::Abandoned};
+      co_return ExpectedViewResult{TransactionViewStatus::Abandoned};
     case SystemErrorCode::Unrecoverable:
       error("view transaction failed with SystemErrorCode::Unrecoverable");
-      return ExpectedViewResult(TransactionViewStatus::InternalError);
+      co_return ExpectedViewResult(TransactionViewStatus::InternalError);
     }
   }
 
@@ -120,7 +120,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
          frame.error().code());
     ExpectedViewResult result(TransactionViewStatus::InvalidInput);
     result.error_code() = frame.error().code();
-    return result;
+    co_return result;
   }
 
   assert(syscall_handler.last_frame_finished() == (!query.parent_address));
@@ -129,7 +129,7 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   // TODO(geoff): we could almost certainly elide a copy or two here
   result.result().output = syscall_handler.get_most_recent_frame_output();
   result.result().events = syscall_handler.get_most_recent_frame_events();
-  return result;
+  co_return result;
 }
 
 } // namespace hogd

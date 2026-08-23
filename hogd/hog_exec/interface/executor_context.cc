@@ -48,14 +48,7 @@ ExecutorContext::propose_transaction(SignedTransaction signed_tx,
                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
-  x23::Awaitable<ExecProposeResult> awaitable;
-  x23::CoroCB<ExecProposeResult> cb(awaitable);
-  worker_pool_.submit(
-      [this, signed_tx = std::move(signed_tx), tx_id, cb]() mutable {
-        auto res = run_propose_transaction(std::move(signed_tx), tx_id);
-        cb(res);
-      });
-  co_return co_await awaitable;
+  co_return co_await run_propose_transaction(std::move(signed_tx), tx_id);
 }
 
 x23::Async<ExecProposeBatchResult>
@@ -63,34 +56,21 @@ ExecutorContext::propose_transaction_batch(
     SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
-  x23::Awaitable<ExecProposeBatchResult> awaitable;
-  x23::CoroCB<ExecProposeBatchResult> cb(awaitable);
-  worker_pool_.submit([this, &signed_txs, first_tx_id, cb]() {
-    ExecProposeBatchResult batch_res;
-    batch_res.reserve(signed_txs.size());
-    for (size_t i = 0; i < signed_txs.size(); i++) {
-      batch_res.push_back(
-          run_propose_transaction(signed_txs[i], first_tx_id + i));
-    }
-    cb(std::move(batch_res));
-  });
-  auto r = co_await awaitable;
-  assert(r.size() == signed_txs.size());
-  co_return std::move(r);
+  ExecProposeBatchResult batch_res;
+  batch_res.reserve(signed_txs.size());
+  for (size_t i = 0; i < signed_txs.size(); i++) {
+    batch_res.push_back(
+        co_await run_propose_transaction(signed_txs[i], first_tx_id + i));
+  }
+  assert(batch_res.size() == signed_txs.size());
+  co_return std::move(batch_res);
 }
 
 x23::Async<ExpectedViewResult>
 ExecutorContext::view_transaction(TransactionViewQuery const &query)
 {
   assert(mode_ == ExecutionMode::kViewing);
-  x23::Awaitable<ExpectedViewResult> awaitable;
-  x23::CoroCB<ExpectedViewResult> cb(awaitable);
-  worker_pool_.submit([this, &query, cb]() {
-    auto res = run_view_transaction(query);
-    cb(res);
-  });
-  auto r = co_await awaitable;
-  co_return std::move(r);
+  co_return co_await run_view_transaction(query);
 }
 
 x23::Async<ExecValidateBatchResult>
@@ -98,20 +78,14 @@ ExecutorContext::validate_transaction_batch(
     ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
-  x23::Awaitable<ExecValidateBatchResult> awaitable;
-  x23::CoroCB<ExecValidateBatchResult> cb(awaitable);
-  worker_pool_.submit([this, &proposed_txs, first_tx_id, cb]() {
-    ExecValidateBatchResult batch_res;
-    batch_res.reserve(proposed_txs.size());
-    for (size_t i = 0; i < proposed_txs.size(); i++) {
-      batch_res.push_back(
-          run_validate_transaction(proposed_txs[i], first_tx_id + i));
-    }
-    cb(std::move(batch_res));
-  });
-  auto r = co_await awaitable;
-  assert(r.size() == proposed_txs.size());
-  co_return std::move(r);
+  ExecValidateBatchResult batch_res;
+  batch_res.reserve(proposed_txs.size());
+  for (size_t i = 0; i < proposed_txs.size(); i++) {
+    batch_res.push_back(
+        co_await run_validate_transaction(proposed_txs[i], first_tx_id + i));
+  }
+  assert(batch_res.size() == proposed_txs.size());
+  co_return std::move(batch_res);
 }
 
 x23::Async<ExecResult>
@@ -119,17 +93,7 @@ ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
                                       TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
-
-  x23::Awaitable<ExecResult> awaitable;
-  x23::CoroCB<ExecResult> cb(awaitable);
-
-  worker_pool_.submit(
-      [this, proposed_tx = std::move(proposed_tx), tx_id, cb]() mutable {
-        auto res = run_validate_transaction(std::move(proposed_tx), tx_id);
-        cb(res);
-      });
-
-  co_return co_await awaitable;
+  co_return co_await run_validate_transaction(std::move(proposed_tx), tx_id);
 }
 
 // Stale-block execution during propose/validate is benign.
@@ -150,7 +114,7 @@ ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
 // The view gateway, by contrast, does care about staleness — it serves
 // public RPCs and must not return arbitrarily old data.  See
 // ViewGatewayRpc::request_refresh() for the view-side mitigation.
-ExecProposeResult
+x23::Async<ExecProposeResult>
 ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
                                          TransactionID tx_id)
 {
@@ -160,7 +124,7 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   // Reject an over-cap body before execution so it can't overflow the event
   // RPC (#2857); NonDeterministicError matches the sibling db-push reject.
   if (x23::xdr_size(signed_tx) > kMaxBytesSignedTransaction) {
-    return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
+    co_return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
   }
 
   auto proxy = make_per_tx_db_proxy(tx_id);
@@ -184,10 +148,10 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
     } catch (...) {
       report_dropped_log("SystemCallHandler ctor failure diagnostic");
     }
-    return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
+    co_return ExecProposeResult(ExecResult::ExecResultUnrecoverable);
   }
-  syscall_handler->root_invoke();
-  auto exec_res = syscall_handler->try_commit_transaction();
+  co_await syscall_handler->root_invoke();
+  auto exec_res = co_await syscall_handler->try_commit_transaction();
 
   auto out = ExecProposeResult(exec_res);
 
@@ -245,10 +209,10 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
         });
   }
 
-  return out;
+  co_return out;
 }
 
-ExecResult
+x23::Async<ExecResult>
 ExecutorContext::run_validate_transaction(ProposedTransaction tx,
                                           TransactionID tx_id)
 {
@@ -257,7 +221,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
   // Same cap as proposal, so a peer-proposed oversized tx is a deterministic
   // reject rather than fail-stopping the validator (#2857).
   if (x23::xdr_size(tx.signed_tx) > kMaxBytesSignedTransaction) {
-    return ExecResult::ExecResultTxNonDeterministicError;
+    co_return ExecResult::ExecResultTxNonDeterministicError;
   }
   auto proxy = make_per_tx_db_proxy(tx_id);
   // SystemCallHandler's ctor deep-copies tx.contracts_to_deploy (#1538) and
@@ -282,10 +246,10 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
     } catch (...) {
       report_dropped_log("SystemCallHandler ctor failure diagnostic");
     }
-    return ExecResult::ExecResultUnrecoverable;
+    co_return ExecResult::ExecResultUnrecoverable;
   }
-  syscall_handler->root_invoke();
-  auto exec_res = syscall_handler->try_commit_transaction();
+  co_await syscall_handler->root_invoke();
+  auto exec_res = co_await syscall_handler->try_commit_transaction();
 
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
@@ -303,15 +267,15 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
           co_return void();
         });
   }
-  return exec_res;
+  co_return exec_res;
 }
 
-ExpectedViewResult
+x23::Async<ExpectedViewResult>
 ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
 {
   assert(mode_ == ExecutionMode::kViewing);
   static thread_local auto context = make_hog_exec_context();
-  return View::run_view_transaction(
+  co_return co_await View::run_view_transaction(
       *snapshot_cache_,
       make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
       make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
