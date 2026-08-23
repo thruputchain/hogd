@@ -28,6 +28,16 @@ source ./scripts/ci/prepare_env.sh
 export ASAN_OPTIONS=abort_on_error=1
 export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 
+# The job directory is reused across runs, and three sanitizer trees
+# (asan Debug, asan Release, ubsan Debug) held at once do not fit alongside
+# what the other schedules leave in it: run #548 exhausted the hogci disk
+# quota on hog4 partway through the ubsan tests, and writes to /tmp started
+# failing with EDQUOT (#3559). So each tree is dropped as soon as its tests
+# pass, keeping at most one resident. This rm only matters when a previous
+# run died before reaching its own cleanup below; in the steady state the
+# trees are already gone and it costs nothing.
+rm -rf build/llvm_asan build/llvm_asan_release build/llvm_ubsan
+
 # Cap build parallelism at 64, same as the gcc job below: fanning out to all
 # 128 hyperthreads OOMs the host (the OOM killer took out the login session's
 # sd-pam, dropping the SSH job mid-build). Applies to all three builds below.
@@ -37,11 +47,18 @@ echo 'build clang asan'
 echo 'run llvm tests'
 ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
 
+# `set -e` aborts the script on a failing ctest, so every rm below is reached
+# only once that tree's tests have passed. A tree whose tests failed survives
+# for the core-dump collection in `after`.
+rm -rf build/llvm_asan
+
 echo 'build clang asan release'
 ./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm asan tests release'
 ctest --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
+
+rm -rf build/llvm_asan_release
 
 # Gcc doesn't support ignorelist with ubsan, so the ubsan build is clang-only.
 echo 'build clang ubsan'
@@ -51,6 +68,8 @@ echo 'run llvm ubsan tests'
 export UBSAN_OPTIONS=print_stacktrace=1
 export HOG_DEVNODE_EXIT_TIMEOUT_SECS=30
 ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
+
+rm -rf build/llvm_ubsan
 
 """
 after = """
@@ -103,6 +122,11 @@ export LSAN_OPTIONS=suppressions=$(pwd)/.lsan_suppress:print_suppressions=1
 # db1b9f9d978a0708e684cd33b5ba8da3accf541d (expected in GCC 16.2).
 GCC_ASAN_ARCH="-DBUILD_ARCHITECTURE=x86-64-v3"
 
+# Keep at most one sanitizer tree resident, for the same disk-quota reason as
+# the clang job above (#3559). Reached only when a previous run died before
+# its own cleanup below.
+rm -rf build/gcc_asan build/gcc_asan_release
+
 # Cap build parallelism at 64: the gcc asan TUs can each peak around 5GB in
 # cc1plus, so fanning out to all 128 hyperthreads OOMs the host (the OOM killer
 # took out the login session's sd-pam, dropping the SSH job). Applies to both
@@ -113,12 +137,19 @@ echo 'build gcc asan'
 echo 'run gcc tests'
 ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
+# `set -e` aborts the script on a failing ctest, so both rms here are reached
+# only once that tree's tests have passed. A tree whose tests failed survives
+# for the core-dump collection in `after`.
+rm -rf build/gcc_asan
+
 # gcc release seems to be more likely broken than clang release?
 echo 'build gcc asan release'
 ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests release'
 ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
+
+rm -rf build/gcc_asan_release
 
 """
 after = """
