@@ -1262,8 +1262,6 @@ TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
   Proposal proposal{
       .header = {.ext = {},
                  .network_hash = MempoolTestInfra::kNetworkHash,
-                 .genesis_configuration_hash =
-                     db_tip.value.proposal_header.genesis_configuration_hash,
                  .block_height = db_tip.value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
                        .hash = t_to_parallel_batch(tx_hashes)(),
@@ -1298,8 +1296,6 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
   Proposal proposal{
       .header = {.ext = {},
                  .network_hash = MempoolTestInfra::kNetworkHash,
-                 .genesis_configuration_hash =
-                     db_tip.value.proposal_header.genesis_configuration_hash,
                  .block_height = db_tip.value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
                        .hash = t_to_parallel_batch(tx_hashes)(),
@@ -1413,25 +1409,6 @@ TEST(Mempool, ValidateEmpty)
       get_tip.db_tip().id, std::move(proposal))();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
-}
-
-TEST(Mempool, ValidateRejectsDifferentGenesisConfiguration)
-{
-  MempoolTestInfra server;
-
-  const SchedulerGetTipResult tip =
-      server.mempool_coord_rpc().schedcoord_get_tip()();
-  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-  SchedulerProposalResult proposed = propose_block(server, tip.db_tip());
-  ASSERT_EQ(proposed.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
-
-  Proposal proposal = proposed.proposed_block().proposal;
-  proposal.header.genesis_configuration_hash[0] ^= 1;
-  const SchedulerValidationResult validated =
-      server.mempool_coord_rpc().schedulercoord_validate_block(
-          tip.db_tip().id, std::move(proposal))();
-  EXPECT_EQ(validated.outcome(),
-            SchedulerValidationOutcome::SchedulerValidationInvalid);
 }
 
 TEST(Mempool, ValidateWrongTxsHash)
@@ -2119,9 +2096,6 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
     Proposal proposal{
         .header = {.ext = {},
                    .network_hash = MempoolTestInfra::kNetworkHash,
-                   .genesis_configuration_hash =
-                       get_tip.db_tip()
-                           .value.proposal_header.genesis_configuration_hash,
                    .block_height =
                        get_tip.db_tip().value.proposal_header.block_height + 1},
         .transactions = {.ext = {},
@@ -2321,7 +2295,6 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis =
       builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract);
-  const GenesisConfigurationHash genesis_configuration_hash = sha256(genesis);
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
@@ -2342,8 +2315,6 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
-  EXPECT_EQ(parent.db_tip().value.proposal_header.genesis_configuration_hash,
-            genesis_configuration_hash);
 
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
@@ -2396,9 +2367,6 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
-  EXPECT_EQ(
-      result.commit().db_tip.value.proposal_header.genesis_configuration_hash,
-      genesis_configuration_hash);
 
   const ContractAddress deployed =
       calculate_genesis_deployment_address(sha256(*fibonacci_contract),
