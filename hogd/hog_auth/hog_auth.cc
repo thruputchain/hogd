@@ -49,8 +49,9 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   // so this client must too — otherwise a valid oversized batch fails the
   // downstream send, HogDb erases the auth subscriber, and subsequent heights
   // are never delivered (issue #3572).
-  auto mempool_client_res = make_rpc_client<MempoolAuth1>(
-      host_port, /*retry=*/true, kBulkRpcMaxMessageSize)();
+  auto mempool_client_res =
+      make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true,
+                                    kBulkRpcMaxMessageSize)();
   if (!mempool_client_res)
     panic("auth connect to mempool failed: {}",
           mempool_client_res.error().error_code().message());
