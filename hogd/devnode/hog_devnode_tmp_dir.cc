@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
@@ -13,11 +14,29 @@
 
 namespace hogd {
 
-HogDevnodeTmpDir::HogDevnodeTmpDir()
+namespace {
+
+// A failed temp-dir creation is an environment problem (permissions, a
+// full or read-only filesystem), not a bug: throw so main's
+// pre-readiness handler reports it cleanly instead of aborting.
+Directory
+open_temporary_or_throw()
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
-  CHECK(dir.has_value());
-  path_ = std::filesystem::absolute((*dir).get_path()).string();
+  if (!dir.has_value()) {
+    throw std::runtime_error(
+        std::format("could not create hog-devnode temp directory: {}",
+                    dir.error()));
+  }
+  return std::move(*dir);
+}
+
+} // namespace
+
+HogDevnodeTmpDir::HogDevnodeTmpDir()
+{
+  path_ =
+      std::filesystem::absolute(open_temporary_or_throw().get_path()).string();
 }
 
 HogDevnodeTmpDir::HogDevnodeTmpDir(
@@ -25,9 +44,8 @@ HogDevnodeTmpDir::HogDevnodeTmpDir(
     std::string_view subdir)
 {
   if (!data_dir.has_value()) {
-    ErrnoStatus<Directory> dir = Directory::open_temporary();
-    CHECK(dir.has_value());
-    path_ = std::filesystem::absolute((*dir).get_path()).string();
+    path_ = std::filesystem::absolute(open_temporary_or_throw().get_path())
+                .string();
     return;
   }
 
