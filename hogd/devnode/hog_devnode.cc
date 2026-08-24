@@ -419,12 +419,21 @@ parse_args(int argc, char *argv[])
   std::optional<std::string> dev_wallet_profile_value;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+    // Consume the flag's value, or fail with a message that names the
+    // flag — a missing value should not be reported the same way as an
+    // unrecognized option.
+    auto take_value = [&]() -> const char * {
+      if (i + 1 >= argc) {
+        hogd::arg_error(std::format("{} requires a value", arg), argv, usage);
+      }
+      return argv[++i];
+    };
     if (arg == "-h" || arg == "--help") {
       print_usage(stdout, argv);
       exit(EXIT_SUCCESS);
     }
-    if (arg == "--listen-host" && i + 1 < argc) {
-      options.listen_host = argv[++i];
+    if (arg == "--listen-host") {
+      options.listen_host = take_value();
       // Node services bind by numeric address (no DNS), so accept the
       // one hostname everyone types and reject the rest here instead of
       // panicking later inside HogDevnodeNode after threads spin up.
@@ -446,15 +455,15 @@ parse_args(int argc, char *argv[])
       }
       continue;
     }
-    if (arg == "--scheduler-port" && i + 1 < argc) {
-      options.scheduler_port = parse_port(argv[++i], argv);
+    if (arg == "--scheduler-port") {
+      options.scheduler_port = parse_port(take_value(), argv);
       continue;
     }
-    if (arg == "--data-dir" && i + 1 < argc) {
+    if (arg == "--data-dir") {
       if (options.data_dir.has_value()) {
         hogd::arg_error("--data-dir specified more than once", argv, usage);
       }
-      std::filesystem::path dir(argv[++i]);
+      std::filesystem::path dir(take_value());
       if (dir.empty()) {
         hogd::arg_error("Invalid data dir: path must not be empty", argv,
                         usage);
@@ -462,8 +471,8 @@ parse_args(int argc, char *argv[])
       options.data_dir = std::move(dir);
       continue;
     }
-    if (arg == "--readiness" && i + 1 < argc) {
-      const std::string readiness = argv[++i];
+    if (arg == "--readiness") {
+      const std::string readiness = take_value();
       if (readiness != "stdout") {
         hogd::arg_error(std::format("Invalid readiness sink: {}", readiness),
                         argv, usage);
@@ -471,8 +480,8 @@ parse_args(int argc, char *argv[])
       options.readiness_sink = hogd::ReadinessSink::kStdout;
       continue;
     }
-    if (arg == "--contract-artifacts-dir" && i + 1 < argc) {
-      std::filesystem::path dir(argv[++i]);
+    if (arg == "--contract-artifacts-dir") {
+      std::filesystem::path dir(take_value());
       if (dir.empty()) {
         hogd::arg_error(
             "Invalid contract artifacts dir: path must not be empty", argv,
@@ -481,53 +490,53 @@ parse_args(int argc, char *argv[])
       options.contract_artifact_directories.push_back(std::move(dir));
       continue;
     }
-    if (arg == "--dev-wallet-profile" && i + 1 < argc) {
+    if (arg == "--dev-wallet-profile") {
       if (sources.dev_wallet_profile) {
         hogd::arg_error("--dev-wallet-profile specified more than once", argv,
                         usage);
       }
       sources.dev_wallet_profile = true;
-      dev_wallet_profile_value = argv[++i];
+      dev_wallet_profile_value = take_value();
       continue;
     }
-    if (arg == "--bootstrap-manifest" && i + 1 < argc) {
+    if (arg == "--bootstrap-manifest") {
       if (sources.bootstrap_manifest) {
         hogd::arg_error("--bootstrap-manifest specified more than once", argv,
                         usage);
       }
       sources.bootstrap_manifest = true;
-      bootstrap_manifest_path = std::filesystem::path(argv[++i]);
+      bootstrap_manifest_path = std::filesystem::path(take_value());
       continue;
     }
-    if (arg == "--log-level" && i + 1 < argc) {
-      options.log_level = parse_log_level(argv[++i], argv);
+    if (arg == "--log-level") {
+      options.log_level = parse_log_level(take_value(), argv);
       continue;
     }
-    if (arg == "--dev-accounts" && i + 1 < argc) {
+    if (arg == "--dev-accounts") {
       sources.dev_accounts = true;
-      dev_accounts_value = argv[++i];
+      dev_accounts_value = take_value();
       continue;
     }
-    if (arg == "--dev-account-seed" && i + 1 < argc) {
+    if (arg == "--dev-account-seed") {
       sources.dev_account_seed = true;
-      dev_account_seed_value = argv[++i];
+      dev_account_seed_value = take_value();
       continue;
     }
-    if (arg == "--dev-account-tokens" && i + 1 < argc) {
+    if (arg == "--dev-account-tokens") {
       sources.dev_account_tokens = true;
-      dev_account_tokens_value = argv[++i];
+      dev_account_tokens_value = take_value();
       continue;
     }
-    if (arg == "--ramdb-bytes" && i + 1 < argc) {
+    if (arg == "--ramdb-bytes") {
       options.ramdb_bytes =
-          hogd::parse_integer_arg<std::size_t>("--ramdb-bytes", argv[++i], argv,
-                                               usage, /*base=*/0);
+          hogd::parse_integer_arg<std::size_t>("--ramdb-bytes", take_value(),
+                                               argv, usage, /*base=*/0);
       if (options.ramdb_bytes == 0) {
         hogd::arg_error("--ramdb-bytes must be positive", argv, usage);
       }
       continue;
     }
-    usage(argv);
+    hogd::arg_error(std::format("Unrecognized option: {}", arg), argv, usage);
   }
   reject_manifest_shorthand_conflicts(sources, argv);
   if (dev_accounts_value.has_value()) {
