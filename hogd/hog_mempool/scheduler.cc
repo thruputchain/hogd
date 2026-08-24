@@ -645,12 +645,25 @@ Scheduler::process_transfers_helper(const Delta &delta,
   uint128_t received_hogs = from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
   const BlockHeight received_age = averages->average_ages[kHogAgeGroupReceived];
   if (num_received > 0) {
+    const auto num_received_u = static_cast<uint128_t>(num_received);
+    // A committed block can never move more HOGs than exist, so under honest
+    // operation the received-group total cannot overflow. Guard the addition
+    // anyway: a malformed delta must not wrap the cached total to zero, which
+    // would then trip the fatal denominator check in [compute_average_age()]
+    // and terminate the mempool. Drop the offending delta instead.
+    if (uint128_add_would_overflow(received_hogs, num_received_u)) {
+      warn("scheduler: dropping transfer delta for account {}: received-group "
+           "total would overflow",
+           show_byte_array(account));
+      return;
+    }
     new_averages.num_hogs[kHogAgeGroupReceived] =
-        to_xdr(received_hogs + num_received);
+        to_xdr(received_hogs + num_received_u);
     // See comment above for [compute_average_age()].
     //
-    // Note that [compute_average_age()] will never divide by 0 because we
-    // check that [num_received] is not 0.
+    // Note that [compute_average_age()] will never divide by 0: the addition
+    // above did not overflow and [num_received] is nonzero, so the denominator
+    // [received_hogs + num_received] is strictly positive.
     new_averages.average_ages[kHogAgeGroupReceived] =
         compute_average_age(received_hogs, received_age, num_received,
                             block_height);

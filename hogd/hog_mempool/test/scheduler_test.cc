@@ -376,6 +376,30 @@ TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
   EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
 }
 
+TEST(Scheduler, ProcessTransfersDropsPositiveDeltaThatWouldOverflowReceived)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  const uint128_t near_max = std::numeric_limits<uint128_t>::max() - 1;
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0,
+                  /*num_hogs=*/near_max);
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  // Adding this delta would wrap the received-group total, which must be
+  // dropped rather than crashing the scheduler on the fatal denominator check.
+  HogsTransferred transfer;
+  transfer.block = kBlock;
+  transfer.deltas.push_back(
+      Delta{.address = account, .hog_delta = to_xdr(static_cast<int128_t>(5))});
+
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), near_max);
+}
+
 TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
