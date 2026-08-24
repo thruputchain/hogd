@@ -58,6 +58,24 @@ uint128_add_would_overflow(uint128_t a, uint128_t b)
   return b > std::numeric_limits<uint128_t>::max() - a;
 }
 
+// Returns the magnitude |value| as an unsigned 128-bit integer. Computing the
+// magnitude via unsigned negation keeps INT128_MIN well-defined: signed
+// negation ([value * -1]) overflows the int128_t domain for INT128_MIN, whereas
+// negating the unsigned representation yields its true magnitude (2^127).
+constexpr uint128_t
+int128_magnitude(int128_t value)
+{
+  return value < 0 ? -static_cast<uint128_t>(value)
+                   : static_cast<uint128_t>(value);
+}
+
+static_assert(
+    int128_magnitude(std::numeric_limits<int128_t>::min()) ==
+        (uint128_t{1} << 127),
+    "int128_magnitude must handle INT128_MIN without signed overflow");
+static_assert(int128_magnitude(int128_t{-1}) == 1);
+static_assert(int128_magnitude(int128_t{7}) == 7);
+
 bool
 hog_age_groups_have_valid_total(const HogAge &hog_age)
 {
@@ -657,7 +675,7 @@ Scheduler::process_transfers_helper(const Delta &delta,
   }
   else {
     CHECK_LT(num_received, 0);
-    auto num_received_abs = static_cast<uint128_t>(num_received * -1);
+    auto num_received_abs = int128_magnitude(num_received);
 
     uint128_t already_scheduled_hogs =
         from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
