@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -59,16 +61,15 @@ public:
     // so reaching this point uncommitted is a programming error.
     CHECK(transaction_committed_or_aborted_);
     CHECK(mock_runtime_stack_.empty());
-    // Destroying a handler that is still published in this thread's TLS context
-    // slot would leave current_context_ dangling, so the next pop_context()
-    // would dereference freed storage (issue #2784). close_syscall_handler()
+    // Destroying a handler that is still published on this thread's context
+    // stack would leave a dangling entry, so the next pop_context() would
+    // dereference freed storage (issue #2784). Scanning rather than checking
+    // just the top: with a stack an entry can be buried under a nested guest
+    // call, and that is equally fatal. close_syscall_handler()
     // rejects that close up front; this CHECK turns any other path that reaches
     // destruction while still installed into a deterministic abort rather than
     // a latent use-after-free.
-    CHECK(get_context() != this);
-    // runtime_context_owner_ is declared before handler_, so it is still alive
-    // here and stays alive until after handler_ is gone.
-    runtime_context_owner_->unregister_handler(&handler_);
+    CHECK(std::ranges::find(context_stack_, this) == context_stack_.end());
     // The open-handler guard is released by open_handler_guard_'s destructor
     // (declared before handler_, destroyed after it), not here -- see #2572.
   }
@@ -91,27 +92,50 @@ public:
   ForeignTracedInvokeResult
   finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
-  static SyscallHandlerContext *get_context() { return current_context_; }
-
-  // Republishes a context on the calling thread while it is alive, restoring
-  // whatever was there before on the way out.
+  // Recovers the context owning a handler. MockRuntimeContext::make_new_runtime
+  // is handed the SystemCallHandler* hog_exec is running and has to reach the
+  // harness state around it. It cannot ask the thread: a database read inside
+  // hog_exec suspends the transaction and resumes it on whichever thread took
+  // the reply, not the one that entered the FFI call.
   //
-  // current_context_ below is written by push_context() on the thread that
-  // entered the FFI call. hog_exec's database reads are coroutines now, so a
-  // nested invoke re-enters harness code on whichever thread the coroutine
-  // resumed on, where that thread's slot is empty. MockRuntime::invoke_internal
-  // -- the one place control crosses back from hog_exec into the harness --
-  // installs the context it was built with for the duration of the guest call.
-  // Nesting works because every inner frame goes through that same funnel and
-  // unwinding puts the outer value back.
+  // The handler sits immediately behind a HandlerHeader, so the owner is a
+  // subtraction away. kHandlerMagic rejects a SystemCallHandler that is not
+  // one of ours rather than returning a pointer into whatever precedes it --
+  // nothing in the tree builds such a handler against a MockRuntimeContext
+  // today, but the arithmetic cannot tell on its own.
+  static SyscallHandlerContext *from_handler(SystemCallHandler *handler)
+  {
+    CHECK(handler != nullptr);
+    auto *header = reinterpret_cast<HandlerHeader *>(
+        reinterpret_cast<char *>(handler) - sizeof(HandlerHeader));
+    CHECK(header->magic == kHandlerMagic);
+    CHECK(header->owner != nullptr);
+    return header->owner;
+  }
+
+  static SyscallHandlerContext *get_context()
+  {
+    return context_stack_.empty() ? nullptr : context_stack_.back();
+  }
+
+  // Publishes a context on the calling thread for as long as it is alive.
+  // MockRuntime::invoke_internal -- the one place control crosses back from
+  // hog_exec into the harness -- installs the context its runtime was built
+  // with for the duration of the guest call, rather than relying on the thread
+  // already holding it. It cannot: a database read inside hog_exec suspends the
+  // transaction and resumes it on whichever thread took the reply, not the one
+  // that entered the FFI call.
   class ScopedContext {
   public:
-    explicit ScopedContext(SyscallHandlerContext *ctx) noexcept
-      : saved_(current_context_)
+    explicit ScopedContext(SyscallHandlerContext *ctx) : pushed_(ctx)
     {
-      current_context_ = ctx;
+      context_stack_.push_back(ctx);
     }
-    ~ScopedContext() { current_context_ = saved_; }
+    ~ScopedContext()
+    {
+      CHECK(!context_stack_.empty() && context_stack_.back() == pushed_);
+      context_stack_.pop_back();
+    }
 
     ScopedContext(ScopedContext const &) = delete;
     ScopedContext &operator=(ScopedContext const &) = delete;
@@ -119,7 +143,7 @@ public:
     ScopedContext &operator=(ScopedContext &&) = delete;
 
   private:
-    SyscallHandlerContext *saved_;
+    SyscallHandlerContext *pushed_;
   };
 
   [[nodiscard]]
@@ -142,7 +166,7 @@ public:
       return false;
     }
 
-    current_context_ = this;
+    context_stack_.push_back(this);
     return true;
   }
 
@@ -150,7 +174,7 @@ public:
   void pop_context()
   {
     CHECK(get_context() == this);
-    current_context_ = nullptr;
+    context_stack_.pop_back();
   }
 
   void push_mock_runtime(Runtime *runtime)
@@ -174,7 +198,7 @@ public:
     return mock_runtime_stack_.back();
   }
 
-  SystemCallHandler &to_handler() { return handler_; }
+  SystemCallHandler &to_handler() { return handler_block_.handler; }
 
   // The DBContext this handler borrows. Exposed so close_syscall_handler() can
   // poison the DB lifecycle if the implicit abort fails (issue #2596).
@@ -189,13 +213,14 @@ public:
   // all frames off of the transaction.
   //
   // This intentionally keys off mock_runtime_stack_ rather than the lower
-  // invocation-frame stack (handler_.is_running()): a mock callback that throws
-  // unwinds before finish_frame() pops the lower frame, so the invocation-frame
-  // stack can legitimately retain a dangling frame on a handler that must still
-  // close cleanly (#2470). mock_runtime_stack_ is RAII-managed, so it is the
-  // signal for "frames the harness still owes a finish". The half-open-frame
-  // window where the two stacks could diverge during open is closed by making
-  // start_mock_invocation_frame() exception-atomic (#2507, #2560).
+  // invocation-frame stack (to_handler().is_running()): a mock callback that
+  // throws unwinds before finish_frame() pops the lower frame, so the
+  // invocation-frame stack can legitimately retain a dangling frame on a
+  // handler that must still close cleanly (#2470). mock_runtime_stack_ is
+  // RAII-managed, so it is the signal for "frames the harness still owes a
+  // finish". The half-open-frame window where the two stacks could diverge
+  // during open is closed by making start_mock_invocation_frame()
+  // exception-atomic (#2507, #2560).
   [[nodiscard]] bool can_be_closed() const
   {
     return mock_runtime_stack_.empty();
@@ -272,7 +297,12 @@ private:
     };
   };
 
-  inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
+  // The contexts running on this thread, innermost last. A stack rather than a
+  // single slot because a mock contract's guest call can nest: every frame
+  // pushes on entry to MockRuntime::invoke_internal and pops on the way out, so
+  // an inner frame does not have to clobber the outer one's entry.
+  inline static thread_local std::vector<SyscallHandlerContext *>
+      context_stack_;
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
@@ -287,7 +317,40 @@ private:
   // it.
   std::shared_ptr<MockRuntimeContext> runtime_context_owner_;
 
-  SystemCallHandler handler_;
+  // The handler, preceded by a header naming the context that owns it. A
+  // SyscallHandlerContext can never be standard-layout -- SystemCallHandler
+  // itself is not, and one such member disqualifies the whole class -- so
+  // offsetof on it would be undefined. HandlerHeader is standard-layout and
+  // alignas'd to the handler, which puts handler at exactly
+  // sizeof(HandlerHeader) into the block; the constructor checks that against
+  // the real object rather than assuming it.
+  //
+  // Declared where the plain handler used to be, so the ordering the guard and
+  // the runtime-context owner rely on (#2572, #2432) is unchanged.
+  struct alignas(SystemCallHandler) HandlerHeader {
+    SyscallHandlerContext *owner;
+    std::uint64_t magic;
+  };
+  static_assert(std::is_standard_layout_v<HandlerHeader>);
+
+  static constexpr std::uint64_t kHandlerMagic = 0x4d41524d4f54ULL; // MARMOT
+
+  struct HandlerBlock {
+    HandlerHeader header;
+    SystemCallHandler handler;
+
+    template<typename... Args>
+    explicit HandlerBlock(SyscallHandlerContext *owner, Args &&...args)
+      : header{.owner = owner, .magic = kHandlerMagic},
+        handler(std::forward<Args>(args)...)
+    {
+      CHECK(reinterpret_cast<char const *>(&handler) -
+                reinterpret_cast<char const *>(this) ==
+            sizeof(HandlerHeader));
+    }
+  };
+
+  HandlerBlock handler_block_;
   std::vector<Runtime *> mock_runtime_stack_;
   std::vector<std::unique_ptr<InvocationFrameTrace>>
       invocation_frame_trace_stack_;

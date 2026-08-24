@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -20,6 +21,7 @@
 #include "ffi_enums.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
@@ -38,6 +40,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -1713,6 +1716,193 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
 // proper has the same shape (one thread_local RuntimeContext per executor
 // thread). So the runtime context must resolve each mock invocation back to the
 // handler running it rather than to a single context-wide slot.
+namespace {
+
+// Forces the coroutine onto a pool worker before reading the slot. A database
+// read migrates the same way, but incidentally; these hop on purpose so the
+// migration is the thing under test rather than a side effect of the DB.
+x23::Async<SyscallHandlerContext *>
+context_after_pool_hop()
+{
+  co_await default_threadpool().bg();
+  co_return SyscallHandlerContext::get_context();
+}
+
+x23::Async<SyscallHandlerContext *>
+owner_after_pool_hop(SystemCallHandler *handler)
+{
+  co_await default_threadpool().bg();
+  co_return SyscallHandlerContext::from_handler(handler);
+}
+
+} // namespace
+
+// The whole design rests on the context slot NOT following a coroutine across
+// a resume -- if it did, from_handler() would be unnecessary. Assert the
+// premise directly, so this fails loudly if x23 ever gains thread-affine
+// resumption and the rest of the machinery becomes dead weight.
+// The shape sdk_rs actually runs: one TestEnvironment (one runtime context)
+// with a handler per thread, all invoking at once. Every invocation suspends
+// on the database reads under resolve_runtime and resumes on a worker, so each
+// one has to re-find its own handler while every other thread's is equally
+// live. A lookup that consulted the running thread, or a single shared slot,
+// fails here and passes every single-threaded test in this file.
+TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
+{
+  constexpr int kThreadCount = 8;
+  constexpr int kIterations = 4;
+
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  std::vector<CallerCheckData> check_data(kThreadCount);
+  ContractAddress contract_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_check_caller,
+                           &check_data[0]);
+
+  // One mock id per thread so each invocation carries its own check block; the
+  // contract address is what the frame targets, so they all deploy the same
+  // callback behind distinct ids.
+  std::vector<ContractAddress> contract_addrs(kThreadCount);
+  contract_addrs[0] = contract_addr;
+  for (int t = 1; t < kThreadCount; t++) {
+    contract_addrs[t] =
+        deploy_mock_contract(db, rc, 1 + t, mock_contract_check_caller,
+                             &check_data[t]);
+  }
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreadCount);
+  std::atomic<int> failures{0};
+
+  for (int t = 0; t < kThreadCount; t++) {
+    threads.emplace_back([&, t] {
+      auto handler = make_mocked_handler(db, rc);
+      if (handler.ffi_error_code != kTestFFIErrorCodeNone) {
+        failures.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+      x23::Defer close([&] { close_syscall_handler(handler.syscall_handler); });
+
+      ContractAddress frame_addr{};
+      frame_addr[0] = static_cast<uint8_t>(t + 1);
+
+      check_data[t].expected_self = contract_addrs[t];
+      check_data[t].expected_sender = frame_addr;
+
+      Invocation invocation = {
+          .invoked_address = frame_addr,
+          .entrypoint = entrypoint_from_method_id(0x1234),
+          .gas_limit = 1'000'000,
+          .calldata = {},
+      };
+      if (open_frame(handler.syscall_handler, invocation) !=
+          kTestFFIErrorCodeNone) {
+        failures.fetch_add(1, std::memory_order_relaxed);
+        return;
+      }
+
+      for (int i = 0; i < kIterations; i++) {
+        check_data[t].sender_check_passed = false;
+        check_data[t].self_check_passed = false;
+
+        if (push_context(handler.syscall_handler) != kTestFFIErrorCodeNone) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        Calldata calldata;
+        RuntimeMemoryLength output_return_buffer_len = 0,
+                            output_returned_auth_token_len = 0;
+        auto res =
+            test_ffi_invoke(contract_addrs[t], 0x1234, UINT64_MAX, calldata,
+                            InvokeFlagSet{}, {}, output_return_buffer_len,
+                            output_returned_auth_token_len);
+        bool ok = res.has_value() &&
+                  *res == SyscallErrorCode::kSyscallErrorCodeNone &&
+                  check_data[t].sender_check_passed &&
+                  check_data[t].self_check_passed;
+        if (pop_context() != kTestFFIErrorCodeNone) {
+          ok = false;
+        }
+        if (!ok) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+      }
+    });
+  }
+
+  for (auto &th : threads) {
+    th.join();
+  }
+  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
+}
+
+TEST(TestBindingsTest, ContextSlotDoesNotFollowACoroutineHop)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler.syscall_handler); });
+
+  ASSERT_EQ(push_context(handler.syscall_handler), kTestFFIErrorCodeNone);
+  ASSERT_NE(SyscallHandlerContext::get_context(), nullptr);
+
+  // The pool worker's own stack is empty; the push happened on this thread.
+  EXPECT_EQ(context_after_pool_hop()(), nullptr);
+
+  // ...and the hop did not disturb the pushing thread's stack.
+  EXPECT_EQ(SyscallHandlerContext::get_context(),
+            static_cast<SyscallHandlerContext *>(handler.syscall_handler));
+  ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+}
+
+// What make_new_runtime() actually does once it resumes on a worker: recover
+// the owner from the handler hog_exec handed it, with no thread involved.
+// Two live handlers on one runtime context, so a lookup that ignored its
+// argument would have a 50% chance of passing.
+TEST(TestBindingsTest, FromHandlerResolvesOwnerOnAPoolThread)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  auto handler_a = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_a.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler_a.syscall_handler); });
+
+  auto handler_b = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_b.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { close_syscall_handler(handler_b.syscall_handler); });
+
+  auto *ctx_a = static_cast<SyscallHandlerContext *>(handler_a.syscall_handler);
+  auto *ctx_b = static_cast<SyscallHandlerContext *>(handler_b.syscall_handler);
+
+  EXPECT_EQ(owner_after_pool_hop(&ctx_a->to_handler())(), ctx_a);
+  EXPECT_EQ(owner_after_pool_hop(&ctx_b->to_handler())(), ctx_b);
+
+  // Same answer on the calling thread: the lookup is thread-independent, which
+  // is the entire point of it.
+  EXPECT_EQ(SyscallHandlerContext::from_handler(&ctx_a->to_handler()), ctx_a);
+  EXPECT_EQ(SyscallHandlerContext::from_handler(&ctx_b->to_handler()), ctx_b);
+}
+
 TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
 {
   auto *db = make_db();
