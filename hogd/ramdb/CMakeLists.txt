@@ -56,6 +56,13 @@ target_link_libraries(
   ramdb
   GTest::gtest_main
 )
+# A TIMEOUT property overrides ctest's --timeout rather than capping it, and
+# ramdb is the only module here that sets one. At 100 it silently withheld the
+# TSAN schedule's deliberately larger --timeout 300 from the heaviest tests in
+# the tree, which is how InsertUntilOOM came to be killed at 100s under TSAN
+# (#3584). Track that budget instead of undercutting it; the bound is kept so
+# that the sanitizer runs in scripts/check.sh, which pass no --timeout at all,
+# still fail a hung test in minutes rather than at ctest's 1500s default.
 gtest_discover_tests(
   ramdb_test
-  PROPERTIES TIMEOUT 100)
+  PROPERTIES TIMEOUT 300)

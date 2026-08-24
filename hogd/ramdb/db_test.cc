@@ -179,11 +179,22 @@ DBError
 DatabaseTest::insert_until_failure()
 {
   std::string key(kKeySize, '0');
+  // Randomize the value once, outside the loop. Only the keys have to differ
+  // per iteration -- each put must land a fresh kMaxValueSize item rather than
+  // overwrite an existing one -- and the value bytes are never read back here,
+  // so refilling them every iteration bought no coverage and dominated the
+  // loop: RandomBytes draws one 64KiB value a byte at a time through
+  // std::independent_bits_engine, which at -O0 costs ~200x the two copies the
+  // put itself performs. This test has to fill the whole heap, and
+  // Database::estimate_heap_size() scales that with the host's core count
+  // (1.773GiB on the 128-core sanitizer host, of which only ~23MiB comes from
+  // the requested item capacity), so ~25k iterations of that per-value draw ran
+  // the test into ctest's timeout on the TSAN schedule (#3584).
   std::string value(kMaxValueSize, '0');
+  rand_(std::span(value));
 
   while (true) {
     rand_(std::span(key));
-    rand_(std::span(value));
     DBStatus<void> ret = db_->put(std::as_bytes(std::span(key)), 0,
                                   std::as_bytes(std::span(value)));
     if (!ret)
