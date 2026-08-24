@@ -879,11 +879,11 @@ TEST_P(InvokeErrorHandlingTest, OrdinaryInvocationDepthIsCapped)
 
   // A chain of exactly kMaxInvocationDepth live frames (root + the cap minus one
   // children, leaf reached at the cap) stays within the limit and succeeds.
-  EXPECT_TRUE(run_chain(kMaxInvocationDepth - 1));
+  EXPECT_TRUE(run_chain(static_cast<uint8_t>(kMaxInvocationDepth - 1)));
 
   // One frame deeper: the invoke that would create frame kMaxInvocationDepth + 1
   // is rejected, and the failure propagates back so the root frame fails.
-  EXPECT_FALSE(run_chain(kMaxInvocationDepth));
+  EXPECT_FALSE(run_chain(static_cast<uint8_t>(kMaxInvocationDepth)));
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,
