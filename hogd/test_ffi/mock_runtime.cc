@@ -98,8 +98,13 @@ MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
     int32_t mock_contract = contract.value()->mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
-      CHECK(handler_context_ != nullptr);
-      co_return std::make_unique<MockRuntime>(it->second, handler_context_);
+      // The handler is the one hog_exec is running, so its registered owner
+      // is the harness context this runtime belongs to. No dependence on
+      // which thread resumed this coroutine, and correct when several
+      // handlers share one runtime context.
+      SyscallHandlerContext *owner = handler_owner(syscall_handler);
+      CHECK(owner != nullptr);
+      co_return std::make_unique<MockRuntime>(it->second, owner);
     }
     co_return nullptr;
   }

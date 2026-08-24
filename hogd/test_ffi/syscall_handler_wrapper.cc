@@ -38,7 +38,9 @@ SyscallHandlerContext::SyscallHandlerContext(
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
              *runtime_context_owner_),
     is_mocked_handler_(false)
-{}
+{
+  runtime_context_owner_->register_handler(&handler_, this);
+}
 
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, DBContext &db,
@@ -49,7 +51,9 @@ SyscallHandlerContext::SyscallHandlerContext(
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
              *runtime_context_owner_, auth_claim, source_tx_hash),
     is_mocked_handler_(true)
-{}
+{
+  runtime_context_owner_->register_handler(&handler_, this);
+}
 
 ForeignTracedInvokeResult
 SyscallHandlerContext::root_invoke(bool enable_tracing)
