@@ -213,7 +213,11 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_tsan -t Debug -c clang -f "-Wer
   printf "tsan build failed!\n"
   exit 1
 fi
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure; then
+# Bound these like every other ctest invocation here. They had no --timeout at
+# all, so they relied on a per-test TIMEOUT property in hogd/ramdb (removed in
+# #3584) for any bound and otherwise fell back to ctest's 1500s default. 300
+# for tsan and 100 for asan/ubsan match scripts/schedules/{tsan,sanitizer}.toml.
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure --timeout 300; then
   printf "tsan tests failed!\n"
   exit 1
 fi
@@ -224,7 +228,7 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_asan -t Debug -c clang -f "-Wer
   exit 1
 fi
 # unfortunately alloc_dealloc_mismatch is blocked on https://github.com/llvm/llvm-project/issues/52771
-if ! ASAN_OPTIONS=alloc_dealloc_mismatch=0 ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_asan --output-on-failure; then
+if ! ASAN_OPTIONS=alloc_dealloc_mismatch=0 ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_asan --output-on-failure --timeout 100; then
   printf "asan tests failed!\n"
   exit 1
 fi
@@ -234,7 +238,7 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_ubsan -t Debug -c clang -f "-We
   printf "ubsan build failed!\n"
   exit 1
 fi
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_ubsan --output-on-failure; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_ubsan --output-on-failure --timeout 100; then
   printf "ubsan tests failed!\n"
   exit 1
 fi
