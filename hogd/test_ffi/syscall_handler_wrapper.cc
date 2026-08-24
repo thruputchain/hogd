@@ -26,8 +26,14 @@
 #include <memory>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace hogd {
+
+// One definition for the whole program; see the declaration for why it is not
+// inline in the header.
+thread_local std::vector<SyscallHandlerContext *>
+    SyscallHandlerContext::context_stack_;
 
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
