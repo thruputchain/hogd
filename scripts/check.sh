@@ -214,9 +214,9 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_tsan -t Debug -c clang -f "-Wer
   exit 1
 fi
 # Bound these like every other ctest invocation here. They had no --timeout at
-# all, so they relied on a per-test TIMEOUT property in hogd/ramdb (removed in
-# #3584) for any bound and otherwise fell back to ctest's 1500s default. 300
-# for tsan and 100 for asan/ubsan match scripts/schedules/{tsan,sanitizer}.toml.
+# all, so they leaned on the per-test TIMEOUT property hogd/ramdb used to set
+# (dropped, see #3584) and otherwise fell back to ctest's 1500s default. 300 for
+# tsan and 100 for asan/ubsan match scripts/schedules/{tsan,sanitizer}.toml.
 if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure --timeout 300; then
   printf "tsan tests failed!\n"
   exit 1
