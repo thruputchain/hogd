@@ -320,8 +320,14 @@ private:
   // single slot because a mock contract's guest call can nest: every frame
   // pushes on entry to MockRuntime::invoke_internal and pops on the way out, so
   // an inner frame does not have to clobber the outer one's entry.
-  inline static thread_local std::vector<SyscallHandlerContext *>
-      context_stack_;
+  // Defined out of line in syscall_handler_wrapper.cc rather than inline here:
+  // a vector needs dynamic initialization, so an inline thread_local emits a
+  // TLS initialization routine in every translation unit that includes this
+  // header, and macOS ld rejects those as duplicate symbols. Linux CI does not
+  // see it -- test_bindings.yml is the only PR workflow that sets
+  // ENABLE_TEST_FFI and it runs on Linux, so the macOS test_ffi build happens
+  // only in release_test_ffi.yml.
+  static thread_local std::vector<SyscallHandlerContext *> context_stack_;
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
