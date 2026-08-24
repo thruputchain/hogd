@@ -22,6 +22,10 @@ namespace hogd {
 // and creates an AuthServer connected to it.
 class AuthServerTestFramework {
 public:
+  // Non-zero, so a signature preimage that dropped the network hash would
+  // still fail to verify here.
+  static constexpr NetworkHash kNetworkHash{0x5a};
+
   AuthServerTestFramework()
   {
     // Start the mock DB server on a random port
@@ -33,7 +37,8 @@ public:
         make_dbauth_client(address_for_auth)().value();
 
     // Create AuthServer
-    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client), 16);
+    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client),
+                                                kNetworkHash, 16);
   }
 
   AuthServer &auth_server() { return *auth_server_; }

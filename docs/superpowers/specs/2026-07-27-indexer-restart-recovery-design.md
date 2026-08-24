@@ -4,6 +4,10 @@
 **Status:** Implemented
 **Issue:** #3149
 
+The broader component and operator boundaries are defined in
+[hogd Component Failure Model](../../component-failure-model.md). This design
+provides the indexer-specific mechanism and test detail for that contract.
+
 ## Problem
 
 Before this change, the event service sent committed transaction logs and bodies
@@ -25,10 +29,11 @@ committed producer records form a durable ordered log, the consumer pulls from
 its durable checkpoint, and the consumer atomically persists each record's
 effects and checkpoint so retries are idempotent. Unlike a textbook
 transactional outbox, HogDB and event durability cannot share one database
-transaction. The scheduler confirmation barrier therefore controls pull
-eligibility after both commits succeed, while canonical consensus identity and
-startup reconciliation repair the permitted crash windows. This is not
-distributed two-phase commit.
+transaction. Scheduler commit is called only after consensus finalization, so
+the event commit itself controls pull eligibility. HogDB and event durability
+remain parallel; the indexer may briefly lead local HogDB without creating a
+rollback window. Canonical consensus identity and startup reconciliation repair
+the permitted crash windows. This is not distributed two-phase commit.
 
 Add a durable, event-side indexer outbox. Closing a candidate atomically writes
 the complete indexer payload before returning its event root to the scheduler.
@@ -50,21 +55,33 @@ fatal.
 
 Before either candidate or committed publication, event computes the complete
 `EventIndexer1.event_indexer_pull_next` block-reply XDR record size: RPC reply
-header, origin, full `ConsensusValue`, every `ProposalTxs` segment and hash,
-event/body vectors, block identity, and record marker. Anything above x23's
+header, origin, full `ConsensusValue`, event/body vectors, block identity, and
+record marker. Anything above x23's
 unchunked 31-bit record-body limit is rejected before a durable write.
 
-The committed record carries a digest over its full payload because transaction
-bodies are deliberately outside the consensus event root. Loading validates the
-digest, batch lengths, each body's transaction hash against its paired event
-log, and the recomputed event root. Published corruption is fatal; incomplete
-candidate or temporary files are not part of the committed outbox.
+The committed record carries a digest over its full payload to detect later
+at-rest corruption. Loading validates the digest, batch lengths, each body's
+transaction hash against its paired event log, the body-derived transaction
+root, and the recomputed event root. The event root authenticates each
+`TxEventLog` together with its transaction's
+`NondeterministicProposalData`; each inner `Transaction` is independently bound
+to the consensus transaction-set root. The `SignedTransaction` signature
+wrapper remains outside both roots because `TransactionHash` deliberately
+excludes signatures. Published corruption is fatal; incomplete candidate or
+temporary files are not part of the committed outbox.
 
 Scheduler `BlockID` is process-local and may be regenerated during recovery. It
 is used only to locate candidate state and alias commit RPCs; it is not part of
 the committed outbox payload, committed header, wire value, payload digest, or
 indexer identity ledger. A committed record is identified by its
 `ConsensusValue` hash and full-payload digest.
+
+Event close receives only the block ID and height. Because the event root now
+commits both event logs and nondeterministic proposal data, restart promotion
+selects a candidate by protocol, height, and the finalized
+`ProposalHeader.events_hash`; no separate proposal tag is passed to event or
+stored in candidate state. `ConsensusValue.proposal_txs_hash` remains unchanged
+for consensus proposal authentication.
 
 Chuckd persists the consensus value before calling scheduler commit. A durable
 candidate therefore closes the chain-ahead/outbox-missing window: if the process
@@ -78,7 +95,7 @@ orphaned or conflicting record is never returned.
 Pulling is ordered and at least once. Each request reports the indexer's outbox
 origin, durable contiguous watermark, and the consensus hash and full-payload
 digest at that boundary. The event service rejects a boundary identity mismatch
-and returns only the exact next scheduler-admissible record. An uninitialized
+and returns only the exact next finalized record. An uninitialized
 indexer receives either the first record or the current origin when the outbox is
 caught up. A request carrying progress advanced through a previous reply is its
 acknowledgement; a lost reply safely causes the same immutable block to be
@@ -107,18 +124,20 @@ only as one ordered prefix below an unbroken current-protocol suffix that starts
 at its durable epoch origin and whose tip exactly matches the scheduler's
 canonical `ConsensusValue`. Pulling an archival record currently decodes it with
 the current generated payload type after checking the envelope's recorded
-protocol. Replay across epochs therefore requires that the committed payload XDR
-remain wire-compatible; an incompatible payload change requires either a
-retained versioned decoder or a clean-chain migration.
+protocol. Replay across epochs therefore requires both wire-compatible
+committed-payload XDR and compatible commitment-validation semantics. An
+incompatible payload or root-definition change requires either retained
+versioned decoding and validation or a clean-chain migration.
 An archival record after the current suffix, an unknown envelope version, a
 current-protocol gap, an origin mismatch, or archival records without enough
 current-protocol state to prove the boundary leaves the event service unhealthy.
 The implementation does not guess an origin.
 
-Reconciliation separately records the scheduler-admissible canonical tail. A
-durable H+1 record found while the scheduler reports H remains withheld from
-pull requests. A later catchup commit must supply the exact retained
-`ConsensusValue` before H+1 becomes admissible.
+Reconciliation separately records the finalized canonical tail. Because
+`eventsched_commit_block` is called only after finalization, a durable H+1
+record found while HogDB reports H remains pullable. This is the expected crash
+window between the parallel event and HogDB durable commits; the retained
+record must link exactly to the recovered HogDB tip.
 
 There is no legacy mid-chain migration. A recovered devnode chain without a
 durable outbox origin fails closed even when the outbox directory is empty. The
@@ -149,16 +168,17 @@ the same card to reconcile a later canonical tip, is idempotent; a different
 card is an error. There are no per-block event leases, endpoint refreshes, or
 live event-service replacement. Any transport exception after a DB/event commit
 has been selected is ambiguous and terminates the process after already-launched
-coroutines have drained. Trusted commit and confirmation result checks run only
-at the commit DAG join, after all sibling operations have settled.
+coroutines have drained. Trusted commit result checks run only at the commit DAG
+join, after all sibling operations have settled.
 
 An outbox publication coroutine lock serializes origin selection, durable
-promotion, scheduler-admissible-tail advancement, and pull snapshots. A pull
-copies the current origin and admissible boundary while holding that lock, then
-loads the immutable next record without holding it. New scheduler confirmations
-only advance the admissible tail; they perform no indexer network work, so
-indexer latency cannot block consensus commit. Shutdown fails the active client
-stream and joins the indexer's owned pull thread.
+promotion, finalized-tail advancement, and pull snapshots. A pull
+copies the current origin and finalized boundary while holding that lock, then
+loads the immutable next record without holding it. A finalized scheduler
+commit durably promotes the record and advances the finalized tail; it performs
+no indexer network work, so indexer latency cannot block consensus commit.
+Shutdown fails the active client stream and joins the indexer's owned pull
+thread.
 
 The indexer stays in its startup state until initial replay succeeds. After its
 first caught-up reply, transport loss, `NotReady`, or known unapplied work marks
@@ -180,13 +200,13 @@ separate work.
 
 1. A committed block is recoverable after the event service has acknowledged
    commit, even if no indexer was connected.
-2. Event logs and transaction bodies retain their positional association and
-   are serialized in canonical `ProposalTxs` hash order.
+2. Event logs and transaction bodies retain their positional association;
+   transaction order is not significant to indexer application.
 3. Empty blocks advance the same contiguous sequence as non-empty blocks.
 4. One indexer pull loop applies records serially in exact height order.
 5. The indexer watermark advances only in strict height order.
 6. A restart after any successful apply can safely request that block again.
-7. Readiness is not healthy while scheduler-admissible durable outbox records
+7. Readiness is not healthy while finalized durable outbox records
    remain unapplied.
 8. Candidate publication precedes consensus persistence, and committed replay
    includes only records reconciled with canonical consensus identity.
@@ -205,19 +225,22 @@ event, indexer, and devnode suites.
 | A fresh indexer starts at the oldest retained origin and traverses into the current epoch | `EventRpcTest.FreshPullStartsAtOldestRetainedEpoch`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
 | Durable progress and indexed rows reopen atomically, then resume from the exact next height | `StrictIndexerTest.SuccessfulStrictApplyReopensAllRowsAndProgressTogether`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
 | A lost reply repeats the same immutable block and duplicate application is idempotent | `EventRpcTest.ExactProgressReturnsNextAndUnchangedProgressRepeatsIt`; `StrictIndexerTest.DuplicateLedgerAndFutureGapWriteNothing` |
-| Scheduler confirmation gates pull eligibility | `EventRpcTest.CommittedRecordBecomesPullableOnlyAfterConfirmation` |
+| Finalized scheduler commit makes the durable record pullable | `EventRpcTest.FinalizedCommitMakesRecordPullable` |
+| Restart promotion ignores regenerated process-local block IDs and selects the candidate whose event root binds the finalized nondeterministic data | `EventRpcTest.ReconciliationPromotesRetainedCandidateWithRegeneratedBlockId`; `HogDevnode.DataDirPromotesFinalizedCandidateAfterRestart` |
+| Event commitment binds nondeterministic proposal data while excluding signature-wrapper malleability | `IndexerOutboxTest.EventRootBindsNondeterministicDataButNotSignatureWrapper`; `IndexerOutboxTest.EventLeafSerializesEventBeforeNondeterministicData` |
 | A dropped event connection clears readiness, is retried, and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
 | A blocked pull is bounded by its RPC deadline and reconnects | `IndexerPullController.RpcTimeoutReconnectsAfterBlockedPull` |
 | Initial catch-up has no wall-clock deadline, and shutdown cancels an in-flight pull before joining | `IndexerPullController.DestructionCancelsBlockedPull` |
-| Event/body candidate bytes follow canonical proposal order | `EventBlockContextTest.CandidateSerializesEventBodiesInCanonicalProposalOrder`; `IndexerOutboxTest.NoncanonicalEventBodyOrderIsRejected` |
+| Event/body association is checked once against finalized consensus before publication | `IndexerOutboxTest.CandidateCardinalityAndCommittedBodyMismatchAreRejected` |
 | Lost activation replies and same-card restart reconciliation are idempotent | `Mempool.EventActivationRetryAfterLostSuccessReplyIsIdempotent`; `Mempool.RegisteredEventSameCardRepreparesAtAdvancedCanonicalTip` |
-| Origin, identity, corruption, and gap conflicts fail closed | `EventRpcTest.ForgedAndUnknownProgressConflict`; `EventRpcTest.ReconciliationRejectsDisconnectedArchivalPrefix`; `StrictIndexerTest.RejectsPrevProposalBodyEventRootAndDigestConflicts` |
+| Origin, identity, corruption, and gap conflicts fail closed | `EventRpcTest.ForgedAndUnknownProgressConflict`; `EventRpcTest.ReconciliationRejectsDisconnectedArchivalPrefix`; `StrictIndexerTest.RejectsPrevBodyEventRootAndDigestConflicts` |
 
 The archived-to-current integration fixture rewrites current-format test records
 under an archival protocol identity. It proves origin ordering, RPC traversal,
 durable application, and restart behavior, but does not prove decoding of an
-incompatible historical payload schema. That limitation is the wire-compatibility
-requirement stated in the protocol epoch policy above.
+incompatible historical payload schema or commitment definition. That
+limitation is the compatibility requirement stated in the protocol epoch
+policy above.
 
 ## Hosted Validation
 

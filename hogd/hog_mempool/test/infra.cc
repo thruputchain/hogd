@@ -43,6 +43,7 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // Multiple tests run within the same process, so we need to clear the
   // registration and metrics at the beginning of each test.
   Registration::registration().clear();
+  Registration::registration().set_network_hash(kNetworkHash);
   Metrics::instance().clear();
   init_hog_exec_metrics();
 
@@ -84,7 +85,8 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // Start the auth servers.
   std::string dbauth_address = make_address(kAddress, db_auth_server_->port());
   dbauth_client_t dbauth_client = make_dbauth_client(dbauth_address)().value();
-  auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+  auth_server_ =
+      std::make_unique<AuthServer>(std::move(dbauth_client), kNetworkHash);
 
   auth_db_server_->max_message_size_ = kBulkRpcMaxMessageSize;
   auth_mempool_server_->max_message_size_ = kBulkRpcMaxMessageSize;

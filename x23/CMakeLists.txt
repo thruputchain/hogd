@@ -55,6 +55,7 @@ include(cmake/pause.cmake)
 include(cmake/stacktrace.cmake)
 include(cmake/coroICE.cmake)
 include(cmake/broken_wait_until.cmake)
+include(cmake/broken_coro_gro_cleanup.cmake)
 
 # Resolve X23_CORO_TRACE to a concrete 0 or 1 here in CMake (rather than
 # leaving the auto-detect to the preprocessor in corotrace.h) so that we

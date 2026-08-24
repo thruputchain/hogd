@@ -96,11 +96,16 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
         .gas_remaining = machine.gas_remaining(),
     };
 
+    // Syscalls are coroutinized, but this loop is not yet: block until the
+    // result is ready.  That is legal here only because contract execution
+    // still runs on a DispatchPool worker rather than an x23 ThreadPool thread
+    // (Async::operator() asserts as much).  Awaiting instead of blocking is
+    // what removes the DispatchPool.
     auto [host_result, gas_consumed] =
         syscall_entry(host_fn_ctx, context, pending_ecall->a0,
                       pending_ecall->a1, pending_ecall->a2, pending_ecall->a3,
                       pending_ecall->a4, pending_ecall->a5, pending_ecall->a6,
-                      pending_ecall->a7);
+                      pending_ecall->a7)();
 
     if (host_result.has_value()) {
       result = machine.resume_from_ecall(

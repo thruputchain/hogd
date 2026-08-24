@@ -119,7 +119,8 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
   value.prev_hash = prev_hash;
   value.proposal_header.block_height = height;
   value.proposal_header.block_timepoint = 1000 + height;
-  value.proposal_header.events_hash = compute_indexer_outbox_event_root(logs);
+  value.proposal_header.events_hash =
+      compute_indexer_outbox_event_root(logs, bodies);
   auto txs_root = compute_indexer_proposal_txs_root(proposal)();
   EXPECT_TRUE(txs_root.has_value()) << txs_root.error();
   value.proposal_header.txs_hash = *txs_root;
@@ -127,7 +128,6 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
   IndexerCommittedBlockPayload payload{
       .format_version = kIndexerOutboxFormatVersion,
       .consensus_value = std::move(value),
-      .proposal_txs = std::move(proposal),
       .event_logs = std::move(logs),
       .tx_bodies = std::move(bodies),
   };
@@ -140,7 +140,6 @@ void
 refresh_identity(IndexerCommittedBlock &block)
 {
   block.identity.consensus_hash = sha256(block.payload.consensus_value);
-  block.identity.payload_digest = sha256(block.payload);
 }
 
 void
@@ -227,8 +226,8 @@ TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
   ASSERT_EQ(transitioned.outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
   EXPECT_EQ(transitioned.progress().contiguous_height, 1);
-  EXPECT_EQ(transitioned.progress().last_payload_digest,
-            first.identity.payload_digest);
+  EXPECT_EQ(transitioned.progress().last_consensus_hash,
+            first.identity.consensus_hash);
 
   EXPECT_EQ(db_->apply_committed_block(origin, first)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockOriginMismatch);
@@ -315,8 +314,8 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().origin, second_origin);
   EXPECT_EQ(progress.initialized().contiguous_height, 1);
-  EXPECT_EQ(progress.initialized().last_payload_digest,
-            first.identity.payload_digest);
+  EXPECT_EQ(progress.initialized().last_consensus_hash,
+            first.identity.consensus_hash);
 
   IndexerCommittedBlock second = make_block(2, first.identity.consensus_hash);
   EXPECT_EQ(reopened->apply_committed_block(second_origin, second)().outcome(),
@@ -419,8 +418,8 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
   IndexerProgress progress = db_->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().contiguous_height, 2);
-  EXPECT_EQ(progress.initialized().last_payload_digest,
-            empty.identity.payload_digest);
+  EXPECT_EQ(progress.initialized().last_consensus_hash,
+            empty.identity.consensus_hash);
 }
 
 TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
@@ -455,7 +454,7 @@ TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
 }
 
-TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
+TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
 {
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
@@ -480,11 +479,6 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   refresh_identity(negative);
   expect_conflict(negative);
 
-  IndexerCommittedBlock proposal = valid;
-  proposal.payload.consensus_value.proposal_txs_hash[0] ^= 1;
-  refresh_identity(proposal);
-  expect_conflict(proposal);
-
   IndexerCommittedBlock body_conflict = valid;
   body_conflict.payload.tx_bodies[0].signed_tx.tx.uniquifier.nonce++;
   refresh_identity(body_conflict);
@@ -493,7 +487,8 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   IndexerCommittedBlock event_conflict = valid;
   event_conflict.payload.event_logs[0].tx_hash[0] ^= 1;
   event_conflict.payload.consensus_value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_conflict.payload.event_logs);
+      compute_indexer_outbox_event_root(event_conflict.payload.event_logs,
+                                        event_conflict.payload.tx_bodies);
   refresh_identity(event_conflict);
   expect_conflict(event_conflict);
 
@@ -506,17 +501,6 @@ TEST_F(StrictIndexerTest, RejectsPrevProposalBodyEventRootAndDigestConflicts)
   txs_root.payload.consensus_value.proposal_header.txs_hash[0] ^= 1;
   refresh_identity(txs_root);
   expect_conflict(txs_root);
-
-  IndexerCommittedBlock digest = valid;
-  digest.identity.payload_digest[0] ^= 1;
-  expect_conflict(digest);
-
-  IndexerCommittedBlock missing_proposal = valid;
-  missing_proposal.payload.proposal_txs = {};
-  missing_proposal.payload.consensus_value.proposal_txs_hash =
-      proposal_txs_compatibility_hash(missing_proposal.payload.proposal_txs);
-  refresh_identity(missing_proposal);
-  expect_conflict(missing_proposal);
 }
 
 TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)
@@ -808,8 +792,8 @@ TEST_F(StrictIndexerTest,
   EXPECT_EQ(progress.initialized().contiguous_height, 1);
   EXPECT_EQ(progress.initialized().last_consensus_hash,
             block.identity.consensus_hash);
-  EXPECT_EQ(progress.initialized().last_payload_digest,
-            block.identity.payload_digest);
+  EXPECT_EQ(progress.initialized().last_consensus_hash,
+            block.identity.consensus_hash);
 }
 
 } // namespace

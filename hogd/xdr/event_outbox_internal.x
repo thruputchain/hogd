@@ -3,7 +3,6 @@
 %#include "consensus.hh"
 %#include "indexer.hh"
 %#include "network.hh"
-%#include "proposal.hh"
 %#include "rpc_types.hh"
 %#include "transaction.hh"
 %#include "types.hh"
@@ -46,11 +45,16 @@ struct IndexerOutboxRecordHeader {
   BlockHeight block_height;
   ProtocolCommit protocol;
   unsigned hyper payload_byte_length;
+  // Epoch-origin records only. Candidate and committed records write zeros:
+  // a committed record's integrity is the consensus roots recomputed on load,
+  // and the slot is retained to keep the stable envelope's wire shape.
   SHA256Hash payload_digest;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
   EventsHash event_root;
-  ProposalTxsHash proposal_txs_hash;
+  // Reserved to preserve the stable envelope's wire shape. Older format-1
+  // files stored ProposalTxsHash here; current readers ignore this slot.
+  SHA256Hash reserved_hash;
 };
 
 struct IndexerOutboxCandidatePayload {
@@ -58,11 +62,20 @@ struct IndexerOutboxCandidatePayload {
   BlockID block_id;
   BlockHeight block_height;
   EventsHash event_root;
-  ProposalTxs proposal_txs;
   TxEventLogBatch event_logs;
   ProposedTransactionBatch tx_bodies;
 };
 
 typedef IndexerCommittedBlockPayload IndexerOutboxCommittedPayload;
+
+// What a committed record actually stores. The event logs and transaction
+// bodies live once, in the block's content-addressed events file named by
+// consensus_value.proposal_header.events_hash (the header's event_root);
+// loading a committed record reassembles the full IndexerOutboxCommittedPayload
+// from that file and revalidates both consensus roots against the header.
+struct IndexerOutboxCommittedStoredPayload {
+  unsigned int format_version;
+  ConsensusValue consensus_value;
+};
 
 } // namespace hogd

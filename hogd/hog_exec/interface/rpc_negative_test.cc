@@ -32,7 +32,6 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -495,13 +494,11 @@ TEST_F(RpcNegativeTest,
   EXPECT_EQ(result[0], ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_
-                .eventsched_close_block(block_id, block_id, ProposalTxs{})
-                .error(),
+  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id, ProposalTxs{})
+                                        recycle_probe_block_id)
                 .error(),
             RPCError::kRPCNone);
   validate_thread.join();
@@ -556,13 +553,11 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   EXPECT_EQ(result[0].result(), ExecResult::ExecResultTxDeterministicError);
   EXPECT_EQ(client_.executorsched_finish_block(recycle_probe_block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_
-                .eventsched_close_block(block_id, block_id, ProposalTxs{})
-                .error(),
+  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
             RPCError::kRPCNone);
   EXPECT_EQ(event_client_
                 .eventsched_close_block(recycle_probe_block_id,
-                                        recycle_probe_block_id, ProposalTxs{})
+                                        recycle_probe_block_id)
                 .error(),
             RPCError::kRPCNone);
   propose_thread.join();
@@ -733,9 +728,7 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
             ExecResult::ExecResultOK);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(event_client_
-                .eventsched_close_block(block_id, block_id, ProposalTxs{})
-                .error(),
+  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
             RPCError::kRPCNone);
 }
 

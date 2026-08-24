@@ -1706,16 +1706,6 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
             SchedulerProposalOutcome::SchedulerProposalOK);
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
 
-  auto forwarded_proposal_txs =
-      server.event_sched_rpc().get_closed_proposal_txs(proposed.block_id)();
-  if (!forwarded_proposal_txs.has_value()) {
-    ADD_FAILURE() << "Proposal transactions were not forwarded";
-    return;
-  }
-  const ProposalTxs &forwarded_txs = forwarded_proposal_txs.value();
-  EXPECT_EQ(x23::serialize(forwarded_txs),
-            x23::serialize(proposed.proposal.transactions));
-
   EXPECT_EQ(proposed.proposal.header.proposer, context.proposer);
   EXPECT_EQ(proposed.proposal.header.block_timepoint, context.block_timepoint);
   EXPECT_NE(proposed.proposal.header.storage_hash, StorageShortHash{});
@@ -1739,7 +1729,7 @@ TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
   EXPECT_EQ(get_tip.db_tip().value.proposal_header, proposed.proposal.header);
 }
 
-TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
+TEST(Mempool, EmptyProposalForwardsConsensusValue)
 {
   MempoolTestInfra server;
   SchedulerGetTipResult get_tip =
@@ -1755,15 +1745,6 @@ TEST(Mempool, EmptyProposalForwardsExactCanonicalInputs)
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
   EXPECT_TRUE(proposed.proposal.transactions.hash.xdr.empty());
   EXPECT_TRUE(proposed.proposal.transactions.nondeterministic_data.xdr.empty());
-
-  auto forwarded_proposal_txs =
-      server.event_sched_rpc().get_closed_proposal_txs(proposed.block_id)();
-  if (!forwarded_proposal_txs.has_value()) {
-    ADD_FAILURE() << "Proposal transactions were not forwarded";
-    return;
-  }
-  EXPECT_EQ(x23::serialize(forwarded_proposal_txs.value()),
-            x23::serialize(proposed.proposal.transactions));
 
   ConsensusValue value = consensus_value(parent_tip, proposed.proposal);
   ASSERT_EQ(server.mempool_coord_rpc().schedulercoord_commit_block(
@@ -2060,7 +2041,8 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   SecretKey sk(CryptographicScheme::Ed25519);
   sk.ed25519() = private_key;
-  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+  txs[0].signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                             MempoolTestInfra::kNetworkHash));
 
   // Submit the tx — should pass auth (weight 1 >= required 1)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(

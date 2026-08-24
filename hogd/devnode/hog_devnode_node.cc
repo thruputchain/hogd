@@ -566,7 +566,8 @@ HogDevnodeNode::HogDevnodeNode(
       panic("devnode connect to dbauth failed: {}",
             dbauth_res.error().error_code().message());
     dbauth_client_t dbauth_client = std::move(*dbauth_res);
-    auth_server_ = std::make_unique<AuthServer>(std::move(dbauth_client));
+    auth_server_ =
+        std::make_unique<AuthServer>(std::move(dbauth_client), network_hash_);
 
     auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
     auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;
@@ -790,9 +791,8 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
   if (*latest && tip_height != std::numeric_limits<BlockHeight>::max() &&
       (*latest)->block_height == tip_height + 1 &&
       (*latest)->prev_hash == sha256(tip.value)) {
-    // Event publication and HogDB commit are concurrent. Preserve the expected
-    // crash window, but reconciliation keeps this record above the admissible
-    // delivery tail until the scheduler catches up with the exact value.
+    // Event publication and HogDB commit are concurrent. The event commit is
+    // called only after finalization, so this expected crash window is safe.
     return;
   }
   if (*latest && (*latest)->block_height > tip_height) {
@@ -832,11 +832,18 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
   const DbTip tip = ctx_->get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
   const BlockHeight indexed_height = indexer_db_->latest_block();
-  if (indexed_height > tip_height) {
+  auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
+  if (!latest) {
+    throw std::runtime_error(
+        "failed to inspect recovered event outbox latest record");
+  }
+  const BlockHeight finalized_height =
+      *latest ? std::max(tip_height, (*latest)->block_height) : tip_height;
+  if (indexed_height > finalized_height) {
     throw std::runtime_error(std::format(
-        "recovered hog-devnode indexer is ahead of chain tip: indexed height "
-        "{}, chain tip {}",
-        indexed_height, tip_height));
+        "recovered hog-devnode indexer is ahead of finalized event outbox: "
+        "indexed height {}, finalized height {}",
+        indexed_height, finalized_height));
   }
 }
 

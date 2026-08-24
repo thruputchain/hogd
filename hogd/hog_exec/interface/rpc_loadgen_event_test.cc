@@ -25,7 +25,6 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -126,7 +125,7 @@ protected:
 
     // We use [block_id] as the height as well.
     auto event_close_res =
-        event_client_.eventsched_close_block(block_id, block_id, ProposalTxs{});
+        event_client_.eventsched_close_block(block_id, block_id);
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);

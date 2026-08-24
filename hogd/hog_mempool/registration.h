@@ -293,6 +293,18 @@ public:
     }
     auth_registered_ = false;
     auth_card_ = AuthCard{};
+
+    network_hash_ = NetworkHash{};
+  }
+
+  void set_network_hash(NetworkHash network_hash)
+  {
+    network_hash_ = network_hash;
+  }
+
+  void get_network_hash(NetworkHash *network_hash) const
+  {
+    *network_hash = network_hash_;
   }
 
 private:
@@ -322,6 +334,8 @@ private:
   // registration instance for the entire process.
   Registration() = default;
   ~Registration() = default;
+
+  NetworkHash network_hash_;
 
   x23::CoroFutex<size_t> registered_executors_{0};
   x23::CoroFutex<bool> event_ready_{false};

@@ -29,6 +29,7 @@
 
 namespace hogd {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class AuthServerTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
 private:
@@ -373,7 +374,7 @@ TEST_F(AuthServerTest, DbAuthIntroUpdateRace)
   const uint16_t db_port = db_server.start_server(0);
   const std::string db_address = std::format("localhost:{}", db_port);
   dbauth_client_t dbauth_client = make_dbauth_client(db_address)().value();
-  AuthServer race_auth_server(std::move(dbauth_client), 16);
+  AuthServer race_auth_server(std::move(dbauth_client), NetworkHash{}, 16);
 
   AuthCard auth_card{.protocol = {},
                      .upid = {},
@@ -491,7 +492,7 @@ TEST(AuthServerSubscribeTest, SynchronizesMempoolToIntroHeight)
   sched_auth_client_t mempool_client =
       make_rpc_client<MempoolAuth1>(mempool_address)().value();
 
-  AuthServer auth_server(std::move(db_client), 16);
+  AuthServer auth_server(std::move(db_client), NetworkHash{}, 16);
   auth_server.set_mempool_client(std::move(mempool_client));
   auth_server.subscribe_to_auth_data_changes(AuthCard{})();
 
@@ -510,7 +511,7 @@ TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
   uint16_t port = db_server.start_server(0);
   std::string db_address = std::format("localhost:{}", port);
   dbauth_client_t dbauth_client = make_dbauth_client(db_address)().value();
-  AuthServer auth_server(std::move(dbauth_client), 16);
+  AuthServer auth_server(std::move(dbauth_client), NetworkHash{}, 16);
 
   std::atomic<bool> lookup_started = false;
   std::atomic<bool> lookup_finished = false;

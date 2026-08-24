@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
-#include <future>
 #include <latch>
 #include <span>
 #include <string>
@@ -17,16 +16,12 @@
 #include "event.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/perthread.h"
 #include "hogd/base/string.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/init.h"
-#include "indexer.hh"
-#include "proposal.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -52,10 +47,20 @@ public:
     TxEventLog log;
     auto data = std::span(*buf);
 
+    // The events file is a flat run of [TxEventLog][ProposedTransaction]
+    // pairs. Both halves have to be walked to stay aligned, even though only
+    // the logs are returned here.
     while (offset < buf->size()) {
       size_t n =
           x23::deserialize_from(&log, x23::BufView(data.subspan(offset)));
       offset += n;
+      EXPECT_LT(offset, buf->size());
+      if (offset >= buf->size()) {
+        break;
+      }
+      ProposedTransaction body;
+      offset +=
+          x23::deserialize_from(&body, x23::BufView(data.subspan(offset)));
       auto it = event_logs.insert({log.tx_hash, log});
       EXPECT_TRUE(it.second);
       if (!it.second) {
@@ -572,131 +577,6 @@ TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
     co_await context.finish_file_write();
     co_await context.finish_file(context.get_root_hash());
   }(pool, context)();
-}
-
-namespace {
-ProposedTransaction
-make_distinct_body(uint64_t nonce)
-{
-  ProposedTransaction body;
-  body.signed_tx.tx.uniquifier.block_expiry_height =
-      static_cast<BlockHeight>(1000 + nonce);
-  body.signed_tx.tx.uniquifier.nonce = nonce;
-  body.signed_tx.tx.invocation.gas_limit = 1'000'000 + nonce;
-  return body;
-}
-
-TxEventLog
-make_event_for_body(ProposedTransaction const &body, uint8_t marker)
-{
-  TxEmittedEvent emitted_event;
-  emitted_event.contract_address[0] = marker;
-  emitted_event.serialized_event.push_back(marker);
-
-  TxEventLog event;
-  event.tx_hash = sha256(body.signed_tx.tx);
-  event.events.push_back(std::move(emitted_event));
-  return event;
-}
-} // namespace
-
-TEST_F(EventBlockContextTest,
-       CandidateSerializesEventBodiesInCanonicalProposalOrder)
-{
-  EventBlockContext context(temp_dir_, 1);
-  PerThread<TxEventLogBatch> event_registration_probe;
-  PerThread<ProposedTransactionBatch> body_registration_probe;
-
-  auto body_a = make_distinct_body(101);
-  auto body_b = make_distinct_body(202);
-  auto event_a = make_event_for_body(body_a, 0xA1);
-  auto event_b = make_event_for_body(body_b, 0xB2);
-
-  std::promise<void> a_event_registered;
-  std::promise<void> b_body_registered;
-  std::promise<void> a_body_registered;
-  std::promise<void> start_add_a;
-  std::promise<void> start_add_b;
-  std::promise<void> done_add_a;
-  std::promise<void> done_add_b;
-  std::promise<void> release_workers;
-
-  auto a_event_registered_f = a_event_registered.get_future();
-  auto b_body_registered_f = b_body_registered.get_future();
-  auto a_body_registered_f = a_body_registered.get_future();
-  auto start_add_a_f = start_add_a.get_future();
-  auto start_add_b_f = start_add_b.get_future();
-  auto done_add_a_f = done_add_a.get_future();
-  auto done_add_b_f = done_add_b.get_future();
-  auto release_workers_f = release_workers.get_future().share();
-
-  std::atomic<bool> added_a = false;
-  std::atomic<bool> added_b = false;
-
-  std::thread worker_a([&] {
-    event_registration_probe->clear();
-    a_event_registered.set_value();
-    b_body_registered_f.wait();
-    body_registration_probe->clear();
-    a_body_registered.set_value();
-
-    start_add_a_f.wait();
-    added_a.store(context.add_event(event_a, body_a)(),
-                  std::memory_order_release);
-    done_add_a.set_value();
-    release_workers_f.wait();
-  });
-
-  std::thread worker_b([&] {
-    a_event_registered_f.wait();
-    event_registration_probe->clear();
-    body_registration_probe->clear();
-    b_body_registered.set_value();
-
-    start_add_b_f.wait();
-    added_b.store(context.add_event(event_b, body_b)(),
-                  std::memory_order_release);
-    done_add_b.set_value();
-    release_workers_f.wait();
-  });
-
-  a_body_registered_f.wait();
-
-  context.executor_open_block();
-  start_add_a.set_value();
-  done_add_a_f.wait();
-  start_add_b.set_value();
-  done_add_b_f.wait();
-  EXPECT_TRUE(added_a.load(std::memory_order_acquire));
-  EXPECT_TRUE(added_b.load(std::memory_order_acquire));
-  context.executor_close_block();
-  finish_file(context);
-
-  x23::XdrVec<TransactionHash> canonical_hashes{sha256(body_b.signed_tx.tx),
-                                                sha256(body_a.signed_tx.tx)};
-  x23::XdrVec<NondeterministicProposalData> canonical_data{
-      body_b.nondeterministic_proposal_data,
-      body_a.nondeterministic_proposal_data};
-  ProposalTxs proposal_txs{
-      .hash = t_to_parallel_batch(canonical_hashes)(),
-      .nondeterministic_data = t_to_parallel_batch(canonical_data)(),
-  };
-  auto candidate = context.snapshot_indexer_outbox_candidate(
-      /*block_height=*/7, context.get_root_hash(), std::move(proposal_txs))();
-
-  release_workers.set_value();
-  worker_a.join();
-  worker_b.join();
-
-  ASSERT_EQ(candidate.event_logs.size(), 2);
-  ASSERT_EQ(candidate.tx_bodies.size(), 2);
-
-  EXPECT_EQ(candidate.event_logs[0].tx_hash, canonical_hashes[0]);
-  EXPECT_EQ(candidate.event_logs[1].tx_hash, canonical_hashes[1]);
-  for (size_t i = 0; i < candidate.event_logs.size(); i++) {
-    EXPECT_EQ(sha256(candidate.tx_bodies[i].signed_tx.tx),
-              candidate.event_logs[i].tx_hash);
-  }
 }
 
 } // namespace hogd

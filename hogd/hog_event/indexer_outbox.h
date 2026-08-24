@@ -15,7 +15,6 @@
 #include "hogd/base/cleanup.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
-#include "proposal.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -48,9 +47,10 @@ struct IndexerOutboxCommittedRecordInfo {
   BlockHeight block_height;
   std::string protocol;
   uint64_t payload_byte_length;
-  SHA256Hash payload_digest;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
+  // Names the <event_root>.events file the record's pairs live in.
+  EventsHash event_root;
 
   bool operator==(const IndexerOutboxCommittedRecordInfo &) const = default;
 };
@@ -62,7 +62,6 @@ struct IndexerOutboxCandidateRecordInfo {
   uint64_t payload_byte_length;
   SHA256Hash payload_digest;
   EventsHash event_root;
-  ProposalTxsHash proposal_txs_hash;
 };
 
 struct IndexerOutboxEpochOriginInfo {
@@ -111,9 +110,10 @@ void fail_next_indexer_outbox_operation_for_test(IndexerOutboxFaultPoint point);
 IndexerOutboxStatus<size_t>
 indexer_outbox_file_size_for_payload(size_t payload_size);
 IndexerOutboxStatus<void> validate_indexer_outbox_file_size(size_t file_size);
-IndexerOutboxStatus<size_t> indexer_event_pull_rpc_record_size_for_parts(
-    size_t consensus_value_xdr_size, size_t proposal_txs_xdr_size,
-    size_t event_logs_xdr_size, size_t tx_bodies_xdr_size);
+IndexerOutboxStatus<size_t>
+indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
+                                             size_t event_logs_xdr_size,
+                                             size_t tx_bodies_xdr_size);
 
 // The outbox directory is private, operator-owned state. open() requires an
 // existing 0700 directory. open_or_create_in() creates indexer-outbox beneath
@@ -141,6 +141,16 @@ public:
   static std::string current_epoch_origin_filename();
   x23::Async<IndexerOutboxStatus<void>>
   publish_candidate(const IndexerOutboxCandidatePayload &payload) const;
+  // publish_candidate() for a payload whose two vectors are already encoded,
+  // as they are on the event ingest path. Writes the identical record without
+  // re-serializing or concatenating the element bytes. event_bufs and body_bufs
+  // must be index-aligned when each list is concatenated, and both vectors are
+  // emitted with pair_count entries.
+  IndexerOutboxStatus<void>
+  publish_candidate_encoded(BlockID block_id, BlockHeight block_height,
+                            SHA256Hash event_root, uint32_t pair_count,
+                            std::span<const x23::Buf> event_bufs,
+                            std::span<const x23::Buf> body_bufs) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
   load_candidate(BlockID block_id) const;
   IndexerOutboxStatus<bool> has_candidate(BlockID block_id) const;
@@ -150,6 +160,17 @@ public:
 
   x23::Async<IndexerOutboxStatus<void>>
   publish_committed(const IndexerOutboxCommittedPayload &payload) const;
+  // Publishes a committed record for an events file this process already
+  // streamed and made durable: the record is written by reference, without
+  // reading the file back or recomputing the consensus roots. The caller
+  // vouches for the root (the live block context computed it over the pairs it
+  // streamed), so this is only for the live commit path; restart promotion and
+  // synthetic publishers go through publish_committed, which validates the
+  // full payload. The referenced file must exist -- publication fails closed
+  // if it does not -- and its size is checked against the pull RPC replay
+  // bound so an unservable record is rejected at commit, not at first pull.
+  x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
+      const IndexerOutboxCommittedStoredPayload &stored) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
@@ -207,8 +228,9 @@ public:
   x23::Async<size_t> committed_history_scan_count_for_test() const;
 
 private:
-  explicit IndexerOutboxStore(UniqueFd directory_fd)
-    : directory_fd_(std::move(directory_fd))
+  IndexerOutboxStore(UniqueFd directory_fd, UniqueFd events_directory_fd)
+    : directory_fd_(std::move(directory_fd)),
+      events_directory_fd_(std::move(events_directory_fd))
   {}
 
   static IndexerOutboxStatus<IndexerOutboxStore>
@@ -228,6 +250,9 @@ private:
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
                 std::span<const std::byte> bytes) const;
+  IndexerOutboxStatus<void>
+  publish_bytes(std::string_view filename,
+                std::span<const std::span<const std::byte>> pieces) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
@@ -241,8 +266,44 @@ private:
   validate_payload_digest(std::string_view filename,
                           const IndexerOutboxRecordHeader &header) const;
   IndexerOutboxStatus<bool> has_regular_file(std::string_view filename) const;
+  // Reads <event_root>.events from the events directory and reassembles the
+  // full committed payload the stored record references.
+  IndexerOutboxStatus<IndexerOutboxCommittedPayload>
+  assemble_committed_payload(const IndexerOutboxRecordHeader &header,
+                             std::span<const uint8_t> stored_bytes) const;
+  // Publishes the payload's pairs as <event_root>.events if that file does not
+  // already exist, first writer wins. The production commit path streamed the
+  // file at close, so this is a stat; synthetic publishers get the file
+  // written for them from the payload in hand.
+  IndexerOutboxStatus<void>
+  ensure_events_file(const IndexerOutboxCommittedPayload &payload) const;
+  // Size of the events file for [event_root], or a fail-closed error when it
+  // is missing or not a regular file.
+  IndexerOutboxStatus<uint64_t>
+  probe_events_file_size(const EventsHash &event_root) const;
+  // Reconciliation-time validation of one current-protocol committed record:
+  // decodes the record's own stored payload (a few hundred bytes) against its
+  // header, and probes that the referenced events file exists and fits the
+  // pull replay record. Deliberately does NOT read the events file: its pairs
+  // are validated fail-closed wherever they are loaded, so restart-to-ready
+  // stays proportional to record count rather than retained transaction
+  // bytes.
+  IndexerOutboxStatus<void> validate_committed_record_reference(
+      const IndexerOutboxCommittedRecordInfo &record) const;
+  // Common tail of committed publication. [payload_for_ensure] non-null means
+  // the caller holds the full payload and a missing events file is written
+  // from it (publish_committed); null means the file must already exist
+  // (publish_committed_reference).
+  x23::Async<IndexerOutboxStatus<void>> publish_committed_stored(
+      const IndexerOutboxCommittedStoredPayload &stored,
+      const IndexerOutboxCommittedPayload *payload_for_ensure) const;
 
   UniqueFd directory_fd_;
+  // The parent directory, where <event_root>.events files live. A committed
+  // record stores only {format_version, consensus_value} and its event logs
+  // and transaction bodies are read back from the events file its header's
+  // event_root names -- the same file close_block streamed, written once.
+  UniqueFd events_directory_fd_;
   bool recognized_residue_on_open_ = false;
   // The generated XDR members are movable without allocation, but clang-tidy
   // follows an infeasible copying path through their implicit move functions.

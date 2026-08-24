@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 21
+#define TEST_FFI_VERSION_MINOR 23
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -155,7 +155,8 @@ struct GetSnapshotStorageItemResult {
 };
 
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
-                                uint32_t serialized_cost_model_len);
+                                uint32_t serialized_cost_model_len,
+                                const uint8_t *serialized_network_hash);
 enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);
@@ -296,9 +297,12 @@ struct VerifyAuthResult {
 // signed_tx: serialized SignedTransaction
 // source_auth_data: serialized AddressAuthData for the source address, or
 // {nullptr, 0} when the address has no registered auth data
+// serialized_network_hash: 32-byte network hash the signatures were produced
+// against; it is part of every signature preimage. Must not be null.
 struct VerifyAuthResult
 verify_signed_transaction_auth(struct FFISerializedSignedTransaction signed_tx,
-                               struct FFISourceAuthData source_auth_data);
+                               struct FFISourceAuthData source_auth_data,
+                               const uint8_t *serialized_network_hash);
 
 // Note that AuthErrorCode is distinct from AuthVerifyErrorCode.
 // AuthErrorCode includes additional checks, such as missing auth data and block

@@ -36,8 +36,10 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
   }
   CHECK_EQ(offset, batch.xdr.size());
 
-  ParallelBatch index = batch;
-  index.xdr.clear();
+  ParallelBatch index{
+      .segment_tokens = batch.segment_tokens,
+      .segment_bytes = batch.segment_bytes,
+  };
   SHA256Hash index_hash = sha256(index);
   for (size_t i = 0; i < result.size(); ++i) {
     result[i] ^= index_hash[i];
@@ -48,9 +50,7 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
 inline ProposalTxsHash
 proposal_txs_compatibility_hash(const ProposalTxs &txs)
 {
-  ProposalTxs base = txs;
-  base.hash = {};
-  base.nondeterministic_data = {};
+  ProposalTxs base{.ext = txs.ext};
 
   ProposalTxsHash result = sha256(base);
   const SHA256Hash hash = hash_parallel_batch_compatibility(txs.hash);
