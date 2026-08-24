@@ -14,6 +14,7 @@
 #include "types.hh"
 
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -155,6 +156,15 @@ HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 DbGatewayResult
 HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch const &batch)
 {
+  // Reject oversized batches before touching the database: this is a
+  // client-facing surface, and the whole-RPC error arm is how a request
+  // the server refuses to serve is reported.
+  if (batch.size() > kMaxGatewayBatchSize) {
+    error("dbgateway_get_items: batch size {} exceeds maximum {}", batch.size(),
+          kMaxGatewayBatchSize);
+    return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  }
+
   HogDbDAO &db = ctx_.get_db();
 
   // Snapshot the committed tip once up-front so every item in the response

@@ -30,4 +30,12 @@ inline constexpr size_t kEventSchedulerRpcMaxMessageSize = 0x7fffffff;
 // intra-node links above.
 inline constexpr size_t kQueryRpcMaxMessageSize = 0x100'0000;
 
+// Per-request batch-size cap for the gateway-facing RPC surfaces
+// (DbGateway1::dbgateway_get_items, SchedGateway1::schedgateway_lookup_tx).
+// The production JSON-RPC gateway's adaptive batcher coalesces up to 1000
+// storage reads into one dbgateway_get_items call by default, so the cap
+// sits just above that while still bounding what an arbitrary client can
+// make the node process in a single request.
+inline constexpr size_t kMaxGatewayBatchSize = 1024;
+
 } // namespace hogd

@@ -5,11 +5,14 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <format>
 #include <memory>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
@@ -74,6 +77,16 @@ public:
   x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
+    // This result shape has no in-band error arm, so reject an
+    // oversized batch by throwing: the x23 dispatcher converts handler
+    // exceptions into a SYSTEM_ERR reply, the same category it uses
+    // for requests whose argument counts are too large to decode.
+    if (tx_hashes.size() > kMaxGatewayBatchSize) {
+      throw std::runtime_error(
+          std::format("schedgateway_lookup_tx: batch size {} exceeds "
+                      "maximum {}",
+                      tx_hashes.size(), kMaxGatewayBatchSize));
+    }
     co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
   }
 

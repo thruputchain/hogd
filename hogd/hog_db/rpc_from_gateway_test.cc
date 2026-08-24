@@ -19,6 +19,7 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -92,6 +93,26 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+// A batch above kMaxGatewayBatchSize is rejected up front through the
+// whole-RPC error arm; a batch at the cap is still served.
+TEST(HogDbGatewayRpcTest, GetItemsRejectsOversizedBatch)
+{
+  RPCContext ctx(make_dao(), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+
+  AddressAndKeyBatch batch;
+  for (std::size_t i = 0; i < kMaxGatewayBatchSize + 1; ++i)
+    batch.push_back(make_balance_query(ContractAddress{}));
+
+  DbGatewayResult rejected = gateway.dbgateway_get_items(batch);
+  EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
+
+  batch.resize(kMaxGatewayBatchSize);
+  DbGatewayResult served = gateway.dbgateway_get_items(batch);
+  ASSERT_EQ(served.error(), RPCError::kRPCNone);
+  EXPECT_EQ(served.payload().items.size(), kMaxGatewayBatchSize);
 }
 
 // Querying an address that was never written returns per-item
