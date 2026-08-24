@@ -19,6 +19,7 @@
 #include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
@@ -201,8 +202,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           panic("Failed to parse database shard address");
         }
-        // One connection per physical core rather than per last-level cache.
-        // The async client has one reader coroutine per connection, and that
+        // A chosen connection count, not the machine's cache topology.  The
+        // async client has one reader coroutine per connection, and that
         // reader is the whole return path for its connection: it parses every
         // reply header and looks up every xid before anything downstream can
         // run.  llc_map can be a single bucket on a machine whose cores share
@@ -226,6 +227,7 @@ x23::Async<SystemStatus<std::optional<WireStorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 {
   auto res = co_await client_.get_snapshot_item(block_id, addrkey);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<std::nullopt>(
       res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
         return std::make_optional<WireStorageItem>(std::move(x));
@@ -236,6 +238,7 @@ x23::Async<SystemStatus<std::optional<Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash contract_hash)
 {
   auto res = co_await client_.get_contract(block_id, contract_hash);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<std::nullopt>(res, [](Contract &&x) {
     return std::make_optional<Contract>(std::move(x));
   });
@@ -245,6 +248,7 @@ x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress addr)
 {
   auto res = co_await client_.get_deployment(block_id, addr);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<std::nullopt>(
       res, [](DeployedContractHash &&x) {
         return std::make_optional<DeployedContractHash>(std::move(x));
@@ -259,6 +263,7 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
   auto res =
       co_await client_.get_next_retrocausal_queue_block(block_id, addrkey,
                                                         search_start_number);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<std::nullopt>(
       res, [](RetrocausalQueueBlock &&x) {
         return std::make_optional<RetrocausalQueueBlock>(std::move(x));
@@ -273,6 +278,7 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
   auto res =
       co_await client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey,
                                                               index);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });
@@ -285,6 +291,7 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
   try {
     auto res =
         co_await client_.commit_transaction(block_id, tx_id, new_contracts);
+    co_await default_threadpool().bg();
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
@@ -313,6 +320,7 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   auto res = co_await client_.abort_transaction(block_id, tx_id);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -494,6 +502,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
   try {
     auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
                                                             delta_batch);
+    co_await default_threadpool().bg();
     switch (res.error()) {
     case RPCError::kRPCNone:
       co_return true;
@@ -532,6 +541,7 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
   auto res = co_await client_.pop_subtransactions(block_id, tx_id, count);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -539,6 +549,7 @@ x23::Async<SystemStatus<DbTip>>
 DatabaseProxy::get_db_tip(BlockID block_id)
 {
   auto res = co_await client_.get_db_tip(block_id);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
       res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
         if (x.id == block_id) {
@@ -555,6 +566,7 @@ x23::Async<SystemStatus<ViewingSnapshot>>
 DatabaseProxy::open_viewing_snapshot()
 {
   auto res = co_await client_.open_viewing_snapshot();
+  co_await default_threadpool().bg();
   co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
       res,
       [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
@@ -564,6 +576,7 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
   auto res = co_await client_.close_viewing_snapshot(block_id);
+  co_await default_threadpool().bg();
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 

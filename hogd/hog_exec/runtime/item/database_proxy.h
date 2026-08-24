@@ -58,6 +58,17 @@ public:
   // are taken BY VALUE so they are copied into the coroutine frame and stay
   // valid across the suspension; the two batch arguments below are too large
   // to copy and are documented as caller-owned instead.
+  //
+  // Each one resumes on a pool thread rather than on the connection's reader.
+  // x23 resumes a reply's waiter inline, which is right when the waiter only
+  // posts a semaphore, but here the waiter is the rest of a transaction: it
+  // would run to its next database read on the reader, and that reader cannot
+  // parse another reply while it does.  So every body below hops with
+  // default_threadpool().bg() before touching the result, leaving the reader
+  // one frame deep for as long as a re-enqueue takes.  Without the hop the
+  // damage scales with how much work sits between two database reads, which
+  // is why it showed up first as multiexec_interface throughput falling off
+  // as batch_size rose.
   x23::Async<SystemStatus<std::optional<WireStorageItem>>>
   get_snapshot_item(BlockID block_id, AddressAndKey addrkey);
 
