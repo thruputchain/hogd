@@ -127,9 +127,16 @@ public:
   // that entered the FFI call.
   class ScopedContext {
   public:
-    explicit ScopedContext(SyscallHandlerContext *ctx) : pushed_(ctx)
+    explicit ScopedContext(SyscallHandlerContext *ctx) noexcept : pushed_(ctx)
     {
-      context_stack_.push_back(ctx);
+      try {
+        context_stack_.push_back(ctx);
+      } catch (std::exception const &e) {
+        std::fputs("ScopedContext: cannot grow the context stack: ", stderr);
+        std::fputs(e.what(), stderr);
+        std::fputc('\n', stderr);
+        throw; // noexcept: terminates here, with the reason already reported
+      }
     }
     ~ScopedContext()
     {
@@ -146,13 +153,18 @@ public:
     SyscallHandlerContext *pushed_;
   };
 
+  // noexcept because this is reachable through the exported C entry point,
+  // where a throw would unwind across the ABI into Rust. Growing the stack can
+  // fail; making that a deterministic terminate at the throw point is the
+  // defined behavior, and the diagnostic below is allocation-free so the reason
+  // still lands (same reasoning as the guard logging, issue #2559).
   [[nodiscard]]
-  bool push_context()
+  bool push_context() noexcept
   {
     if (get_context() != nullptr) {
-      // The exported pop/push_context() FFI entries are not noexcept, so a
-      // std::bad_alloc from this guard diagnostic (error() formats and
-      // allocates) would propagate across the C ABI. Keep it best-effort, and
+      // error() formats and allocates, so this diagnostic can throw. That must
+      // not escape: this function is noexcept and has a structured rejection to
+      // report, which a terminate would throw away. Keep it best-effort and
       // report a logging failure via fputs (no allocation) rather than silently
       // dropping it, so the guard still returns false (issue #2559).
       try {
@@ -166,12 +178,19 @@ public:
       return false;
     }
 
-    context_stack_.push_back(this);
+    try {
+      context_stack_.push_back(this);
+    } catch (std::exception const &e) {
+      std::fputs("push_context: cannot grow the context stack: ", stderr);
+      std::fputs(e.what(), stderr);
+      std::fputc('\n', stderr);
+      throw; // noexcept: terminates here, with the reason already reported
+    }
     return true;
   }
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  void pop_context()
+  void pop_context() noexcept
   {
     CHECK(get_context() == this);
     context_stack_.pop_back();
