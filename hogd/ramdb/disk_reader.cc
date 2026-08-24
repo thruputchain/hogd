@@ -360,6 +360,12 @@ load_log_file(
         debug("out of memory in recovery buffer");
         return DBError(DBCode::kNoMemory);
       }
+      // Persisted ordinary headers carry canonical zero bytes in the next
+      // slot (#1530), but SafeItemHeader reconstruction reintroduced the
+      // host's nullptr representation. Re-canonicalize before the recovery
+      // CRC hashes this loglet so validation is representation-independent
+      // (#2975); the commit header gets the same treatment in crc_valid().
+      dst->clear_next();
       ret = read_full(r, dst->get_all());
       if (!ret) {
         if (ret.error() == ENODATA)

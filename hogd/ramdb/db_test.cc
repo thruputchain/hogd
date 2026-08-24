@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <memory>
@@ -25,6 +26,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
@@ -1082,6 +1084,73 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
 
   holder.join();
   resizer.join();
+}
+
+TEST(RAMDBRecoveryCRC, OrdinaryRecordNextSlotAffectsRecoveryChecksum)
+{
+  struct OnDiskItemHeader {
+    uint8_t storage;
+    uint8_t type;
+    uint16_t key_len;
+    uint32_t value_len;
+    uint64_t lsn;
+    uint64_t zero_next;
+  };
+
+  static_assert(sizeof(OnDiskItemHeader) == sizeof(ItemHeader));
+  static_assert(offsetof(OnDiskItemHeader, zero_next) ==
+                offsetof(ItemHeader, next));
+
+  auto allocator = LogletAllocator::create(4 * kLogletRegionSize, 1, [] {});
+  ASSERT_NE(allocator, nullptr);
+
+  const std::string key = "wal-key";
+  const std::string value = "wal-value";
+
+  UniqueLoglet writer = make_unique_loglet(*allocator, LogletMode::kDiskBuffer);
+  ItemHeader source(ItemStorage::kNormal, /*type=*/7, key.size(), value.size());
+  source.lsn = 42;
+
+  ItemHeader *canonical = writer->clone(&source);
+  ASSERT_NE(canonical, nullptr);
+  if (std::span all = canonical->get_all(); all.size() >= alignof(ItemHeader)) {
+    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
+                alignof(ItemHeader));
+  }
+  canonical->lsn = source.lsn;
+  canonical->clear_next();
+  std::ranges::copy(std::as_bytes(std::span(key)),
+                    canonical->get_key().begin());
+  std::ranges::copy(std::as_bytes(std::span(value)),
+                    canonical->get_value().begin());
+
+  OnDiskItemHeader persisted{};
+  std::memcpy(&persisted, canonical, sizeof(persisted));
+  ASSERT_EQ(persisted.zero_next, 0U);
+  const uint32_t writer_crc = crc32c_append(0, writer->get_bytes());
+
+  // This is the accepted SafeItemHeader -> ItemHeader reconstruction. A
+  // nonzero valid pointer is used as a byte-level stand-in for a target whose
+  // null pointer object representation is not all zero; recovery hashes the
+  // bytes and never dereferences this field before checksum validation.
+  ItemHeader reconstructed(static_cast<ItemStorage>(persisted.storage),
+                           persisted.type, persisted.key_len,
+                           persisted.value_len);
+  reconstructed.lsn = persisted.lsn;
+  reconstructed.next = &reconstructed;
+
+  UniqueLoglet recovery =
+      make_unique_loglet(*allocator, LogletMode::kDiskBuffer);
+  ItemHeader *dst = recovery->clone(&reconstructed);
+  ASSERT_NE(dst, nullptr);
+  std::ranges::copy(canonical->get_all(), dst->get_all().begin());
+
+  const uint32_t recovery_crc = crc32c_append(0, recovery->get_bytes());
+  EXPECT_NE(writer_crc, recovery_crc);
+
+  dst->clear_next();
+  const uint32_t fixed_crc = crc32c_append(0, recovery->get_bytes());
+  EXPECT_EQ(writer_crc, fixed_crc);
 }
 
 } // namespace hogd
