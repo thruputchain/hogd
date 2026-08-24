@@ -33,8 +33,14 @@ std::pair<InvokeStatus<void>, GasAmount>
 MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   reset_gas(gas_limit);
-  auto *context = SyscallHandlerContext::get_context();
-  assert(context != nullptr);
+  // Install the handler context this runtime was built with for the duration
+  // of the guest call. Today the FFI call and the guest call run on the same
+  // thread, so the thread_local slot already holds it; taking it from the
+  // runtime instead keeps that from being load-bearing. Everything the mock
+  // contract reaches -- mock_syscall_parser, the nested FFI entry points, a
+  // nested invoke coming back through here -- reads it through get_context().
+  SyscallHandlerContext *context = owner_;
+  SyscallHandlerContext::ScopedContext scoped_context(context);
   context->push_mock_runtime(this);
   // Pop on every exit path. MockContract::invoke() now catches the foreign
   // callback's exceptions and returns Unrecoverable instead of letting them
@@ -79,7 +85,8 @@ MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
     int32_t mock_contract = contract.value()->mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
-      return std::make_unique<MockRuntime>(it->second);
+      CHECK(handler_context_ != nullptr);
+      return std::make_unique<MockRuntime>(it->second, handler_context_);
     }
     return nullptr;
   }

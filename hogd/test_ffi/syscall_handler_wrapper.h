@@ -90,6 +90,31 @@ public:
 
   static SyscallHandlerContext *get_context() { return current_context_; }
 
+  // Republishes a context on the calling thread while it is alive, restoring
+  // whatever was there before on the way out. MockRuntime::invoke_internal --
+  // the one place control crosses back from hog_exec into the harness --
+  // installs the context it was built with for the duration of the guest call,
+  // rather than relying on that thread's slot already holding it. Nesting works
+  // because every inner frame goes through that same funnel and unwinding puts
+  // the outer value back.
+  class ScopedContext {
+  public:
+    explicit ScopedContext(SyscallHandlerContext *ctx) noexcept
+      : saved_(current_context_)
+    {
+      current_context_ = ctx;
+    }
+    ~ScopedContext() { current_context_ = saved_; }
+
+    ScopedContext(ScopedContext const &) = delete;
+    ScopedContext &operator=(ScopedContext const &) = delete;
+    ScopedContext(ScopedContext &&) = delete;
+    ScopedContext &operator=(ScopedContext &&) = delete;
+
+  private:
+    SyscallHandlerContext *saved_;
+  };
+
   [[nodiscard]]
   bool push_context()
   {
@@ -111,6 +136,13 @@ public:
     }
 
     current_context_ = this;
+    // Also publish on the runtime context, which unlike a thread_local is
+    // reachable without knowing which thread is running; see ScopedContext.
+    // Published here rather than in the constructor so it brackets the
+    // execution window and not the handler's lifetime: several handlers may be
+    // open on one runtime context at once, but only the one between push and
+    // pop is running.
+    runtime_context_owner_->set_handler_context(this);
     return true;
   }
 
@@ -118,6 +150,7 @@ public:
   void pop_context()
   {
     CHECK(get_context() == this);
+    runtime_context_owner_->set_handler_context(nullptr);
     current_context_ = nullptr;
   }
 
