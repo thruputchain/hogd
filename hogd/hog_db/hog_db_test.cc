@@ -4077,6 +4077,36 @@ TEST_F(HogDbTest, ReadNNIntBaseAbsentContractDataDoesNotRetainLock)
   EXPECT_EQ(block_tx.get().item_lock_count_for_testing(), before);
 }
 
+// Companion to the retention test above: a state-backed NNInt key must still
+// publish its ItemLock on first read so that subsequent probes hit the
+// cached base instead of the DAO. The size assertion is one-per-key rather
+// than exact, since setup_contract_address() may publish balance/metadata
+// locks; the point is that repeated reads do not each add a node.
+TEST_F(HogDbTest, ReadNNIntBaseStateBackedContractDataPublishesLockOnce)
+{
+  constexpr uint64_t kBackedAddr = 0xABCD0101;
+  Address addr = make_address(kBackedAddr);
+  ItemKey key = make_item_key(addr, 42);
+  setup_contract_address(addr);
+  commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
+    ASSERT_TRUE(itx.request_nnint128(key, /*base=*/0, /*delta=*/7,
+                                     std::to_underlying(
+                                         StorageDeltaFlags::None)));
+  });
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 2,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  auto before = block_tx.get().item_lock_count_for_testing();
+  for (size_t i = 0; i < 4; ++i) {
+    auto base = block_tx.get().read_nnint128_base(key);
+    ASSERT_TRUE(base.has_value());
+    EXPECT_EQ(*base, 7);
+  }
+  EXPECT_EQ(block_tx.get().item_lock_count_for_testing(), before + 1);
+}
+
 TEST_F(HogDbTest, InvalidatedBlockTXBalanceReadReturnsStaleBlock)
 {
   constexpr uint64_t kInvalidAddr = 0xABCD0002;

@@ -248,23 +248,25 @@ BlockTX::read_nnint128_base(const ItemKey &key)
     return s.error();
   auto *lock = item_locks_.get(key);
   if (!lock) {
-    // Read the snapshot base directly from the DAO without publishing an
-    // ItemLock: a caller (InvokeTX::request_nnint128) may reject the delta
-    // at the base-aware overload before request_change() records anything,
-    // and ConcurrentMap has no deletion, so a lock published here would
-    // otherwise be retained -- uncharged and invisible to rollback -- for
-    // each rejected probe against a distinct absent key (#3576). If the
-    // delta is admissible, request_change() will publish the lock through
-    // block_.lock() in the normal path.
-    auto r = db_.read_nnint128(key);
-    if (!r) {
-      if (r.error() == HogDbCode::kNotFound ||
-          r.error() == HogDbCode::kTypeMismatch) {
-        return 0;
-      }
-      return r.error();
+    auto snapshot = get_snapshot_cost_and_cache_data(key);
+    if (!snapshot) {
+      return snapshot.error();
     }
-    return *r;
+    // Publish an ItemLock only when the snapshot carries a cached NNInt
+    // base: a state-backed key answers repeated probes from that cache,
+    // matching the pre-fix path. For an absent key or a non-NNInt type
+    // the base is 0 with no cache to keep, and the caller
+    // (InvokeTX::request_nnint128) may reject the delta at the base-aware
+    // overload before request_change() records anything -- ConcurrentMap
+    // has no deletion, so a lock published here would otherwise be
+    // retained per distinct probed key, uncharged and invisible to
+    // rollback (#3576). If the delta is admissible, request_change() will
+    // publish the lock through block_.lock() in the normal path.
+    if (!snapshot->second.is_cached_nnint128_base()) {
+      return 0;
+    }
+    lock = item_locks_.insert_or_get(key, *snapshot);
+    CHECK_PTR(lock);
   }
 
   auto base = lock->get_cached_nnint128_base();
