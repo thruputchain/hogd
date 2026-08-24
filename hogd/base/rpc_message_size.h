@@ -23,4 +23,11 @@ static_assert(kBulkRpcMaxMessageSize <= 0x7fffffffULL,
 // pre-commit candidate. Keep this cap scoped to that internal RPC surface.
 inline constexpr size_t kEventSchedulerRpcMaxMessageSize = 0x7fffffff;
 
+// Message-size cap for read-only query surfaces served to external
+// consumers (the indexer block-explorer server). Query requests and
+// responses are small; keeping the cap at the 16 MiB x23 default bounds
+// what a misbehaving client can make the server buffer, unlike the bulk
+// intra-node links above.
+inline constexpr size_t kQueryRpcMaxMessageSize = 0x100'0000;
+
 } // namespace hogd

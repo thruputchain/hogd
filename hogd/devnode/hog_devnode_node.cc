@@ -786,7 +786,7 @@ HogDevnodeNode::start_indexer_servers()
   indexer_block_explorer_server_ =
       std::make_unique<RpcServer<IndexerBlockExplorerRpc>>(
           *indexer_db_, indexer_failure_cache_);
-  indexer_block_explorer_server_->max_message_size_ = kDevRpcMaxMessageSize;
+  indexer_block_explorer_server_->max_message_size_ = kQueryRpcMaxMessageSize;
   indexer_block_explorer_server_->start_server(
       make_bind_host_port(bind_host_, /*port=*/0));
 }

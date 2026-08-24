@@ -47,7 +47,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
 
   // Do not serve stale product queries while startup replay is incomplete.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
-  block_explorer->max_message_size_ = kBulkRpcMaxMessageSize;
+  block_explorer->max_message_size_ = kQueryRpcMaxMessageSize;
   uint16_t actual_block_explorer_port = block_explorer.start_server(
       make_bind_host_port(bind_ip, block_explorer_port));
   CHECK(actual_block_explorer_port == block_explorer_port ||
