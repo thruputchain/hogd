@@ -4089,9 +4089,9 @@ TEST_F(HogDbTest, ReadNNIntBaseStateBackedContractDataPublishesLockOnce)
   ItemKey key = make_item_key(addr, 42);
   setup_contract_address(addr);
   commit_block_expect_db_hash_matches_full(1, [&](InvokeTX &itx) {
-    ASSERT_TRUE(itx.request_nnint128(key, /*base=*/0, /*delta=*/7,
-                                     std::to_underlying(
-                                         StorageDeltaFlags::None)));
+    ASSERT_TRUE(
+        itx.request_nnint128(key, /*base=*/0, /*delta=*/7,
+                             std::to_underlying(StorageDeltaFlags::None)));
   });
 
   PerThreadARC<BlockTX> block_tx(
