@@ -42,6 +42,35 @@ namespace hogd {
 
 namespace {
 
+// A CpuMap with a chosen number of buckets, assigning CPUs round-robin.
+//
+// Connection count is a tuning knob in its own right, not a cache-topology
+// question: the async client runs one reader coroutine per connection, so it
+// sets how much of the return path can proceed at once. Measured on the
+// 64-core bench machine, llc_map's 8 connections leave the mid-range starved
+// (100000 txs / 512 threads ran 1.91x main) while core_map's 64 fix that
+// (1.21x) but cost the short runs, which pay 64 connection setups against a
+// 70ms total, and the largest run.
+//
+// The returned map must outlive every client built from it: PerCpuSet holds a
+// reference to it, not a copy.
+const x23::CpuMap &
+connection_map(int nconnections)
+{
+  static const x23::CpuMap map = [nconnections] {
+    const int ncpu = std::max(1, static_cast<int>(available_parallelism()));
+    x23::Vec<int> buckets;
+    buckets.reserve(ncpu);
+    for (int i = 0; i < ncpu; i++)
+      buckets.push_back(i % nconnections);
+    return x23::CpuMap{std::move(buckets)};
+  }();
+  return map;
+}
+
+// Connections the executor opens to hog_db.  See connection_map().
+constexpr int kDbConnections = 24;
+
 struct VoidMarker {};
 struct NotFoundIsUnrecoverableError {};
 
@@ -181,10 +210,12 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         // only posted a semaphore and each transaction resumed on its own
         // caller thread, so its return-path width was the executor thread
         // count, not the connection count.
-        info("DatabaseProxy: {} connections (core_map), llc_map would give {}",
-             x23::core_map->nbuckets(), x23::llc_map->nbuckets());
+        info("DatabaseProxy: {} connections (llc_map would give {}, core_map "
+             "{})",
+             connection_map(kDbConnections).nbuckets(),
+             x23::llc_map->nbuckets(), x23::core_map->nbuckets());
         return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
-            hostport, false, *x23::core_map);
+            hostport, false, connection_map(kDbConnections));
       }
       panic("unimplemented");
     }())
