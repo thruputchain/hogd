@@ -129,12 +129,44 @@ enable_abortive_close(BorrowedFd fd)
     Errno{}.raise("SO_LINGER");
 }
 
+namespace {
+
+UniqueFd
+stcplisten4(std::uint16_t port, int backlog)
+{
+  UniqueFd lfd(socket(AF_INET, SOCK_STREAM, 0));
+  if (!lfd)
+    Errno{}.raise("socket");
+  set_cloexec(lfd);
+  enable_reuseaddr_if_needed(lfd, port);
+
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  if (bind(lfd.get(), reinterpret_cast<struct sockaddr *>(&addr),
+           sizeof(addr)) < 0)
+    Errno{}.raise("bind INADDR_ANY");
+
+  if (listen(lfd.get(), backlog) < 0)
+    Errno{}.raise("listen");
+  return lfd;
+}
+
+} // namespace
+
 UniqueFd
 stcplisten(std::uint16_t port, int backlog)
 {
   UniqueFd lfd(socket(AF_INET6, SOCK_STREAM, 0));
-  if (!lfd)
+  if (!lfd) {
+    // IPv4-only environments (containers/CI sandboxes without IPv6)
+    // reject AF_INET6 sockets outright.
+    if (errno == EAFNOSUPPORT)
+      return stcplisten4(port, backlog);
     Errno{}.raise("socket");
+  }
   set_cloexec(lfd);
 
   int opt = 0;
