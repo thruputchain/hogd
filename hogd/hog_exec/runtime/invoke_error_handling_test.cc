@@ -837,8 +837,9 @@ TEST_P(InvokeErrorHandlingTest, OrdinaryInvocationDepthIsCapped)
         .flags = std::to_underlying(InvokeFlag::None),
     };
     CopyableInvokeOutputs outputs{};
-    auto status = ctx.syscall<SyscallNo::kInvoke>(
-        next_address, child_calldata, std::span<uint32_t>{}, inputs, outputs);
+    auto status =
+        ctx.syscall<SyscallNo::kInvoke>(next_address, child_calldata,
+                                        std::span<uint32_t>{}, inputs, outputs);
     if (!status.has_value() ||
         status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
         outputs.frame_status != InvocationFrameStatusCode::Return) {
@@ -867,22 +868,23 @@ TEST_P(InvokeErrorHandlingTest, OrdinaryInvocationDepthIsCapped)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation =
-                                  Invocation{
-                                      .invoked_address = root_address,
-                                      .entrypoint = entrypoint_from_method_id(0),
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = Calldata{root_remaining}},
+                                  Invocation{.invoked_address = root_address,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(0),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata =
+                                                 Calldata{root_remaining}},
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context);
     return handler.root_invoke().is_root_success();
   };
 
-  // A chain of exactly kMaxInvocationDepth live frames (root + the cap minus one
-  // children, leaf reached at the cap) stays within the limit and succeeds.
+  // A chain of exactly kMaxInvocationDepth live frames (root + the cap minus
+  // one children, leaf reached at the cap) stays within the limit and succeeds.
   EXPECT_TRUE(run_chain(static_cast<uint8_t>(kMaxInvocationDepth - 1)));
 
-  // One frame deeper: the invoke that would create frame kMaxInvocationDepth + 1
-  // is rejected, and the failure propagates back so the root frame fails.
+  // One frame deeper: the invoke that would create frame kMaxInvocationDepth +
+  // 1 is rejected, and the failure propagates back so the root frame fails.
   EXPECT_FALSE(run_chain(static_cast<uint8_t>(kMaxInvocationDepth)));
 }
 

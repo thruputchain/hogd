@@ -36,8 +36,8 @@ inline constexpr size_t kMaxSerializedContractBytes =
 // invocation nesting was previously unbounded. That let a contract build a deep
 // address-distinct call chain whose per-frame first-use item lookups scan every
 // ancestor frame and whose successful unwinds copy each child's write set into
-// its parent -- host work that grows with depth times modified-item count but is
-// not gas-metered (hogd issue #3590). Capping the depth makes that per-write
+// its parent -- host work that grows with depth times modified-item count but
+// is not gas-metered (hogd issue #3590). Capping the depth makes that per-write
 // factor a constant, so the total host work stays linear in the metered work,
 // and also bounds the native call-stack recursion each nested invoke consumes.
 //
