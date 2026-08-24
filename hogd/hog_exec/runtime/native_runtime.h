@@ -74,9 +74,11 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  // Stays noexcept and is not itself a coroutine; it catches the frame
+  // allocation of invoke_impl() below (cf. Rv32Runtime::invoke_internal).
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke(Runtime::MethodID method, SystemCallHandler &syscall_handler,
-         uint64_t gas_limit) const;
+         uint64_t gas_limit) const noexcept;
 
 private:
   const function_t *find_function(Runtime::MethodID method) const;
@@ -139,7 +141,7 @@ public:
   ~NativeRuntime() override = default;
 
 private:
-  x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   NativeContract &contract_;

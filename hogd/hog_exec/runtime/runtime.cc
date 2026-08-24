@@ -1,13 +1,11 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 
 #include <exception>
-#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "types.hh"
 #include "x23/async.h"
 #include "x23/format.h"
 
@@ -35,28 +33,7 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
                                InvokeError{InvokeErrorCode::Unrecoverable},
                            .gas_consumed_ = 0};
   }
-  // invoke_internal() is a coroutine in every implementation, so building it
-  // allocates a frame in the ramp and can throw before the body runs. That is
-  // the same class of failure the body itself reports structurally, so catch
-  // it here rather than making implementations reestablish a noexcept boundary
-  // each -- which a coroutine cannot do for its own frame.
-  // Seeded only because the pair is not default-constructible.
-  std::pair<InvokeStatus<void>, GasAmount> invoked{
-      InvokeError{InvokeErrorCode::Unrecoverable}, 0};
-  try {
-    invoked = co_await invoke_internal(method_id, gas_limit);
-  } catch (std::exception const &e) {
-    error("Unrecoverable: could not run contract body: {}", e.what());
-    co_return InvokeResult{.result_ =
-                               InvokeError{InvokeErrorCode::Unrecoverable},
-                           .gas_consumed_ = 0};
-  } catch (...) {
-    report_dropped_log("non-std exception running contract body");
-    co_return InvokeResult{.result_ =
-                               InvokeError{InvokeErrorCode::Unrecoverable},
-                           .gas_consumed_ = 0};
-  }
-  auto [res, gas_consumed] = invoked;
+  auto [res, gas_consumed] = co_await invoke_internal(method_id, gas_limit);
   try {
     trace("Invoke result: {}, gas consumed: {}",
           res.has_value() ? "success" : x23::show(res.error().code()),

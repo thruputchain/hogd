@@ -26,14 +26,11 @@ private:
 using SyscallInnerResult =
     std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>;
 
-// What wrap_after_parse() awaits.  Every inner body is a coroutine, so every
-// one of them allocates a frame -- including the bodies that could answer
-// without waiting.  x23::MaybeAsync exists to skip that allocation, but its
-// value arm cannot be mixed with the Async arm here: the awaiting frame is
-// destroyed from inside the resumption chain the completing body hands it,
-// which leaves the variant destroying a coroutine handle that is no longer a
-// frame.  A frame per syscall is the price of that being correct.
-using AsyncSyscallInnerResult = x23::Async<SyscallInnerResult>;
+// What wrap_after_parse() awaits.  A body that can answer immediately -- every
+// one of them today -- just returns its SyscallInnerResult, which lands in the
+// value arm and costs nothing to await.  A body that has to wait, e.g. on a
+// database RPC, declares this as its return type and returns an Async instead.
+using MaybeAsyncSyscallInnerResult = x23::MaybeAsync<SyscallInnerResult>;
 
 // Report a syscall-trace diagnostic straight to stderr without allocating (same
 // fallback pattern as test_ffi's do_ffi_trace).

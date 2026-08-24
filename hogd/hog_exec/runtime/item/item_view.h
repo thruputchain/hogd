@@ -116,10 +116,10 @@ public:
   }
 
 private:
-  x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
+  x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
 
-  x23::Async<SystemStatus<const QueueEntry *>>
+  x23::MaybeAsync<SystemStatus<const QueueEntry *>>
   get_next_concurrent_entry(uint32_t index,
                             ExecutionModeData &execution_mode_data) const;
 
@@ -238,11 +238,15 @@ public:
 
   std::optional<ItemViewType> get_item_type() const;
 
-  // Populates base_item_ from the snapshot cache.
-  x23::Async<SystemStatus<void>> load(StorageSnapshotCache &snapshot_cache,
-                                      AddressAndKey const &addrkey) const;
+  // Populates base_item_ from the snapshot cache.  Answers with no coroutine
+  // frame on a cache hit; only a miss allocates and suspends on the database.
+  x23::MaybeAsync<SystemStatus<void>> load(StorageSnapshotCache &snapshot_cache,
+                                           AddressAndKey const &addrkey) const;
 
 private:
+  // Miss path for load(): awaits the pending cache fill, then stores it.
+  x23::Async<SystemStatus<void>> load_slow(
+      x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending) const;
   // Shared tail of both load() paths.
   SystemStatus<void>
   store_loaded(SystemStatus<const SnapshotStorageItem *> const &r) const;

@@ -17,7 +17,7 @@
 
 namespace hogd {
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 const StorageKeyContractData &input_key,
                                 bool input_force_load_from_snapshot,
@@ -60,7 +60,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{0}};
 }
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,

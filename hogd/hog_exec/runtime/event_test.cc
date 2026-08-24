@@ -243,9 +243,10 @@ TEST_F(EventTest, BadEventInputs)
         too_long_event.resize(kMaxEventLength + 1);
 
         {
-          auto [status, gas] = co_await syscall_LogEvent_inner(
-              ctx.handler(), nullptr, &topic1, nullptr,
-              std::as_bytes(std::span("test bad topic organization")));
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), nullptr, &topic1, nullptr,
+                                     std::as_bytes(std::span(
+                                         "test bad topic organization")));
           if (!status.has_value()) {
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
@@ -257,9 +258,10 @@ TEST_F(EventTest, BadEventInputs)
         }
 
         {
-          auto [status, gas] = co_await syscall_LogEvent_inner(
-              ctx.handler(), &topic0, nullptr, &topic2,
-              std::as_bytes(std::span("test bad topic organization")));
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), &topic0, nullptr, &topic2,
+                                     std::as_bytes(std::span(
+                                         "test bad topic organization")));
           if (!status.has_value()) {
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
@@ -271,9 +273,9 @@ TEST_F(EventTest, BadEventInputs)
         }
 
         {
-          auto [status, gas] = co_await syscall_LogEvent_inner(
-              ctx.handler(), nullptr, nullptr, nullptr,
-              std::as_bytes(std::span(too_long_event)));
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr, nullptr,
+                                     std::as_bytes(std::span(too_long_event)));
           if (!status.has_value()) {
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
@@ -342,9 +344,9 @@ TEST_F(EventTest, EventLengthIncludesTopics)
         max_event_data.resize(kMaxEventLength - topic.size());
 
         {
-          auto [status, gas] = co_await syscall_LogEvent_inner(
-              ctx.handler(), &topic, nullptr, nullptr,
-              std::as_bytes(std::span(max_event_data)));
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
+                                     std::as_bytes(std::span(max_event_data)));
           if (!status.has_value()) {
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
@@ -357,9 +359,10 @@ TEST_F(EventTest, EventLengthIncludesTopics)
         x23::Vec<uint8_t> too_long_event_data;
         too_long_event_data.resize(max_event_data.size() + 1);
         {
-          auto [status, gas] = co_await syscall_LogEvent_inner(
-              ctx.handler(), &topic, nullptr, nullptr,
-              std::as_bytes(std::span(too_long_event_data)));
+          auto [status, gas] =
+              syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
+                                     std::as_bytes(
+                                         std::span(too_long_event_data)));
           if (!status.has_value()) {
             co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }

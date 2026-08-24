@@ -32,7 +32,7 @@ MockRuntimeContext::set_trampoline(int32_t contract,
                                                             foreign_context));
 }
 
-x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
 MockRuntime::invoke_internal(MethodID method_id, uint64_t gas_limit)
 {
   reset_gas(gas_limit);

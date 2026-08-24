@@ -67,8 +67,10 @@ public:
 protected:
   // Invariant:  The returned GasAmount must be <= the input gas_limit.
   //
-  // May throw when its frame is allocated; invoke() translates that.
-  virtual x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
+  // MaybeAsync so an implementation that answers without touching the database
+  // -- and one that must stay noexcept, which a coroutine cannot (its frame
+  // allocation throws before the body runs) -- can return a value directly.
+  virtual x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) = 0;
 
   SystemCallHandler *syscall_handler_ = nullptr;

@@ -17,7 +17,7 @@
 
 namespace hogd {
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_RetrocausalQueueInsert_inner(
     SystemCallHandler &syscall_handler, StorageKeyContractData const &input_key,
     std::span<const std::byte> input_queue_entry)
@@ -39,7 +39,7 @@ syscall_RetrocausalQueueInsert_inner(
                                WrappedGasAmount{0}};
 };
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                                       const StorageKeyContractData &input_key,
                                       bool input_peek,
@@ -75,7 +75,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{0}};
 }
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
                                       const StorageKeyContractData &input_key,
                                       RuntimeMemoryLength &output_len)

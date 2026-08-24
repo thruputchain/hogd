@@ -110,24 +110,16 @@ make_ecall_args(std::initializer_list<uint32_t> regs)
 // Success result whose a0 continue value is `code`, delivered as the
 // SyscallErrorCode underlying value (the enum has a fixed int32_t underlying
 // type, so out-of-enum test codes are well-defined round trips).
-SyscallResult
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 make_code_result(int32_t code, uint64_t gas_consumed = 0)
 {
   return {static_cast<SyscallErrorCode>(code), gas_consumed};
 }
 
-SyscallResult
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
 {
   return {HostFnError{code}, gas_consumed};
-}
-
-// The entries below are SyscallFunctions, so they hand back an Async even
-// though none of them suspends.
-AsyncSyscallResult
-async_result(SyscallResult result)
-{
-  co_return result;
 }
 
 struct CapturedCall {
@@ -136,10 +128,11 @@ struct CapturedCall {
   uint64_t memory_size = 0;
   uint8_t first_memory_byte = 0;
   int calls = 0;
-  SyscallResult result = make_code_result(0);
+  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> result =
+      make_code_result(0);
 };
 
-AsyncSyscallResult
+MaybeAsyncSyscallResult
 capture_entry(ExternHostCallContext context, ExecutionContext exec_context,
               uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3,
               uint32_t arg4, uint32_t arg5, uint32_t arg6, uint32_t arg7)
@@ -152,7 +145,7 @@ capture_entry(ExternHostCallContext context, ExecutionContext exec_context,
   captured->first_memory_byte =
       std::to_integer<uint8_t>(exec_context.memory[0]);
   exec_context.memory[7] = std::byte{0xa5};
-  return async_result(captured->result);
+  return captured->result;
 }
 
 struct SequencedGasCall {
@@ -160,7 +153,7 @@ struct SequencedGasCall {
   uint64_t gas_consumed = 0;
 };
 
-AsyncSyscallResult
+MaybeAsyncSyscallResult
 sequenced_gas_entry(ExternHostCallContext context,
                     ExecutionContext exec_context, uint32_t, uint32_t, uint32_t,
                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
@@ -169,10 +162,10 @@ sequenced_gas_entry(ExternHostCallContext context,
   ++captured->calls;
   exec_context.memory[8] =
       std::byte{static_cast<uint8_t>(0x40 + captured->calls)};
-  return async_result(make_code_result(222, captured->gas_consumed));
+  return make_code_result(222, captured->gas_consumed);
 }
 
-AsyncSyscallResult
+MaybeAsyncSyscallResult
 throwing_entry(ExternHostCallContext, ExecutionContext, uint32_t, uint32_t,
                uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
 {
@@ -187,7 +180,7 @@ enum class ParserProbeMode : uint32_t {
   kUnsignedU32 = 5,
 };
 
-AsyncSyscallResult
+MaybeAsyncSyscallResult
 parser_probe_entry(ExternHostCallContext, ExecutionContext context,
                    uint32_t mode, uint32_t arg1, uint32_t arg2, uint32_t arg3,
                    uint32_t arg4, uint32_t, uint32_t, uint32_t)
@@ -207,53 +200,51 @@ parser_probe_entry(ExternHostCallContext, ExecutionContext context,
     if (!SyscallArgParams<std::span<const std::byte>>::validate(input) ||
         !SyscallArgParams<std::span<std::byte>>::validate(output) ||
         !guard.check()) {
-      return async_result(make_code_result(-1));
+      return make_code_result(-1);
     }
     auto in = SyscallArgParams<std::span<const std::byte>>::deref(input);
     auto out = SyscallArgParams<std::span<std::byte>>::deref(output);
     if (!in.empty() && !out.empty()) {
       out[0] = in[0];
     }
-    return async_result(make_code_result(0));
+    return make_code_result(0);
   }
   case ParserProbeMode::kBool:
   {
     auto parsed = SyscallArgParams<bool>::parse(guard, context.memory, arg1);
-    return async_result(
-        make_code_result(SyscallArgParams<bool>::validate(parsed) ? 0 : -1));
+    return make_code_result(SyscallArgParams<bool>::validate(parsed) ? 0 : -1);
   }
   case ParserProbeMode::kSignedI32:
   {
     auto parsed = SyscallArgParams<int32_t>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<int32_t>::validate(parsed)) {
-      return async_result(make_code_result(-2));
+      return make_code_result(-2);
     }
-    return async_result(
-        make_code_result(SyscallArgParams<int32_t>::deref(parsed)));
+    return make_code_result(SyscallArgParams<int32_t>::deref(parsed));
   }
   case ParserProbeMode::kUnsignedU32:
   {
     auto parsed =
         SyscallArgParams<uint32_t>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<uint32_t>::validate(parsed)) {
-      return async_result(make_code_result(-2));
+      return make_code_result(-2);
     }
-    return async_result(make_code_result(
-        std::bit_cast<int32_t>(SyscallArgParams<uint32_t>::deref(parsed))));
+    return make_code_result(
+        std::bit_cast<int32_t>(SyscallArgParams<uint32_t>::deref(parsed)));
   }
   case ParserProbeMode::kOptionalU32:
   {
     auto parsed =
         SyscallArgParams<const uint32_t *>::parse(guard, context.memory, arg1);
     if (!SyscallArgParams<const uint32_t *>::validate(parsed)) {
-      return async_result(make_code_result(-1));
+      return make_code_result(-1);
     }
     const uint32_t *value = SyscallArgParams<const uint32_t *>::deref(parsed);
-    return async_result(
-        make_code_result(value == nullptr ? 1 : static_cast<int32_t>(*value)));
+    return make_code_result(value == nullptr ? 1
+                                             : static_cast<int32_t>(*value));
   }
   }
-  return async_result(make_code_result(-1));
+  return make_code_result(-1);
 }
 
 // Drive parser_probe_entry through the bridge: mode in a0, probe args in

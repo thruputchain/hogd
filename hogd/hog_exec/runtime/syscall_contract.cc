@@ -1,5 +1,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <utility>
+
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -10,7 +12,7 @@
 
 namespace hogd {
 
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetDeployAddress_inner(
     SystemCallHandler &syscall_handler,
     const ContractAddress *optional_input_caller_address,
@@ -33,11 +35,10 @@ syscall_GetDeployAddress_inner(
     trace_data->outputs.emplace(SyscallGetDeployAddressOutputs{
         .to_be_deployed = output_to_be_deployed});
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_nonce,
                              const SHA256Hash &input_contract_hash,

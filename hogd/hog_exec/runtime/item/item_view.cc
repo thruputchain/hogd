@@ -412,14 +412,14 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
   return {};
 }
 
-x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
+x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
   assert(base_item_);
   if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
-    co_return co_await base_item_->get_next_rcq_block(search_start_index);
+    return base_item_->get_next_rcq_block(search_start_index);
   }
-  co_return SystemStatus<const RetrocausalQueueBlock *>{nullptr};
+  return SystemStatus<const RetrocausalQueueBlock *>{nullptr};
 }
 
 // Resolve the next concurrent (non-self, non-past-block) RCQ observation.
@@ -428,7 +428,7 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 // is the single location aware of proposal-vs-validation-vs-viewing for RCQ
 // reads; the get_next_item caller only sees the uniform pointer result. The
 // returned pointer aliases into owned observation storage (see get_next_item).
-x23::Async<SystemStatus<const QueueEntry *>>
+x23::MaybeAsync<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
@@ -440,31 +440,30 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     // Once the cap is hit, record nothing further and stop probing the queue
     // (#2894).
     if (proposal_data->observation_cap_exceeded()) {
-      co_return SystemStatus<const QueueEntry *>{nullptr};
+      return SystemStatus<const QueueEntry *>{nullptr};
     }
     // Only proposal mode reads the database here; viewing and validation
     // replay recorded observations below and never suspend.
-    co_return co_await get_next_concurrent_entry_proposing(index,
-                                                           *proposal_data);
+    return get_next_concurrent_entry_proposing(index, *proposal_data);
   }
 
   if (auto *viewing_data = std::get_if<ViewingModeData>(&execution_mode_data)) {
     if (viewing_data->observation_cap_exceeded()) {
-      co_return SystemStatus<const QueueEntry *>{nullptr};
+      return SystemStatus<const QueueEntry *>{nullptr};
     }
     // Bind to a local: Nondeterministic::get() takes an lvalue object argument,
     // so it cannot be called on the returned temporary directly.
     auto queue_bit = viewing_data->view_query_queue_observation_bit();
     if (!queue_bit.get()) {
       // no queue entry available
-      co_return SystemStatus<const QueueEntry *>{nullptr};
+      return SystemStatus<const QueueEntry *>{nullptr};
     }
     // Bind before .get(): Nondeterministic::get() needs an lvalue.
     auto observed = viewing_data->view_queue_entry_observation(addrkey, index);
     if (const QueueEntry *entry = observed.get()) {
-      co_return SystemStatus<const QueueEntry *>{entry};
+      return SystemStatus<const QueueEntry *>{entry};
     }
-    co_return SystemStatus<const QueueEntry *>{
+    return SystemStatus<const QueueEntry *>{
         replay_exhausted_at_cap(viewing_data->observation_cap_exceeded())};
   }
 
@@ -472,24 +471,24 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   if (validation_data.observation_cap_exceeded()) {
-    co_return SystemStatus<const QueueEntry *>{nullptr};
+    return SystemStatus<const QueueEntry *>{nullptr};
   }
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
     // Bit stream exhausted: a malformed proposal.
-    co_return SystemStatus<const QueueEntry *>{
+    return SystemStatus<const QueueEntry *>{
         SystemError{SystemErrorCode::ValidationFailure}};
   }
   if (!bit_res->get()) {
-    co_return SystemStatus<const QueueEntry *>{nullptr};
+    return SystemStatus<const QueueEntry *>{nullptr};
   }
   // Bind before .get(): Nondeterministic::get() needs an lvalue.
   auto observed =
       validation_data.consume_queue_entry_observation(addrkey, index);
   if (const QueueEntry *entry = observed.get()) {
-    co_return SystemStatus<const QueueEntry *>{entry};
+    return SystemStatus<const QueueEntry *>{entry};
   }
-  co_return SystemStatus<const QueueEntry *>{
+  return SystemStatus<const QueueEntry *>{
       replay_exhausted_at_cap(validation_data.observation_cap_exceeded())};
 }
 
@@ -592,12 +591,24 @@ UnmodifiedItem::get_item_type() const
       ->type();
 }
 
-x23::Async<SystemStatus<void>>
+x23::MaybeAsync<SystemStatus<void>>
 UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
                      AddressAndKey const &addrkey) const
 {
-  co_return store_loaded(
-      co_await snapshot_cache.try_get_snapshot_item(addrkey));
+  auto r = snapshot_cache.try_get_snapshot_item(addrkey);
+  // Cache hit: MaybeAsync's value arm.  operator() does not block here (and
+  // could not suspend anyway) -- it just unwraps the value already in hand.
+  if (r.has_value()) {
+    return store_loaded(r());
+  }
+  return load_slow(std::move(r));
+}
+
+x23::Async<SystemStatus<void>>
+UnmodifiedItem::load_slow(
+    x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>> pending) const
+{
+  co_return store_loaded(co_await pending);
 }
 
 SystemStatus<void>

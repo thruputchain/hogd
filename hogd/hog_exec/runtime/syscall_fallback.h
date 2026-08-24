@@ -13,13 +13,11 @@
 
 namespace hogd {
 
-// A coroutine like every other inner body, even though it cannot suspend:
-// wrap_after_parse() awaits whatever kInnerFunc hands back.
-inline AsyncSyscallInnerResult
+constexpr std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 no_syscall_func_inner()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNoSyscall,
-                               WrappedGasAmount{kNoSyscallCost}};
+  return {SyscallErrorCode::kSyscallErrorCodeNoSyscall,
+          WrappedGasAmount{kNoSyscallCost}};
 }
 
 struct NoSyscallFuncMeta {

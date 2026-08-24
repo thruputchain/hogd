@@ -1,6 +1,9 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <utility>
+
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -11,7 +14,7 @@
 
 namespace hogd {
 
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
                                        WrappedGasAmount remaining_gas,
                                        TransactionStatistic input_statistic,
@@ -25,12 +28,10 @@ syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
       trace_data->outputs.emplace(
           SyscallGetTransactionStatisticsOutputs{.result = output_result});
     }
-    co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                                 WrappedGasAmount{0}};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
   default:
-    co_return SyscallInnerResult{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-        WrappedGasAmount{0}};
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 };
 

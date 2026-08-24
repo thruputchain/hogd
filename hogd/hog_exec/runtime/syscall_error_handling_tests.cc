@@ -39,10 +39,10 @@ namespace hogd {
 namespace {
 
 template<HostFnErrorCode Code>
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 error_syscall_func()
 {
-  co_return SyscallInnerResult{HostFnError{Code}, WrappedGasAmount{1000}};
+  return {HostFnError{Code}, WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -207,11 +207,10 @@ TEST_F(SyscallErrorHandlingTest, GasLimitOverridesExit)
 }
 
 namespace {
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 noreturn_failing_syscall_func()
 {
-  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Unrecoverable},
-                               WrappedGasAmount{1000}};
+  return {HostFnError{HostFnErrorCode::Unrecoverable}, WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -250,12 +249,11 @@ TEST_F(SyscallErrorHandlingTest, NoreturnFailingSyscallOverridesGasLimit)
 
 namespace {
 
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 noerror_syscall_func()
 {
-  co_return SyscallInnerResult{
-      SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
-      WrappedGasAmount{1000}};
+  return {SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist,
+          WrappedGasAmount{1000}};
 }
 } // namespace
 
@@ -417,7 +415,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnOversizedBufferGasIsZero)
   auto [status, gas] =
       syscall_Return_inner(handler,
                            std::span<const std::byte>(oversized_buffer), false,
-                           {})();
+                           {});
 
   // The syscall should fail with Exit
   ASSERT_FALSE(status.has_value());
@@ -445,7 +443,7 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
   auto [status, gas] =
       syscall_Return_inner(handler, std::span<const std::byte>(valid_buffer),
-                           false, {})();
+                           false, {});
 
   // The syscall should succeed with Return
   ASSERT_FALSE(status.has_value());
@@ -459,13 +457,13 @@ TEST_F(SyscallErrorHandlingTest, ReturnValidBufferGasIsZero)
 
 namespace {
 
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 bad_alloc_syscall_func()
 {
   throw std::bad_alloc{};
 }
 
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 non_std_exception_syscall_func()
 {
   throw 42; // NOLINT(hicpp-exception-baseclass)
@@ -578,29 +576,27 @@ namespace {
 
 // The shape of a zero-cost syscall (MintAuthToken, Return, ...): succeeds, and
 // reports no gas. This is the case that `>` would let through.
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 free_success_syscall_func()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 // The shape of syscall_Return_inner: reports no gas, and signals a successful
 // frame return through the error channel.
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 free_return_syscall_func()
 {
-  co_return SyscallInnerResult{HostFnError{HostFnErrorCode::Return},
-                               WrappedGasAmount{0}};
+  return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }
 
 constexpr GasAmount kFixedSyscallCost = 100;
 
-AsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 fixed_cost_syscall_func()
 {
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kFixedSyscallCost}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{kFixedSyscallCost}};
 }
 
 } // namespace

@@ -13,7 +13,7 @@
 
 namespace hogd {
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
                              BlockHeight &output_result)
 {

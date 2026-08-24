@@ -9,7 +9,7 @@
 
 namespace hogd {
 
-AsyncSyscallInnerResult
+MaybeAsyncSyscallInnerResult
 syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key,
                            StorageDeltaFlagSet input_flags)
