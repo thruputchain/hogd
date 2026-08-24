@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -18,6 +19,11 @@
 #include "types.hh"
 
 namespace hogd {
+
+enum class GenesisCeremonyError {
+  kNegativeDistribution,
+  kSupplyExceeded,
+};
 
 constexpr static ContractAddress
 make_precompile_address(GenesisContractAddresses addr_enum)
@@ -48,6 +54,12 @@ public:
 
   // Build the stock distributor root's single height-1 invocation. The
   // transaction creates and funds all economic state and deploys every entry.
+  std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
+  try_make_genesis_ceremony_transactions(
+      StorageCostModel const &cost_model) const;
+
+  // Panic-style wrapper for trusted callers whose hardcoded allocations are
+  // known to fit within the native-token supply.
   std::vector<SignedTransaction>
   make_genesis_ceremony_transactions(StorageCostModel const &cost_model) const;
 

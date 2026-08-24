@@ -1671,6 +1671,19 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
 }
 
+TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  LocalBootstrapConfig config{
+      .user_account_count = 1,
+      .user_storage_tokens = kTokenSupply,
+  };
+
+  EXPECT_THROW(build_local_bootstrap_account_artifact(config),
+               std::runtime_error);
+}
+
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({

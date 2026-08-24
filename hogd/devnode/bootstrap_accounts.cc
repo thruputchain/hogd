@@ -5,6 +5,7 @@
 #include <format>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -81,12 +82,18 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
                           NetworkHash const &network_hash,
                           StorageCostModel const &cost_model)
 {
+  auto initialization_txs =
+      builder.try_make_genesis_ceremony_transactions(cost_model);
+  if (!initialization_txs.has_value()) {
+    throw std::runtime_error(
+        "bootstrap accounts and ceremony funding exceed the native token "
+        "supply");
+  }
   return BootstrapAccountArtifact{
       .genesis_configuration =
           builder.build(network_hash, cost_model,
                         *load_stock_genesis_root_contract()),
-      .initialization_txs =
-          builder.make_genesis_ceremony_transactions(cost_model),
+      .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
   };
 }

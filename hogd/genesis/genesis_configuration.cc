@@ -148,8 +148,8 @@ GenesisConfigurationBuilder::build(NetworkHash const &network_hash,
   };
 }
 
-std::vector<SignedTransaction>
-GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
+std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
+GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
     StorageCostModel const &cost_model) const
 {
   using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
@@ -172,10 +172,39 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
       static_cast<uint128_t>(cost_model.get_balance_cost()) +
       static_cast<uint128_t>(cost_model.get_nnint_cost());
 
+  // The root contract mints each distribution plus enough native token to
+  // create the root replay/balance rows and token supply/balance rows for every
+  // ceremony transaction. Reject the artifact before emitting transactions if
+  // all of those mints would exceed the protocol supply.
+  uint128_t remaining_supply =
+      uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+  const std::size_t transaction_count =
+      std::max<std::size_t>(1, (entries_.size() + kDistributionsPerTransaction -
+                                1) /
+                                   kDistributionsPerTransaction);
+  for (std::size_t i = 0; i < transaction_count; ++i) {
+    if (root_funding > remaining_supply) {
+      return std::unexpected(GenesisCeremonyError::kSupplyExceeded);
+    }
+    remaining_supply -= root_funding;
+    if (token_funding > remaining_supply) {
+      return std::unexpected(GenesisCeremonyError::kSupplyExceeded);
+    }
+    remaining_supply -= token_funding;
+  }
+  for (Entry const &entry : entries_) {
+    if (entry.amount < 0) {
+      return std::unexpected(GenesisCeremonyError::kNegativeDistribution);
+    }
+    const uint128_t amount = static_cast<uint128_t>(entry.amount);
+    if (amount > remaining_supply) {
+      return std::unexpected(GenesisCeremonyError::kSupplyExceeded);
+    }
+    remaining_supply -= amount;
+  }
+
   std::vector<SignedTransaction> transactions;
-  transactions.reserve(std::max<std::size_t>(
-      1, (entries_.size() + kDistributionsPerTransaction - 1) /
-             kDistributionsPerTransaction));
+  transactions.reserve(transaction_count);
 
   for (std::size_t begin = 0; begin < std::max<std::size_t>(1, entries_.size());
        begin += kDistributionsPerTransaction) {
@@ -188,7 +217,6 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
     attached_contract_hashes.reserve(end - begin);
     for (std::size_t i = begin; i < end; ++i) {
       auto const &entry = entries_[i];
-      CHECK_GE(entry.amount, 0);
       distributions.push_back(genesis_root::Distribution{
           .nonce = entry.initial_nonce,
           .contract_hash = entry.contract_hash,
@@ -220,6 +248,15 @@ GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
         }});
   }
   return transactions;
+}
+
+std::vector<SignedTransaction>
+GenesisConfigurationBuilder::make_genesis_ceremony_transactions(
+    StorageCostModel const &cost_model) const
+{
+  auto transactions = try_make_genesis_ceremony_transactions(cost_model);
+  CHECK(transactions.has_value());
+  return std::move(*transactions);
 }
 
 ContractAddress

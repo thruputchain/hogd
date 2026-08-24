@@ -462,13 +462,20 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     };
   }
 
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto initialization_txs =
+      builder.try_make_genesis_ceremony_transactions(cost_model);
+  if (!initialization_txs.has_value()) {
+    throw std::runtime_error(
+        "hosted bootstrap accounts, faucet, and ceremony funding exceed the "
+        "native token supply");
+  }
+
   HostedBootstrapArtifact artifact{
       .genesis_configuration =
-          builder.build(config.network_hash,
-                        StorageCostModel::default_cost_model(),
+          builder.build(config.network_hash, cost_model,
                         *load_stock_genesis_root_contract()),
-      .initialization_txs = builder.make_genesis_ceremony_transactions(
-          StorageCostModel::default_cost_model()),
+      .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),
   };

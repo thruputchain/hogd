@@ -267,6 +267,53 @@ TEST(HostedBootstrapGenerator, RejectsInvalidFaucetAllocation)
   EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
 }
 
+TEST(HostedBootstrapGenerator, RejectsAggregateAllocationAboveTokenSupply)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.bootstrap_config.storage_tokens = kTokenSupply / 2;
+  config.faucet = HostedFaucetConfig{
+      .public_key =
+          derive_bootstrap_account_keypair("independent-faucet-seed", 0).first,
+      .storage_tokens = kTokenSupply - (kTokenSupply / 2),
+  };
+
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, AcceptsAllocationAtTokenSupplyLimit)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  const std::uint64_t ceremony_funding = static_cast<std::uint64_t>(
+      (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
+      cost_model.get_replay_cache_cost(1));
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.bootstrap_config.storage_tokens = kTokenSupply - ceremony_funding;
+
+  EXPECT_NO_THROW(build_hosted_bootstrap_artifact(config));
+}
+
+TEST(HostedBootstrapGenerator, CountsFundingForEveryCeremonyTransaction)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  const std::uint64_t ceremony_funding = static_cast<std::uint64_t>(
+      (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
+      cost_model.get_replay_cache_cost(1));
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 17;
+  config.bootstrap_config.storage_tokens =
+      (kTokenSupply - ceremony_funding) / config.bootstrap_config.count;
+
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
 TEST(HostedBootstrapGenerator,
      RejectsSeedDerivedFaucetKeyOutsideAllocatedAccounts)
 {
