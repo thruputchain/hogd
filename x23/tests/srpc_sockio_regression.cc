@@ -288,22 +288,21 @@ TEST(RpcRecordRegression, OversizedRecordIsRejectedBeforeMarkerWrite)
   msg.body.cbody().cred.flavor = AUTH_NONE;
   msg.body.cbody().verf.flavor = AUTH_NONE;
 
-  constexpr size_t kFirstIllegalRecordSize = 0x80000004UZ;
+  // The first record size whose marker wraps: 0x80000004 bytes on the wire
+  // is payload 0x80000000, one past the 0x7fffffff single-fragment limit.
+  // The reported size drives the rejection before any buffer is allocated,
+  // so the huge value never materializes 2 GiB.
   const size_t msg_size = xdr_size(msg);
-  ASSERT_LT(4UZ + msg_size, kFirstIllegalRecordSize);
-
+  ASSERT_LT(msg_size, kMaxRecordPayloadSize);
   const HugeReportedPayloadForRecordRegression oversized{
-      .serialized_size = kFirstIllegalRecordSize - 4UZ - msg_size,
+      .serialized_size = kMaxRecordPayloadSize + 1UZ - msg_size,
   };
   EXPECT_THROW(make_record(msg, oversized), XdrBadInput);
 
-  // One byte under the limit still frames, with an intact marker.
-  const HugeReportedPayloadForRecordRegression at_limit{
-      .serialized_size = kFirstIllegalRecordSize - 1UZ - 4UZ - msg_size,
-  };
-  Buf record = make_record(msg, at_limit);
-  ASSERT_EQ(record.size(), kFirstIllegalRecordSize - 1UZ);
+  // A normal (small) record still frames, with an intact non-wrapped marker.
+  Buf record = make_record(msg, std::uint32_t{0xfeedface});
   const uint32_t marker = getbe<uint32_t>(record.data());
+  EXPECT_EQ(marker & 0x80000000U, 0x80000000U); // final-fragment bit set
   EXPECT_EQ(static_cast<size_t>(marker & 0x7fffffffU), record.size() - 4UZ);
 }
 

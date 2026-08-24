@@ -130,16 +130,18 @@ template<is_xdr_serializable... X>
 Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
-  Buf ret = serialize(std::uint32_t{}, msg, x...);
   // The record marker's low 31 bits carry the payload length, so a longer
-  // serialization would wrap the marker and desynchronize the stream for
-  // the receiver.  This must hold at runtime in every build: the x23assert
-  // it replaces compiled out under NDEBUG, letting release senders emit
-  // wrapped markers for oversized payloads.
-  if (ret.size() - 4 > kMaxRecordPayloadSize) [[unlikely]]
+  // payload would wrap the marker and desynchronize the stream for the
+  // receiver.  Reject on the computed size before serializing, so an
+  // oversized payload is never materialized.  This must hold at runtime in
+  // every build: the x23assert it replaces compiled out under NDEBUG,
+  // letting release senders emit wrapped markers for oversized payloads.
+  size_t payload_size = xdr_size(msg) + (size_t{0} + ... + xdr_size(x));
+  if (payload_size > kMaxRecordPayloadSize) [[unlikely]]
     throw XdrBadInput("serialized record payload {} exceeds ONC RPC "
                       "single-fragment record limit {}",
-                      ret.size() - 4, kMaxRecordPayloadSize);
+                      payload_size, kMaxRecordPayloadSize);
+  Buf ret = serialize(std::uint32_t{}, msg, x...);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
