@@ -333,8 +333,7 @@ private:
   };
   static_assert(std::is_standard_layout_v<HandlerHeader>);
 
-  static constexpr std::uint64_t kHandlerMagic =
-      0x484f47445f484452ULL; // HOGD_HDR
+  static constexpr std::uint64_t kHandlerMagic = 0x4d41524d4f54ULL; // MARMOT
 
   struct HandlerBlock {
     HandlerHeader header;
