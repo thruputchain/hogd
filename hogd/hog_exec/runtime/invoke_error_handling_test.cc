@@ -13,6 +13,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -802,6 +803,87 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// A deep address-distinct ordinary-invocation chain is bounded by
+// kMaxInvocationDepth (hogd issue #3590): a chain that stays within the cap
+// runs to completion, and the first invoke that would exceed it is rejected,
+// so the whole chain fails deterministically rather than doing unbounded
+// per-frame lookup and unwind work.
+TEST_P(InvokeErrorHandlingTest, OrdinaryInvocationDepthIsCapped)
+{
+  // One native contract, deployed at many distinct addresses so the reentrance
+  // guard never trips. Each frame reads a one-byte "remaining depth" from its
+  // calldata; while that is nonzero it ordinary-invokes the next distinct
+  // address (tag == remaining) with remaining - 1, extending the chain by one
+  // frame. A frame with remaining == 0 is the leaf and just returns.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    auto const &calldata = ctx.handler().get_calldata();
+    if (calldata.size() != 1) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    uint8_t remaining = calldata[0];
+    if (remaining == 0) {
+      return {};
+    }
+
+    ContractAddress next_address{};
+    next_address[0] = remaining;
+    Calldata child_calldata{static_cast<uint8_t>(remaining - 1)};
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = 0,
+        .gas_limit = UINT64_MAX,
+        .flags = std::to_underlying(InvokeFlag::None),
+    };
+    CopyableInvokeOutputs outputs{};
+    auto status = ctx.syscall<SyscallNo::kInvoke>(
+        next_address, child_calldata, std::span<uint32_t>{}, inputs, outputs);
+    if (!status.has_value() ||
+        status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+        outputs.frame_status != InvocationFrameStatusCode::Return) {
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  // Deploy the shared contract at every address tag the two chains reach.
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  for (uint32_t tag = 1; tag <= kMaxInvocationDepth + 1; ++tag) {
+    write_deployment(make_contract_address(static_cast<uint8_t>(tag)),
+                     contract_xdr);
+  }
+
+  auto run_chain = [&](uint8_t root_remaining) {
+    // The root frame lives at tag root_remaining + 1 and starts the chain.
+    auto root_address =
+        make_contract_address(static_cast<uint8_t>(root_remaining + 1));
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{
+                                      .invoked_address = root_address,
+                                      .entrypoint = entrypoint_from_method_id(0),
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = Calldata{root_remaining}},
+                              .uniquifier = make_new_uniquifier()}},
+        *runtime_context);
+    return handler.root_invoke().is_root_success();
+  };
+
+  // A chain of exactly kMaxInvocationDepth live frames (root + the cap minus one
+  // children, leaf reached at the cap) stays within the limit and succeeds.
+  EXPECT_TRUE(run_chain(kMaxInvocationDepth - 1));
+
+  // One frame deeper: the invoke that would create frame kMaxInvocationDepth + 1
+  // is rejected, and the failure propagates back so the root frame fails.
+  EXPECT_FALSE(run_chain(kMaxInvocationDepth));
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,

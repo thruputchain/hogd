@@ -26,4 +26,23 @@ inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
 inline constexpr size_t kMaxSerializedContractBytes =
     kMaxContractSizeBytes + 16;
 
+// Maximum number of simultaneously-live invocation frames (i.e. the ordinary +
+// TryInvoke call-nesting depth). Enforced deterministically in
+// SystemCallHandler::validate_new_invocation() before a child frame is created.
+//
+// The exact-address reentrance guard only blocks reusing an address already on
+// the stack, and the TryInvoke savepoint cap (kMaxSavepointDepth) bounds
+// sequential TryInvoke breadth rather than nesting depth, so ordinary
+// invocation nesting was previously unbounded. That let a contract build a deep
+// address-distinct call chain whose per-frame first-use item lookups scan every
+// ancestor frame and whose successful unwinds copy each child's write set into
+// its parent -- host work that grows with depth times modified-item count but is
+// not gas-metered (hogd issue #3590). Capping the depth makes that per-write
+// factor a constant, so the total host work stays linear in the metered work,
+// and also bounds the native call-stack recursion each nested invoke consumes.
+//
+// TODO(#2569): migrate into a protocol-defined config-bounds struct plumbed
+// through genesis (like StorageCostModelXdr) once that exists.
+inline constexpr size_t kMaxInvocationDepth = 128;
+
 } // namespace hogd

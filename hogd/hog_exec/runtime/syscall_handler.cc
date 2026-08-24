@@ -804,6 +804,14 @@ SystemCallHandler::validate_new_invocation(
   if (invocation_frame_stack_.has_active_frame_for(address)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
+  // Bound the invocation-nesting depth so the unmetered per-frame item-lookup
+  // and successful-unwind merge work stays linear in the metered work rather
+  // than growing with depth (hogd issue #3590). size() is the number of frames
+  // already live (the caller and its ancestors); admitting one more must not
+  // exceed the cap.
+  if (invocation_frame_stack_.size() >= kMaxInvocationDepth) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
   return {};
 }
 
