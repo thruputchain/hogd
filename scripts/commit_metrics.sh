@@ -64,7 +64,18 @@ prepare_metrics_commit() {
 #
 # So retry only the race, and only a bounded number of times. Anything else
 # fails fast with the remote's own output, which is what a human needs to see.
+#
+# Validate the override rather than trusting it: [ 1 -ge abc ] does not fail
+# the script under [set -e] -- as an [if] condition it just reports an integer
+# expression error and evaluates false -- so a malformed value would silently
+# restore the unbounded loop this whole block exists to remove.
 MAX_PUSH_ATTEMPTS=${MAX_PUSH_ATTEMPTS:-10}
+case $MAX_PUSH_ATTEMPTS in
+*[!0-9]* | '' | 0*)
+  echo "MAX_PUSH_ATTEMPTS must be a positive integer; got '$MAX_PUSH_ATTEMPTS'." >&2
+  exit 1
+  ;;
+esac
 attempt=0
 
 push_is_race() {
