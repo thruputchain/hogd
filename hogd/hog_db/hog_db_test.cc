@@ -4047,6 +4047,36 @@ TEST_F(HogDbTest, InvalidatedBlockTXReadReturnsStaleBlock)
   EXPECT_EQ(result_after.error().code(), HogDbCode::kStaleBlock);
 }
 
+// #3576: read_nnint128_base for an absent contract-data key must not publish
+// a fresh ItemLock into item_locks_. ConcurrentMap has no deletion, and
+// InvokeTX::request_nnint128 rejects a negative add against implicit base 0
+// before request_change() records anything -- so any lock published here
+// would be retained until the block is destroyed, uncharged and invisible
+// to rollback. A repeatable attack surface if a contract-controlled
+// TryInvoke child can loop the probe against distinct keys.
+TEST_F(HogDbTest, ReadNNIntBaseAbsentContractDataDoesNotRetainLock)
+{
+  constexpr uint64_t kAbsentAddr = 0xABCD0100;
+  Address addr = make_address(kAbsentAddr);
+  setup_contract_address(addr);
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+
+  auto before = block_tx.get().item_lock_count_for_testing();
+
+  for (size_t i = 0; i < 4; ++i) {
+    ItemKey key = make_item_key(addr, i);
+    ASSERT_TRUE(key.is_contract_data());
+    auto base = block_tx.get().read_nnint128_base(key);
+    ASSERT_TRUE(base.has_value());
+    EXPECT_EQ(*base, 0);
+  }
+
+  EXPECT_EQ(block_tx.get().item_lock_count_for_testing(), before);
+}
+
 TEST_F(HogDbTest, InvalidatedBlockTXBalanceReadReturnsStaleBlock)
 {
   constexpr uint64_t kInvalidAddr = 0xABCD0002;

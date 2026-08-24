@@ -318,6 +318,19 @@ public:
     cleared_ = true;
   }
 
+  // Serial scan; not for hot paths. Concurrent inserts might or might not be
+  // observed, like for_each.
+  size_t size_for_testing()
+  {
+    assert(!cleared_);
+    size_t count = 0;
+    auto inc = [&count](std::pair<const KeyType &, Value &>) { ++count; };
+    for (auto &bucket : buckets_) {
+      value_bucket_t::for_each(&bucket, inc);
+    }
+    return count;
+  }
+
 private:
   size_t worker_width(WorkerPool &pool) const
   {

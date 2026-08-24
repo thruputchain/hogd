@@ -248,24 +248,23 @@ BlockTX::read_nnint128_base(const ItemKey &key)
     return s.error();
   auto *lock = item_locks_.get(key);
   if (!lock) {
-    if (!key.is_contract_data()) {
-      auto r = db_.read_nnint128(key);
-      if (!r) {
-        if (r.error() == HogDbCode::kNotFound ||
-            r.error() == HogDbCode::kTypeMismatch) {
-          return 0;
-        }
-        return r.error();
+    // Read the snapshot base directly from the DAO without publishing an
+    // ItemLock: a caller (InvokeTX::request_nnint128) may reject the delta
+    // at the base-aware overload before request_change() records anything,
+    // and ConcurrentMap has no deletion, so a lock published here would
+    // otherwise be retained -- uncharged and invisible to rollback -- for
+    // each rejected probe against a distinct absent key (#3576). If the
+    // delta is admissible, request_change() will publish the lock through
+    // block_.lock() in the normal path.
+    auto r = db_.read_nnint128(key);
+    if (!r) {
+      if (r.error() == HogDbCode::kNotFound ||
+          r.error() == HogDbCode::kTypeMismatch) {
+        return 0;
       }
-      return *r;
+      return r.error();
     }
-
-    auto snapshot = get_snapshot_cost_and_cache_data(key);
-    if (!snapshot) {
-      return snapshot.error();
-    }
-    lock = item_locks_.insert_or_get(key, *snapshot);
-    CHECK_PTR(lock);
+    return *r;
   }
 
   auto base = lock->get_cached_nnint128_base();

@@ -95,6 +95,11 @@ public:
   // Do not use in production code — the db hash is required for consensus.
   HogDbStatus<void> close_skip_hash_for_testing();
 
+  size_t item_lock_count_for_testing()
+  {
+    return item_locks_.size_for_testing();
+  }
+
 private:
   HogDbStatus<std::pair<int128_t, ItemLockCacheData>>
   get_snapshot_cost_and_cache_data(const ItemKey &key);
