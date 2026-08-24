@@ -48,7 +48,10 @@ map_segment(size_t len)
   addr = mmap(nullptr, len, kPermissions, kFlags, -1, 0);
   if (addr == MAP_FAILED) {
     Errno e;
-    error("Couldn't mmap segment: {}", e);
+    error("Couldn't mmap segment of {} bytes: {}. If the system is out of "
+          "memory, lower the configured RAM database capacity (hog-devnode: "
+          "--ramdb-bytes)",
+          len, e);
     e.raise();
   }
   return addr;

@@ -1,5 +1,8 @@
 Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/workflows/cpp.yml/badge.svg)
 
+Operator documentation: see [docs/devnode.md](docs/devnode.md) for
+running `hog-devnode`, the local development node.
+
 # Installation Instructions
 
 ## macOS Quick Start
