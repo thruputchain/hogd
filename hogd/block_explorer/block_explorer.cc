@@ -1,3 +1,7 @@
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <format>
 #include <optional>
@@ -26,7 +30,7 @@ namespace {
 void
 print_usage()
 {
-  std::println("usage: <indexer_server:port> [-t <tx_hash>]");
+  std::println("usage: <indexer_server:port> -t <tx_hash>");
 }
 
 int
@@ -35,6 +39,20 @@ block_explorer_init(const std::string &indexer_server_addr,
 {
   if (!tx_hash_raw) {
     print_usage();
+    return EXIT_FAILURE;
+  }
+
+  // Validate before HexArray/to_sha256, whose size and hex-digit CHECKs
+  // abort the process on malformed input.
+  constexpr std::size_t kTxHashHexDigits = sizeof(SHA256Hash) * 2;
+  const bool all_hex = std::ranges::all_of(*tx_hash_raw, [](unsigned char c) {
+    return std::isxdigit(c) != 0;
+  });
+  if (tx_hash_raw->size() != kTxHashHexDigits || !all_hex) {
+    std::println(stderr,
+                 "error: -t expects a {}-character hex transaction hash "
+                 "(no 0x prefix), got \"{}\"",
+                 kTxHashHexDigits, *tx_hash_raw);
     return EXIT_FAILURE;
   }
 
