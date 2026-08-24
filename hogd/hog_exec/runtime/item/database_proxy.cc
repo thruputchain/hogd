@@ -171,8 +171,20 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           panic("Failed to parse database shard address");
         }
-        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
-                                                                   false);
+        // One connection per physical core rather than per last-level cache.
+        // The async client has one reader coroutine per connection, and that
+        // reader is the whole return path for its connection: it parses every
+        // reply header and looks up every xid before anything downstream can
+        // run.  llc_map can be a single bucket on a machine whose cores share
+        // one L3, which would put every database read in the executor behind
+        // one reader.  The blocking client did not care -- its reply callback
+        // only posted a semaphore and each transaction resumed on its own
+        // caller thread, so its return-path width was the executor thread
+        // count, not the connection count.
+        info("DatabaseProxy: {} connections (core_map), llc_map would give {}",
+             x23::core_map->nbuckets(), x23::llc_map->nbuckets());
+        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+            hostport, false, *x23::core_map);
       }
       panic("unimplemented");
     }())
