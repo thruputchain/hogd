@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -79,8 +80,10 @@ public:
   x23::Async<PendingTxCount> schedgateway_pending_tx_count()
   {
     // size() is the mempool runqueue + stranded count — the full
-    // "pending tx" view from the scheduler's perspective.
-    co_return coord_->scheduler()->size();
+    // "pending tx" view from the scheduler's perspective.  It can
+    // transiently dip below zero while add_txs()/schedule() race (see
+    // Scheduler::size_), so clamp before it becomes the wire count.
+    co_return std::max<ssize_t>(0, coord_->scheduler()->size());
   }
 
   void shut_down() { shutdown_flag_ = true; }
