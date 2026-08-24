@@ -2151,8 +2151,10 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
             EventPrepareOutcome::EventPrepareNotReady);
 
   GenesisConfigurationBuilder builder;
+  auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis_configuration =
-      builder.build_or_panic(StorageCostModel::default_cost_model());
+      builder.build(MempoolTestInfra::kNetworkHash,
+                    StorageCostModel::default_cost_model(), *root_contract);
 
   constexpr size_t kWarmupReads = 100;
   std::atomic<bool> load_done = false;
@@ -2210,9 +2212,11 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   GenesisConfigurationBuilder builder;
+  auto root_contract = load_stock_genesis_root_contract();
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
-                builder.build_or_panic(
-                    StorageCostModel::default_cost_model()))(),
+                builder.build(MempoolTestInfra::kNetworkHash,
+                              StorageCostModel::default_cost_model(),
+                              *root_contract))(),
             DbSchedResult::DbSchedResultOK);
 
   HttpServer health_server;
@@ -2266,7 +2270,7 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
             SchedulerProposalOutcome::SchedulerProposalError);
 }
 
-TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
+TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
@@ -2277,23 +2281,21 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
   const SHA256Hash second_deployment_nonce = make_test_nonce(9002);
   const int128_t allocation = 1'000'000'000;
   using fibonacci_meta = ContractTraitMeta<fibonacci::Fibonacci>;
-  builder.add_initial_config(fibonacci_contract, deployment_nonce,
-                             fibonacci_meta::entrypoint<u8"fibonacci">(),
-                             fibonacci_meta::make_calldata<u8"fibonacci">(
-                                 uint32_t{0}),
-                             allocation);
-  builder.add_initial_config(fibonacci_contract, second_deployment_nonce,
-                             fibonacci_meta::entrypoint<u8"fibonacci">(),
-                             fibonacci_meta::make_calldata<u8"fibonacci">(
-                                 uint32_t{1}),
-                             allocation);
+  builder.add_distribution(fibonacci_contract, deployment_nonce,
+                           fibonacci_meta::entrypoint<u8"fibonacci">(),
+                           fibonacci_meta::make_calldata<u8"fibonacci">(
+                               uint32_t{0}),
+                           allocation);
+  builder.add_distribution(fibonacci_contract, second_deployment_nonce,
+                           fibonacci_meta::entrypoint<u8"fibonacci">(),
+                           fibonacci_meta::make_calldata<u8"fibonacci">(
+                               uint32_t{1}),
+                           allocation);
 
   auto root_contract = load_stock_genesis_root_contract();
-  GenesisConfigurationV2 genesis =
-      builder.build_v2(MempoolTestInfra::kNetworkHash, cost_model,
-                       *root_contract);
-  const GenesisConfigurationHash genesis_configuration_hash = sha256(genesis);
-  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration_v2(
+  GenesisConfiguration genesis =
+      builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract);
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
 
@@ -2313,8 +2315,6 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
-  EXPECT_EQ(parent.db_tip().value.proposal_header.genesis_configuration_hash,
-            genesis_configuration_hash);
 
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
@@ -2367,19 +2367,16 @@ TEST(Mempool, GenesisV2CeremonyMintsDeploysAndRejectsRetry)
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
-  EXPECT_EQ(
-      result.commit().db_tip.value.proposal_header.genesis_configuration_hash,
-      genesis_configuration_hash);
 
   const ContractAddress deployed =
-      GenesisConfigurationLoader::calculate_deployed_address(
-          sha256(*fibonacci_contract), deployment_nonce);
+      calculate_genesis_deployment_address(sha256(*fibonacci_contract),
+                                           deployment_nonce);
   ASSERT_TRUE(server.read_address_metadata(deployed).has_value());
   ASSERT_TRUE(server.read_address_balance(deployed).has_value());
   EXPECT_GT(*server.read_address_balance(deployed), 0);
   const ContractAddress second_deployed =
-      GenesisConfigurationLoader::calculate_deployed_address(
-          sha256(*fibonacci_contract), second_deployment_nonce);
+      calculate_genesis_deployment_address(sha256(*fibonacci_contract),
+                                           second_deployment_nonce);
   ASSERT_TRUE(server.read_address_metadata(second_deployed).has_value());
   ASSERT_TRUE(server.read_address_balance(second_deployed).has_value());
   EXPECT_GT(*server.read_address_balance(second_deployed), 0);
@@ -2398,9 +2395,11 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);
   GenesisConfigurationBuilder builder;
+  auto root_contract = load_stock_genesis_root_contract();
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
-                builder.build_or_panic(
-                    StorageCostModel::default_cost_model()))(),
+                builder.build(MempoolTestInfra::kNetworkHash,
+                              StorageCostModel::default_cost_model(),
+                              *root_contract))(),
             DbSchedResult::DbSchedResultOK);
   server.register_runtime_after_genesis();
 

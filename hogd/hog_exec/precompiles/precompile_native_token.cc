@@ -762,9 +762,7 @@ make_native_token_contract()
         }
         uint128_t total_supply;
         if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-          // V1 compatibility during the staged migration.
-          total_supply =
-              uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+          total_supply = 0;
         }
         else if (*get != SyscallErrorCode::kSyscallErrorCodeNone ||
                  !supply_base_present ||

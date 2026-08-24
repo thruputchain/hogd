@@ -66,8 +66,8 @@ protected:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     GenesisConfiguration genesis_configuration{
-        .default_wallet =
-            GenesisConfigurationLoader::native_default_wallet_hash()};
+        .root_contract = *load_stock_genesis_root_contract(),
+        .default_wallet = native_default_wallet_hash()};
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
@@ -779,9 +779,8 @@ TEST(RpcGenesisTest, RejectsNonGenesisHeight)
 
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = -1;
-  GenesisConfiguration genesis_configuration{
-      .default_wallet =
-          GenesisConfigurationLoader::native_default_wallet_hash()};
+  GenesisConfiguration genesis_configuration{.default_wallet =
+                                                 native_default_wallet_hash()};
 
   EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,
                                                          genesis_value),

@@ -310,7 +310,9 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb);
+      TestDB::kHogDb, /*empty_genesis=*/false);
+  fw.run_genesis_initialization(
+      NativeContractTestFramework::make_compact_test_genesis_configuration());
 
   const auto contract_addr =
       NativeContractTestFramework::make_contract_address(0);
@@ -342,7 +344,9 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
 
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb);
+      TestDB::kHogDb, /*empty_genesis=*/false);
+  fw.run_genesis_initialization(
+      NativeContractTestFramework::make_compact_test_genesis_configuration());
 
   const auto contract_addr =
       NativeContractTestFramework::make_contract_address(1);

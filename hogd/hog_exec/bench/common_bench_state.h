@@ -118,7 +118,7 @@ public:
       GenesisConfiguration const &genesis_configuration,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
   void run_genesis_configuration(
-      GenesisConfigurationV2 const &genesis_configuration,
+      GenesisConfiguration const &genesis_configuration,
       InitializationBlock const &genesis_ceremony_txs,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
 
@@ -330,13 +330,15 @@ inline void
 CommonBenchState::run_genesis_configuration(
     GenesisConfigurationBuilder const &genesis_configuration_builder)
 {
-  auto unfurl_txs =
-      genesis_configuration_builder.make_unfurl_genesis_transactions();
-  InitializationBlock initialization_txs = {unfurl_txs.begin(),
-                                            unfurl_txs.end()};
-  run_genesis_configuration(genesis_configuration_builder.build_or_panic(
-                                StorageCostModel::default_cost_model()),
-                            {initialization_txs});
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto root_contract = load_stock_genesis_root_contract();
+  auto ceremony_txs =
+      genesis_configuration_builder.make_genesis_ceremony_transactions(
+          cost_model);
+  run_genesis_configuration(
+      genesis_configuration_builder.build(NetworkHash{}, cost_model,
+                                          *root_contract),
+      InitializationBlock{ceremony_txs.begin(), ceremony_txs.end()}, {});
 }
 
 inline void
@@ -392,15 +394,16 @@ CommonBenchState::run_genesis_configuration(
 
 inline void
 CommonBenchState::run_genesis_configuration(
-    GenesisConfigurationV2 const &genesis_configuration,
+    GenesisConfiguration const &genesis_configuration,
     InitializationBlock const &genesis_ceremony_txs,
     x23::XdrVec<InitializationBlock> const &initialization_txs)
 {
   assert(block_number_ == 0);
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto r = coord_client_->dbsched_load_genesis_configuration_v2(
-      genesis_configuration, genesis_value);
+  auto r =
+      coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
+                                                        genesis_value);
   if (r != DbSchedResult::DbSchedResultOK) {
     panic("Failed to write genesis configuration");
   }

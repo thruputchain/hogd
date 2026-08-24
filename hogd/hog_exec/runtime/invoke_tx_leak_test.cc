@@ -69,7 +69,9 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
 
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb);
+      TestDB::kHogDb, /*empty_genesis=*/false);
+  fw.run_genesis_initialization(
+      NativeContractTestFramework::make_compact_test_genesis_configuration());
 
   Contract contract_to_deploy(ContractType::kRv32);
   contract_to_deploy.rv32_contract().data.append_range(std::string(8192, 'x'));

@@ -15,7 +15,6 @@ CONTRACTS=(
   fibonacci
   fibonacci_call
   itc_erc20
-  initial_token_claim
   authclaim_test
   cxs_roundtrip
   txs_roundtrip

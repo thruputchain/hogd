@@ -22,7 +22,7 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -163,7 +163,7 @@ protected:
   // Addresses are fixed per test; the native precompile lives at the genesis
   // preset address, everything else is arbitrary.
   static constexpr ContractAddress kNativeTokenAddr =
-      GenesisConfigurationLoader::kPresetNativeTokenAddress;
+      kNativeTokenContractAddress;
   static constexpr ContractAddress kRv32TokenAddr = make_contract_address(200);
   static constexpr ContractAddress kRv32AdminAddr = make_contract_address(201);
   static constexpr ContractAddress kNativeCallerAddr =
