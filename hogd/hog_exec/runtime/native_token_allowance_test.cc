@@ -18,7 +18,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
@@ -106,7 +105,7 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
                     !r.value().value().has_value() ||
                     !r.value().value().value().is_ok() ||
                     amount_to_u128(r.value().value().value().ok()) != 0) {
-                  ADD_FAILURE() << "fresh allowance did not return Ok(0)";
+                  ADD_FAILURE() << "fresh allowance did not co_return Ok(0)";
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
                 co_return InvokeStatus<void>{};
@@ -399,7 +398,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
         if (!r.has_value() || !r.value().has_value() ||
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
-          ADD_FAILURE() << "transfer_from(50000) did not return Ok";
+          ADD_FAILURE() << "transfer_from(50000) did not co_return Ok";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -543,7 +542,8 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
                 if (!grant.has_value() || !grant.value().has_value() ||
                     !grant.value().value().has_value() ||
                     !grant.value().value().value().is_ok()) {
-                  ADD_FAILURE() << "initial allowance grant did not return Ok";
+                  ADD_FAILURE()
+                      << "initial allowance grant did not co_return Ok";
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
 
@@ -651,7 +651,7 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
                 if (!r.has_value() || !r.value().has_value() ||
                     !r.value().value().has_value() ||
                     !r.value().value().value().is_ok()) {
-                  ADD_FAILURE() << "self-transfer did not return Ok";
+                  ADD_FAILURE() << "self-transfer did not co_return Ok";
                   co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
                 co_return InvokeStatus<void>{};
@@ -1115,7 +1115,7 @@ TEST_F(NativeTokenAllowanceTest,
             !r.value().value().has_value() ||
             !r.value().value().value().is_ok()) {
           ADD_FAILURE()
-              << "transfer_from(owner, zero, amount) did not return Ok";
+              << "transfer_from(owner, zero, amount) did not co_return Ok";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};
@@ -1490,7 +1490,7 @@ TEST_F(NativeTokenAllowanceTest,
         if (!invoke.has_value() ||
             invoke.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs.frame_status != InvocationFrameStatusCode::Return) {
-          ADD_FAILURE() << "nested spender did not return normally";
+          ADD_FAILURE() << "nested spender did not co_return normally";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         co_return InvokeStatus<void>{};

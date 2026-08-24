@@ -340,7 +340,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kFirstTransferAmount)));
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -357,7 +357,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Should fail in try_invoke (insufficient funds for balance cost): the
-        // child frame runs (code None) but does not return normally — it
+        // child frame runs (code None) but does not co_return normally — it
         // reverts or faults, so frame_status is not Return.
         if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status == InvocationFrameStatusCode::Return) {
@@ -366,7 +366,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
 
         // 2. Call transfer with same arguments, NOT in try_invoke frame
         // - should succeed (creates the balance)
-        auto r2 = [&]() {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -392,7 +392,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
         auto calldata2 = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kSecondTransferAmount)));
-        auto r3 = [&]() {
+        auto r3 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -495,15 +495,15 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
         // The public transfer path is strict now; stage the deferred negative
         // delta directly at the handler layer (the surface #1503 guards) to
         // keep the read-side fault and commit-time rejection covered.
-        auto r_debit = ctx.handler().modify_native_token_balance(
+        auto r_debit = co_await ctx.handler().modify_native_token_balance(
             ctx.handler().get_current_address(), -kTransferAmount);
         if (!r_debit.has_value() || !r_debit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend debit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto r_credit =
-            ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                      kTransferAmount);
+            co_await ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                               kTransferAmount);
         if (!r_credit.has_value() || !r_credit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend credit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -514,7 +514,8 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
         // kSyscallErrorCodeNone with frame_status == Fault.
         auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
         CopyableInvokeOutputs r_get_outputs{};
-        auto r_get = [&]() {
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
@@ -529,7 +530,7 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
         if (!r_get.has_value() ||
             r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-          ADD_FAILURE() << "get_balance after overspend did not return a "
+          ADD_FAILURE() << "get_balance after overspend did not co_return a "
                            "deterministic fault";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -598,15 +599,15 @@ TEST_F(BalanceCostTrackingTest,
         // The public transfer path is strict now; stage the deferred negative
         // delta directly at the handler layer (the surface #1503 guards) to
         // keep the read-side fault and commit-time rejection covered.
-        auto r_debit = ctx.handler().modify_native_token_balance(
+        auto r_debit = co_await ctx.handler().modify_native_token_balance(
             ctx.handler().get_current_address(), -kTransferAmount);
         if (!r_debit.has_value() || !r_debit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend debit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto r_credit =
-            ctx.handler().modify_native_token_balance(kReceiverAddr,
-                                                      kTransferAmount);
+            co_await ctx.handler().modify_native_token_balance(kReceiverAddr,
+                                                               kTransferAmount);
         if (!r_credit.has_value() || !r_credit.value().has_value()) {
           ADD_FAILURE() << "staging the direct overspend credit failed";
           co_return InvokeError{InvokeErrorCode::Deterministic};
@@ -615,7 +616,8 @@ TEST_F(BalanceCostTrackingTest,
         auto calldata_get =
             erc20_meta::make_calldata<u8"get_balance_of">(kSenderAddr);
         CopyableInvokeOutputs r_get_outputs{};
-        auto r_get = [&]() {
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"get_balance_of">()),
@@ -630,7 +632,7 @@ TEST_F(BalanceCostTrackingTest,
         if (!r_get.has_value() ||
             r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r_get_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-          ADD_FAILURE() << "get_balance_of after overspend did not return a "
+          ADD_FAILURE() << "get_balance_of after overspend did not co_return a "
                            "deterministic fault";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
@@ -698,7 +700,8 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
         CopyableInvokeOutputs transfer_outputs{};
-        auto r_transfer = [&]() {
+        auto r_transfer =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -720,7 +723,8 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
         // transaction succeeds (Return, not the #1503 Fault).
         auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
         CopyableInvokeOutputs get_outputs{};
-        auto r_get = [&]() {
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
@@ -933,7 +937,8 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
             erc20_meta::make_calldata<u8"transfer">(kSenderAddr,
                                                     make_amount(uint128_t{50}));
         CopyableInvokeOutputs back_outputs{};
-        auto r_back = [&]() {
+        auto r_back =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -968,7 +973,8 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferToReceiver)));
         CopyableInvokeOutputs fwd_outputs{};
-        auto r_fwd = [&]() {
+        auto r_fwd =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -988,7 +994,8 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
 
         // (b) Invoke receiver's method 0; it spends tokens received above.
         CopyableInvokeOutputs invoke_outputs{};
-        auto r_invoke = [&]() {
+        auto r_invoke =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
@@ -1080,7 +1087,8 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
         auto calldata_transfer = erc20_meta::make_calldata<u8"transfer">(
             kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
-        auto r_transfer = [&]() {
+        auto r_transfer =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"transfer">()),
@@ -1094,12 +1102,13 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
 
         if (!r_transfer.has_value() ||
             r_transfer.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          ADD_FAILURE() << "transfer did not return success";
+          ADD_FAILURE() << "transfer did not co_return success";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto calldata_get = erc20_meta::make_calldata<u8"get_balance">();
-        auto r_get = [&]() {
+        auto r_get =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id =
                   sdk_method_id(erc20_meta::entrypoint<u8"get_balance">()),
@@ -1114,7 +1123,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
         if (!r_get.has_value() ||
             r_get.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "get_balance after non-overspend did not "
-                           "return success";
+                           "co_return success";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -1507,7 +1516,7 @@ TEST_F(BalanceCostTrackingTest,
         if (!r_transfer.has_value() || !r_transfer.value().has_value() ||
             !r_transfer.value().value().has_value() ||
             !r_transfer.value().value().value().is_ok()) {
-          ADD_FAILURE() << "transfer(zero, amount) did not return Ok";
+          ADD_FAILURE() << "transfer(zero, amount) did not co_return Ok";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
