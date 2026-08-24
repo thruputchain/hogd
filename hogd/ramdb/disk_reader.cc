@@ -4,9 +4,11 @@
 #include <unistd.h> // NOLINT(misc-include-cleaner) for off_t
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <functional>
 #include <limits>
@@ -108,13 +110,28 @@ LogletBuffer::calculate_crc32c()
   return crc32c_append(crc_, head_->get_bytes());
 }
 
+// Whether a null pointer's object representation is all-zero bytes on this
+// target. Recovery relies on this so a reconstructed ordinary header's `next`
+// slot already matches the canonical zero bytes the writer persisted, without
+// any per-record canonicalization on the hot path (#2975). It holds on every
+// platform we build for; checked once, never per record.
+inline bool
+null_pointer_is_all_zero()
+{
+  const void *p = nullptr;
+  std::array<std::byte, sizeof(p)> bytes{};
+  std::memcpy(bytes.data(), &p, sizeof(p));
+  return std::ranges::all_of(bytes,
+                             [](std::byte b) { return b == std::byte{0}; });
+}
+
 inline bool
 crc_valid(uint32_t commit_crc, LogletBuffer &buf, ItemHeader *commit_hdr)
 {
-  // The next slot is persisted as canonical zero bytes (#1530); zero it on the
-  // reconstructed header too so the checksum is independent of the host's
-  // nullptr representation.
-  commit_hdr->clear_next();
+  // Like the ordinary records in the buffer, the reconstructed commit header's
+  // value-initialized null `next` slot matches the writer's canonical zero
+  // bytes wherever a null pointer is all-zero (asserted once in load_log_file),
+  // so it is hashed as-is with no per-record canonicalization (#2975).
   uint32_t crc = crc32c_append(buf.calculate_crc32c(), byte_view(*commit_hdr));
   if (commit_crc != crc) {
     error("CRC check failed! Expected {:x}, got {:x}.", commit_crc, crc);
@@ -281,6 +298,12 @@ load_log_file(
     return DBError(DBCode::kCorruption);
   }
 
+  // Recovery hashes reconstructed ordinary headers whose `next` slot is a
+  // value-initialized null pointer against a writer CRC over canonical zero
+  // bytes; those agree only where a null pointer is all-zero bytes. Checked
+  // once per log file (compiled out of release), not per record.
+  assert(null_pointer_is_all_zero());
+
   BufferedReader r(*f);
   LogletBuffer buf(&allocator);
   bool uncommitted_records = false;
@@ -360,12 +383,12 @@ load_log_file(
         debug("out of memory in recovery buffer");
         return DBError(DBCode::kNoMemory);
       }
-      // Persisted ordinary headers carry canonical zero bytes in the next
-      // slot (#1530), but SafeItemHeader reconstruction reintroduced the
-      // host's nullptr representation. Re-canonicalize before the recovery
-      // CRC hashes this loglet so validation is representation-independent
-      // (#2975); the commit header gets the same treatment in crc_valid().
-      dst->clear_next();
+      // The reconstructed header's `next` slot is a value-initialized null
+      // pointer, which equals the canonical zero bytes the writer persisted
+      // (#2975) on every target we build for (see the null_pointer_is_all_zero
+      // assert below), so no per-record canonicalization is needed here. On a
+      // platform where that did not hold, this record's recovery CRC would
+      // simply mismatch and we would fail closed rather than corrupt data.
       ret = read_full(r, dst->get_all());
       if (!ret) {
         if (ret.error() == ENODATA)

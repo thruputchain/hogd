@@ -1086,6 +1086,13 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
   resizer.join();
 }
 
+// Documents the representation invariant recovery relies on (#2975): the
+// writer persists an ordinary header's `next` slot as canonical zero bytes,
+// while recovery reconstructs it as a value-initialized null pointer. The two
+// CRCs agree only where a null pointer is all-zero bytes — true on every target
+// we build for; on any other, recovery fails closed on the CRC mismatch this
+// test exhibits (using a non-null pointer as a byte-level stand-in) rather than
+// canonicalizing per record on the hot path.
 TEST(RAMDBRecoveryCRC, OrdinaryRecordNextSlotAffectsRecoveryChecksum)
 {
   struct OnDiskItemHeader {
