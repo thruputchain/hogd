@@ -3,6 +3,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <utility>
 
 #include "contract.hh"
@@ -18,6 +19,7 @@ namespace hogd {
 
 class MockRuntime;
 class SyscallHandlerContext;
+class SystemCallHandler;
 
 // Context for a runtime that has been mocked out to some function pointer.
 // Returns a MockRuntime when the input to make_new_runtime is an appropriate
@@ -53,16 +55,36 @@ public:
     return mocked_contracts_.contains(id);
   }
 
-  // The handler context currently executing against this runtime context, or
-  // nullptr between transactions. Set by SyscallHandlerContext::push_context()
-  // on the thread entering the FFI call, and read back by make_new_runtime(),
-  // which reaches it through the runtime context rather than a thread_local.
-  void set_handler_context(SyscallHandlerContext *ctx)
+  // Records which SyscallHandlerContext owns a SystemCallHandler, so that
+  // make_new_runtime() can recover the harness-side owner of the handler it is
+  // building a runtime for. A thread_local cannot serve that once hog_exec's
+  // database reads become coroutines: make_new_runtime() then runs on whichever
+  // pool thread resumed it, not the one that entered the FFI call.
+  //
+  // Keyed per handler rather than held in a single slot because one runtime
+  // context backs many handlers -- sdk_rs gives a TestEnvironment exactly one
+  // and opens every TransactionHandler against it, and hog_exec proper has the
+  // same shape (one thread_local RuntimeContext per executor thread).
+  // Registered for the handler's whole lifetime, so it does not depend on
+  // push_context() ordering either.
+  void register_handler(SystemCallHandler const *handler,
+                        SyscallHandlerContext *owner)
   {
-    // Exactly one handler runs against a runtime context at a time: a clear
-    // must follow a set, and a set must not overwrite a live one.
-    CHECK((ctx == nullptr) != (handler_context_ == nullptr));
-    handler_context_ = ctx;
+    std::lock_guard<std::mutex> lock(handler_owners_mutex_);
+    CHECK(handler_owners_.emplace(handler, owner).second);
+  }
+
+  void unregister_handler(SystemCallHandler const *handler)
+  {
+    std::lock_guard<std::mutex> lock(handler_owners_mutex_);
+    CHECK(handler_owners_.erase(handler) == 1);
+  }
+
+  SyscallHandlerContext *handler_owner(SystemCallHandler const *handler)
+  {
+    std::lock_guard<std::mutex> lock(handler_owners_mutex_);
+    auto it = handler_owners_.find(handler);
+    return it == handler_owners_.end() ? nullptr : it->second;
   }
 
   std::unique_ptr<MockRuntimeContext> clone() const
@@ -74,7 +96,10 @@ public:
 private:
   std::map<int32_t, MockContract> mocked_contracts_;
   std::shared_ptr<RuntimeContext> base_context_;
-  SyscallHandlerContext *handler_context_ = nullptr;
+  std::mutex handler_owners_mutex_;
+  // Deliberately not carried over by clone(): a fresh runtime context backs no
+  // handlers yet.
+  std::map<SystemCallHandler const *, SyscallHandlerContext *> handler_owners_;
 };
 
 // One instance of a mock contract.

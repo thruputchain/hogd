@@ -66,6 +66,9 @@ public:
     // destruction while still installed into a deterministic abort rather than
     // a latent use-after-free.
     CHECK(get_context() != this);
+    // runtime_context_owner_ is declared before handler_, so it is still alive
+    // here and stays alive until after handler_ is gone.
+    runtime_context_owner_->unregister_handler(&handler_);
     // The open-handler guard is released by open_handler_guard_'s destructor
     // (declared before handler_, destroyed after it), not here -- see #2572.
   }
@@ -136,13 +139,6 @@ public:
     }
 
     current_context_ = this;
-    // Also publish on the runtime context, which unlike a thread_local is
-    // reachable without knowing which thread is running; see ScopedContext.
-    // Published here rather than in the constructor so it brackets the
-    // execution window and not the handler's lifetime: several handlers may be
-    // open on one runtime context at once, but only the one between push and
-    // pop is running.
-    runtime_context_owner_->set_handler_context(this);
     return true;
   }
 
@@ -150,7 +146,6 @@ public:
   void pop_context()
   {
     CHECK(get_context() == this);
-    runtime_context_owner_->set_handler_context(nullptr);
     current_context_ = nullptr;
   }
 
