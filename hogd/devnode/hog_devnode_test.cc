@@ -45,7 +45,6 @@
 #include "event.hh"
 #include "event_outbox_internal.hh"
 #include "exec_result.hh"
-#include "genesis.hh"
 #include "header.hh"
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/cleanup.h"
@@ -61,7 +60,7 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_event/event_block_context.h"
@@ -71,7 +70,6 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
@@ -1071,27 +1069,15 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfigurationV2
-build_test_data_dir_genesis(LocalBootstrapConfig const &config)
-{
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration_v2.storage_cost_model =
-      StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration_v2);
-}
-
 void
 write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              LocalBootstrapConfig const &config,
                              std::int64_t schema_version = 2)
 {
-  const GenesisConfigurationV2 genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", schema_version);
     w.field("kind", "hog-devnode-data");
-    w.field("genesisHash", hex_string(sha256(genesis)));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
       w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
@@ -1171,12 +1157,6 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   if (!git_hash.empty() && git_hash != "unknown") {
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
   }
-
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact({});
-  GenesisConfigurationV2 genesis = std::move(artifact.genesis_configuration_v2);
-  EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
-            hex_string(sha256(genesis)));
 
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
   ASSERT_NE(bootstrap, nullptr);
@@ -1596,7 +1576,6 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
   std::string manifest =
       R"({"schemaVersion":2,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
-      R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
@@ -1663,7 +1642,6 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 
   ASSERT_EQ(first.accounts.size(), 4UL);
   ASSERT_EQ(first.initialization_txs.size(), 1UL);
-  ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 
   for (std::uint32_t i = 0; i < first.accounts.size(); ++i) {
@@ -1693,12 +1671,15 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
 }
 
-TEST(HogDevnode, LocalBootstrapRejectsAggregateAllocationAboveSupply)
+TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 {
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
   LocalBootstrapConfig config{
-      .user_account_count = 2,
-      .user_storage_tokens = std::numeric_limits<std::uint64_t>::max(),
+      .user_account_count = 1,
+      .user_storage_tokens = kTokenSupply,
   };
+
   EXPECT_THROW(build_local_bootstrap_account_artifact(config),
                std::runtime_error);
 }
@@ -3219,7 +3200,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+        x23::serialize(kNativeTokenContractAddress,
                        erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{10'000'000},
                        erc20_meta::make_calldata<u8"transfer">(

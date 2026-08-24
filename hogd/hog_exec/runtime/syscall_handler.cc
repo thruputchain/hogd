@@ -29,7 +29,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
@@ -135,13 +134,6 @@ SystemCallHandler::replay_uniquifier_expired()
   if (!tx_uniquifier_.has_value()) {
     return false;
   }
-  auto legacy_claim = root_is_legacy_initial_token_claim();
-  if (!legacy_claim.has_value()) {
-    return std::unexpected(legacy_claim.error());
-  }
-  if (*legacy_claim) {
-    return false;
-  }
   // get_block_height() returns the executing block height (parent tip + 1),
   // which is exactly the height ReplayCacheLock validates expiry against. A
   // tip-read failure is propagated.
@@ -150,22 +142,6 @@ SystemCallHandler::replay_uniquifier_expired()
     return std::unexpected(height.error());
   }
   return replay_uniquifier_expired(*tx_uniquifier_, *height);
-}
-
-SystemStatus<bool>
-SystemCallHandler::root_is_legacy_initial_token_claim()
-{
-  if (!root_invoked_address_.has_value() ||
-      *root_invoked_address_ != kGenesisRootContractAddress) {
-    return false;
-  }
-  auto deployed =
-      snapshot_cache_.try_get_deployed_contract(*root_invoked_address_);
-  if (!deployed.has_value()) {
-    return std::unexpected(deployed.error());
-  }
-  return *deployed != nullptr &&
-         (*deployed)->hash.contract_type == ContractType::kNative;
 }
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -677,15 +653,6 @@ SystemCallHandler::add_replay_nonce_delta()
   // Transaction constructor; a uniquifier without a root address would make the
   // access below undefined. Make that invariant explicit.
   assert(root_invoked_address_.has_value());
-  // V1 deployed the native InitialTokenClaim precompile at address 2 and gave
-  // it contract-internal replay protection. V2 deliberately reuses address 2
-  // for an RV32 root contract, so the compatibility exception must be based on
-  // the deployed contract type rather than the address alone.
-  auto legacy_claim = root_is_legacy_initial_token_claim();
-  CHECK(legacy_claim.has_value());
-  if (*legacy_claim) {
-    return;
-  }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   db_proxy_.add_delta(AddressAndKey{.address = root_invoked_address_.value(),
                                     .key = StorageKey(
@@ -1536,7 +1503,6 @@ is_banned_redeploy_native_contract(
 {
   switch (native_contract_id) {
   case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
-  case HogexecPrecompiledNativeContracts::kNativeContractInitialTokenClaim:
   case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
     return true;
   }

@@ -73,11 +73,12 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  GenesisConfiguration genesis_configuration{
-      .initial_config = {},
-      .storage_cost_model = cost_model,
-      .default_wallet =
-          GenesisConfigurationLoader::native_default_wallet_hash()};
+  auto root_contract = load_stock_genesis_root_contract();
+  GenesisConfiguration genesis_configuration{.network_hash = {},
+                                             .storage_cost_model = cost_model,
+                                             .root_contract = *root_contract,
+                                             .default_wallet =
+                                                 native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
   auto res =

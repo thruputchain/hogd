@@ -171,7 +171,6 @@ Persistent metadata currently records one count and one token amount under schem
 {
   "schemaVersion": 2,
   "kind": "hog-devnode-data",
-  "genesisHash": "...",
   "bootstrapConfig": {
     "devWalletProfile": "hog-devnode-default",
     "devAccountSeed": "groundhog-dev-accounts",

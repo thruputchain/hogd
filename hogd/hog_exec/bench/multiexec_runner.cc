@@ -501,10 +501,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   }
 
   auto write_genesis_configuration =
-      [&](const GenesisConfigurationV2 &genesis_configuration) {
+      [&](const GenesisConfiguration &genesis_configuration) {
         ConsensusValue genesis_value{};
         genesis_value.proposal_header.block_height = 0;
-        auto res = db_sched_client.dbsched_load_genesis_configuration_v2(
+        auto res = db_sched_client.dbsched_load_genesis_configuration(
             genesis_configuration, genesis_value);
         if (res != DbSchedResult::DbSchedResultOK) {
           panic("Failed to write genesis block");

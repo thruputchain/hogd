@@ -207,7 +207,6 @@ add_riscv_builds(
     simple_wallet
     simple_wallet_authclaim
     sha256_wrapper
-    initial_token_claim
     itc_erc20
     authclaim_test
     htlc
@@ -277,7 +276,6 @@ add_contract_header(manual_revert_caller)
 add_contract_header(sha256_wrapper)
 add_contract_header(simple_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/simple_wallet.hh")
 add_contract_header(simple_wallet_authclaim)
-add_contract_header(initial_token_claim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
 add_contract_header(authclaim_test)
 add_contract_header(htlc)

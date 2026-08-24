@@ -555,6 +555,21 @@ public:
     return &default_cost_model;
   }
 
+  // RPC-size regression tests deliberately lower the message cap below the
+  // size of the stock genesis-root artifact. They do not execute the root, so
+  // use the smallest configuration accepted by the genesis prerequisite
+  // loader and reserve the constrained RPC budget for the payload under test.
+  static GenesisConfiguration make_compact_test_genesis_configuration()
+  {
+    Contract root(ContractType::kRv32);
+    root.rv32_contract().data.push_back(0);
+    return GenesisConfiguration{
+        .storage_cost_model = get_default_cost_model()->to_xdr(),
+        .root_contract = std::move(root),
+        .default_wallet = native_default_wallet_hash(),
+    };
+  }
+
   PerTransactionDatabaseProxy make_new_per_tx_db_proxy(TransactionID tx_id)
   {
     assert(db_proxy_);
@@ -585,10 +600,6 @@ public:
 
   void run_genesis_initialization(
       GenesisConfiguration const &genesis_configuration,
-      BlockExecutionMode mode =
-          BlockExecutionMode::kBlockExecutionModeProposal);
-  void run_genesis_initialization(
-      GenesisConfigurationV2 const &genesis_configuration,
       BlockExecutionMode mode =
           BlockExecutionMode::kBlockExecutionModeProposal);
 
@@ -721,11 +732,12 @@ private:
     }
 
     {
+      auto root_contract = load_stock_genesis_root_contract();
       GenesisConfiguration genesis_configuration{
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
-          .default_wallet =
-              GenesisConfigurationLoader::native_default_wallet_hash(),
+          .root_contract = *root_contract,
+          .default_wallet = native_default_wallet_hash(),
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;
