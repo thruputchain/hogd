@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "exec_result.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -179,6 +180,105 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   }
 }
 
+// Coroutine-driven variant of run_bench_rep.
+//
+// run_bench_rep sizes a WorkerPool and blocks one OS thread per in-flight
+// transaction, which is how the executor was driven when its database calls
+// blocked. It no longer is: execution is coroutinized and runs on the shared
+// x23 ThreadPool, which has one thread per core. Driving it with thousands of
+// blocking OS threads measures the old shape -- oversubscription plus a wakeup
+// of the blocked submitter on top of every reply -- rather than how the
+// executor is now used.
+//
+// So this drives the same work the way a caller would today: `concurrency`
+// coroutines on the pool, each awaiting its transactions rather than blocking
+// on them. Concurrency is transactions in flight, decoupled from thread count.
+void
+run_bench_rep_coro(BenchmarkState &bs,
+                   std::span<SignedTransaction> total_work_txs, int concurrency,
+                   uint32_t num_txs_per_rep, size_t num_reps)
+{
+  if (total_work_txs.size() < num_txs_per_rep * num_reps) {
+    panic("not enough transactions to run the benchmark");
+  }
+
+  for (size_t nrep = 0U; nrep < num_reps; nrep++) {
+    info("bench rep {} for {} txs (accts {}) on {} coros", nrep,
+         num_txs_per_rep, bs.num_accounts_, concurrency);
+    auto work_txs =
+        total_work_txs.subspan(nrep * num_txs_per_rep, num_txs_per_rep);
+
+    const auto base_height = bs.block_height();
+    auto start_time = std::chrono::steady_clock::now();
+
+    std::atomic<uint32_t> next_tx = 0;
+    std::atomic<int> live = concurrency;
+    std::atomic<bool> all_done = false;
+    std::atomic<uint64_t> pending_events = num_txs_per_rep;
+    std::atomic<bool> events_done = false;
+
+    for (int i = 0; i < concurrency; i++) {
+      [](BenchmarkState &bs, std::span<SignedTransaction> work_txs,
+         uint32_t num_txs_per_rep, BlockHeight base_height,
+         std::atomic<uint32_t> &next_tx, std::atomic<int> &live,
+         std::atomic<bool> &all_done, std::atomic<uint64_t> &pending_events,
+         std::atomic<bool> &events_done) -> x23::Detached {
+        co_await default_threadpool().bg();
+        auto runtime_context = make_hog_exec_context();
+        for (;;) {
+          const uint32_t k = next_tx.fetch_add(1, std::memory_order_relaxed);
+          if (k >= num_txs_per_rep) {
+            break;
+          }
+          work_txs[k].tx.uniquifier =
+              CommonBenchState::bench_uniquifier(base_height, k);
+          auto const &tx = work_txs[k];
+
+          auto handler =
+              bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
+          if (!(co_await handler.root_invoke()).is_root_success()) {
+            panic("Failed to invoke transaction");
+          }
+          if ((co_await handler.try_commit_transaction()) !=
+              ExecResult::ExecResultOK) {
+            panic("failed to perform commit operation");
+          }
+          handler.emit_events(ExecResult::ExecResultOK,
+                              ProposedTransaction{.signed_tx = tx})(
+              [&pending_events,
+               &events_done](this auto,
+                             SystemStatus<void> res) -> x23::Detached {
+                if (!res.has_value()) {
+                  panic("failed to emit events");
+                }
+                if (pending_events.fetch_sub(1, std::memory_order_relaxed) ==
+                    1) {
+                  events_done.store(true, std::memory_order_relaxed);
+                  events_done.notify_one();
+                }
+                co_return;
+              });
+        }
+        if (live.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+          all_done.store(true, std::memory_order_relaxed);
+          all_done.notify_one();
+        }
+      }(bs, work_txs, num_txs_per_rep, base_height, next_tx, live, all_done,
+                                         pending_events, events_done);
+    }
+
+    all_done.wait(false);
+    events_done.wait(false);
+    auto finish_time = std::chrono::steady_clock::now();
+    std::println("time taken: {} us for {} txs (accts {}) on {} coros",
+                 std::chrono::duration_cast<std::chrono::microseconds>(
+                     finish_time - start_time)
+                     .count(),
+                 num_txs_per_rep, bs.num_accounts_, concurrency);
+    bs.clear_uniquifiers(num_txs_per_rep);
+  }
+}
+
 void
 run_payments_bench(std::vector<std::string> const &server_addrs,
                    uint32_t exec_port, uint32_t coord_port,
@@ -210,6 +310,17 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
                                                                  100 * nthread *
                                                                      num_reps),
                   nthread, 100 * nthread, num_reps);
+  }
+
+  // Same strong-scaling work again, driven by coroutines instead of blocking
+  // OS threads; see run_bench_rep_coro. Reported as "on N coros" so the two
+  // shapes stay distinguishable in the metrics history.
+  for (auto nconcurrent : {64, 128, 256, 512, 1024, 2048}) {
+    assert(offset + (100000 * num_reps) <= work_txs.size());
+    run_bench_rep_coro(bs,
+                       std::span<SignedTransaction>(work_txs).subspan(
+                           offset, 100000 * num_reps),
+                       nconcurrent, 100000, num_reps);
   }
 }
 } // namespace
