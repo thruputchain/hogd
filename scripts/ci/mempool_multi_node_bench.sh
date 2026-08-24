@@ -161,10 +161,13 @@ copy_remote_file() {
 # the push is rejected outright -- and a file that merely squeezes under the
 # limit is still committed forever, growing every future clone of the repo.
 #
-# Publish a bounded excerpt rather than the raw file. The head carries startup
-# and configuration, the tail carries whatever the run died on, and the middle
-# is steady-state throughput logging that nobody reads out of a nightly
-# artifact. Compress what survives; text logs run roughly 10x.
+# Publish a bounded excerpt rather than the raw file. This is a size policy,
+# not a claim about what the middle of these logs contains: an unbounded debug
+# artifact does not belong in a permanent git repo whatever it holds. Head and
+# tail are the two ends worth keeping blind -- startup and configuration at the
+# front, whatever the run died on at the back -- and the elision marker names
+# how much was dropped so nobody mistakes a bounded log for a complete one.
+# Compress what survives; text logs run roughly 10x.
 LOG_PUBLISH_LIMIT_BYTES=$((32 * 1024 * 1024))
 LOG_PUBLISH_EDGE_BYTES=$((8 * 1024 * 1024))
 LOG_GZIP_THRESHOLD_BYTES=$((8 * 1024 * 1024))
