@@ -5,10 +5,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
-#include <cstring>
 #include <format>
 #include <functional>
 #include <limits>
@@ -119,8 +119,7 @@ inline bool
 null_pointer_is_all_zero()
 {
   const void *p = nullptr;
-  std::array<std::byte, sizeof(p)> bytes{};
-  std::memcpy(bytes.data(), &p, sizeof(p));
+  const auto bytes = std::bit_cast<std::array<std::byte, sizeof(p)>>(p);
   return std::ranges::all_of(bytes,
                              [](std::byte b) { return b == std::byte{0}; });
 }
