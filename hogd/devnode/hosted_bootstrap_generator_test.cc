@@ -29,6 +29,7 @@
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "types.hh"
 
 #ifndef HOG_HOSTED_BOOTSTRAP_BINARY
@@ -288,7 +289,7 @@ TEST(HostedBootstrapGenerator, AcceptsAllocationAtTokenSupplyLimit)
   constexpr std::uint64_t kTokenSupply =
       kTotalHogSupply * std::uint64_t{kHogDivisibility};
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
-  const std::uint64_t ceremony_funding = static_cast<std::uint64_t>(
+  const auto ceremony_funding = static_cast<std::uint64_t>(
       (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
       cost_model.get_replay_cache_cost(1));
   HostedBootstrapGeneratorConfig config;
@@ -303,7 +304,7 @@ TEST(HostedBootstrapGenerator, CountsFundingForEveryCeremonyTransaction)
   constexpr std::uint64_t kTokenSupply =
       kTotalHogSupply * std::uint64_t{kHogDivisibility};
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
-  const std::uint64_t ceremony_funding = static_cast<std::uint64_t>(
+  const auto ceremony_funding = static_cast<std::uint64_t>(
       (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
       cost_model.get_replay_cache_cost(1));
   HostedBootstrapGeneratorConfig config;

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -196,7 +197,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
     if (entry.amount < 0) {
       return std::unexpected(GenesisCeremonyError::kNegativeDistribution);
     }
-    const uint128_t amount = static_cast<uint128_t>(entry.amount);
+    const auto amount = static_cast<uint128_t>(entry.amount);
     if (amount > remaining_supply) {
       return std::unexpected(GenesisCeremonyError::kSupplyExceeded);
     }
