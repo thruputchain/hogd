@@ -1707,12 +1707,12 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
 }
 
-// Two handlers open against one runtime context, each with a mock frame of its
-// own. sdk_rs works this way: a TestEnvironment holds exactly one runtime
-// context and opens every TransactionHandler against it, and hog_exec proper
-// has the same shape (one thread_local RuntimeContext per executor thread). So
-// the runtime context must resolve each mock invocation back to the handler
-// that is running it rather than to a single context-wide slot.
+// Two handlers open against one runtime context, each holding a mock frame at
+// the same time. sdk_rs works this way: a TestEnvironment holds exactly one
+// runtime context and opens every TransactionHandler against it, and hog_exec
+// proper has the same shape (one thread_local RuntimeContext per executor
+// thread). So the runtime context must resolve each mock invocation back to the
+// handler running it rather than to a single context-wide slot.
 TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
 {
   auto *db = make_db();
@@ -1739,14 +1739,7 @@ TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
   ContractAddress addr_a{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
   ContractAddress addr_b{2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
 
-  // Each handler invokes the same contract from a frame at its own address.
-  // The contract reads get_msg_sender() off whichever handler is running, so a
-  // mismatch means the invocation attached to the wrong one.
-  auto invoke_from = [&](void *handler, ContractAddress const &frame_addr) {
-    check_data.expected_sender = frame_addr;
-    check_data.sender_check_passed = false;
-    check_data.self_check_passed = false;
-
+  auto open = [](void *handler, ContractAddress const &frame_addr) {
     Invocation invocation = {
         .invoked_address = frame_addr,
         .entrypoint = entrypoint_from_method_id(0x1234),
@@ -1754,8 +1747,21 @@ TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
         .calldata = {},
     };
     ASSERT_EQ(open_frame(handler, invocation), kTestFFIErrorCodeNone);
-    ASSERT_EQ(push_context(handler), kTestFFIErrorCodeNone);
+  };
 
+  // Both frames stay open across both invocations, so each invocation has to
+  // find its own handler while the other is equally live.
+  open(handler_a.syscall_handler, addr_a);
+  open(handler_b.syscall_handler, addr_b);
+
+  // The contract reads get_msg_sender() off whichever handler is running, so a
+  // mismatch means the invocation attached to the wrong one.
+  auto invoke_from = [&](void *handler, ContractAddress const &frame_addr) {
+    check_data.expected_sender = frame_addr;
+    check_data.sender_check_passed = false;
+    check_data.self_check_passed = false;
+
+    ASSERT_EQ(push_context(handler), kTestFFIErrorCodeNone);
     Calldata calldata;
     RuntimeMemoryLength output_return_buffer_len = 0,
                         output_returned_auth_token_len = 0;
@@ -1766,8 +1772,13 @@ TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
     EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
     EXPECT_TRUE(check_data.sender_check_passed);
     EXPECT_TRUE(check_data.self_check_passed);
-
     ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+  };
+
+  invoke_from(handler_a.syscall_handler, addr_a);
+  invoke_from(handler_b.syscall_handler, addr_b);
+
+  auto finish = [](void *handler) {
     auto finish_res =
         finish_mock_invocation_frame(handler,
                                      std::to_underlying(InvokeErrorCode::None));
@@ -1776,12 +1787,8 @@ TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
     free_ffi_data_buffer(finish_res.serialized_trace);
     free_ffi_data_buffer(finish_res.serialized_events);
   };
-
-  invoke_from(handler_a.syscall_handler, addr_a);
-  invoke_from(handler_b.syscall_handler, addr_b);
-  // Back to the first handler, which is still open: its registration must have
-  // survived the second handler's whole lifecycle.
-  invoke_from(handler_a.syscall_handler, addr_a);
+  finish(handler_a.syscall_handler);
+  finish(handler_b.syscall_handler);
 }
 
 // Verify that a contract invoked from a mock frame sees get_current_address()
