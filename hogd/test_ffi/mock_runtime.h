@@ -3,7 +3,6 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <utility>
 
 #include "contract.hh"
@@ -55,38 +54,6 @@ public:
     return mocked_contracts_.contains(id);
   }
 
-  // Records which SyscallHandlerContext owns a SystemCallHandler, so that
-  // make_new_runtime() can recover the harness-side owner of the handler it is
-  // building a runtime for. A thread_local cannot serve that once hog_exec's
-  // database reads become coroutines: make_new_runtime() then runs on whichever
-  // pool thread resumed it, not the one that entered the FFI call.
-  //
-  // Keyed per handler rather than held in a single slot because one runtime
-  // context backs many handlers -- sdk_rs gives a TestEnvironment exactly one
-  // and opens every TransactionHandler against it, and hog_exec proper has the
-  // same shape (one thread_local RuntimeContext per executor thread).
-  // Registered for the handler's whole lifetime, so it does not depend on
-  // push_context() ordering either.
-  void register_handler(SystemCallHandler const *handler,
-                        SyscallHandlerContext *owner)
-  {
-    std::lock_guard<std::mutex> lock(handler_owners_mutex_);
-    CHECK(handler_owners_.emplace(handler, owner).second);
-  }
-
-  void unregister_handler(SystemCallHandler const *handler)
-  {
-    std::lock_guard<std::mutex> lock(handler_owners_mutex_);
-    CHECK(handler_owners_.erase(handler) == 1);
-  }
-
-  SyscallHandlerContext *handler_owner(SystemCallHandler const *handler)
-  {
-    std::lock_guard<std::mutex> lock(handler_owners_mutex_);
-    auto it = handler_owners_.find(handler);
-    return it == handler_owners_.end() ? nullptr : it->second;
-  }
-
   std::unique_ptr<MockRuntimeContext> clone() const
   {
     return std::make_unique<MockRuntimeContext>(base_context_,
@@ -96,10 +63,6 @@ public:
 private:
   std::map<int32_t, MockContract> mocked_contracts_;
   std::shared_ptr<RuntimeContext> base_context_;
-  std::mutex handler_owners_mutex_;
-  // Deliberately not carried over by clone(): a fresh runtime context backs no
-  // handlers yet.
-  std::map<SystemCallHandler const *, SyscallHandlerContext *> handler_owners_;
 };
 
 // One instance of a mock contract.
