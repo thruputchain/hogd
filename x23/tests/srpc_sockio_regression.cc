@@ -244,4 +244,67 @@ TEST(RpcRegression, InFlightDisconnectIsTransportException)
   EXPECT_TRUE(got_transport_error);
 }
 
+namespace {
+
+// Reports an enormous serialized size while writing only four bytes, so the
+// oversized-record path can be exercised without materializing gigabytes.
+struct HugeReportedPayloadForRecordRegression {
+  size_t serialized_size;
+};
+
+inline size_t
+xdr_size(const HugeReportedPayloadForRecordRegression &payload)
+{
+  return payload.serialized_size;
+}
+
+inline void
+xdr_serialize(auto &serializer,
+              const HugeReportedPayloadForRecordRegression & /*payload*/)
+{
+  serializer.put32(0xfeedfaceU);
+}
+
+} // namespace
+
+// An ONC RPC record marker carries the payload length in its low 31 bits.
+// make_record() used to guard the limit with a debug-only assertion, so a
+// release sender could emit a wrapped marker for an oversized payload (a
+// 0x80000004-byte record produced marker 0x80000000: a zero-length final
+// record) and desynchronize the stream (#2075).  The guard is a runtime
+// throw now; verify it holds in every build mode.
+TEST(RpcRecordRegression, OversizedRecordIsRejectedBeforeMarkerWrite)
+{
+  using enum auth_flavor;
+  using enum msg_type;
+
+  rpc_msg msg{};
+  msg.xid = 0x12345678;
+  msg.body.mtype(CALL);
+  msg.body.cbody().rpcvers = 2;
+  msg.body.cbody().prog = 0x20000001;
+  msg.body.cbody().vers = 1;
+  msg.body.cbody().proc = 0;
+  msg.body.cbody().cred.flavor = AUTH_NONE;
+  msg.body.cbody().verf.flavor = AUTH_NONE;
+
+  constexpr size_t kFirstIllegalRecordSize = 0x80000004UZ;
+  const size_t msg_size = xdr_size(msg);
+  ASSERT_LT(4UZ + msg_size, kFirstIllegalRecordSize);
+
+  const HugeReportedPayloadForRecordRegression oversized{
+      .serialized_size = kFirstIllegalRecordSize - 4UZ - msg_size,
+  };
+  EXPECT_THROW(make_record(msg, oversized), XdrBadInput);
+
+  // One byte under the limit still frames, with an intact marker.
+  const HugeReportedPayloadForRecordRegression at_limit{
+      .serialized_size = kFirstIllegalRecordSize - 1UZ - 4UZ - msg_size,
+  };
+  Buf record = make_record(msg, at_limit);
+  ASSERT_EQ(record.size(), kFirstIllegalRecordSize - 1UZ);
+  const uint32_t marker = getbe<uint32_t>(record.data());
+  EXPECT_EQ(static_cast<size_t>(marker & 0x7fffffffU), record.size() - 4UZ);
+}
+
 } // namespace x23

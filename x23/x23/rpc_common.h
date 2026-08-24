@@ -131,7 +131,15 @@ Buf
 make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  x23assert(ret.size() <= 0x80000003UZ);
+  // The record marker's low 31 bits carry the payload length, so a longer
+  // serialization would wrap the marker and desynchronize the stream for
+  // the receiver.  This must hold at runtime in every build: the x23assert
+  // it replaces compiled out under NDEBUG, letting release senders emit
+  // wrapped markers for oversized payloads.
+  if (ret.size() - 4 > kMaxRecordPayloadSize) [[unlikely]]
+    throw XdrBadInput("serialized record payload {} exceeds ONC RPC "
+                      "single-fragment record limit {}",
+                      ret.size() - 4, kMaxRecordPayloadSize);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
