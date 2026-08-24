@@ -37,6 +37,7 @@
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "types.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -424,9 +425,23 @@ parse_args(int argc, char *argv[])
     }
     if (arg == "--listen-host" && i + 1 < argc) {
       options.listen_host = argv[++i];
+      // Node services bind by numeric address (no DNS), so accept the
+      // one hostname everyone types and reject the rest here instead of
+      // panicking later inside HogDevnodeNode after threads spin up.
+      if (options.listen_host == "localhost") {
+        options.listen_host = "127.0.0.1";
+      }
       if (hogd::is_wildcard_listen_host(options.listen_host)) {
         hogd::arg_error(
             "Invalid listen host: wildcard addresses cannot be advertised",
+            argv, usage);
+      }
+      if (!x23::HostPort(options.listen_host, std::uint16_t{0})
+               .to_addr(/*dns=*/false)
+               .has_value()) {
+        hogd::arg_error(
+            std::format("Invalid listen host: {} is not a numeric IP address",
+                        options.listen_host),
             argv, usage);
       }
       continue;
