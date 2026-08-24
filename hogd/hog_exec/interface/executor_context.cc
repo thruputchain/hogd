@@ -48,10 +48,14 @@ ExecutorContext::propose_transaction(SignedTransaction signed_tx,
                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
-  // Forwarded, not awaited: run_propose_transaction already returns this exact
-  // Async, so co_return co_await would only add a frame and a resume hop. Its
-  // ramp runs at the call and moves signed_tx into its own frame.
-  return run_propose_transaction(std::move(signed_tx), tx_id);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  co_return co_await run_propose_transaction(std::move(signed_tx), tx_id);
 }
 
 x23::Async<ExecProposeBatchResult>
@@ -59,6 +63,13 @@ ExecutorContext::propose_transaction_batch(
     SignedTransactionBatch const &signed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
   ExecProposeBatchResult batch_res;
   batch_res.reserve(signed_txs.size());
   for (size_t i = 0; i < signed_txs.size(); i++) {
@@ -73,10 +84,16 @@ x23::Async<ExpectedViewResult>
 ExecutorContext::view_transaction(TransactionViewQuery const &query)
 {
   assert(mode_ == ExecutionMode::kViewing);
-  // Forwarded, not awaited (see propose_transaction). query stays borrowed
-  // from the caller either way -- a coroutine would not copy a reference
-  // parameter into its frame.
-  return run_view_transaction(query);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  // query stays borrowed from the caller across the hop; the RPC service keeps
+  // the request alive until the returned Async completes.
+  co_return co_await run_view_transaction(query);
 }
 
 x23::Async<ExecValidateBatchResult>
@@ -84,6 +101,13 @@ ExecutorContext::validate_transaction_batch(
     ProposedTransactionBatch const &proposed_txs, TransactionID first_tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
   ExecValidateBatchResult batch_res;
   batch_res.reserve(proposed_txs.size());
   for (size_t i = 0; i < proposed_txs.size(); i++) {
@@ -99,8 +123,14 @@ ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
                                       TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
-  // Forwarded, not awaited (see propose_transaction).
-  return run_validate_transaction(std::move(proposed_tx), tx_id);
+  // Get off the RPC reader before executing.  x23's reader coroutine calls
+  // serve() inline, so without this hop the body runs on the reader up to its
+  // first database read and every other request on that connection waits
+  // behind it -- and a connection serves many transactions at once.  main did
+  // not have this problem because it submitted to a DispatchPool and parked on
+  // the result, which returned to the reader immediately.
+  co_await default_threadpool().bg();
+  co_return co_await run_validate_transaction(std::move(proposed_tx), tx_id);
 }
 
 // Stale-block execution during propose/validate is benign.
