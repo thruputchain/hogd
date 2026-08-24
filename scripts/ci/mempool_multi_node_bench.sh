@@ -154,30 +154,68 @@ copy_remote_file() {
   scp "${COMMON_SCP_OPTS[@]}" "${host}:${remote_path}" "$local_path"
 }
 
-# GitHub rejects any single file over 100 MiB (GH001), and metrics_history is
-# committed to plain git rather than LFS. A verbose chuckd stderr on a busy
-# integration run has been observed at ~440 MiB, which trips that limit and
-# leaves commit_metrics.sh retrying the same rejected push until the workflow
-# times out. Gzip anything over the threshold in place before we hand it off
-# to git; text log files typically compress ~10x, keeping them well under the
-# per-file cap while preserving the debug artifact.
-LOG_GZIP_THRESHOLD_BYTES=$((50 * 1024 * 1024))
+# These logs are copied verbatim from the bench hosts and then committed to
+# groundhogchain/metrics_history, which is plain git rather than LFS. chuckd
+# stderr at [-l info --stack] has been observed at ~440 MiB for a single host
+# on one run (issue #3508). That is over GitHub's 100 MiB per-file limit, so
+# the push is rejected outright -- and a file that merely squeezes under the
+# limit is still committed forever, growing every future clone of the repo.
+#
+# Publish a bounded excerpt rather than the raw file. The head carries startup
+# and configuration, the tail carries whatever the run died on, and the middle
+# is steady-state throughput logging that nobody reads out of a nightly
+# artifact. Compress what survives; text logs run roughly 10x.
+LOG_PUBLISH_LIMIT_BYTES=$((32 * 1024 * 1024))
+LOG_PUBLISH_EDGE_BYTES=$((8 * 1024 * 1024))
+LOG_GZIP_THRESHOLD_BYTES=$((8 * 1024 * 1024))
+
+log_file_size() {
+  stat -c '%s' "$1" 2>/dev/null || wc -c <"$1"
+}
+
+bound_published_log() {
+  local path=$1
+  local size
+  local tmp
+
+  size=$(log_file_size "$path")
+  if [[ ${size:-0} -le $LOG_PUBLISH_LIMIT_BYTES ]]; then
+    return 0
+  fi
+
+  echo "truncating ${path} (${size} bytes) to a ${LOG_PUBLISH_EDGE_BYTES}-byte head and tail"
+  tmp="$path.bounded"
+  {
+    head -c "$LOG_PUBLISH_EDGE_BYTES" -- "$path"
+    printf '\n\n[hogd-ci] %s bytes elided from the middle of this log\n\n' \
+      "$((size - 2 * LOG_PUBLISH_EDGE_BYTES))"
+    tail -c "$LOG_PUBLISH_EDGE_BYTES" -- "$path"
+  } >"$tmp"
+  mv -f -- "$tmp" "$path"
+}
 
 gzip_large_log() {
   local path=$1
   local size
 
-  if [[ ! -f $path ]]; then
-    return 0
-  fi
-
-  size=$(stat -c '%s' "$path" 2>/dev/null || wc -c <"$path")
+  size=$(log_file_size "$path")
   if [[ ${size:-0} -le $LOG_GZIP_THRESHOLD_BYTES ]]; then
     return 0
   fi
 
-  echo "gzip ${path} (${size} bytes) to stay under GitHub's 100 MiB per-file cap"
+  echo "gzip ${path} (${size} bytes)"
   gzip -f -- "$path"
+}
+
+shrink_published_log() {
+  local path=$1
+
+  if [[ ! -f $path ]]; then
+    return 0
+  fi
+
+  bound_published_log "$path"
+  gzip_large_log "$path"
 }
 
 publish_multi_node_logs() {
@@ -202,8 +240,8 @@ publish_multi_node_logs() {
     local_stderr="$logs_dir/${host}_${label}.stderr.log"
     copy_remote_file "$host" "$stdout_path" "$local_stdout"
     copy_remote_file "$host" "$stderr_path" "$local_stderr"
-    gzip_large_log "$local_stdout"
-    gzip_large_log "$local_stderr"
+    shrink_published_log "$local_stdout"
+    shrink_published_log "$local_stderr"
   done
 }
 

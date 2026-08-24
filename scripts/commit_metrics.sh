@@ -53,14 +53,42 @@ prepare_metrics_commit() {
     git commit -m "Add metrics for hogd $GIT_branch $GIT_commit" --author "$committer_name <$committer_email>" --quiet
 }
 
+# Refreshing the parent and re-pushing only ever helps for one failure mode: a
+# concurrent CI run landed first, so our push is a non-fast-forward and
+# [prepare_metrics_commit] rebuilds the commit on the refreshed parent. Every
+# other rejection re-pushes byte-identical content and gets the same answer --
+# most importantly a pre-receive hook declining an oversized file (GH001),
+# where an unbounded loop becomes a hang: issue #3508 spent 22 minutes
+# re-pushing a rejected 436 MiB log until the CI job's own timeout killed it,
+# so the [|| true] at the call sites never got a chance to run.
+#
+# So retry only the race, and only a bounded number of times. Anything else
+# fails fast with the remote's own output, which is what a human needs to see.
+MAX_PUSH_ATTEMPTS=${MAX_PUSH_ATTEMPTS:-10}
+attempt=0
+
+push_is_race() {
+  printf '%s' "$1" | grep -qE 'non-fast-forward|fetch first|stale info'
+}
+
 while true; do
   if ! prepare_metrics_commit; then
     exit 0
   fi
 
-  if git push --quiet origin "HEAD:$METRICS_HISTORY_BRANCH"; then
-    break
-  else
-    echo "Push failed, refreshing metrics_history parent and retrying..."
+  attempt=$((attempt + 1))
+  push_output=$(git push --quiet origin "HEAD:$METRICS_HISTORY_BRANCH" 2>&1) && break
+  printf '%s\n' "$push_output" >&2
+
+  if ! push_is_race "$push_output"; then
+    echo "Push was rejected for a reason retrying cannot fix. Giving up." >&2
+    exit 1
   fi
+
+  if [ "$attempt" -ge "$MAX_PUSH_ATTEMPTS" ]; then
+    echo "Push lost the race with a concurrent run $attempt times. Giving up." >&2
+    exit 1
+  fi
+
+  echo "Push failed, refreshing metrics_history parent and retrying..."
 done
