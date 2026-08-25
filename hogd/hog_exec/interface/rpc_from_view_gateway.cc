@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "auth_claim.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -98,6 +99,14 @@ ViewGatewayRpc::viewgateway_intro(ProtocolCommit const &protocol)
 x23::Async<ViewGatewayResult>
 ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
 {
+  // Same handoff the executor's entry points make, and for the same reason:
+  // x23's reader calls serve() inline, so without this the view runs on the
+  // reader up to its first database read and every other request on that
+  // connection waits behind it.  This is also what earns the coroutine frame
+  // -- the body cannot simply return run_view_with_retries(...), because that
+  // takes its query by reference and would be left pointing at this frame's
+  // local once the frame went away.
+  co_await default_threadpool().bg();
   query = normalize_public_view_query(std::move(query));
   co_return co_await run_view_with_retries(query);
 }
