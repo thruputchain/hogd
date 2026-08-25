@@ -1,6 +1,5 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 
-#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <exception>
@@ -21,12 +20,12 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
+#include "hogd/hog_exec/runtime/item/db_connection_map.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
@@ -37,41 +36,11 @@
 #include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 #include "x23/x23.h" // x23::union_visit_arm
 
 namespace hogd {
 
 namespace {
-
-// A CpuMap with a chosen number of buckets, assigning CPUs round-robin.
-//
-// Connection count is a tuning knob in its own right, not a cache-topology
-// question: the async client runs one reader coroutine per connection, so it
-// sets how much of the return path can proceed at once. Measured on the
-// 64-core bench machine, llc_map's 8 connections leave the mid-range starved
-// (100000 txs / 512 threads ran 1.91x main) while core_map's 64 fix that
-// (1.21x) but cost the short runs, which pay 64 connection setups against a
-// 70ms total, and the largest run.
-//
-// The returned map must outlive every client built from it: PerCpuSet holds a
-// reference to it, not a copy.
-const x23::CpuMap &
-connection_map(int nconnections)
-{
-  static const x23::CpuMap map = [nconnections] {
-    const int ncpu = std::max(1, static_cast<int>(available_parallelism()));
-    x23::Vec<int> buckets;
-    buckets.reserve(ncpu);
-    for (int i = 0; i < ncpu; i++)
-      buckets.push_back(i % nconnections);
-    return x23::CpuMap{std::move(buckets)};
-  }();
-  return map;
-}
-
-// Connections the executor opens to hog_db.  See connection_map().
-constexpr int kDbConnections = 24;
 
 // Report a transport failure escaping an RPC body and leave the caller with a
 // structured Unrecoverable.
@@ -234,22 +203,15 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         if (!hostport.parse(sharded_db.shards_[0].address_for_exec)) {
           panic("Failed to parse database shard address");
         }
-        // A chosen connection count, not the machine's cache topology.  The
-        // async client has one reader coroutine per connection, and that
-        // reader is the whole return path for its connection: it parses every
-        // reply header and looks up every xid before anything downstream can
-        // run.  llc_map can be a single bucket on a machine whose cores share
-        // one L3, which would put every database read in the executor behind
-        // one reader.  The blocking client did not care -- its reply callback
-        // only posted a semaphore and each transaction resumed on its own
-        // caller thread, so its return-path width was the executor thread
-        // count, not the connection count.
+        // See db_connection_map.h for why the count is derived from the
+        // machine rather than fixed, and what it was measured against.
+        const x23::CpuMap &conn_map = db_connection_map();
         info("DatabaseProxy: {} connections (llc_map would give {}, core_map "
              "{})",
-             connection_map(kDbConnections).nbuckets(),
-             x23::llc_map->nbuckets(), x23::core_map->nbuckets());
+             conn_map.nbuckets(), x23::llc_map->nbuckets(),
+             x23::core_map->nbuckets());
         return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
-            hostport, false, connection_map(kDbConnections));
+            hostport, false, conn_map);
       }
       panic("unimplemented");
     }())
