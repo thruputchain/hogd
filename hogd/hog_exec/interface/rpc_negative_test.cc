@@ -17,7 +17,6 @@
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -120,7 +119,7 @@ protected:
         .shards = x23::Vec<ShardCard>{std::move(shard_card)},
         .event = make_event_card(),
     };
-    rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+    rpc_server_->impl()->init(std::move(exec_result));
   }
 
   // CHECK, not ASSERT_*: a fatal gtest assertion in a void helper records the

@@ -11,7 +11,6 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -124,7 +123,7 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockAfterInit)
   };
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Call open_proposal_block after init - should succeed
   auto result = client_.executorsched_open_proposal_block(test_block_id);
@@ -147,7 +146,7 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   exec_result.event = make_event_card();
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Call open_proposal_block multiple times - should all succeed
   auto result1 = client_.executorsched_open_proposal_block(test_block_id);
@@ -221,7 +220,7 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   exec_result.event = make_event_card();
 
   // Initialize the executor with a shard pointing to our mock database server
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id),
             ExecResult::ExecResultOK);

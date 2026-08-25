@@ -11,7 +11,6 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -167,7 +166,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
       .shards = x23::Vec<ShardCard>{make_shard_card()},
       .event = make_event_card(),
   };
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Run initialization transactions
   BlockID current_block_id = 1;
@@ -268,7 +267,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
       .shards = x23::Vec<ShardCard>{make_shard_card()},
       .event = make_event_card(),
   };
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Run initialization transactions
   BlockID current_block_id = 1;
