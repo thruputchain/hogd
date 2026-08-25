@@ -194,6 +194,12 @@ jobs:
           ./scripts/package_hogd_validator_release.sh \
             build/debug artifacts debug "${{ matrix.architecture }}"
 
+          for archive in artifacts/*.tar.gz; do
+            contents=$(tar -tzf "$archive")
+            grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
+            grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
+          done
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -311,6 +317,7 @@ jobs:
           chmod +x package/hog-devnode-macos-arm64/hog-devnode
           mkdir -p package/hog-devnode-macos-arm64/contracts
           cp build/release/built_contracts/dev_wallet.rv32a package/hog-devnode-macos-arm64/contracts/dev_wallet.rv32a
+          cp build/release/built_contracts/genesis_root.rv32a package/hog-devnode-macos-arm64/contracts/genesis_root.rv32a
 
           pushd package/hog-devnode-macos-arm64 >/dev/null
           mkdir -p lib
@@ -469,7 +476,15 @@ jobs:
           trap - EXIT
           popd >/dev/null
 
-          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz -C package/hog-devnode-macos-arm64 hog-devnode contracts/dev_wallet.rv32a lib
+          tar -czf artifacts/hog-devnode-macos-arm64.tar.gz \
+            -C package/hog-devnode-macos-arm64 \
+            hog-devnode \
+            contracts/dev_wallet.rv32a \
+            contracts/genesis_root.rv32a \
+            lib
+          contents=$(tar -tzf artifacts/hog-devnode-macos-arm64.tar.gz)
+          grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
+          grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
