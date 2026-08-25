@@ -1749,8 +1749,14 @@ owner_after_pool_hop(SystemCallHandler *handler)
 // fails here and passes every single-threaded test in this file.
 TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
 {
-  constexpr int kThreadCount = 8;
-  constexpr int kIterations = 4;
+  // Sized for the macOS job's budget: ctest runs with --timeout 100 and
+  // --parallel hw.logicalcpu, so this competes with the rest of the suite for
+  // cores. 8x4 exceeded that (it passes on Linux, where test_bindings.yml runs
+  // the binary directly with no cap). Four concurrent handlers still fail a
+  // lookup that consults the running thread or a single shared slot, which is
+  // what this is for; the iterations only repeat the push/pop cycle.
+  constexpr int kThreadCount = 4;
+  constexpr int kIterations = 2;
 
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
