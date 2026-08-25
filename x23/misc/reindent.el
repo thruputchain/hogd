@@ -26,6 +26,12 @@
           ;; Font-lock isn’t active in --batch, but ensure it’s off
           (when (bound-and-true-p font-lock-mode) (font-lock-mode -1))
           (indent-region (point-min) (point-max))
+          ;; Strip trailing whitespace (and trailing blank lines at EOF).
+          (delete-trailing-whitespace)
+          ;; Collapse runs of consecutive blank lines into a single one.
+          (goto-char (point-min))
+          (while (re-search-forward "\n\\{3,\\}" nil t)
+            (replace-match "\n\n"))
           (when (buffer-modified-p)
             (save-buffer)))
         (kill-buffer buf)))))
