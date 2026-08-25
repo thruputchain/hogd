@@ -192,8 +192,18 @@ ViewGatewayRpc::current_view_pin()
     co_await g.reset_and_return(result_t{std::nullopt});
     panic("unreachable");
   }
-  ViewState const &current_state =
-      view_states_.at(current_view_block_id_).get();
+  // find(), not at(): at() throws out_of_range if the invariant above ever
+  // breaks, and an exception here would unwind through ~CoroGuard instead of
+  // reset_and_return -- the nested unlock/resume chain view_state_lock_ exists
+  // to avoid.  Same reasoning at every lookup under this lock.
+  auto it = view_states_.find(current_view_block_id_);
+  if (it == view_states_.end()) [[unlikely]] {
+    warn("viewgateway: current view {} missing from view_states_",
+         current_view_block_id_);
+    co_await g.reset_and_return(result_t{std::nullopt});
+    panic("unreachable");
+  }
+  ViewState const &current_state = it->second.get();
   co_await g.reset_and_return(result_t{
       std::pair{current_state.block_id,
                 current_state.tip.value.proposal_header.block_height}});
@@ -224,7 +234,13 @@ ViewGatewayRpc::probe_refresh_tip()
     co_await g.reset_and_return();
     panic("unreachable");
   }
-  ViewState const &current_state = view_states_.at(block_id).get();
+  auto it = view_states_.find(block_id);
+  if (it == view_states_.end()) [[unlikely]] {
+    warn("viewgateway: view {} missing from view_states_", block_id);
+    co_await g.reset_and_return();
+    panic("unreachable");
+  }
+  ViewState const &current_state = it->second.get();
   if (!tip_res.has_value() ||
       tip_res.value().value.proposal_header.block_height >
           current_state.tip.value.proposal_header.block_height) {
@@ -256,7 +272,11 @@ ViewGatewayRpc::get_current_view_state()
     if (res.has_value() &&
         res.value().viewing_block_id != current_view_block_id_) {
       BlockID old_block_id = current_view_block_id_;
-      bool can_gc = view_states_.at(old_block_id).initiate_shutdown();
+      // A missing entry means that state was already retired: nothing to shut
+      // down, and nothing for the gc below to collect.
+      auto old_it = view_states_.find(old_block_id);
+      bool can_gc =
+          old_it != view_states_.end() && old_it->second.initiate_shutdown();
 
       auto &snapshot = res.value();
       view_states_.try_emplace(snapshot.viewing_block_id,
@@ -296,7 +316,14 @@ ViewGatewayRpc::get_current_view_state()
                              db_proxy_);
     current_view_block_id_ = snapshot.viewing_block_id;
   }
-  auto *state = &view_states_.at(current_view_block_id_);
+  auto cur_it = view_states_.find(current_view_block_id_);
+  if (cur_it == view_states_.end()) [[unlikely]] {
+    warn("viewgateway: current view {} missing from view_states_",
+         current_view_block_id_);
+    co_await g.reset_and_return(result_t{nullptr});
+    panic("unreachable");
+  }
+  auto *state = &cur_it->second;
   if (!state->try_acquire_reference()) {
     co_await g.reset_and_return(result_t{nullptr});
     panic("unreachable");
@@ -314,7 +341,10 @@ ViewGatewayRpc::rotate_view_state(BlockID stale_block_id)
     co_await g.reset_and_return(true);
     panic("unreachable");
   }
-  view_states_.at(stale_block_id).initiate_shutdown();
+  if (auto stale_it = view_states_.find(stale_block_id);
+      stale_it != view_states_.end()) {
+    stale_it->second.initiate_shutdown();
+  }
 
   auto res = co_await db_proxy_.open_viewing_snapshot();
   if (!res.has_value()) {
