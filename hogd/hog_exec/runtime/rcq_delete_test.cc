@@ -2523,6 +2523,77 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
   ASSERT_TRUE(check_rcq_empty());
 }
 
+// A delete-then-recreate of a nonempty RCQ folds a consume-to-tail into the new
+// delta (make_fully_consumed_item). Lock admission must derive the consumed
+// entry count from metadata rather than reading and XDR-decoding every retained
+// block row, so its block reads must not grow with the queue's retained history
+// -- otherwise a constant-size delete-plus-insert forces admission work
+// proportional to unbounded persisted state (#3594).
+TEST_P(RCQDeleteTest, DeleteRecreateBlockReadsDoNotScaleWithHistory)
+{
+  if (GetParam() != TestDB::kHogDb) {
+    GTEST_SKIP() << "DAO read instrumentation requires HogDb";
+  }
+
+  constexpr uint64_t kShortHistory = 3;
+  constexpr uint64_t kLongHistory = 7;
+
+  // One committed entry per block maximizes the number of separately encoded
+  // RCQ rows. The short-history queue lives at kContractAddress, the
+  // long-history one at kContractAddress2; both delete-recreate triggers below
+  // are identical and constant-size.
+  for (uint64_t block = 1; block <= kLongHistory; ++block) {
+    if (block <= kShortHistory) {
+      invoke_method_impl(kContractAddress, 0, static_cast<uint32_t>(block));
+    }
+    invoke_method_impl(kContractAddress2, 0, static_cast<uint32_t>(block));
+    advance_block();
+  }
+
+  auto &dao = get_hog_db_dao();
+
+  HogDbDAO::reset_retrocausal_queue_block_read_count_for_test();
+  invoke_method_impl(kContractAddress, 13, uint32_t{100});
+  auto const short_reads =
+      HogDbDAO::retrocausal_queue_block_read_count_for_test();
+
+  HogDbDAO::reset_retrocausal_queue_block_read_count_for_test();
+  invoke_method_impl(kContractAddress2, 13, uint32_t{200});
+  auto const long_reads =
+      HogDbDAO::retrocausal_queue_block_read_count_for_test();
+
+  // Before the fix these were kShortHistory and kLongHistory respectively.
+  EXPECT_EQ(short_reads, long_reads)
+      << "delete-recreate block reads scale with retained history";
+  EXPECT_LT(long_reads, kLongHistory)
+      << "delete-recreate still reads one row per retained block";
+
+  advance_block();
+
+  // Both recreated queues retain exactly the one newly inserted entry, and the
+  // old block rows are pruned.
+  auto short_key = make_item_key(get_queue_addrkey_for(kContractAddress));
+  auto long_key = make_item_key(get_queue_addrkey_for(kContractAddress2));
+  for (uint64_t block = 1; block <= kLongHistory; ++block) {
+    EXPECT_FALSE(dao.read_retrocausal_queue_block(long_key, block).has_value())
+        << "long-history row " << block << " was not pruned";
+    if (block <= kShortHistory) {
+      EXPECT_FALSE(
+          dao.read_retrocausal_queue_block(short_key, block).has_value())
+          << "short-history row " << block << " was not pruned";
+    }
+  }
+
+  auto short_queue =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress));
+  auto long_queue =
+      lookup_storage_item_from_db(get_queue_addrkey_for(kContractAddress2));
+  ASSERT_TRUE(short_queue.has_value());
+  ASSERT_TRUE(long_queue.has_value());
+  EXPECT_EQ(short_queue->metadata().live_entries, 1);
+  EXPECT_EQ(long_queue->metadata().live_entries, 1);
+}
+
 // Consume 1 of 3 concurrent entries, delete, consume remaining 2.
 // Exposes the bug where current_block_consumed lost entries across delete.
 TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)

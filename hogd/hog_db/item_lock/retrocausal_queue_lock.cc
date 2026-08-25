@@ -314,6 +314,22 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       consumed_entries += (new_consume.partial_consumed_number -
                            snapshot_consume.partial_consumed_number);
     }
+    else if (new_consume.max_fully_consumed_block_number ==
+                 meta.max_live_block_num &&
+             new_consume.partial_consumed_number == 0) {
+      // Consume-to-tail: every live entry from past blocks is consumed.
+      // meta.live_entries is maintained to be exactly that count (it excludes
+      // this block's not-yet-committed inserts), so take it directly instead
+      // of reading and XDR-decoding every persisted block row up to the tail.
+      //
+      // This is the path a delete-then-recreate of a nonempty queue takes:
+      // make_fully_consumed_item folds the delete into a consume with
+      // max_fully_consumed_block_number == max_live_block_num. The triggering
+      // contract work there is a constant-size delete plus one insert, so
+      // walking every retained row would let an O(1) operation force lock
+      // admission work proportional to unbounded retained history (#3594).
+      consumed_entries = meta.live_entries;
+    }
     else {
       // First block (the one we were partially in)
       auto first_block_num =

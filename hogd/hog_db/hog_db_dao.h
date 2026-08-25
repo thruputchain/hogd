@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <iterator>
@@ -523,6 +524,21 @@ public:
 
   HogDbStatus<RetrocausalQueueBlock>
   read_retrocausal_queue_block(const ItemKey &key, uint64_t block_number);
+
+  // Test-only counter of read_retrocausal_queue_block calls. Used by
+  // regression tests that assert lock admission does not scale its block
+  // reads with a queue's retained history (#3594).
+  static void reset_retrocausal_queue_block_read_count_for_test()
+  {
+    retrocausal_queue_block_read_count_for_test_.store(
+        0, std::memory_order_relaxed);
+  }
+  static uint64_t retrocausal_queue_block_read_count_for_test()
+  {
+    return retrocausal_queue_block_read_count_for_test_.load(
+        std::memory_order_relaxed);
+  }
+
   HogDbStatus<void>
   write_retrocausal_queue_block(const ItemKey &key,
                                 const RetrocausalQueueBlock &block);
@@ -589,6 +605,9 @@ private:
 
   std::vector<std::unique_ptr<HogdbInvariant>> invariants_;
   RAMDB db_;
+
+  inline static std::atomic<uint64_t>
+      retrocausal_queue_block_read_count_for_test_{0};
 };
 
 } // namespace hogd

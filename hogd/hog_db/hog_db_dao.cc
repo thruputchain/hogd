@@ -406,6 +406,8 @@ HogDbStatus<RetrocausalQueueBlock>
 HogDbDAO::read_retrocausal_queue_block(const ItemKey &key,
                                        uint64_t block_number)
 {
+  retrocausal_queue_block_read_count_for_test_.fetch_add(
+      1, std::memory_order_relaxed);
   auto block_key = make_retrocausal_queue_block_key(key, block_number);
   auto raw = db_.get_if_type(std::as_bytes(std::span(block_key)), 0);
   if (!raw)
