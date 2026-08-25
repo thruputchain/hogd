@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "hogd/base/network.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"

@@ -12,7 +12,6 @@
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/interface/executor.h"
