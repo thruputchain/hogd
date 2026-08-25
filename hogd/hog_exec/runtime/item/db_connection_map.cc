@@ -1,8 +1,8 @@
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
 
 #include <algorithm>
+#include <utility>
 
-#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "x23/cpumap.h"
 #include "x23/vec.h"
@@ -12,7 +12,7 @@ namespace hogd {
 int
 db_connection_count()
 {
-  return std::max(1, static_cast<int>(x23::core_map->nbuckets()) / 2);
+  return std::max(1, x23::core_map->nbuckets() / 2);
 }
 
 // Neither map x23 ships lands on the right count.  Measured on the bench

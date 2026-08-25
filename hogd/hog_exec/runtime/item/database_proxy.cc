@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <exception>
@@ -36,6 +37,7 @@
 #include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 #include "x23/x23.h" // x23::union_visit_arm
 
 namespace hogd {
