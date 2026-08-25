@@ -111,7 +111,21 @@ jobs:
         run: ./scripts/macos-setup.sh
 
       - name: Build Clang Debug
-        run: ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror"
+        run: |
+          ./scripts/build.sh -d build/clang -t Debug -c clang -f "-Werror" \
+            -x "-DENABLE_TEST_FFI=ON"
+
+      # test_ffi is built on Linux by test_bindings.yml, but nothing built it
+      # on macOS outside release_test_ffi.yml, so linker differences reached us
+      # only at release time -- a header-inline thread_local with dynamic
+      # initialization links on Linux and is a duplicate symbol under macOS ld.
+      # Link the targets here; running them stays with the Linux job, since
+      # what differs across platforms is the link, not the behavior.
+      - name: Link test_ffi targets
+        run: |
+          cmake --build build/clang --parallel "$(sysctl -n hw.ncpu)" \
+            --target test_ffi test_ffi_test test_ffi_mock_syscall_test \
+            test_ffi_first_call_test
 
       - name: Pre-build Rust Test Binaries
         run: |

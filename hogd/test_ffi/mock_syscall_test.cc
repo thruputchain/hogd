@@ -208,7 +208,7 @@ TEST(MockSyscallTest, IntTypeTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   uint32_t inp_1 = 100;
@@ -288,7 +288,7 @@ TEST(MockSyscallTest, SpanTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   uint64_t inp = 0x090A;
@@ -325,7 +325,7 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   // Under the wasm32 ABI a value slot is a bare 32-bit word, so int32_t -1 is
@@ -366,7 +366,7 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   // The largest valid u32 fits a 32-bit slot and reaches the inner syscall
@@ -416,7 +416,7 @@ TEST(MockSyscallTest, NoReturnTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   auto res =
@@ -446,7 +446,7 @@ TEST(MockSyscallTest, NoSyscallTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   auto res = mock_syscall_entrypoint(-1, 0, 0, 0, 0, 0, 0, 0);
@@ -473,7 +473,7 @@ TEST(MockSyscallTest, ErrorSyscallTest)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr));
+  MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
   auto res = mock_syscall_parser<ErrorSyscallMeta>(SyscallNo::kExit, 0, 0, 0, 0,
