@@ -3386,6 +3386,40 @@ TEST(TestBindingsTest, SetupCreateContractRejectsUnknownNative)
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
+// Regression test for #3592: a native precompile (here the default wallet)
+// verifies and stores through setup_create_contract(), but deploying it at an
+// ordinary address must be rejected -- production deploy_contract() bans
+// redeploying native precompiles. Without the setup-path ban, the deployment
+// row is written and a later nested invoke of the default wallet trips its
+// root-only CHECK and aborts the process instead of returning an error.
+TEST(TestBindingsTest, SetupDeployContractRejectsNativePrecompile)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract wallet_contract(ContractType::kNative);
+  wallet_contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  auto bytes = x23::serialize(wallet_contract);
+
+  // The native default wallet is registered with the runtime, so it verifies
+  // and stores successfully.
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  // Deploying it at an ordinary child address is rejected with a structured
+  // error rather than persisting the invariant-breaking deployment.
+  ContractAddress addr{0x44};
+  EXPECT_EQ(setup_deploy_contract(db, addr.data(),
+                                  sha256(wallet_contract).data(), bytes.size()),
+            kTestFFIErrorCodeInvalidArgument);
+}
+
 // Since #2569 hog_db chunks large code rows across multiple RAMDB items, so an
 // honest verifier-accepted contract whose serialized bytes exceed RAMDB's
 // single-item limit stores successfully through the setup path. The artifact
