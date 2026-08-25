@@ -11,7 +11,8 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
-  HOGD_RELEASE_VERSION: "0.1.25"
+  # Version embedded in binaries assembled by this component release.
+  HOGD_DISTRIBUTION_VERSION: "0.1.25"
 
 permissions:
   contents: write
@@ -180,8 +181,8 @@ jobs:
           for build_type in release debug; do
             for binary in "${binaries[@]}"; do
               output=$("build/${build_type}/hogd/${binary}" --version 2>&1)
-              if [[ "$output" != *"$HOGD_RELEASE_VERSION"* ]]; then
-                echo "${binary} does not report distribution version ${HOGD_RELEASE_VERSION}: ${output}" >&2
+              if [[ "$output" != *"$HOGD_DISTRIBUTION_VERSION"* ]]; then
+                echo "${binary} does not report distribution version ${HOGD_DISTRIBUTION_VERSION}: ${output}" >&2
                 exit 1
               fi
             done
@@ -399,8 +400,8 @@ jobs:
           otool -L hog-devnode
 
           version_output=$(./hog-devnode --version 2>&1)
-          if [[ "$version_output" != *"$HOGD_RELEASE_VERSION"* ]]; then
-            echo "hog-devnode does not report distribution version ${HOGD_RELEASE_VERSION}: ${version_output}" >&2
+          if [[ "$version_output" != *"$HOGD_DISTRIBUTION_VERSION"* ]]; then
+            echo "hog-devnode does not report distribution version ${HOGD_DISTRIBUTION_VERSION}: ${version_output}" >&2
             exit 1
           fi
 
@@ -508,6 +509,14 @@ jobs:
       contents: write
       actions: read
     steps:
+      - name: Verify tag matches distribution version
+        run: |
+          expected_tag="v${HOGD_DISTRIBUTION_VERSION}"
+          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+            echo "release tag $GITHUB_REF_NAME does not match distribution version $HOGD_DISTRIBUTION_VERSION" >&2
+            exit 1
+          fi
+
       - name: Download Linux x86_64 artifacts
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
