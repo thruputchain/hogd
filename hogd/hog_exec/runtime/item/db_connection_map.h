@@ -2,7 +2,7 @@
 
 namespace x23 {
 class CpuMap;
-}
+} // namespace x23
 
 namespace hogd {
 

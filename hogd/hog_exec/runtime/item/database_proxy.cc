@@ -210,8 +210,9 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
              "{})",
              conn_map.nbuckets(), x23::llc_map->nbuckets(),
              x23::core_map->nbuckets());
-        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
-            hostport, false, conn_map);
+        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
+                                                                   false,
+                                                                   conn_map);
       }
       panic("unimplemented");
     }())
