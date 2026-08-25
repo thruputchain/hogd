@@ -43,6 +43,7 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
