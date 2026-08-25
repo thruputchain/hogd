@@ -39,6 +39,7 @@
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/metrics/health.h"
 #include "hogd/metrics/metrics.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "parallel.hh"
 #include "proposal.hh"
@@ -248,6 +249,8 @@ public:
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;
       genesis_value.proposal_header.network_hash = network_hash_;
+      genesis_value.proposal_header.config_hash =
+          compute_config_hash(genesis_configuration.storage_cost_model);
       ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {

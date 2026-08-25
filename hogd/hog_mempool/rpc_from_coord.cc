@@ -1220,6 +1220,8 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
           cache.db_tip.value.proposal_header.storage_hash =
               result.block().storage_hash;
           cache.db_tip.storage_long_hash = result.block().storage_long_hash;
+          cache.db_tip.value.proposal_header.config_hash =
+              compute_config_hash(result.block().config_hash_preimage);
         }
         {
           EventBlockResult result = close_event.get();
@@ -1230,6 +1232,7 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         proposal.header = ProposalHeader{
             .ext = {},
             .network_hash = network_hash_,
+            .config_hash = cache.db_tip.value.proposal_header.config_hash,
             .proposer = context.proposer,
             .block_timepoint = context.block_timepoint,
             .block_height = db_tip.value.proposal_header.block_height + 1,
@@ -1699,6 +1702,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     proposed.proposal.header = ProposalHeader{
         .ext = {},
         .network_hash = network_hash_,
+        .config_hash =
+            compute_config_hash(db_close.block().config_hash_preimage),
         .proposer = request.context.proposer,
         .block_timepoint = request.context.block_timepoint,
         .block_height = 1,
@@ -2383,11 +2388,15 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
           cache.db_tip.value.proposal_header.storage_hash =
               db_result.block().storage_hash;
           cache.db_tip.storage_long_hash = db_result.block().storage_long_hash;
+          cache.db_tip.value.proposal_header.config_hash =
+              compute_config_hash(db_result.block().config_hash_preimage);
         }
 
         if (txset_hash_node.get() != proposal.header.txs_hash ||
             cache.db_tip.value.proposal_header.storage_hash !=
                 proposal.header.storage_hash ||
+            cache.db_tip.value.proposal_header.config_hash !=
+                proposal.header.config_hash ||
             cache.db_tip.value.proposal_header.events_hash !=
                 proposal.header.events_hash) {
           // The event block and DB snapshot were closed above, but a hash

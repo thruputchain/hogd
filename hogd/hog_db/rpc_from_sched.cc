@@ -248,6 +248,8 @@ HogDbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
   DbTip tip = ctx_.get_tip();
   result.block().storage_hash = tip.value.proposal_header.storage_hash;
   result.block().storage_long_hash = tip.storage_long_hash;
+  result.block().config_hash_preimage =
+      make_config_hash_preimage(ctx_.get_cost_model());
   co_return result;
 }
 
@@ -295,6 +297,8 @@ HogDbSchedRpc::dbsched_close_snapshot(BlockID id) // NOLINT
   ctx_.cache_db_hash(id, *db_hash_result);
   ret.block().storage_hash = sha256(std::as_bytes(std::span(*db_hash_result)));
   ret.block().storage_long_hash = *db_hash_result;
+  ret.block().config_hash_preimage =
+      make_config_hash_preimage(ctx_.get_cost_model());
   co_return ret;
 }
 
@@ -323,8 +327,10 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||
       value.proposal_header.network_hash !=
-          genesis_configuration.network_hash) {
-    error("invalid genesis height or network hash");
+          genesis_configuration.network_hash ||
+      value.proposal_header.config_hash !=
+          compute_config_hash(genesis_configuration.storage_cost_model)) {
+    error("invalid genesis height, network hash, or config hash");
     co_return DbSchedResult::DbSchedResultError;
   }
   if (!valid_genesis_configuration(genesis_configuration)) {

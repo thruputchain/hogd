@@ -23,6 +23,7 @@
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -157,6 +158,8 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash = compute_config_hash(
+      result.success().genesis_configuration.storage_cost_model);
   auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
@@ -258,6 +261,8 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash = compute_config_hash(
+      result.success().genesis_configuration.storage_cost_model);
   auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);

@@ -351,6 +351,8 @@ CommonBenchState::run_genesis_configuration(
   {
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
+    genesis_value.proposal_header.config_hash =
+        compute_config_hash(genesis_configuration.storage_cost_model);
     auto r =
         coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                           genesis_value);
@@ -398,6 +400,8 @@ CommonBenchState::run_genesis_configuration(
   assert(block_number_ == 0);
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration.storage_cost_model);
   auto r =
       coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                         genesis_value);
