@@ -56,20 +56,15 @@ namespace {
 //
 // The returned map must outlive every client built from it: PerCpuSet holds a
 // reference to it, not a copy.
-//
-// Templated on the count rather than taking it as an argument: the map is a
-// function-local static, so one function shared by two different counts would
-// hand back whichever was built first.
-template<int NConnections>
 const x23::CpuMap &
-connection_map()
+connection_map(int nconnections)
 {
-  static const x23::CpuMap map = [] {
+  static const x23::CpuMap map = [nconnections] {
     const int ncpu = std::max(1, static_cast<int>(available_parallelism()));
     x23::Vec<int> buckets;
     buckets.reserve(ncpu);
     for (int i = 0; i < ncpu; i++)
-      buckets.push_back(i % NConnections);
+      buckets.push_back(i % nconnections);
     return x23::CpuMap{std::move(buckets)};
   }();
   return map;
@@ -77,11 +72,6 @@ connection_map()
 
 // Connections the executor opens to hog_db.  See connection_map().
 constexpr int kDbConnections = 24;
-
-// Connections the executor opens to a LocalMockDB. See DatabaseProxy's
-// constructor: enough to stop concurrent transactions serializing on one
-// reader, small enough not to reintroduce the fd pressure that made this one.
-constexpr int kMockDbConnections = 4;
 
 struct VoidMarker {};
 struct NotFoundIsUnrecoverableError {};
@@ -195,23 +185,12 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
-        // A few connections, not one. hog_db's exec-facing handler bodies are
-        // synchronous (HogDbExecutorRpc::get_snapshot_item returns a value),
-        // and a synchronous-bodied async server serializes per connection --
-        // so a single connection funnels every database read in the process
-        // through one reader. The blocking client did not care, because its
-        // return-path width was the executor thread count; the async client
-        // makes the connection count the cap. That serialization is invisible
-        // to a single-threaded test and quadratic-feeling once several
-        // transactions run at once.
-        //
-        // Kept small deliberately: the original single connection was chosen
-        // to avoid fd exhaustion in sdk tests, which run many processes at
-        // once, and this stays far below any such limit.
         return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
                           x23::uformat("{}", mock_db.read_port_number_)},
-            false, connection_map<kMockDbConnections>());
+            false, *x23::single_bucket_map);
+        // Uses just one client for local mock testing.
+        // This avoids fd ulimit issues in sdk tests
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
@@ -235,10 +214,10 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         // count, not the connection count.
         info("DatabaseProxy: {} connections (llc_map would give {}, core_map "
              "{})",
-             connection_map<kDbConnections>().nbuckets(),
+             connection_map(kDbConnections).nbuckets(),
              x23::llc_map->nbuckets(), x23::core_map->nbuckets());
         return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
-            hostport, false, connection_map<kDbConnections>());
+            hostport, false, connection_map(kDbConnections));
       }
       panic("unimplemented");
     }())

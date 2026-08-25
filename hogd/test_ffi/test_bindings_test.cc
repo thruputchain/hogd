@@ -1,7 +1,6 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <gtest/gtest.h>
@@ -1750,12 +1749,9 @@ owner_after_pool_hop(SystemCallHandler *handler)
 // fails here and passes every single-threaded test in this file.
 TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
 {
-  // Sized for the macOS job's budget: ctest runs with --timeout 100 and
-  // --parallel hw.logicalcpu, so this competes with the rest of the suite for
-  // cores. 8x4 exceeded that (it passes on Linux, where test_bindings.yml runs
-  // the binary directly with no cap). Four concurrent handlers still fail a
-  // lookup that consults the running thread or a single shared slot, which is
-  // what this is for; the iterations only repeat the push/pop cycle.
+  // Four is enough: a lookup that consulted the running thread or a single
+  // shared slot fails with two, and the iterations only repeat the push/pop
+  // cycle. The whole thing runs in about 275ms.
   constexpr int kThreadCount = 4;
   constexpr int kIterations = 2;
 
@@ -1840,12 +1836,6 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
           failures.fetch_add(1, std::memory_order_relaxed);
           return;
         }
-        // Progress, not decoration: if this test ever times out, ctest's
-        // --output-on-failure shows how many transactions finished before the
-        // cap. That distinguishes a slow test from one wedged at the start,
-        // which a killed run otherwise cannot tell apart.
-        std::fprintf(stderr, "  [concurrent] thread %d finished iteration %d\n",
-                     t, i);
       }
     });
   }
