@@ -28,8 +28,13 @@
           (indent-region (point-min) (point-max))
           ;; Strip trailing whitespace (and trailing blank lines at EOF).
           (delete-trailing-whitespace)
-          ;; Collapse runs of consecutive blank lines into a single one.
+          ;; Delete blank lines at the start of the buffer (a leading run
+          ;; has no preceding line terminator, so the interior pattern
+          ;; below would not see it), then collapse interior runs of
+          ;; consecutive blank lines into a single one.
           (goto-char (point-min))
+          (when (looking-at "\n+")
+            (replace-match ""))
           (while (re-search-forward "\n\\{3,\\}" nil t)
             (replace-match "\n\n"))
           (when (buffer-modified-p)
