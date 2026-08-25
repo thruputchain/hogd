@@ -40,10 +40,9 @@ SyscallHandlerContext::SyscallHandlerContext(
     DBContext &db)
   : identifier_(db.allocate_identifier()), db_(db), open_handler_guard_(db),
     runtime_context_owner_(std::move(context)),
-    handler_block_(this, stx.tx, db.get_snapshot(),
-                   db.get_new_db_proxy(identifier_),
-                   db.get_new_event_server_proxy(identifier_),
-                   ProposalModeCtor{}, *runtime_context_owner_),
+    handler_(*this, stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+             db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
+             *runtime_context_owner_),
     is_mocked_handler_(false)
 {}
 
@@ -52,10 +51,9 @@ SyscallHandlerContext::SyscallHandlerContext(
     AuthClaim const &auth_claim, SHA256Hash const &source_tx_hash)
   : identifier_(db.allocate_identifier()), db_(db), open_handler_guard_(db),
     runtime_context_owner_(std::move(context)),
-    handler_block_(this, db.get_snapshot(), db.get_new_db_proxy(identifier_),
-                   db.get_new_event_server_proxy(identifier_),
-                   ProposalModeCtor{}, *runtime_context_owner_, auth_claim,
-                   source_tx_hash),
+    handler_(*this, db.get_snapshot(), db.get_new_db_proxy(identifier_),
+             db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
+             *runtime_context_owner_, auth_claim, source_tx_hash),
     is_mocked_handler_(true)
 {}
 
