@@ -27,16 +27,10 @@ namespace hogd {
 class ExecutorStateManager {
 public:
   ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy,
-                       std::unique_ptr<EventServerProxy> event_server_proxy,
-                       size_t nthreads)
+                       std::unique_ptr<EventServerProxy> event_server_proxy)
     : db_proxy_(std::move(db_proxy)),
       event_server_proxy_(std::move(event_server_proxy))
-  {
-    // nthreads no longer sizes an execution-side pool: contract execution runs
-    // on the x23 ThreadPool now that it is coroutinized. Kept in the signature
-    // so callers' -nthreads plumbing stays put while that pool is retuned.
-    (void)nthreads;
-  }
+  {}
 
   // This acquires a reference to the executor context, if the returned value is
   // not null. The caller must eventually release the reference and, if

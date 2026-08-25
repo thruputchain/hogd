@@ -54,10 +54,12 @@ public:
   DatabaseProxy &operator=(DatabaseProxy &&) = delete;
 
   // Every call below is a coroutine that suspends until hog_db answers, so the
-  // thread is free to run other transactions meanwhile.  Small key arguments
-  // are taken BY VALUE so they are copied into the coroutine frame and stay
-  // valid across the suspension; the two batch arguments below are too large
-  // to copy and are documented as caller-owned instead.
+  // thread is free to run other transactions meanwhile.  A key argument still
+  // live after the suspension is taken BY VALUE, so it is copied into the
+  // coroutine frame rather than left dangling; one consumed before the first
+  // suspension, only to build the request, is taken by reference.  The two
+  // batch arguments below are too large to copy and are documented as
+  // caller-owned instead.
   //
   // Each one resumes on a pool thread rather than on the connection's reader.
   // x23 resumes a reply's waiter inline, which is right when the waiter only
@@ -73,10 +75,10 @@ public:
   get_snapshot_item(BlockID block_id, AddressAndKey addrkey);
 
   x23::Async<SystemStatus<std::optional<Contract>>>
-  get_contract(BlockID block_id, SHA256Hash contract_hash);
+  get_contract(BlockID block_id, SHA256Hash const &contract_hash);
 
   x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
-  get_deployment(BlockID block_id, ContractAddress addr);
+  get_deployment(BlockID block_id, ContractAddress const &addr);
 
   x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
   get_next_retrocausal_queue_block(BlockID block_id, AddressAndKey addrkey,

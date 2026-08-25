@@ -272,7 +272,7 @@ DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 }
 
 x23::Async<SystemStatus<std::optional<Contract>>>
-DatabaseProxy::get_contract(BlockID block_id, SHA256Hash contract_hash)
+DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   try {
     auto res = co_await client_.get_contract(block_id, contract_hash);
@@ -287,7 +287,7 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash contract_hash)
 }
 
 x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
-DatabaseProxy::get_deployment(BlockID block_id, ContractAddress addr)
+DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   try {
     auto res = co_await client_.get_deployment(block_id, addr);

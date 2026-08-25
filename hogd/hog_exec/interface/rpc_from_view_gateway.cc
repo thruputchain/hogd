@@ -77,15 +77,10 @@ make_view_database_identifier(std::string const &db_executor_address)
 
 ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
                                std::string const &event_host,
-                               std::uint16_t event_exec_port,
-                               std::size_t nthreads)
+                               std::uint16_t event_exec_port)
   : db_proxy_(make_view_database_identifier(db_executor_address)),
     event_server_proxy_(x23::HostPort{event_host, event_exec_port})
 {
-  // nthreads no longer sizes a view-side pool: view execution is coroutinized
-  // and runs on the x23 ThreadPool. Kept in the signature so callers' plumbing
-  // stays put while that pool is retuned.
-  (void)nthreads;
   refresh_thread_ = std::jthread(
       [this](std::stop_token const &stoken) { refresh_worker(stoken); });
 }

@@ -31,8 +31,7 @@ public:
   using rpc_service = ViewGateway1;
 
   ViewGatewayRpc(std::string const &db_executor_address,
-                 std::string const &event_host, std::uint16_t event_exec_port,
-                 std::size_t nthreads = 2);
+                 std::string const &event_host, std::uint16_t event_exec_port);
 
   static ViewGatewayIntroOutcome
   viewgateway_intro(ProtocolCommit const &protocol);

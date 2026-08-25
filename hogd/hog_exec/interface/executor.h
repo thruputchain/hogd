@@ -32,9 +32,7 @@ public:
   // ONC RPC single-fragment record limit; x23 cannot frame a larger message.
   static constexpr size_t kMessageSize = 0x7fffffff;
 
-  Executor(size_t n_exec_threads = available_parallelism())
-    : n_exec_threads_(n_exec_threads)
-  {}
+  Executor() = default;
   ~Executor() { await_shutdown_request(); }
 
   uint16_t start(std::string const &bind_ip, uint16_t self_port,
@@ -62,7 +60,7 @@ public:
         MempoolExecutorClient::register_with_coordinator(
             make_bind_host_port(bind_ip, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
-    server_->impl()->init(std::move(exec_result), n_exec_threads_);
+    server_->impl()->init(std::move(exec_result));
 
     // init() has published all state the RPC handlers read; it is now safe to
     // begin serving RPCs to the coordinator.
@@ -77,8 +75,6 @@ public:
 
 private:
   RpcServer<ExecutorMempoolRpc> server_;
-
-  const int n_exec_threads_;
 };
 
 } // namespace hogd
