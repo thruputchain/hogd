@@ -217,8 +217,8 @@ TEST_F(ViewGatewayRefreshTest, ViewRefreshesAfterCommittedBlock)
 
   std::string db_addr =
       std::format("localhost:{}", framework_.get_db_exec_port());
-  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
-                         1);
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
 
   // First view warms the gateway's ViewState cache.
   ViewGatewayResult r1 = gateway.viewgateway_view(make_read_query())();
@@ -267,8 +267,8 @@ TEST_F(ViewGatewayRefreshTest, RefreshWithNoNewBlockIsHarmless)
 
   std::string db_addr =
       std::format("localhost:{}", framework_.get_db_exec_port());
-  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
-                         1);
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
 
   ViewGatewayResult r1 = gateway.viewgateway_view(make_read_query())();
   ASSERT_EQ(r1.outcome(), ViewGatewayOutcome::ViewGatewayOk);
@@ -302,8 +302,8 @@ TEST_F(ViewGatewayRefreshTest, IntroMismatchAndViewAfterShutdown)
 
   std::string db_addr =
       std::format("localhost:{}", framework_.get_db_exec_port());
-  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
-                         1);
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
 
   EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{"not-a-protocol"}),
             ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol);
@@ -334,8 +334,8 @@ TEST_F(ViewGatewayRefreshTest, RotationOnStaleSnapshotServesFreshHeight)
 
   std::string db_addr =
       std::format("localhost:{}", framework_.get_db_exec_port());
-  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
-                         1);
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
 
   ViewGatewayResult warm = gateway.viewgateway_view(make_read_query())();
   ASSERT_EQ(warm.outcome(), ViewGatewayOutcome::ViewGatewayOk);
@@ -379,8 +379,8 @@ TEST_F(ViewGatewayRefreshTest, ViewNormalizesFlagsEndToEnd)
 
   std::string db_addr =
       std::format("localhost:{}", framework_.get_db_exec_port());
-  ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
-                         1);
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
 
   auto query = make_read_query();
   query.invoke_flags = std::to_underlying(InvokeFlag::TryInvoke) |
