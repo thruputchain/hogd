@@ -1749,11 +1749,12 @@ owner_after_pool_hop(SystemCallHandler *handler)
 // fails here and passes every single-threaded test in this file.
 TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
 {
-  // Four is enough: a lookup that consulted the running thread or a single
-  // shared slot fails with two, and the iterations only repeat the push/pop
-  // cycle. The whole thing runs in about 275ms.
-  constexpr int kThreadCount = 4;
-  constexpr int kIterations = 2;
+  // A lookup that consulted the running thread or a single shared slot fails
+  // at two threads; eight with four rounds each leaves room for the push/pop
+  // cycle to interleave badly.  Almost all of the runtime is the shared DB
+  // setup, so the extra threads are close to free.
+  constexpr int kThreadCount = 8;
+  constexpr int kIterations = 4;
 
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
@@ -1763,20 +1764,21 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
   ASSERT_NE(rc, nullptr);
   x23::Defer d2([rc] { close_runtime_context(rc); });
 
+  // One mock id and one deployment address per thread, so each invocation
+  // carries its own check block.  Both have to differ: the id selects the
+  // callback's check block, and the address is what the frame targets --
+  // deploying to the default address would put every thread's contract at the
+  // same place, leaving them all invoking whichever one was deployed last.
+  // The 0x80 base keeps these clear of the caller addresses below, since a
+  // nested invoke of an address already on the stack is rejected.
   std::vector<CallerCheckData> check_data(kThreadCount);
-  ContractAddress contract_addr =
-      deploy_mock_contract(db, rc, 1, mock_contract_check_caller,
-                           &check_data[0]);
-
-  // One mock id per thread so each invocation carries its own check block; the
-  // contract address is what the frame targets, so they all deploy the same
-  // callback behind distinct ids.
   std::vector<ContractAddress> contract_addrs(kThreadCount);
-  contract_addrs[0] = contract_addr;
-  for (int t = 1; t < kThreadCount; t++) {
+  for (int t = 0; t < kThreadCount; t++) {
+    ContractAddress deployment_addr{};
+    deployment_addr[0] = static_cast<uint8_t>(0x80 + t);
     contract_addrs[t] =
         deploy_mock_contract(db, rc, 1 + t, mock_contract_check_caller,
-                             &check_data[t]);
+                             &check_data[t], deployment_addr);
   }
 
   std::vector<std::thread> threads;
@@ -1790,7 +1792,11 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
         failures.fetch_add(1, std::memory_order_relaxed);
         return;
       }
-      x23::Defer close([&] { close_syscall_handler(handler.syscall_handler); });
+      x23::Defer close([&] {
+        if (close_syscall_handler(handler.syscall_handler) !=
+            kTestFFIErrorCodeNone)
+          failures.fetch_add(1, std::memory_order_relaxed);
+      });
 
       ContractAddress frame_addr{};
       frame_addr[0] = static_cast<uint8_t>(t + 1);
@@ -1809,6 +1815,20 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
         failures.fetch_add(1, std::memory_order_relaxed);
         return;
       }
+      // An open frame is owed a finish, and close_syscall_handler() refuses to
+      // destroy a handler that still has one -- which in turn makes free_db()
+      // refuse the DBContext, stranding its RPC clients and hanging the
+      // process in ~CoroPoll at exit.  Pay the debt on every path out, so a
+      // check that fails here fails as a test rather than as a hang.  Declared
+      // after `close` so it runs before it.
+      x23::Defer finish([&] {
+        auto done = finish_mock_invocation_frame(handler.syscall_handler,
+                                                 std::to_underlying(
+                                                     InvokeErrorCode::None));
+        free_ffi_data_buffer(done.serialized_output);
+        free_ffi_data_buffer(done.serialized_trace);
+        free_ffi_data_buffer(done.serialized_events);
+      });
 
       for (int i = 0; i < kIterations; i++) {
         check_data[t].sender_check_passed = false;
@@ -1818,6 +1838,10 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
           failures.fetch_add(1, std::memory_order_relaxed);
           return;
         }
+        x23::Defer pop([&] {
+          if (pop_context() != kTestFFIErrorCodeNone)
+            failures.fetch_add(1, std::memory_order_relaxed);
+        });
         Calldata calldata;
         RuntimeMemoryLength output_return_buffer_len = 0,
                             output_returned_auth_token_len = 0;
@@ -1825,14 +1849,10 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
             test_ffi_invoke(contract_addrs[t], 0x1234, UINT64_MAX, calldata,
                             InvokeFlagSet{}, {}, output_return_buffer_len,
                             output_returned_auth_token_len);
-        bool ok = res.has_value() &&
-                  *res == SyscallErrorCode::kSyscallErrorCodeNone &&
-                  check_data[t].sender_check_passed &&
-                  check_data[t].self_check_passed;
-        if (pop_context() != kTestFFIErrorCodeNone) {
-          ok = false;
-        }
-        if (!ok) {
+        if (!res.has_value() ||
+            *res != SyscallErrorCode::kSyscallErrorCodeNone ||
+            !check_data[t].sender_check_passed ||
+            !check_data[t].self_check_passed) {
           failures.fetch_add(1, std::memory_order_relaxed);
           return;
         }
