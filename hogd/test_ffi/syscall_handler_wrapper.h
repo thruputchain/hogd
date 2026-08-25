@@ -98,19 +98,21 @@ public:
   // hog_exec suspends the transaction and resumes it on whichever thread took
   // the reply, not the one that entered the FFI call.
   //
-  // The handler sits immediately behind a HandlerHeader, so the owner is a
-  // subtraction away. kHandlerMagic rejects a SystemCallHandler that is not
-  // one of ours rather than returning a pointer into whatever precedes it --
-  // nothing in the tree builds such a handler against a MockRuntimeContext
-  // today, but the arithmetic cannot tell on its own.
+  // Every handler a MockRuntimeContext sees is the TestSystemCallHandler member
+  // of some SyscallHandlerContext, so this is an ordinary base-to-derived
+  // conversion -- defined, with no assumption about layout.
+  //
+  // kHandlerMagic still rejects a handler that is not one of ours. The
+  // downcast itself cannot detect that (nor could the arithmetic this
+  // replaced): nothing in the tree builds a bare SystemCallHandler and hands
+  // it to a MockRuntimeContext, and if that changes this aborts rather than
+  // returning a reference to whatever the bytes happen to hold.
   static SyscallHandlerContext *from_handler(SystemCallHandler *handler)
   {
     CHECK(handler != nullptr);
-    auto *header = reinterpret_cast<HandlerHeader *>(
-        reinterpret_cast<char *>(handler) - sizeof(HandlerHeader));
-    CHECK(header->magic == kHandlerMagic);
-    CHECK(header->owner != nullptr);
-    return header->owner;
+    auto *test_handler = static_cast<TestSystemCallHandler *>(handler);
+    CHECK(test_handler->magic == kHandlerMagic);
+    return &test_handler->owner;
   }
 
   static SyscallHandlerContext *get_context()
@@ -217,7 +219,7 @@ public:
     return mock_runtime_stack_.back();
   }
 
-  SystemCallHandler &to_handler() { return handler_block_.handler; }
+  SystemCallHandler &to_handler() { return handler_; }
 
   // The DBContext this handler borrows. Exposed so close_syscall_handler() can
   // poison the DB lifecycle if the implicit abort fails (issue #2596).
@@ -342,40 +344,30 @@ private:
   // it.
   std::shared_ptr<MockRuntimeContext> runtime_context_owner_;
 
-  // The handler, preceded by a header naming the context that owns it. A
-  // SyscallHandlerContext can never be standard-layout -- SystemCallHandler
-  // itself is not, and one such member disqualifies the whole class -- so
-  // offsetof on it would be undefined. HandlerHeader is standard-layout and
-  // alignas'd to the handler, which puts handler at exactly
-  // sizeof(HandlerHeader) into the block; the constructor checks that against
-  // the real object rather than assuming it.
+  static constexpr std::uint64_t kHandlerMagic = 0x4d41524d4f54ULL; // MARMOT
+
+  // The handler, carrying a reference back to the context that owns it.
+  // Deriving keeps the backreference in the test-specific object: production
+  // SystemCallHandler is untouched, and recovering the owner is a defined
+  // downcast rather than pointer arithmetic over a layout we would have to
+  // assume. SystemCallHandler has no virtual functions and is never deleted
+  // through a base pointer here -- this is a by-value member -- so the absent
+  // virtual destructor is not a hazard.
   //
   // Declared where the plain handler used to be, so the ordering the guard and
   // the runtime-context owner rely on (#2572, #2432) is unchanged.
-  struct alignas(SystemCallHandler) HandlerHeader {
-    SyscallHandlerContext *owner;
-    std::uint64_t magic;
-  };
-  static_assert(std::is_standard_layout_v<HandlerHeader>);
-
-  static constexpr std::uint64_t kHandlerMagic = 0x4d41524d4f54ULL; // MARMOT
-
-  struct HandlerBlock {
-    HandlerHeader header;
-    SystemCallHandler handler;
-
+  struct TestSystemCallHandler : SystemCallHandler {
     template<typename... Args>
-    explicit HandlerBlock(SyscallHandlerContext *owner, Args &&...args)
-      : header{.owner = owner, .magic = kHandlerMagic},
-        handler(std::forward<Args>(args)...)
-    {
-      CHECK(reinterpret_cast<char const *>(&handler) -
-                reinterpret_cast<char const *>(this) ==
-            sizeof(HandlerHeader));
-    }
+    explicit TestSystemCallHandler(SyscallHandlerContext &owner_in,
+                                   Args &&...args)
+      : SystemCallHandler(std::forward<Args>(args)...), owner(owner_in)
+    {}
+
+    SyscallHandlerContext &owner;
+    std::uint64_t magic = kHandlerMagic;
   };
 
-  HandlerBlock handler_block_;
+  TestSystemCallHandler handler_;
   std::vector<Runtime *> mock_runtime_stack_;
   std::vector<std::unique_ptr<InvocationFrameTrace>>
       invocation_frame_trace_stack_;
