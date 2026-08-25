@@ -406,8 +406,14 @@ HogDbStatus<RetrocausalQueueBlock>
 HogDbDAO::read_retrocausal_queue_block(const ItemKey &key,
                                        uint64_t block_number)
 {
-  retrocausal_queue_block_read_count_for_test_.fetch_add(
-      1, std::memory_order_relaxed);
+  // Debug-only instrumentation for the #3594 regression test. Guarded so
+  // production (release) builds keep this hot path free of any atomic
+  // read-modify-write; the counter's only reader is that test, which runs
+  // under the debug CI jobs.
+  if constexpr (is_debug_build()) {
+    retrocausal_queue_block_read_count_for_test_.fetch_add(
+        1, std::memory_order_relaxed);
+  }
   auto block_key = make_retrocausal_queue_block_key(key, block_number);
   auto raw = db_.get_if_type(std::as_bytes(std::span(block_key)), 0);
   if (!raw)

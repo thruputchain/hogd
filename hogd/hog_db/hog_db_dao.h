@@ -527,7 +527,10 @@ public:
 
   // Test-only counter of read_retrocausal_queue_block calls. Used by
   // regression tests that assert lock admission does not scale its block
-  // reads with a queue's retained history (#3594).
+  // reads with a queue's retained history (#3594). Only incremented in debug
+  // builds (see read_retrocausal_queue_block) so release builds pay nothing;
+  // reads back as 0 in release, which keeps the test's assertions trivially
+  // satisfied there.
   static void reset_retrocausal_queue_block_read_count_for_test()
   {
     retrocausal_queue_block_read_count_for_test_.store(
