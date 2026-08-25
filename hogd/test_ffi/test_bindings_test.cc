@@ -1,6 +1,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <gtest/gtest.h>
@@ -1839,6 +1840,12 @@ TEST(TestBindingsTest, ConcurrentHandlersOnOneRuntimeContext)
           failures.fetch_add(1, std::memory_order_relaxed);
           return;
         }
+        // Progress, not decoration: if this test ever times out, ctest's
+        // --output-on-failure shows how many transactions finished before the
+        // cap. That distinguishes a slow test from one wedged at the start,
+        // which a killed run otherwise cannot tell apart.
+        std::fprintf(stderr, "  [concurrent] thread %d finished iteration %d\n",
+                     t, i);
       }
     });
   }
