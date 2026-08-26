@@ -192,6 +192,23 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
+// The number of objects [parallel_batch_to_t] would decode from [parallel],
+// as claimed by its segment metadata.  Callers that bound how much work one
+// batch may commit should consult this before decoding, so an over-large
+// claim is rejected without first allocating for it.  A claim the payload
+// cannot back is caught by the decode itself.
+inline size_t
+claimed_parallel_batch_size(const ParallelBatch &parallel)
+{
+  // The sum cannot overflow [size_t]: [segment_tokens] holds at most
+  // 0xffffffff entries, each at most 0xffffffff.
+  size_t total = 0;
+  for (unsigned int segment_tokens : parallel.segment_tokens) {
+    total += segment_tokens;
+  }
+  return total;
+}
+
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
 // xdr.size()) as well as per-object XDR deserialization failures.

@@ -153,6 +153,32 @@ TEST(ParallelBatchToTTest, AppendPreservesExistingDataAndOrder)
   EXPECT_EQ(parsed[1], tx1);
 }
 
+TEST(ClaimedParallelBatchSizeTest, SumsSegmentTokens)
+{
+  ParallelBatch batch;
+  EXPECT_EQ(claimed_parallel_batch_size(batch), 0UL);
+
+  batch.segment_tokens.push_back(3);
+  batch.segment_tokens.push_back(0);
+  batch.segment_tokens.push_back(7);
+  EXPECT_EQ(claimed_parallel_batch_size(batch), 10UL);
+}
+
+// The claimed size is read from the metadata alone, so a caller can bound a
+// batch before the decode allocates for what it claims.
+TEST(ClaimedParallelBatchSizeTest, ReportsAnOverclaimWithoutDecoding)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+
+  ASSERT_EQ(claimed_parallel_batch_size(batch), 1UL);
+  batch.segment_tokens[0] = 0xffffffff;
+  EXPECT_EQ(claimed_parallel_batch_size(batch), 0xffffffffUL);
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+}
+
 TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
 {
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(

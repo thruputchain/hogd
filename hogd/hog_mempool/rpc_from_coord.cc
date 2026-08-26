@@ -2112,6 +2112,30 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         cache.result_tx_hashes.reserve(kMaxBlockSize);
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
+        // The nomination reaches us over the coordinator RPC, whose server
+        // runs with [kBulkRpcMaxMessageSize], so a peer's proposal can claim
+        // far more transactions than a block may hold.  Nothing downstream
+        // bounds that: [prepare_and_validate_chunk] would fan every claimed
+        // transaction out across the executors before the block finally
+        // failed on missing txs.  Bound the nomination on its claimed size,
+        // before decoding allocates for it, the way
+        // [schedulercoord_commit_genesis_ceremony] bounds the ceremony batch.
+        const size_t claimed_hashes =
+            claimed_parallel_batch_size(proposal.transactions.hash);
+        const size_t claimed_nominations = claimed_parallel_batch_size(
+            proposal.transactions.nondeterministic_data);
+        if (claimed_hashes > kMaxBlockSize ||
+            claimed_nominations > kMaxBlockSize) {
+          info("schedulercoord_validate rejected nomination batch claiming "
+               "{} tx hashes and {} nominations, over the {} tx block limit",
+               claimed_hashes, claimed_nominations, kMaxBlockSize);
+          log_validation_return = false;
+          co_await cancel_with_result(
+              SchedulerValidationOutcome::SchedulerValidationMalformed,
+              "decode nomination batches");
+          co_return;
+        }
+
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                 tx_nominations);

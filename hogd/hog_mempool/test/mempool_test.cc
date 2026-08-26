@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <exception>
 #include <future>
 #include <gtest/gtest.h>
@@ -1301,6 +1302,66 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
                        .hash = t_to_parallel_batch(tx_hashes)(),
                        .nondeterministic_data =
                            t_to_parallel_batch(tx_nondeterministic_data)()}};
+
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationMalformed);
+}
+
+// Builds a single-segment ParallelBatch that repeats the encoding of
+// [one_element_batch]'s sole element [count] times.  The result is
+// self-consistent -- its segment metadata matches its payload and every
+// element decodes -- so only an explicit size bound rejects it.
+template<typename Batch>
+static ParallelBatch
+repeated_parallel_batch(const Batch &one_element_batch, size_t count)
+{
+  const ParallelBatch one = t_to_parallel_batch(one_element_batch)();
+  EXPECT_EQ(one.segment_tokens.size(), 1UL);
+  EXPECT_EQ(one.segment_tokens[0], 1U);
+  const size_t element_size = one.xdr.size();
+
+  ParallelBatch batch;
+  batch.segment_tokens.push_back(static_cast<unsigned int>(count));
+  batch.segment_bytes.push_back(static_cast<unsigned int>(element_size *
+                                                          count));
+  batch.xdr.resize(element_size * count, 0);
+  for (size_t i = 0; i < count; i++) {
+    std::memcpy(&batch.xdr[i * element_size], one.xdr.data(), element_size);
+  }
+  return batch;
+}
+
+// A nomination claiming more transactions than a block may hold is rejected
+// on its claimed size, before the decode allocates for it.  Both batches
+// here decode cleanly, so without that bound validation would fan
+// [kMaxBlockSize] + 1 transactions out across the executors.
+TEST(Mempool, ValidateOversizedProposalIsRejected)
+{
+  MempoolTestInfra server;
+
+  constexpr size_t kOverCapCount = MempoolCoordinatorRpc::kMaxBlockSize + 1;
+
+  const TransactionHashBatch one_hash{TransactionHash{}};
+  const x23::XdrVec<NondeterministicProposalData> one_nomination{
+      NondeterministicProposalData{}};
+  ParallelBatch hashes = repeated_parallel_batch(one_hash, kOverCapCount);
+  ParallelBatch nominations =
+      repeated_parallel_batch(one_nomination, kOverCapCount);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  Proposal proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height = db_tip.value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = std::move(hashes),
+                       .nondeterministic_data = std::move(nominations)}};
 
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
