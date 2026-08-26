@@ -5,6 +5,7 @@
 // These tests are just wrappers around the tests in the syscall_misc_tests
 // contract.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -19,6 +20,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -902,9 +904,11 @@ TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
 
 // A hand-written entrypoint record registered outside the #[contract] macro
 // (method id 0xFF) has a wrapper that returns without issuing the Return
-// syscall: verification passes, but dispatch ebreaks.
-TEST_F(SyscallMiscTests,
-       RootInvokeOfEntrypointWithoutReturnSyscallIsDeterministicFault)
+// syscall. The SDK dispatcher falls through to its unknown-method arm, so the
+// frame aborts with LibraryExn::UnknownMethod rather than trapping: the
+// transaction executes, and the caller can tell this apart from an OOB access
+// or a bad instruction by decoding the selector.
+TEST_F(SyscallMiscTests, RootInvokeOfEntrypointWithoutReturnSyscallAborts)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -920,8 +924,15 @@ TEST_F(SyscallMiscTests,
                                  .nonce = nonce_++}},
       *runtime_context_);
   auto result = handler.root_invoke();
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  ASSERT_TRUE(result.is_root_success());
+
+  auto const output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
+
+  LibraryExn exn(LibraryExnKind::kLibraryExnUnknownMethod);
+  auto expected = x23::serialize_cxs(kLibraryExceptionSelector, exn);
+  ASSERT_TRUE(expected.has_value());
+  EXPECT_TRUE(std::ranges::equal(output.abort_buffer(), *expected));
 }
 
 // #40: reentrance beats resolution. The misc contract runs as the configured
