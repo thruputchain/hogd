@@ -314,6 +314,7 @@ add_contract_header(faucet_caller)
 add_contract_header(tx_context_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
+add_dependencies(drip_faucet_header drip_faucet_hh)
 add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
