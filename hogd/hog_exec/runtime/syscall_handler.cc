@@ -2196,6 +2196,15 @@ SystemCallHandler::sha256_update(uint32_t input_index,
       input_index, input_buffer, input_reset);
 }
 
+SyscallStatus<void>
+SystemCallHandler::sha256_copy(uint32_t input_src_index,
+                               uint32_t input_dst_index)
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
+      input_src_index, input_dst_index);
+}
+
 SyscallStatus<SHA256Hash>
 SystemCallHandler::sha256_finalize(uint32_t input_index)
 {
