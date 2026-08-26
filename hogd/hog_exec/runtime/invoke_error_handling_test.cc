@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <sys/mman.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -26,6 +28,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -797,6 +800,99 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                                     .entrypoint = entrypoint_from_method_id(0),
                                     .gas_limit = UINT64_MAX,
                                     .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// Issue #2973: a self-invoke is rejected as kReentrance *before* the host
+// materializes the caller's calldata. A rejected invoke reports gas 0, so a
+// pre-rejection copy would be host allocation/memcpy work, proportional to a
+// contract-chosen length, that a contract could repeat for free.
+//
+// Statement order is not otherwise observable, so the probe is a calldata span
+// the host cannot possibly copy: one byte longer than Calldata's maximum size.
+// Reaching the copy throws x23::XdrLengthError out of the syscall body, which
+// wrap_after_parse turns into HostFnErrorCode::Unrecoverable -- so the pre-fix
+// ordering fails this test with a structured error rather than a crash, and the
+// span itself is never read either way. Only a native caller can build a span
+// that long (wasm and rv32 spans are u32-bounded), which is exactly why it
+// works as an ordering probe rather than as a reachable guest input.
+//
+// The span still has to describe real memory: forming one over a range that
+// does not exist is undefined even if no element is read, and a hardened
+// standard library would abort here rather than at the assertion below. So
+// reserve the range PROT_NONE -- address space only, nothing committed, and
+// nothing ever read from it.
+TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
+{
+  constexpr ContractAddress kSelfAddress = make_contract_address(0);
+
+  size_t const uncopyable_len = Calldata::max_size() + 1;
+  void *reservation = mmap(nullptr, uncopyable_len, PROT_NONE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (reservation == MAP_FAILED) {
+    GTEST_SKIP() << "could not reserve " << uncopyable_len
+                 << " bytes of address space for the uncopyable-span probe";
+  }
+  x23::Defer unmap([&] { munmap(reservation, uncopyable_len); });
+  std::span<const std::byte> const uncopyable_calldata(
+      static_cast<std::byte const *>(reservation), uncopyable_len);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_self;
+  fns_self.emplace(
+      0,
+      [kSelfAddress, uncopyable_calldata](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags = 0};
+        CopyableInvokeOutputs outputs{};
+
+        auto const gas_before = ctx.total_gas_consumed();
+        auto r =
+            ctx.syscall<SyscallNo::kInvoke>(kSelfAddress, uncopyable_calldata,
+                                            std::span<uint32_t>{}, inputs,
+                                            outputs);
+        auto const gas_after = ctx.total_gas_consumed();
+
+        if (!r.has_value()) {
+          ADD_FAILURE() << "self-invoke failed while handling its calldata "
+                           "instead of being rejected as reentrant";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeReentrance);
+        // The rejection stays the documented no-op, charging the caller
+        // nothing.
+        EXPECT_EQ(gas_after, gas_before);
+        return {};
+      });
+  auto self_contract = std::make_unique<NativeContract>(std::move(fns_self));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(self_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto self_xdr = make_native_contract(0);
+  write_contract(self_xdr);
+  write_deployment(kSelfAddress, self_xdr);
+
+  // The self-invoking contract is the root invoked address; committing its
+  // transaction consumes one replay-cache entry charged to it (0 on
+  // MockInMemory).
+  setup_grant_storage_token(kSelfAddress, replay_cache_cost_charged(1));
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kSelfAddress,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   auto res = handler.root_invoke();

@@ -847,15 +847,16 @@ TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-// #39: forwarding an unowned auth token on a self-invoke reports
-// kInvalidSyscallInput, not kReentrance: token ownership is checked before
-// reentrance.
-TEST_F(SyscallMiscTests, InvokeUnownedTokenBeatsReentrance)
+// #39: forwarding an unowned auth token on a self-invoke reports kReentrance,
+// not kInvalidSyscallInput: reentrance is checked ahead of token ownership
+// (#2973). A malformed or duplicated list still wins over reentrance -- those
+// checks run before admission, in the syscall body.
+TEST_F(SyscallMiscTests, InvokeUnownedTokenLosesToReentrance)
 {
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation = client_.make_invocation<
-              u8"test_invoke_unowned_token_beats_reentrance">(UINT64_MAX),
+              u8"test_invoke_unowned_token_loses_to_reentrance">(UINT64_MAX),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
