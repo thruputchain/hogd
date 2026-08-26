@@ -291,8 +291,7 @@ GenTs::const_fits_u32(const string &val)
     size_t pos = 0;
     unsigned long long n = std::stoull(v, &pos, 0);
     return pos == v.size() && n <= 0xFFFFFFFFULL;
-  }
-  catch (const std::exception &) {
+  } catch (const std::exception &) {
     return false; // negative, overflowing, or malformed
   }
 }
@@ -306,8 +305,8 @@ GenTs::xdr_doc(const Declaration &d, const string &base, bool is_typedef)
   string decl;
   string suffix;
   bool is_opaque = (base == "opaque");
-  string unit = is_opaque || d.qual == Declaration::kString ? "bytes"
-                                                            : "elements";
+  string unit =
+      is_opaque || d.qual == Declaration::kString ? "bytes" : "elements";
   // Named bounds link to the const's doc page; literal bounds inline.
   string linked_bound = d.bound;
   if (!d.bound.empty() && !std::isdigit(d.bound[0]))
@@ -506,8 +505,7 @@ GenTs::show_def(const Typedef &d)
       string factory = to_camel_case(d.id);
       string bound_str = map_bound(d.bound);
       string base_ts =
-          bound_t.empty() ? "Uint8Array"
-                          : std::format("VarBytes<{}>", bound_t);
+          bound_t.empty() ? "Uint8Array" : std::format("VarBytes<{}>", bound_t);
 
       prtop("{}\n", xdr_doc(d, base, true));
       prtop("export type {} = {} & {{ readonly __brand: {{ readonly "
@@ -535,9 +533,9 @@ GenTs::show_def(const Typedef &d)
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      string base_ts =
-          bound_t.empty() ? tref + "[]"
-                          : std::format("VarArray<{}, {}>", tref, bound_t);
+      string base_ts = bound_t.empty()
+                           ? tref + "[]"
+                           : std::format("VarArray<{}, {}>", tref, bound_t);
       prtop("{}\n", xdr_doc(d, base, true));
       prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: "
             "true }} }};\n",
@@ -1062,8 +1060,7 @@ GenTs::ts_field_type(const Declaration &d, const string &parent_name)
                ? ts_ref(base) + "[]"
                : std::format("VarArray<{}, {}>", ts_ref(base), bound_t);
   case Declaration::kString:
-    return bound_t.empty() ? "string"
-                           : std::format("VarString<{}>", bound_t);
+    return bound_t.empty() ? "string" : std::format("VarString<{}>", bound_t);
   case Declaration::kPtr:
     return ts_ref(base) + " | null";
   case Declaration::kVoid:
