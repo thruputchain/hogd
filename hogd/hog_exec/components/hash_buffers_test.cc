@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <span>
 #include <vector>
 
@@ -159,7 +160,7 @@ TEST(HashBuffersTest, BlockBoundaryChunkingMatchesOneShot)
   // implementation differs internally from an accumulate-then-hash one.
   std::vector<uint8_t> whole(200);
   for (size_t i = 0; i < whole.size(); i++) {
-    whole[i] = static_cast<uint8_t>(i * 7 + 1);
+    whole[i] = static_cast<uint8_t>((i * 7) + 1);
   }
   const auto expected = sha256(whole);
 
@@ -272,7 +273,7 @@ TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
   // reports the full size.
   std::vector<uint8_t> whole(kSHA256BufferMaxSize);
   for (size_t i = 0; i < whole.size(); i++) {
-    whole[i] = static_cast<uint8_t>(i * 31 + 5);
+    whole[i] = static_cast<uint8_t>((i * 31) + 5);
   }
 
   HashBuffers buffers;
