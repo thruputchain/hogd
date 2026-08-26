@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -22,6 +23,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
