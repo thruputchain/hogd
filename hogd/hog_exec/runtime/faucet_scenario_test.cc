@@ -271,12 +271,23 @@ protected:
     return out;
   }
 
-  TxOutcome run_claim_tx(PubkeyAccountPreimage const &preimage,
-                         WalletCall const &call)
+  static wallet_calls_t single_call(WalletCall const &call)
   {
     wallet_calls_t calls;
     calls.push_back(call);
-    return run_execute_tx(preimage, calls);
+    return calls;
+  }
+
+  TxOutcome run_claim_tx(PubkeyAccountPreimage const &preimage,
+                         WalletCall const &call)
+  {
+    return run_execute_tx(preimage, single_call(call));
+  }
+
+  TxOutcome run_claim_tx_no_advance(PubkeyAccountPreimage const &preimage,
+                                    WalletCall const &call)
+  {
+    return run_execute_tx_no_advance(preimage, single_call(call));
   }
 
   int128_t read_balance(ContractAddress const &addr)
@@ -318,9 +329,11 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
   auto bob = make_preimage(2);
   constexpr uint128_t kAliceAmount = 10'000'000;
   constexpr uint128_t kBobAmount = 5'000'000;
-  // Minted to the token contract by the chain's first claim (the airdrop
-  // faucet's TOKEN_ROW_FUNDING bootstrap).
-  constexpr uint128_t kTokenRowFunding = 1'000'000;
+  // Minted by the chain's first claim: the airdrop faucet's one-time
+  // bootstrap of the token contract's rows and its own (TOKEN_ROW_FUNDING +
+  // ROOT_ROW_FUNDING), mirroring the stock ceremony's token_funding and
+  // root_funding mints.
+  constexpr uint128_t kBootstrapFunding = 2'000'000;
 
   auto alice_out = run_claim_tx(alice, airdrop_claim_call(kAliceAmount));
   EXPECT_TRUE(alice_out.root_success);
@@ -335,7 +348,7 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
   // claim minus the storage costs its own transaction consumed.
   EXPECT_EQ(read_total_supply(),
             static_cast<int128_t>(kAliceAmount + kBobAmount +
-                                  kTokenRowFunding));
+                                  kBootstrapFunding));
   auto alice_balance = read_balance(account_address(alice));
   auto bob_balance = read_balance(account_address(bob));
   EXPECT_GT(alice_balance, 0);
@@ -356,7 +369,7 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
   EXPECT_EQ(read_balance(account_address(pauper)), 0);
   EXPECT_EQ(read_total_supply(),
             static_cast<int128_t>(kAliceAmount + kBobAmount +
-                                  kTokenRowFunding));
+                                  kBootstrapFunding));
 
   // An amount above INT128_MAX is rejected by the native token itself; the
   // wallet reports the aborted call and nothing is minted.
@@ -368,7 +381,62 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
             std::optional(default_wallet::WalletError::CallAborted));
   EXPECT_EQ(read_total_supply(),
             static_cast<int128_t>(kAliceAmount + kBobAmount +
-                                  kTokenRowFunding));
+                                  kBootstrapFunding));
+}
+
+// Two accounts race the chain's very first claim in ONE block. The bootstrap
+// mint that funds the token contract's own rows must land exactly once, so
+// the faucet takes an exclusive lock on a bootstrap flag: the two claims
+// cannot share a block, one commits (bootstrapping the chain) and the other
+// is rejected and retries later. Guarding on the token's balance instead
+// would not serialize -- native balance updates are commutative, so both
+// transactions would read a zero pre-block balance, both would mint, and the
+// chain would end up with twice the bootstrap funding.
+TEST_F(FaucetScenarioTest, ConcurrentFirstClaimsBootstrapExactlyOnce)
+{
+  make_ctx();
+  auto faucet = airdrop_meta::load_rv32();
+  ASSERT_TRUE(faucet);
+  run_faucet_genesis(faucet, *get_default_cost_model());
+
+  auto alice = make_preimage(1);
+  auto bob = make_preimage(2);
+  constexpr uint128_t kClaim = 10'000'000;
+  constexpr uint128_t kBootstrapFunding = 2'000'000;
+
+  auto a = run_claim_tx_no_advance(alice, airdrop_claim_call(kClaim));
+  auto b = run_claim_tx_no_advance(bob, airdrop_claim_call(kClaim));
+  advance_block();
+
+  // Exactly one bootstraps the chain; the other loses the exclusive lock.
+  const bool alice_won = a.commit == ExecResult::ExecResultOK;
+  const bool bob_won = b.commit == ExecResult::ExecResultOK;
+  EXPECT_NE(alice_won, bob_won)
+      << "exactly one of two concurrent first claims may commit";
+  EXPECT_EQ(read_total_supply(),
+            static_cast<int128_t>(kClaim + kBootstrapFunding))
+      << "the bootstrap funding must be minted exactly once";
+
+  // The loser retries in the next block: the chain is bootstrapped now, so
+  // its claim takes the ordinary path and mints only its own amount.
+  auto const &loser = alice_won ? bob : alice;
+  auto retry = run_claim_tx(loser, airdrop_claim_call(kClaim));
+  EXPECT_EQ(retry.commit, ExecResult::ExecResultOK);
+  EXPECT_EQ(read_total_supply(),
+            static_cast<int128_t>((2 * kClaim) + kBootstrapFunding));
+
+  // Once bootstrapped, concurrent claims no longer contend at all: both of
+  // these commit in the same block.
+  auto carol = make_preimage(3);
+  auto dave = make_preimage(4);
+  auto c = run_claim_tx_no_advance(carol, airdrop_claim_call(kClaim));
+  auto d = run_claim_tx_no_advance(dave, airdrop_claim_call(kClaim));
+  advance_block();
+  EXPECT_EQ(c.commit, ExecResult::ExecResultOK);
+  EXPECT_EQ(d.commit, ExecResult::ExecResultOK)
+      << "the exclusive lock must only be taken on the bootstrap claim";
+  EXPECT_EQ(read_total_supply(),
+            static_cast<int128_t>((4 * kClaim) + kBootstrapFunding));
 }
 
 // The drip faucet's global 100-per-5-blocks budget, including concurrent
@@ -492,7 +560,7 @@ TEST_F(FaucetScenarioTest, AirdropFundsWalletDeployedContractCaller)
 
   auto alice = make_preimage(1);
   constexpr uint128_t kAliceAmount = 50'000'000;
-  constexpr uint128_t kTokenRowFunding = 1'000'000;
+  constexpr uint128_t kBootstrapFunding = 2'000'000;
   auto claimed = run_claim_tx(alice, airdrop_claim_call(kAliceAmount));
   ASSERT_EQ(claimed.commit, ExecResult::ExecResultOK);
 
@@ -558,7 +626,7 @@ TEST_F(FaucetScenarioTest, AirdropFundsWalletDeployedContractCaller)
             static_cast<int128_t>(kCallerAmount + kDeployFunding));
   EXPECT_EQ(read_total_supply(),
             static_cast<int128_t>(kAliceAmount + kCallerAmount +
-                                  kTokenRowFunding));
+                                  kBootstrapFunding));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
