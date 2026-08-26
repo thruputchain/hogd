@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <array>
+#include <sys/mman.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -27,6 +28,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -818,21 +820,32 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
 // span itself is never read either way. Only a native caller can build a span
 // that long (wasm and rv32 spans are u32-bounded), which is exactly why it
 // works as an ordering probe rather than as a reachable guest input.
+//
+// The span still has to describe real memory: forming one over a range that
+// does not exist is undefined even if no element is read, and a hardened
+// standard library would abort here rather than at the assertion below. So
+// reserve the range PROT_NONE -- address space only, nothing committed, and
+// nothing ever read from it.
 TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
 {
   constexpr ContractAddress kSelfAddress = make_contract_address(0);
 
+  size_t const uncopyable_len = Calldata::max_size() + 1;
+  void *reservation = mmap(nullptr, uncopyable_len, PROT_NONE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (reservation == MAP_FAILED) {
+    GTEST_SKIP() << "could not reserve " << uncopyable_len
+                 << " bytes of address space for the uncopyable-span probe";
+  }
+  x23::Defer unmap([&] { munmap(reservation, uncopyable_len); });
+  std::span<const std::byte> const uncopyable_calldata(
+      static_cast<std::byte const *>(reservation), uncopyable_len);
+
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_self;
   fns_self.emplace(
       0,
-      [kSelfAddress](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        // Valid base pointer, length the host must never act on: the syscall
-        // has to reject before it looks at the span at all.
-        std::array<std::byte, 1> anchor{};
-        std::span<const std::byte> uncopyable_calldata(anchor.data(),
-                                                       Calldata::max_size() +
-                                                           1);
-
+      [kSelfAddress, uncopyable_calldata](
+          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         CopyableInvokeInputs inputs{.entrypoint_id = 0,
                                     .gas_limit = UINT64_MAX,
                                     .flags = 0};
