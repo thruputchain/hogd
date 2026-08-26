@@ -1322,12 +1322,12 @@ repeated_parallel_batch(const Batch &one_element_batch, size_t count)
   EXPECT_EQ(one.segment_tokens.size(), 1UL);
   EXPECT_EQ(one.segment_tokens[0], 1U);
   const size_t element_size = one.xdr.size();
+  const size_t total_bytes = element_size * count;
 
   ParallelBatch batch;
   batch.segment_tokens.push_back(static_cast<unsigned int>(count));
-  batch.segment_bytes.push_back(static_cast<unsigned int>(element_size *
-                                                          count));
-  batch.xdr.resize(element_size * count, 0);
+  batch.segment_bytes.push_back(static_cast<unsigned int>(total_bytes));
+  batch.xdr.resize(total_bytes, 0);
   for (size_t i = 0; i < count; i++) {
     std::memcpy(&batch.xdr[i * element_size], one.xdr.data(), element_size);
   }
