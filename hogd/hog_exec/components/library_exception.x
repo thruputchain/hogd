@@ -61,26 +61,21 @@ case kCallingSyscall:
   SysErr syscall_err;
 };
 
-// --- StorageError (sdk_rs `storage::error::StorageError`) ---
+// --- AuthTokenError (sdk_rs `exn::wrapper::AuthTokenError`) ---
 
-struct StorageErrorIndexOutOfBounds {
-  unsigned hyper len;
-  unsigned hyper access;
+enum AuthTokenErrorKind {
+  kAuthTokenMintEncodeFailure = 0,
+  kAuthTokenConsumeDecodeFailure = 1,
+  kAuthTokenReceiveAuthHandlesFailure = 2
 };
 
-enum StorageErrorKind {
-  kStorageSys = 0,
-  kStorageSerialization = 1,
-  kStorageIndexOutOfBounds = 2
-};
-
-union StorageError switch (StorageErrorKind kind) {
-case kStorageSys:
-  SyscallExn exn;
-case kStorageSerialization:
+union AuthTokenError switch (AuthTokenErrorKind kind) {
+case kAuthTokenMintEncodeFailure:
   void;
-case kStorageIndexOutOfBounds:
-  StorageErrorIndexOutOfBounds index_out_of_bounds;
+case kAuthTokenConsumeDecodeFailure:
+  void;
+case kAuthTokenReceiveAuthHandlesFailure:
+  void;
 };
 
 // --- LibraryExn (sdk_rs `exn::library::LibraryExn`) ---
@@ -90,15 +85,30 @@ struct LibraryExnBytestringWrongSize {
   unsigned int found;
 };
 
+struct LibraryExnStorageIndexOutOfBounds {
+  unsigned hyper len;
+  unsigned hyper access;
+};
+
+struct LibraryExnRetrocausalQueueEntryWrongSize {
+  unsigned int expected;
+  unsigned int found;
+};
+
 enum LibraryExnKind {
   kLibraryExnSyscall = 0,
   kLibraryExnHandling = 1,
   kLibraryExnCalling = 2,
   kLibraryExnCalled = 3,
-  kLibraryExnBytestringWrongSize = 4,
-  kLibraryExnNonNegativeIntUnderflow = 5,
-  kLibraryExnNonNegativeIntOverflow = 6,
-  kLibraryExnStorage = 7
+  kLibraryExnAuthToken = 4,
+  kLibraryExnBytestringWrongSize = 5,
+  kLibraryExnNonNegativeIntUnderflow = 6,
+  kLibraryExnNonNegativeIntOverflow = 7,
+  kLibraryExnStorageSerialization = 8,
+  kLibraryExnStorageIndexOutOfBounds = 9,
+  kLibraryExnStorageKeypathOverflow = 10,
+  kLibraryExnRetrocausalQueueEntryWrongSize = 11,
+  kLibraryExnCapacityConstraintAlreadyWritten = 12
 };
 
 union LibraryExn switch (LibraryExnKind kind) {
@@ -110,14 +120,24 @@ case kLibraryExnCalling:
   CallingError calling;
 case kLibraryExnCalled:
   void;
+case kLibraryExnAuthToken:
+  AuthTokenError auth_token;
 case kLibraryExnBytestringWrongSize:
   LibraryExnBytestringWrongSize bytestring_wrong_size;
 case kLibraryExnNonNegativeIntUnderflow:
   void;
 case kLibraryExnNonNegativeIntOverflow:
   void;
-case kLibraryExnStorage:
-  StorageError storage;
+case kLibraryExnStorageSerialization:
+  void;
+case kLibraryExnStorageIndexOutOfBounds:
+  LibraryExnStorageIndexOutOfBounds index_out_of_bounds;
+case kLibraryExnStorageKeypathOverflow:
+  void;
+case kLibraryExnRetrocausalQueueEntryWrongSize:
+  LibraryExnRetrocausalQueueEntryWrongSize entry_wrong_size;
+case kLibraryExnCapacityConstraintAlreadyWritten:
+  void;
 };
 
 } // namespace hogd
