@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "airdrop_faucet"
+version = "0.2.0"
+dependencies = [
+ "groundhog-erc20-if",
+ "sdk",
+]
+
+[[package]]
 name = "auth_weight_test"
 version = "0.2.0"
 dependencies = [
@@ -207,6 +215,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "drip_faucet"
+version = "0.2.0"
+dependencies = [
+ "groundhog-erc20-if",
+ "sdk",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -279,6 +295,14 @@ name = "escape-bytes"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
+
+[[package]]
+name = "faucet_caller"
+version = "0.2.0"
+dependencies = [
+ "airdrop_faucet",
+ "sdk",
+]
 
 [[package]]
 name = "fiat-crypto"
