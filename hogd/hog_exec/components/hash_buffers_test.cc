@@ -143,16 +143,6 @@ TEST(HashBuffersTest, FailedResetPreservesExistingBuffer)
 // hash state tomorrow): digests, the size caps and their error paths, the
 // finalize-consumes lifecycle, and the byte count finalize reports.
 
-namespace {
-
-std::span<const std::byte>
-bytes_of(const std::vector<uint8_t> &v)
-{
-  return std::as_bytes(std::span<const uint8_t>(v));
-}
-
-} // namespace
-
 TEST(HashBuffersTest, BlockBoundaryChunkingMatchesOneShot)
 {
   // Splitting the input at and around SHA-256's 64-byte block boundary must
@@ -169,8 +159,8 @@ TEST(HashBuffersTest, BlockBoundaryChunkingMatchesOneShot)
     HashBuffers buffers;
     std::vector<uint8_t> head(whole.begin(), whole.begin() + split);
     std::vector<uint8_t> tail(whole.begin() + split, whole.end());
-    ASSERT_TRUE(buffers.update(0, bytes_of(head), true));
-    ASSERT_TRUE(buffers.update(0, bytes_of(tail), false));
+    ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(head)), true));
+    ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(tail)), false));
     auto hash = buffers.finalize(0);
     ASSERT_TRUE(hash.has_value());
     EXPECT_EQ(hash.value(), expected) << "split at " << split;
@@ -183,16 +173,16 @@ TEST(HashBuffersTest, FailedAppendPreservesExistingBuffer)
   // its bytes: the buffer keeps hashing as if the failed call never happened.
   HashBuffers buffers;
   std::vector<uint8_t> prefix = {0x10, 0x20, 0x30};
-  ASSERT_TRUE(buffers.update(0, bytes_of(prefix), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(prefix)), true));
 
   std::vector<uint8_t> oversized(kSHA256BufferMaxSize, 0xEE);
-  auto result = buffers.update(0, bytes_of(oversized), false);
+  auto result = buffers.update(0, std::as_bytes(std::span(oversized)), false);
   ASSERT_FALSE(result.has_value());
   ASSERT_EQ(result.error(),
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
   std::vector<uint8_t> suffix = {0x40};
-  ASSERT_TRUE(buffers.update(0, bytes_of(suffix), false));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(suffix)), false));
 
   auto hash = buffers.finalize(0);
   ASSERT_TRUE(hash.has_value());
@@ -203,7 +193,7 @@ TEST(HashBuffersTest, FinalizeConsumesBuffer)
 {
   HashBuffers buffers;
   std::vector<uint8_t> data = {1, 2, 3};
-  ASSERT_TRUE(buffers.update(0, bytes_of(data), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(data)), true));
   ASSERT_TRUE(buffers.finalize(0).has_value());
 
   // The buffer is gone: a second finalize and a no-reset update both fail.
@@ -211,10 +201,10 @@ TEST(HashBuffersTest, FinalizeConsumesBuffer)
   ASSERT_FALSE(again.has_value());
   ASSERT_EQ(again.error(),
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-  ASSERT_FALSE(buffers.update(0, bytes_of(data), false));
+  ASSERT_FALSE(buffers.update(0, std::as_bytes(std::span(data)), false));
 
   // The index is reusable with a fresh reset.
-  ASSERT_TRUE(buffers.update(0, bytes_of(data), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(data)), true));
   auto hash = buffers.finalize(0);
   ASSERT_TRUE(hash.has_value());
   EXPECT_EQ(hash.value(), sha256(data));
@@ -234,20 +224,26 @@ TEST(HashBuffersTest, FinalizeReportsAccumulatedSize)
   // stats, so the byte count is observable and must survive representation
   // changes: it counts bytes since the last reset, not since creation.
   HashBuffers buffers;
+  const std::vector<uint8_t> chunk1(10, 1);
+  const std::vector<uint8_t> chunk2(20, 2);
+  const std::vector<uint8_t> chunk3(30, 3);
+  const std::vector<uint8_t> chunk4(40, 4);
+  const std::vector<uint8_t> chunk5(5, 5);
 
   size_t size = 12345;
-  ASSERT_TRUE(buffers.update(0, bytes_of({}), true));
+  ASSERT_TRUE(
+      buffers.update(0, std::as_bytes(std::span<const uint8_t>()), true));
   ASSERT_TRUE(buffers.finalize(0, &size).has_value());
   EXPECT_EQ(size, 0U);
 
-  ASSERT_TRUE(buffers.update(0, bytes_of(std::vector<uint8_t>(10, 1)), true));
-  ASSERT_TRUE(buffers.update(0, bytes_of(std::vector<uint8_t>(20, 2)), false));
-  ASSERT_TRUE(buffers.update(0, bytes_of(std::vector<uint8_t>(30, 3)), false));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk1)), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk2)), false));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk3)), false));
   ASSERT_TRUE(buffers.finalize(0, &size).has_value());
   EXPECT_EQ(size, 60U);
 
-  ASSERT_TRUE(buffers.update(0, bytes_of(std::vector<uint8_t>(40, 4)), true));
-  ASSERT_TRUE(buffers.update(0, bytes_of(std::vector<uint8_t>(5, 5)), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk4)), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(chunk5)), true));
   ASSERT_TRUE(buffers.finalize(0, &size).has_value());
   EXPECT_EQ(size, 5U);
 }
@@ -256,9 +252,11 @@ TEST(HashBuffersTest, EmptyUpdatesDoNotChangeDigest)
 {
   HashBuffers buffers;
   std::vector<uint8_t> data = {9, 8, 7};
-  ASSERT_TRUE(buffers.update(0, bytes_of({}), true));
-  ASSERT_TRUE(buffers.update(0, bytes_of(data), false));
-  ASSERT_TRUE(buffers.update(0, bytes_of({}), false));
+  ASSERT_TRUE(
+      buffers.update(0, std::as_bytes(std::span<const uint8_t>()), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(data)), false));
+  ASSERT_TRUE(
+      buffers.update(0, std::as_bytes(std::span<const uint8_t>()), false));
 
   size_t size = 0;
   auto hash = buffers.finalize(0, &size);
@@ -278,10 +276,10 @@ TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
 
   HashBuffers buffers;
   const size_t half = whole.size() / 2;
-  ASSERT_TRUE(
-      buffers.update(0, bytes_of({whole.begin(), whole.begin() + half}), true));
-  ASSERT_TRUE(
-      buffers.update(0, bytes_of({whole.begin() + half, whole.end()}), false));
+  ASSERT_TRUE(buffers.update(
+      0, std::as_bytes(std::span(whole.begin(), whole.begin() + half)), true));
+  ASSERT_TRUE(buffers.update(
+      0, std::as_bytes(std::span(whole.begin() + half, whole.end())), false));
 
   size_t size = 0;
   auto hash = buffers.finalize(0, &size);
@@ -296,10 +294,10 @@ TEST(HashBuffersTest, IndependentIndexesInterleaved)
   std::vector<uint8_t> a1 = {1, 2}, a2 = {3, 4};
   std::vector<uint8_t> b1 = {5, 6}, b2 = {7, 8};
 
-  ASSERT_TRUE(buffers.update(0, bytes_of(a1), true));
-  ASSERT_TRUE(buffers.update(1, bytes_of(b1), true));
-  ASSERT_TRUE(buffers.update(0, bytes_of(a2), false));
-  ASSERT_TRUE(buffers.update(1, bytes_of(b2), false));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(a1)), true));
+  ASSERT_TRUE(buffers.update(1, std::as_bytes(std::span(b1)), true));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(a2)), false));
+  ASSERT_TRUE(buffers.update(1, std::as_bytes(std::span(b2)), false));
 
   auto hash_b = buffers.finalize(1);
   ASSERT_TRUE(hash_b.has_value());
