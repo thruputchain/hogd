@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"

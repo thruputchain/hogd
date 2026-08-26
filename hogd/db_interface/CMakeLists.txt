@@ -17,6 +17,7 @@ add_library(db_interface STATIC
 
 target_link_libraries(
   db_interface
+  config_hash
   hogd
   storage_item
   storage_cost

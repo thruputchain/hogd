@@ -1,3 +1,24 @@
+add_library(
+  config_hash
+  config_hash.cc
+)
+target_link_libraries(
+  config_hash
+  hogd
+)
+
+add_executable(
+  config_hash_test
+  test/config_hash_test.cc
+)
+target_link_libraries(
+  config_hash_test
+  config_hash
+  storage_cost
+  GTest::gtest_main
+)
+gtest_discover_tests(config_hash_test)
+
 add_subdirectory(test)
 
 add_library(
@@ -8,6 +29,7 @@ add_library(
 target_link_libraries(
   hog_mempool
   base
+  config_hash
   crypto
   exec_interface
   hogd

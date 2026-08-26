@@ -37,6 +37,7 @@
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "network.hh"

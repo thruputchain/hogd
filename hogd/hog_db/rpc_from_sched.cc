@@ -19,6 +19,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"

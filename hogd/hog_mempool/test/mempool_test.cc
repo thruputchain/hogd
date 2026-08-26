@@ -33,6 +33,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"

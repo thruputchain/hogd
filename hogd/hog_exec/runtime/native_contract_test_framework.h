@@ -44,6 +44,7 @@
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
