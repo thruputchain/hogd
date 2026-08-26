@@ -90,7 +90,7 @@ TEST_F(TxContextTests, GetSourceTxHashMatchesSubmittedTx)
                               output.return_buffer().size())),
       false);
   ASSERT_TRUE(decoded.has_value());
-  EXPECT_TRUE(std::ranges::equal(*decoded, expected));
+  EXPECT_TRUE(std::ranges::equal(decoded.value(), expected));
 }
 
 // The contract-visible block height is the executing block's height: the
@@ -113,7 +113,7 @@ TEST_F(TxContextTests, GetBlockHeightMatchesExecutingBlock)
                               output.return_buffer().size())),
       false);
   ASSERT_TRUE(decoded.has_value());
-  EXPECT_EQ(*decoded, expected);
+  EXPECT_EQ(decoded.value(), expected);
 }
 
 // GetTransactionStatistics(GasRemaining) succeeds; the contract asserts the

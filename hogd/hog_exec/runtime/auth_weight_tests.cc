@@ -86,7 +86,7 @@ TEST_F(AuthWeightTests, WriteWeightCommitsAuthData)
   auto item = lookup_storage_item_from_db(
       make_address_auth_data_addrkey(kContractAddress));
   ASSERT_TRUE(item.has_value());
-  EXPECT_EQ(item->auth_data().required_weight, 5U);
+  EXPECT_EQ(item.value().auth_data().required_weight, 5U);
 }
 
 // GetAuthClaim from a contract frame reports the transaction's claim; the
