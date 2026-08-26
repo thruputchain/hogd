@@ -398,50 +398,53 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
         constexpr auto kInvalid =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
 
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(abc)), true),
                     kOk)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         1U, std::as_bytes(std::span(wxyz)), true),
                     kOk)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Overflowing append: rejected, and index 0 keeps hashing as if the
         // call never happened.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(oversized)), false),
                     kInvalid)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(def)), false),
                     kOk)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash out{};
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out),
+                    kOk) ||
             out != hash_wxyz) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+                    kOk) ||
             out != hash_abcdef) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Finalize consumed index 0.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
                     kInvalid)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The index is reusable with a fresh reset.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(fresh)), true),
                     kOk)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+                    kOk) ||
             out != hash_fresh) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
