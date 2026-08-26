@@ -85,6 +85,7 @@ add_library(runtime_test_objects OBJECT
   empty_test.cc
   erc20_parity_test.cc
   event_test.cc
+  faucet_scenario_test.cc
   fibonacci_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc

@@ -38,7 +38,10 @@ members = [
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/txs_roundtrip",
     "integration_test_contracts/view_gateway_test",
+    "local_test_contracts/airdrop_faucet",
     "local_test_contracts/auth_weight_test",
+    "local_test_contracts/drip_faucet",
+    "local_test_contracts/faucet_caller",
     "local_test_contracts/tx_context_test",
 ]
 
