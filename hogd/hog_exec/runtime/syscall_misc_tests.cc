@@ -709,13 +709,14 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-// ── Wasm function that returns without calling the Return syscall ────
+// ── An entrypoint that returns without calling the Return syscall ────
 
 TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 {
   // The contract invokes raw entrypoint 0xFF on the target, whose body
-  // returns without calling the Return syscall; on rv32 the contract asserts
-  // the child frame faults (the SDK dispatcher ebreaks on wrapper return).
+  // returns without calling the Return syscall. The contract asserts the
+  // child frame aborts and that the payload decodes as the SDK's typed
+  // LibraryExn::UnknownMethod.
   deploy_target();
 
   auto handler = make_new_system_call_handler(
@@ -723,6 +724,24 @@ TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
           .invocation =
               client_.make_invocation<u8"test_invoke_no_return_syscall">(
                   UINT64_MAX, kTargetAddress),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// The contrast with InvokeNoReturnSyscall: a panicking entrypoint carries no
+// payload at all, so the child frame faults rather than aborting. The contract
+// asserts the frame status and that neither buffer came back.
+TEST_F(SyscallMiscTests, InvokePanicFaults)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<u8"test_invoke_panic_faults">(
+              UINT64_MAX, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},

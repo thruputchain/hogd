@@ -115,28 +115,29 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'350, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'330, tx.tx.invocation.calldata));
   {
     // No child frame ran, and the restored-token span is misaligned (3
     // bytes); the buffer-availability check wins and no outputs are written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
-        99'227, 99'227, std::move(body),
+        99'207, 99'207, std::move(body),
         status_with(
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable)));
   }
-  expected.push_back(empty_return_entry(99'195));
+  expected.push_back(empty_return_entry(99'175));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 }
 
-// The gas figures below sit 10 under their pre-#2973 values: renaming this
-// entrypoint moved its record one slot later in the rv32 entrypoint table, and
-// the guest dispatcher scans that table linearly, so every syscall in the frame
-// starts 10 gas lower. Measured rather than predicted -- the table order does
-// not follow the method name.
+// The gas figures below track this contract's rv32 entrypoint table: the guest
+// dispatcher scans it linearly, so every record added or moved ahead of the
+// invoked method costs the frame 10 more gas before its first syscall. Renaming
+// this entrypoint for #2973 cost 10; the panic pair added alongside
+// test_invoke_no_return_syscall cost 20 more. Measured rather than predicted --
+// table order does not follow the method name.
 TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
@@ -152,13 +153,13 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'360, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'340, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kGetCurrentAddress);
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(99'326, 99'326, std::move(body),
+        make_entry(99'306, 99'306, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
@@ -175,10 +176,10 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .flags = 0,
     };
     expected.push_back(
-        make_entry(99'292, 99'292, std::move(body),
+        make_entry(99'272, 99'272, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(99'254));
+  expected.push_back(empty_return_entry(99'234));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
