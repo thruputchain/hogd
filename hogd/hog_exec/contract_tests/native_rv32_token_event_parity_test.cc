@@ -237,16 +237,16 @@ protected:
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodInitializeGenesisRoot,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"initialize">(ctx, target,
-                                         kGenesisRootContractAddress);
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return co_await call_ok<u8"initialize">(
+              ctx, target, kGenesisRootContractAddress);
         });
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kMethodBurn,
         [](NativeSyscallContext &ctx,
-           ContractAddress target) -> InvokeStatus<void> {
-          return call_ok<u8"burn">(ctx, target, kAlice,
-                                   make_amount(kBurnAmount));
+           ContractAddress target) -> x23::Async<InvokeStatus<void>> {
+          co_return co_await call_ok<u8"burn">(ctx, target, kAlice,
+                                               make_amount(kBurnAmount));
         });
     // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
     // allowance and then, as a sibling call in the same transaction, increment
