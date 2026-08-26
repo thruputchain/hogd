@@ -110,3 +110,105 @@ CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/
 
 [jobs.host]
 tsan_1 = "?"
+
+
+# A second TSAN job, on GCC, covering x23 only.
+#
+# Why a second job at all: GCC and Clang lower coroutines differently, and
+# the difference is race-relevant. When a coroutine's initial_suspend() does
+# not suspend, its body starts inside the ramp function, and GCC's ramp goes
+# on touching the frame after the body returns -- it decrements a non-atomic
+# use count stored in the frame and frees the frame when that reaches zero,
+# and the body's own completion path decrements the same counter. If the body
+# suspends and is resumed on another thread, those two decrements race and
+# the frame is freed twice or leaked (#3615, found by the ASAN schedule's gcc
+# tree as a heap-use-after-free, days after it could have been found here).
+# Clang's ramp returns on suspend without touching the frame, so the job
+# above cannot see this class of bug however long it runs.
+#
+# Why x23 only: the job above instruments the Rust crates too (RUST_TSAN=ON,
+# which needs -Zsanitizer=thread plus -Zbuild-std on nightly), and
+# -Zexternal-clangrt deliberately leaves the runtime to the C++ link --
+# mixing rustc's LLVM instrumentation with GCC's libtsan is exactly what
+# that job's closing comment says to avoid. x23 has no Rust in it, so it
+# builds standalone against GCC's libtsan with no mixing at all, and it is
+# where the coroutine, threadpool and RPC machinery lives. Extending GCC
+# TSAN to the rest of hogd needs the Rust runtime question settled first
+# and is deliberately not attempted here.
+
+[[jobs]]
+name = "{{ .hog_schedule }}_gcc_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }}
+git checkout {{ .git_commit }}
+git submodule update --init --recursive
+
+source ./scripts/ci/prepare_env.sh
+
+# Same TSAN_OPTIONS as the clang job; see the comments there for why each
+# is set. The suppression file is shared: its one entry is a libc++
+# std::promise pattern that libstdc++ does not produce, so it is inert
+# here, but pointing at the same file keeps the two jobs from drifting.
+export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=0"
+
+# Configured with cmake directly rather than scripts/build.sh, which always
+# configures the top-level project; this job wants the x23 subproject on its
+# own. HAVE_STD_STACKTRACE=OFF for the same reason as the clang job:
+# libbacktrace is not TSAN-annotated and its symbolization produces hundreds
+# of bogus reports.
+for BUILD_TYPE in Debug Release; do
+    BUILD_DIR="build/gcc_tsan_x23"
+
+    rm -rf "${BUILD_DIR}"
+
+    echo "build gcc tsan x23 ${BUILD_TYPE}"
+    cmake -S x23 -B "${BUILD_DIR}" \
+        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+        -DCMAKE_CXX_COMPILER=g++ \
+        -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
+        -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+        -DX23_MAKE_ALL_DEPEND_ON_TESTS=ON \
+        -DBUILD_BENCHMARKS=OFF \
+        -DGOOGLETEST_PATH="$(pwd)/external/googletest" \
+        -DHAVE_STD_STACKTRACE=OFF
+    cmake --build "${BUILD_DIR}" -j 64
+
+    echo "run gcc tsan x23 tests ${BUILD_TYPE}"
+    ctest --test-dir "${BUILD_DIR}" --parallel --timeout 300 --output-on-failure
+
+    # `set -e` aborts the script on a failing ctest, so this rm is reached
+    # only once this tree's tests have passed; a tree whose tests failed
+    # survives for the core-dump collection in `after`. Only one x23 tree is
+    # resident at a time, for the same disk-quota reason as the sanitizer
+    # schedule (#3559).
+    rm -rf "${BUILD_DIR}"
+done
+
+"""
+after = """
+
+if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
+
+    echo 'saving core dumps and associated binaries'
+    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+
+[jobs.host]
+tsan_gcc = "?"
