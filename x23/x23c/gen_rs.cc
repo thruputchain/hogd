@@ -419,7 +419,7 @@ pub trait {}_{}: Send + Sync {{)",
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
     prtop("    {}\n", proc.comment);
-    prtop("    async fn {}({}) -> Result<{}, ::rpc_driver::ProgramError>;\n",
+    prtop("    async fn {}({}) -> Result<{}, ::rpc_api::ProgramError>;\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
 
@@ -443,11 +443,11 @@ impl {0}_{1}_Dispatcher {{
 }}
 
 #[async_trait::async_trait]
-impl ::rpc_driver::handler::RpcHandler for {0}_{1}_Dispatcher {{
-    fn prog_vers(&self) -> ::rpc_driver::ProgVers {{
-        ::rpc_driver::ProgVers::new({2}, {3})
+impl ::rpc_api::RpcHandler for {0}_{1}_Dispatcher {{
+    fn prog_vers(&self) -> ::rpc_api::ProgVers {{
+        ::rpc_api::ProgVers::new({2}, {3})
     }}
-    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_driver::RpcError> {{
+    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_api::RpcError> {{
         match proc {{
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -471,17 +471,17 @@ impl ::rpc_driver::handler::RpcHandler for {0}_{1}_Dispatcher {{
     prtop("            {} => {{\n", proc.val);
     prtop("                let args: ({}) =\n", type_args);
     prtop("                    xdrs::txs::decode(data).map_err(|_| "
-          "::rpc_driver::RpcError::GarbageArguments)?;\n");
+          "::rpc_api::RpcError::GarbageArguments)?;\n");
     auto detuple = make_arg_detuple(proc.arg_types.size());
     prtop("                let res = self.inner.{}({}).await.map_err(|_| "
-          "::rpc_driver::RpcError::SystemError)?;\n",
+          "::rpc_api::RpcError::SystemError)?;\n",
           proc.id, detuple);
     prtop("                xdrs::txs::encode(&res).map_err(|_| "
-          "::rpc_driver::RpcError::SystemError)\n");
+          "::rpc_api::RpcError::SystemError)\n");
     prtop("            }}\n");
   }
 
-  prtop("            _ => Err(::rpc_driver::RpcError::InvalidProcedure),\n");
+  prtop("            _ => Err(::rpc_api::RpcError::InvalidProcedure),\n");
 
   prtop("        }}\n"); // close match
   prtop("    }}\n");     // close fn
@@ -496,16 +496,16 @@ GenRs::show_vers_client(const VersDef &vers, const std::string &prog_name,
   prtop(R"(
 #[derive(Clone)]
 pub struct {0}_{1}_Client {{
-    handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>,
+    handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>,
 }}
 
 impl {0}_{1}_Client {{
-    pub fn new(handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>) -> Self {{
+    pub fn new(handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>) -> Self {{
         Self {{ handle }}
     }}
 
-    fn prog_vers() -> ::rpc_driver::ProgVers {{
-        ::rpc_driver::ProgVers::new({2}, {3})
+    fn prog_vers() -> ::rpc_api::ProgVers {{
+        ::rpc_api::ProgVers::new({2}, {3})
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -529,22 +529,22 @@ impl {0}_{1}_Client {{
       call_args.push_back(
           std::format("{}arg{}", is_ref_type(proc.arg_types[i]), i));
     }
-    prtop("    pub async fn {}({}) -> Result<{}, ::rpc_driver::RpcError> {{\n",
+    prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
     prtop("         let data = xdrs::txs::encode(&({})).map_err(|_| "
-          "::rpc_driver::RpcError::GarbageArguments)?;\n",
+          "::rpc_api::RpcError::GarbageArguments)?;\n",
           join(call_args, ", "));
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
           "&data).await?;\n",
           proc.val);
     prtop("         xdrs::txs::decode(&buf).map_err(|_| "
-          "::rpc_driver::RpcError::SystemError)\n");
+          "::rpc_api::RpcError::SystemError)\n");
     prtop("    }}\n");
   }
   prtop("}}\n");
   prtop(R"(
-impl From<::std::sync::Arc<dyn ::rpc_driver::RpcSender>> for {0}_{1}_Client {{
-    fn from(handle: ::std::sync::Arc<dyn ::rpc_driver::RpcSender>) -> Self {{
+impl From<::std::sync::Arc<dyn ::rpc_api::RpcSender>> for {0}_{1}_Client {{
+    fn from(handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>) -> Self {{
         Self::new(handle)
     }}
 }}

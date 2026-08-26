@@ -42,23 +42,26 @@ endif()
 
 git_describe_string(GIT_PROTOCOL_COMMIT "${SOURCE_DIR}/protocol" NODIRTY)
 
-if(DEFINED ENV{HOGD_RELEASE_VERSION} AND NOT "$ENV{HOGD_RELEASE_VERSION}" STREQUAL "")
-  set(HOGD_RELEASE_VERSION "$ENV{HOGD_RELEASE_VERSION}")
+# Release assembly sets the distribution version explicitly. Other builds use
+# an exact tag when available, then fall back to the CMake project version.
+if(DEFINED ENV{HOGD_DISTRIBUTION_VERSION}
+   AND NOT "$ENV{HOGD_DISTRIBUTION_VERSION}" STREQUAL "")
+  set(HOGD_DISTRIBUTION_VERSION "$ENV{HOGD_DISTRIBUTION_VERSION}")
 elseif(Git_FOUND)
   execute_process(
     COMMAND "${GIT_EXECUTABLE}" describe --tags --exact-match
     WORKING_DIRECTORY "${SOURCE_DIR}"
-    OUTPUT_VARIABLE HOGD_RELEASE_VERSION
+    OUTPUT_VARIABLE HOGD_DISTRIBUTION_VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET)
 endif()
 
-if(HOGD_RELEASE_VERSION MATCHES "^v(.+)$")
-  set(HOGD_RELEASE_VERSION "${CMAKE_MATCH_1}")
+if(HOGD_DISTRIBUTION_VERSION MATCHES "^v(.+)$")
+  set(HOGD_DISTRIBUTION_VERSION "${CMAKE_MATCH_1}")
 endif()
 
-if(NOT HOGD_RELEASE_VERSION)
-  set(HOGD_RELEASE_VERSION "${PROJECT_VERSION}")
+if(NOT HOGD_DISTRIBUTION_VERSION)
+  set(HOGD_DISTRIBUTION_VERSION "${PROJECT_VERSION}")
 endif()
 
 # Load the template source and substitute the values we just computed into the
