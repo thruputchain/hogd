@@ -232,10 +232,20 @@ public:
   }
 
   // Auth.
-  void register_auth(const AuthCard &card)
+  // Only the first caller registers the auth card; later callers are rejected
+  // (first-writer wins, mirroring the coordinator). This prevents a subsequent
+  // registration from overwriting the singleton auth card. Returns true if this
+  // call registered the card, false if an auth card was already registered.
+  bool register_auth(const AuthCard &card)
   {
+    bool expected = false;
+    if (!auth_claimed_.compare_exchange_strong(expected, true,
+                                               std::memory_order_relaxed)) {
+      return false;
+    }
     auth_card_ = card;
     auth_registered_.store(true, std::memory_order_release);
+    return true;
   }
   bool auth_registered(AuthCard *card) const
   {
@@ -291,6 +301,7 @@ public:
       std::unique_lock lk(shard_cards_mutex_);
       shard_cards_.clear();
     }
+    auth_claimed_ = false;
     auth_registered_ = false;
     auth_card_ = AuthCard{};
 
@@ -356,6 +367,7 @@ private:
   uint64_t next_event_registration_token_ = 0;
   std::optional<EventCanonicalTip> event_canonical_tip_;
 
+  std::atomic<bool> auth_claimed_ = false;
   std::atomic<bool> auth_registered_ = false;
   AuthCard auth_card_;
 

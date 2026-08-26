@@ -10,6 +10,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -34,6 +35,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
@@ -202,6 +204,61 @@ TEST(Mempool, EventPreparedCardIsUnavailableBeforeActivation)
   auto prepared = MempoolEventRpc::schedevent_prepare_event(card);
   ASSERT_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
   EXPECT_FALSE(registration.event_registered(nullptr));
+}
+
+// A card whose [address_for_mempool] cannot be reached must be rejected at
+// registration time rather than stored: [MempoolAuthRpc::get_client] dials it
+// with retry disabled during coordinator init and panics on failure, so an
+// unreachable callback would otherwise abort mempool initialization.
+TEST(Mempool, AuthIntroRejectsUnreachableCallback)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  AuthCard card{
+      .protocol = version::kHogdProtocol(),
+      .upid = {},
+      .address_for_db = "127.0.0.1:1",
+      .address_for_mempool = "127.0.0.1:1",
+  };
+  IntroAuthResult intro = MempoolAuthRpc::mempoolauth_intro_auth(card)();
+  EXPECT_EQ(intro.outcome(), IntroAuthOutcome::kFailure);
+  EXPECT_FALSE(registration.auth_registered(nullptr));
+
+  // A malformed callback address must also be rejected, not passed to the
+  // resolver (which would CHECK-fail on unparseable input).
+  card.address_for_mempool = "not a valid address";
+  IntroAuthResult malformed =
+      MempoolAuthRpc::mempoolauth_intro_auth(card)();
+  EXPECT_EQ(malformed.outcome(), IntroAuthOutcome::kFailure);
+  EXPECT_FALSE(registration.auth_registered(nullptr));
+}
+
+// The first auth registration wins; a later registration must not overwrite the
+// singleton auth card.
+TEST(Mempool, AuthRegistrationIsFirstWriterWins)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  AuthCard first{
+      .protocol = version::kHogdProtocol(),
+      .upid = {},
+      .address_for_db = "127.0.0.1:10",
+      .address_for_mempool = "127.0.0.1:11",
+  };
+  AuthCard second = first;
+  second.address_for_mempool = "127.0.0.1:22";
+
+  EXPECT_TRUE(registration.register_auth(first));
+  EXPECT_FALSE(registration.register_auth(second));
+
+  AuthCard stored;
+  EXPECT_TRUE(registration.auth_registered(&stored));
+  EXPECT_EQ(std::string_view(stored.address_for_mempool),
+            std::string_view(first.address_for_mempool));
 }
 
 TEST(Mempool, EventSameCardPrepareRetryPreservesPendingSnapshot)

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <expected>
 #include <string_view>
+#include <sys/socket.h>
 #include <utility>
 
 #include "auth_card.hh"
@@ -13,6 +15,7 @@
 #include "hogd/version.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -39,7 +42,42 @@ public:
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 
-    Registration::registration().register_auth(card);
+    // Preflight the advertised callback before publishing the registration.
+    // [get_client] later resolves and dials this address with retry disabled
+    // and panics on failure, so a malformed, unresolvable, or unreachable
+    // [address_for_mempool] would abort coordinator initialization. Reject such
+    // a card here instead of storing a callback that cannot be reached. Parse
+    // defensively: [server_address_to_sockaddr] CHECK-fails on bad input, which
+    // would itself be an abort triggered by the caller-supplied address.
+    x23::HostPort callback;
+    if (!callback.parse(std::string_view(card.address_for_mempool))) {
+      info("mempoolauth_intro_auth rejecting card with unparseable callback {}",
+           card.address_for_mempool.c_str());
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
+    std::expected<sockaddr_storage, x23::GaiError> callback_addr =
+        callback.to_addr(/*dns=*/true);
+    if (!callback_addr) {
+      info("mempoolauth_intro_auth rejecting card with unresolvable callback "
+           "{}",
+           card.address_for_mempool.c_str());
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
+    auto preflight = co_await create_client<AuthMempool1>(
+        *callback_addr, /*retry=*/false,
+        /*max_message_size=*/kBulkRpcMaxMessageSize);
+    if (!preflight) {
+      info("mempoolauth_intro_auth rejecting card with unreachable callback "
+           "{}: {}",
+           card.address_for_mempool.c_str(),
+           preflight.error().error_code().message());
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
+
+    if (!Registration::registration().register_auth(card)) {
+      // An auth card is already registered; do not overwrite it.
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
     x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);
     NetworkHash network_hash{};
