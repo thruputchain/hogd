@@ -23,6 +23,8 @@
 
 namespace hogd {
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class AuthWeightTests : public ::testing::Test,
                         public NativeContractTestFramework {
@@ -125,5 +127,7 @@ TEST_F(AuthWeightTests, WriteWeightRejectedInReadOnlyFrame)
       make_address_auth_data_addrkey(kTargetAddress));
   EXPECT_FALSE(item.has_value());
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

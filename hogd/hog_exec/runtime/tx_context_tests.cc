@@ -26,6 +26,8 @@
 
 namespace hogd {
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class TxContextTests : public ::testing::Test,
                        public NativeContractTestFramework {
@@ -143,5 +145,7 @@ TEST_F(TxContextTests, SourceTxHashConsistentInChildFrame)
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
