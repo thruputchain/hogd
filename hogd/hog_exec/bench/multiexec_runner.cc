@@ -563,7 +563,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     panic("Failed to extend loadgen experiment");
   }
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs)();
+  parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   CHECK_EQ(work_txs.size(), num_txs_per_block);
 
   // The same work txs are replayed across every trial, so each must carry a

@@ -192,29 +192,25 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
-// The number of objects [parallel_batch_to_t] would decode from [parallel],
-// as claimed by its segment metadata.  Callers that bound how much work one
-// batch may commit should consult this before decoding, so an over-large
-// claim is rejected without first allocating for it.  A claim the payload
-// cannot back is caught by the decode itself.
-inline size_t
-claimed_parallel_batch_size(const ParallelBatch &parallel)
-{
-  // The sum cannot overflow [size_t]: [segment_tokens] holds at most
-  // 0xffffffff entries, each at most 0xffffffff.
-  size_t total = 0;
-  for (unsigned int segment_tokens : parallel.segment_tokens) {
-    total += segment_tokens;
-  }
-  return total;
-}
+// Pass as [max_objects] when the only bound that applies is what the payload
+// itself can encode.  Correct for a batch this node produced; anything a peer
+// or a client can send should name the real limit instead, so grepping this
+// name finds every decode that trusts its source.
+inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
 
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
 // xdr.size()) as well as per-object XDR deserialization failures.
+//
+// [max_objects] bounds how many objects the batch may claim.  It is checked
+// against the running segment-token total the decode already computes, before
+// anything is allocated for them, so a caller cannot pay for an over-large
+// batch and cannot forget to bound one.  Use [kNoBatchSizeLimit] only for
+// locally produced input.
 template<typename T>
 inline x23::Async<bool>
-parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
+parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
+                    size_t max_objects)
 {
   if (parallel.segment_tokens.size() != parallel.segment_bytes.size()) {
     info("failed to deserialize: segment_tokens size {} != segment_bytes size "
@@ -244,12 +240,17 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   // divide rather than multiply so the bound cannot overflow [size_t]. The sum
   // itself cannot overflow either: [segment_tokens] holds at most 0xffffffff
   // entries each at most 0xffffffff, so the total is below SIZE_MAX.
+  //
+  // The caller's [max_objects] joins the same bound rather than getting a
+  // scan of its own: the loop below already accumulates the claimed total, so
+  // an over-cap batch is rejected in that one pass.
   constexpr size_t kMinObjectSize = x23::detail::xdr_size_bounds<T>().min_;
   static_assert(kMinObjectSize > 0,
                 "ParallelBatch element type must have a nonzero minimum XDR "
                 "size, else token counts cannot bound the allocation");
   const size_t max_total_segment_tokens =
-      std::min<size_t>(0xffffffffUL, total_segment_bytes / kMinObjectSize);
+      std::min({max_objects, size_t{0xffffffffUL},
+                total_segment_bytes / kMinObjectSize});
 
   std::vector<size_t> obj_offsets;
   obj_offsets.reserve(parallel.segment_tokens.size());
@@ -260,8 +261,9 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs)
   }
   if (total_segment_tokens > max_total_segment_tokens) {
     info("failed to deserialize: claimed {} segment tokens exceeds the maximum "
-         "{} that {} payload bytes can encode",
-         total_segment_tokens, max_total_segment_tokens, total_segment_bytes);
+         "{} allowed by the caller's {} object limit and {} payload bytes",
+         total_segment_tokens, max_total_segment_tokens, max_objects,
+         total_segment_bytes);
     co_return false;
   }
   objs.resize(total_segment_tokens, {});

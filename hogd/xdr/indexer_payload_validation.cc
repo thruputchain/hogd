@@ -91,7 +91,10 @@ x23::Async<IndexerPayloadStatus<TxsHash>>
 compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs)
 {
   x23::XdrVec<TransactionHash> hashes;
-  if (!(co_await parallel_batch_to_t(proposal_txs.hash, hashes))) {
+  // Committed-payload roots are recomputed from this node's own outbox and
+  // index, never from a peer message, so the payload's own size is the bound.
+  if (!(co_await parallel_batch_to_t(proposal_txs.hash, hashes,
+                                     kNoBatchSizeLimit))) {
     co_return std::unexpected("malformed canonical transaction hash batch");
   }
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);

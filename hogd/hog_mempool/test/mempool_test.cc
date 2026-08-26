@@ -627,15 +627,17 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
+                                    parsed_txs, kNoBatchSizeLimit)());
 
     TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                    kNoBatchSizeLimit)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                    tx_nondeterministic_data)());
+                                    tx_nondeterministic_data,
+                                    kNoBatchSizeLimit)());
 
     if (i == 0) {
       // The tx should be included in the nominated block on the first iteration
@@ -754,15 +756,17 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
     EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
+                                    parsed_txs, kNoBatchSizeLimit)());
 
     TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                    kNoBatchSizeLimit)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                    tx_nondeterministic_data)());
+                                    tx_nondeterministic_data,
+                                    kNoBatchSizeLimit)());
 
     if (i == 0) {
       // The tx should be included in the nominated block on the first iteration
@@ -854,14 +858,15 @@ TEST(Mempool, Propose)
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs,
+                                    kNoBatchSizeLimit)());
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
     TransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
-                            tx_hashes)());
+                            tx_hashes, kNoBatchSizeLimit)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
     EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
   }
@@ -888,7 +893,8 @@ TEST(Mempool, NominateBatch)
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs,
+                                    kNoBatchSizeLimit)());
     EXPECT_EQ(parsed_txs.size(), txs.size());
     std::set<SignedTransaction> parsed_txs_set(parsed_txs.begin(),
                                                parsed_txs.end());
@@ -898,7 +904,7 @@ TEST(Mempool, NominateBatch)
     TransactionHashBatch tx_hashes;
     EXPECT_TRUE(
         parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
-                            tx_hashes)());
+                            tx_hashes, kNoBatchSizeLimit)());
     EXPECT_EQ(tx_hashes.size(), txs.size());
     std::set<TransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
                                                    tx_hashes.end());
@@ -934,7 +940,8 @@ TEST(Mempool, ProposalExceptionRollsBackPendingNomination)
   const SchedulerProposalResult retry = propose_block(server, db_tip);
   ASSERT_EQ(retry.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
   SignedTransactionBatch proposed_txs;
-  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs)());
+  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs,
+                                  kNoBatchSizeLimit)());
   EXPECT_EQ(proposed_txs, txs);
 }
 
@@ -953,7 +960,8 @@ TEST(Mempool, NominateEmpty)
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res.proposed_block().txs, parsed_txs,
+                                    kNoBatchSizeLimit)());
     EXPECT_TRUE(parsed_txs.empty());
   }
 }
@@ -989,15 +997,17 @@ TEST(Mempool, NominateTxWithError)
     EXPECT_EQ(proposal.header.block_height, i + 2);
 
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
+                                    parsed_txs, kNoBatchSizeLimit)());
 
     TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                    kNoBatchSizeLimit)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                    tx_nondeterministic_data)());
+                                    tx_nondeterministic_data,
+                                    kNoBatchSizeLimit)());
 
     if (i == 0) {
       // The tx should be included in the nominated block on the first iteration
@@ -1085,14 +1095,15 @@ TEST(Mempool, NominateCommit)
 
   {
     SignedTransactionBatch parsed_txs;
-    EXPECT_TRUE(
-        parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
+    EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
+                                    parsed_txs, kNoBatchSizeLimit)());
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
     TransactionHashBatch tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(
-        res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
+        res_nominate.proposed_block().proposal.transactions.hash, tx_hashes,
+        kNoBatchSizeLimit)());
     EXPECT_EQ(tx_hashes.size(), 1UL);
     EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
   }
@@ -1147,14 +1158,15 @@ TEST(Mempool, NewlyDeployedContractHogCount)
             SchedulerProposalOutcome::SchedulerProposalOK);
 
   SignedTransactionBatch parsed_txs;
-  ASSERT_TRUE(
-      parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
+  ASSERT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs,
+                                  kNoBatchSizeLimit)());
   ASSERT_EQ(parsed_txs.size(), 1UL);
   EXPECT_EQ(parsed_txs[0], tx);
 
   TransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
+      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes,
+      kNoBatchSizeLimit)());
   ASSERT_EQ(tx_hashes.size(), 1UL);
   EXPECT_EQ(tx_hashes[0], sha256(tx.tx));
 
@@ -1546,7 +1558,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
   proposal.header.block_height++;
   {
     TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                    kNoBatchSizeLimit)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1557,7 +1570,8 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
     tx_hashes.pop_back();
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                    tx_nondeterministic_data)());
+                                    tx_nondeterministic_data,
+                                    kNoBatchSizeLimit)());
     tx_nondeterministic_data.pop_back();
 
     proposal.transactions.hash = t_to_parallel_batch(tx_hashes)();
@@ -1601,7 +1615,8 @@ TEST(Mempool, ValidateBatchMissingTx)
   proposal.header.block_height++;
   {
     TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                    kNoBatchSizeLimit)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -1735,7 +1750,8 @@ TEST(Mempool, ProposalUsesTransactionRoot)
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   TransactionHashBatch tx_hashes;
-  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes)());
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                  kNoBatchSizeLimit)());
   EXPECT_EQ(proposal.header.txs_hash,
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
@@ -2529,8 +2545,8 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
             SchedulerProposalOutcome::SchedulerProposalOK);
 
   SignedTransactionBatch parsed_txs;
-  ASSERT_TRUE(
-      parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs)());
+  ASSERT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs, parsed_txs,
+                                  kNoBatchSizeLimit)());
   ASSERT_EQ(parsed_txs.size(), 1UL);
   ASSERT_TRUE(parsed_txs[0] == txs[0] || parsed_txs[0] == txs[1]);
 
@@ -2539,14 +2555,15 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 
   TransactionHashBatch tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes)());
+      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes,
+      kNoBatchSizeLimit)());
   ASSERT_EQ(tx_hashes.size(), 1UL);
   ASSERT_TRUE(tx_hashes[0] == tx0_hash || tx_hashes[0] == tx1_hash);
 
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
   ASSERT_TRUE(parallel_batch_to_t(
       res_nominate.proposed_block().proposal.transactions.nondeterministic_data,
-      tx_nondeterministic_data)());
+      tx_nondeterministic_data, kNoBatchSizeLimit)());
   EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
 
   const TransactionHash included_hash = tx_hashes[0];

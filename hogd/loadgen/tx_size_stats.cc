@@ -45,7 +45,7 @@ print_tx_size_stats()
     return;
   }
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(result.value().work_txs, work_txs)();
+  parallel_batch_to_t(result.value().work_txs, work_txs, kNoBatchSizeLimit)();
 
   std::println("Generated {} transactions\n", work_txs.size());
 

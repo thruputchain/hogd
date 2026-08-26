@@ -114,7 +114,7 @@ TEST(ParallelBatchToTTest, RoundTripsSingleSignedTransaction)
       t_to_parallel_batch(SignedTransactionBatch{tx})();
 
   SignedTransactionBatch parsed;
-  ASSERT_TRUE(parallel_batch_to_t(batch, parsed)());
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
   ASSERT_EQ(parsed.size(), 1UL);
   EXPECT_EQ(parsed[0], tx);
 }
@@ -147,36 +147,62 @@ TEST(ParallelBatchToTTest, AppendPreservesExistingDataAndOrder)
   EXPECT_GT(batch.xdr.size(), initial_num_bytes);
 
   SignedTransactionBatch parsed;
-  ASSERT_TRUE(parallel_batch_to_t(batch, parsed)());
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
   ASSERT_EQ(parsed.size(), 2UL);
   EXPECT_EQ(parsed[0], tx0);
   EXPECT_EQ(parsed[1], tx1);
 }
 
-TEST(ClaimedParallelBatchSizeTest, SumsSegmentTokens)
+TEST(ParallelBatchToTTest, AcceptsABatchAtTheObjectLimit)
 {
-  ParallelBatch batch;
-  EXPECT_EQ(claimed_parallel_batch_size(batch), 0UL);
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction(),
+                             make_minimal_signed_transaction()})();
 
-  batch.segment_tokens.push_back(3);
-  batch.segment_tokens.push_back(0);
-  batch.segment_tokens.push_back(7);
-  EXPECT_EQ(claimed_parallel_batch_size(batch), 10UL);
+  SignedTransactionBatch parsed;
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, 2)());
+  EXPECT_EQ(parsed.size(), 2UL);
 }
 
-// The claimed size is read from the metadata alone, so a caller can bound a
-// batch before the decode allocates for what it claims.
-TEST(ClaimedParallelBatchSizeTest, ReportsAnOverclaimWithoutDecoding)
+TEST(ParallelBatchToTTest, RejectsABatchOverTheObjectLimit)
+{
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction(),
+                             make_minimal_signed_transaction()})();
+
+  SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, 1)());
+  // Nothing was allocated for the objects the batch claimed.
+  EXPECT_TRUE(parsed.empty());
+}
+
+// The limit is applied to what the metadata claims, so an overclaim is
+// rejected without the payload ever having to be large enough to back it.
+TEST(ParallelBatchToTTest, RejectsAnOverclaimAgainstTheObjectLimit)
 {
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(
       SignedTransactionBatch{make_minimal_signed_transaction()})();
 
-  ASSERT_EQ(claimed_parallel_batch_size(batch), 1UL);
+  ASSERT_EQ(batch.segment_tokens.size(), 1UL);
   batch.segment_tokens[0] = 0xffffffff;
-  EXPECT_EQ(claimed_parallel_batch_size(batch), 0xffffffffUL);
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, 1)());
+  EXPECT_TRUE(parsed.empty());
+}
+
+// A zero limit admits nothing, including an empty batch's zero objects.
+TEST(ParallelBatchToTTest, AZeroObjectLimitAcceptsOnlyAnEmptyBatch)
+{
+  ParallelSignedTransactionBatch empty =
+      t_to_parallel_batch(SignedTransactionBatch{})();
+  SignedTransactionBatch parsed;
+  EXPECT_TRUE(parallel_batch_to_t(empty, parsed, 0)());
+  EXPECT_TRUE(parsed.empty());
+
+  ParallelSignedTransactionBatch one = t_to_parallel_batch(
+      SignedTransactionBatch{make_minimal_signed_transaction()})();
+  EXPECT_FALSE(parallel_batch_to_t(one, parsed, 0)());
 }
 
 TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
@@ -190,7 +216,7 @@ TEST(ParallelBatchToTTest, RejectsOverclaimedFinalSegment)
   batch.segment_tokens[0] = 2;
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsLeftoverSegmentBytes)
@@ -204,7 +230,7 @@ TEST(ParallelBatchToTTest, RejectsLeftoverSegmentBytes)
   batch.segment_bytes[0] += 4;
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsXdrLargerThanSegmentBytes)
@@ -216,7 +242,7 @@ TEST(ParallelBatchToTTest, RejectsXdrLargerThanSegmentBytes)
   batch.xdr.resize(batch.xdr.size() + 4, 0);
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
@@ -228,7 +254,7 @@ TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
   batch.segment_bytes[0] += 4;
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
@@ -248,7 +274,7 @@ TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
       corrupted.xdr[idx_dist(rng)] = byte_dist(rng);
     }
     SignedTransactionBatch parsed;
-    (void)parallel_batch_to_t(corrupted, parsed)();
+    (void)parallel_batch_to_t(corrupted, parsed, kNoBatchSizeLimit)();
   }
 }
 
@@ -268,7 +294,7 @@ TEST(ParallelBatchToTTest, RejectsTokenCountExceedingPayloadBytes)
   };
 
   SignedTransactionBatch parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
@@ -282,7 +308,7 @@ TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
   };
 
   x23::XdrVec<BoundedUint32Vec> parsed;
-  EXPECT_FALSE(parallel_batch_to_t(batch, parsed)());
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
 } // namespace hogd

@@ -570,7 +570,8 @@ submit_and_commit(sched_coord_client_t &scheduler,
   }
   const SchedulerProposedBlock &proposed = proposal.proposed_block();
   SignedTransactionBatch proposed_txs;
-  EXPECT_TRUE(parallel_batch_to_t(proposed.txs, proposed_txs)());
+  EXPECT_TRUE(
+      parallel_batch_to_t(proposed.txs, proposed_txs, kNoBatchSizeLimit)());
   TransactionHashBatch tx_hashes;
   tx_hashes.reserve(proposed_txs.size());
   for (const SignedTransaction &tx : proposed_txs) {

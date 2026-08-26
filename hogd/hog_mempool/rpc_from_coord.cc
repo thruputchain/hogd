@@ -230,7 +230,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+        if (!(co_await parallel_batch_to_t(
+                batch, *txs, static_cast<size_t>(mempool_tx_size_limit_)))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
           info("submit_unvetted rejected malformed transaction batch");
@@ -414,7 +415,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+        if (!(co_await parallel_batch_to_t(
+                batch, *txs, static_cast<size_t>(mempool_tx_size_limit_)))) {
           MempoolMetrics::instance()
               .rejected_malformed_vetted_rpc_count.increment();
           info("submit_vetted rejected malformed transaction batch");
@@ -1530,8 +1532,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
   }
   x23::XdrVec<SignedTransaction> txs;
-  if (!(co_await parallel_batch_to_t(request.transactions, txs)) ||
-      txs.size() > kMaxBlockSize) {
+  if (!(co_await parallel_batch_to_t(request.transactions, txs,
+                                     kMaxBlockSize))) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
   }
   for (const SignedTransaction &tx : txs) {
@@ -2117,30 +2119,13 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         // far more transactions than a block may hold.  Nothing downstream
         // bounds that: [prepare_and_validate_chunk] would fan every claimed
         // transaction out across the executors before the block finally
-        // failed on missing txs.  Bound the nomination on its claimed size,
-        // before decoding allocates for it, the way
-        // [schedulercoord_commit_genesis_ceremony] bounds the ceremony batch.
-        const size_t claimed_hashes =
-            claimed_parallel_batch_size(proposal.transactions.hash);
-        const size_t claimed_nominations = claimed_parallel_batch_size(
-            proposal.transactions.nondeterministic_data);
-        if (claimed_hashes > kMaxBlockSize ||
-            claimed_nominations > kMaxBlockSize) {
-          info("schedulercoord_validate rejected nomination batch claiming "
-               "{} tx hashes and {} nominations, over the {} tx block limit",
-               claimed_hashes, claimed_nominations, kMaxBlockSize);
-          log_validation_return = false;
-          co_await cancel_with_result(
-              SchedulerValidationOutcome::SchedulerValidationMalformed,
-              "decode nomination batches");
-          co_return;
-        }
-
+        // failed on missing txs.
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                tx_nominations);
+                                tx_nominations, kMaxBlockSize);
         x23::Async<bool> tx_hash_handle =
-            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes);
+            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes,
+                                kMaxBlockSize);
 
         std::exception_ptr first_exception;
         bool decoded_tx_nominations = false;

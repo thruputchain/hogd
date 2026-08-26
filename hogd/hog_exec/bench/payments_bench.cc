@@ -71,7 +71,8 @@ struct BenchmarkState : public CommonBenchState {
     }
 
     x23::XdrVec<SignedTransaction> work_txs;
-    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs)();
+    parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
+                        kNoBatchSizeLimit)();
     return work_txs;
   }
 };
