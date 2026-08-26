@@ -121,6 +121,7 @@ add_x23_gtest(shutdown)
 add_x23_gtest(sync)
 add_x23_gtest(threadpool)
 add_x23_gtest(detached)
+add_x23_gtest(async_callback)
 add_x23_gtest(dag)
 add_x23_gtest(uiobuf)
 add_x23_gtest(xdr)
@@ -138,6 +139,10 @@ set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 # wakeup, which hangs rather than merely running slowly, so the larger
 # budget still catches what the test is for.
 set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
+# async_callback spawns a producer thread per iteration to race the
+# invocation, so it is thread-create bound rather than CPU bound and the
+# sanitizers make each one much more expensive.  Same budget as threadpool.
+set_tests_properties(async_callback PROPERTIES TIMEOUT 60)
 endif()
 
 if(BENCHMARK_PATH)
