@@ -852,6 +852,12 @@ TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
 // #39: forwarding an unowned auth token on a self-invoke reports
 // kReentrance, not kInvalidSyscallInput: the reentrance check runs before the
 // forwarded auth-token list is read at all.
+//
+// KNOWN RED until #3540 lands: validate_new_invocation() still checks token
+// ownership ahead of reentrance, so this reports kInvalidSyscallInput and the
+// contract's assertion aborts the frame. The contracts pinned here already
+// expect the post-#3540 order, so no expectation in this file makes it pass
+// before then.
 TEST_F(SyscallMiscTests, InvokeUnownedTokenLosesToReentrance)
 {
   auto handler = make_new_system_call_handler(

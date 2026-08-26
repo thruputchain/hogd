@@ -132,6 +132,11 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
       << x23::show(handler.get_trace()->system_calls);
 }
 
+// KNOWN RED until #3540 lands, for the reason in syscall_misc_tests.cc's
+// InvokeUnownedTokenLosesToReentrance: the guest aborts, so root_invoke()
+// below fails before the trace is compared. The gas figures are already the
+// post-#3540 ones -- 10 below their predecessors, the cost of the renamed
+// entrypoint record sitting one slot later in the dispatch table.
 TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
