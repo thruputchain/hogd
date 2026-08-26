@@ -80,7 +80,7 @@ TEST_F(AuthWeightTests, WriteWeightCommitsAuthData)
                                                                      5U),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 
   advance_block();
@@ -102,7 +102,7 @@ TEST_F(AuthWeightTests, GetAuthClaimDefaultClaim)
                           UINT64_MAX),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // WriteAddressRequiredWeight is a write syscall: in a read-only child frame
@@ -118,7 +118,7 @@ TEST_F(AuthWeightTests, WriteWeightRejectedInReadOnlyFrame)
                           UINT64_MAX, kTargetAddress),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 
   advance_block();

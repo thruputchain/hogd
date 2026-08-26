@@ -1400,16 +1400,15 @@ protected:
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         rv32_admin_fns;
     rv32_admin_fns.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
-          auto init =
-              client.invoke_opt<u8"initialize">(ctx,
-                                                kGenesisRootContractAddress);
+          auto init = co_await client.invoke_opt<u8"initialize">(
+              ctx, kGenesisRootContractAddress);
           if (!init.has_value() || !init.value().has_value()) {
             ADD_FAILURE() << "itc initialize failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto rv32_admin =
         std::make_unique<NativeContract>(std::move(rv32_admin_fns));

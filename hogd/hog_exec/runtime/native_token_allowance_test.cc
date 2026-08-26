@@ -1859,48 +1859,48 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
   // Genesis-root driver: method 0 mints INT128_MAX to the whale.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> root_fns;
   root_fns.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto client =
             ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
-        auto mint = client.invoke_opt<u8"mint">(
+        auto mint = co_await client.invoke_opt<u8"mint">(
             ctx, kWhaleAddr, make_amount(static_cast<uint128_t>(kMaxSupply)));
         if (!mint.has_value() || !mint.value().has_value() ||
             !mint.value().value().has_value() ||
             !mint.value().value().value().is_ok()) {
           ADD_FAILURE() << "mint of INT128_MAX to the whale did not succeed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto root_contract = std::make_unique<NativeContract>(std::move(root_fns));
 
   // Whale contract: method 0 writes a bytestring; method 1 deletes it.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> whale_fns;
   whale_fns.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("whale_storage");
         Bytestring payload = make_bytestring("release me back to a near-max "
                                              "balance");
-        auto r = ctx.syscall<SyscallNo::kBytestringSet>(
+        auto r = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key, std::as_bytes(std::span(payload.data(), payload.size())),
             std::to_underlying(StorageDeltaFlags::None));
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "whale failed to write storage";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   whale_fns.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("whale_storage");
-        auto r = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+        auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE() << "whale failed to delete storage";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto whale_contract = std::make_unique<NativeContract>(std::move(whale_fns));
 
@@ -1933,7 +1933,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(tx, *runtime_context);
-    EXPECT_TRUE(handler.root_invoke().is_root_success());
+    EXPECT_TRUE(handler.root_invoke()().is_root_success());
     ExecResult commit = handler.try_commit_transaction();
     EXPECT_EQ(commit, ExecResult::ExecResultOK);
     EXPECT_TRUE(

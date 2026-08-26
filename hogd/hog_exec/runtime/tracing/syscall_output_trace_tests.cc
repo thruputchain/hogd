@@ -389,8 +389,8 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   const SHA256Hash hash_fresh = sha256(std::span(fresh));
 
   auto context = make_single_contract_context(
-      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef,
-       hash_fresh](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef, hash_fresh](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto expect = [](auto r, SyscallErrorCode code) {
           return r.has_value() && r.value() == code;
         };
@@ -401,57 +401,57 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
         if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(abc)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
                         1U, std::as_bytes(std::span(wxyz)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Overflowing append: rejected, and index 0 keeps hashing as if the
         // call never happened.
         if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(oversized)), false),
                     kInvalid)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(def)), false),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash out{};
         if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out), kOk) ||
             out != hash_wxyz) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
             out != hash_abcdef) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Finalize consumed index 0.
         if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
                     kInvalid)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The index is reusable with a fresh reset.
         if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(fresh)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
             out != hash_fresh) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   auto update_entry = [](uint32_t index, std::span<const uint8_t> buffer,
                          bool reset, HostFunctionStatusXdr status) {
