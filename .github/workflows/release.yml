@@ -12,7 +12,7 @@ env:
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.25"
+  HOGD_DISTRIBUTION_VERSION: "0.1.25-rc.1"
 
 permissions:
   contents: write
