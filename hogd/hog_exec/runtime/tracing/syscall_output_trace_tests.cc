@@ -392,8 +392,8 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   const SHA256Hash hash_fresh = sha256(std::span(fresh));
 
   auto context = make_single_contract_context(
-      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef, hash_fresh](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef,
+       hash_fresh](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         auto expect = [](auto r, SyscallErrorCode code) {
           return r.has_value() && r.value() == code;
         };

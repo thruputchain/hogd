@@ -163,8 +163,8 @@ TEST(HashBuffersTest, BlockBoundaryChunkingMatchesOneShot)
   }
   const auto expected = sha256(whole);
 
-  for (const size_t split : {1UL, 55UL, 56UL, 63UL, 64UL, 65UL, 127UL, 128UL,
-                             whole.size() - 1}) {
+  for (const size_t split :
+       {1UL, 55UL, 56UL, 63UL, 64UL, 65UL, 127UL, 128UL, whole.size() - 1}) {
     HashBuffers buffers;
     std::vector<uint8_t> head(whole.begin(), whole.begin() + split);
     std::vector<uint8_t> tail(whole.begin() + split, whole.end());
@@ -277,8 +277,8 @@ TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
 
   HashBuffers buffers;
   const size_t half = whole.size() / 2;
-  ASSERT_TRUE(buffers.update(
-      0, bytes_of({whole.begin(), whole.begin() + half}), true));
+  ASSERT_TRUE(
+      buffers.update(0, bytes_of({whole.begin(), whole.begin() + half}), true));
   ASSERT_TRUE(
       buffers.update(0, bytes_of({whole.begin() + half, whole.end()}), false));
 
