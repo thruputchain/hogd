@@ -242,6 +242,8 @@ public:
     return *event_sched_server_->impl();
   }
 
+  TestEventAggregator &event_aggregator() { return event_server_; }
+
   void register_runtime_after_genesis()
   {
     register_event_with_mempool();
