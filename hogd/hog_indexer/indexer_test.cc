@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -130,6 +131,21 @@ make_failure_diag(BlockHeight attempt_height)
   return diag;
 }
 
+// Unwraps a page-query result, recording a test failure (and returning an
+// empty page) when the backend reported an error instead of a page.
+template<typename Result>
+auto
+unwrap_page(Result result)
+{
+  using Page = std::remove_cvref_t<decltype(result.page())>;
+  if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
+    ADD_FAILURE() << "page query failed: outcome "
+                  << static_cast<int>(result.outcome());
+    return Page{};
+  }
+  return std::move(result.page());
+}
+
 } // namespace
 
 TEST_F(IndexerTest, FindTx)
@@ -196,7 +212,8 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   query.limit = 0; // server default
 
-  TransactionPage page = block_explorer_->get_transactions(query)();
+  TransactionPage page =
+      unwrap_page(block_explorer_->get_transactions(query)());
 
   // Both txs are at block 100; ascending order is by (block, tx_hash), so
   // 0x01 (index 0) precedes 0x02 (index 1) -- aligned with events/bodies.
@@ -223,7 +240,8 @@ TEST_F(IndexerTest, GetTransactionsReturnsAllRegardlessOfAddress)
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   query.limit = 0;
 
-  TransactionPage page = block_explorer_->get_transactions(query)();
+  TransactionPage page =
+      unwrap_page(block_explorer_->get_transactions(query)());
   EXPECT_EQ(page.transactions.size(), 2);
 }
 
@@ -255,7 +273,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   query.limit = 0;
 
   TransactionRefPage page =
-      block_explorer_->get_transactions_by_address(query)();
+      unwrap_page(block_explorer_->get_transactions_by_address(query)());
   ASSERT_EQ(page.refs.size(), 1);
   EXPECT_EQ(page.refs[0].tx_hash, tx_hash);
   EXPECT_EQ(page.refs[0].height, block_height);
@@ -297,7 +315,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
     q.order = IterationOrder::IterationOrderAscending;
     q.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
     q.limit = 0;
-    return block_explorer_->get_transactions_by_address(q)();
+    return unwrap_page(block_explorer_->get_transactions_by_address(q)());
   };
 
   // Rooted at A → in A's history.
@@ -317,7 +335,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   eq.order = IterationOrder::IterationOrderAscending;
   eq.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   eq.limit = 0;
-  EventPage ep = block_explorer_->get_events(eq)();
+  EventPage ep = unwrap_page(block_explorer_->get_events(eq)());
   EXPECT_EQ(ep.events.size(), 1);
 }
 
@@ -349,7 +367,8 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
 
   std::vector<SHA256Hash> seen;
   for (int guard = 0; guard < 10; guard++) {
-    TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
+    TransactionRefPage page =
+        unwrap_page(block_explorer_->get_transactions_by_address(q)());
     for (auto const &r : page.refs) {
       seen.push_back(r.tx_hash);
     }
@@ -392,7 +411,8 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   event_query.order = IterationOrder::IterationOrderAscending;
   event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   event_query.limit = 1;
-  EventPage event_page = block_explorer_->get_events(event_query)();
+  EventPage event_page =
+      unwrap_page(block_explorer_->get_events(event_query)());
   ASSERT_EQ(event_page.events.size(), 1UL);
   ASSERT_FALSE(event_page.cursor.empty());
 
@@ -401,7 +421,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   transaction_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   transaction_query.limit = 1;
   TransactionPage transaction_page =
-      block_explorer_->get_transactions(transaction_query)();
+      unwrap_page(block_explorer_->get_transactions(transaction_query)());
   ASSERT_EQ(transaction_page.transactions.size(), 1UL);
   ASSERT_FALSE(transaction_page.cursor.empty());
 
@@ -410,29 +430,31 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   address_query.order = IterationOrder::IterationOrderAscending;
   address_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   address_query.limit = 1;
-  TransactionRefPage address_page =
-      block_explorer_->get_transactions_by_address(address_query)();
+  TransactionRefPage address_page = unwrap_page(
+      block_explorer_->get_transactions_by_address(address_query)());
   ASSERT_EQ(address_page.refs.size(), 1UL);
   ASSERT_FALSE(address_page.cursor.empty());
 
   ingest(302, 0x62);
 
   event_query.cursor = event_page.cursor;
-  event_page = block_explorer_->get_events(event_query)();
+  event_page = unwrap_page(block_explorer_->get_events(event_query)());
   ASSERT_EQ(event_page.events.size(), 1UL);
   EXPECT_EQ(event_page.events[0].block_height, 301);
   EXPECT_EQ(event_page.latest_block, 302);
   EXPECT_TRUE(event_page.cursor.empty());
 
   transaction_query.cursor = transaction_page.cursor;
-  transaction_page = block_explorer_->get_transactions(transaction_query)();
+  transaction_page =
+      unwrap_page(block_explorer_->get_transactions(transaction_query)());
   ASSERT_EQ(transaction_page.transactions.size(), 1UL);
   EXPECT_EQ(transaction_page.transactions[0].height, 301);
   EXPECT_EQ(transaction_page.latest_block, 302);
   EXPECT_TRUE(transaction_page.cursor.empty());
 
   address_query.cursor = address_page.cursor;
-  address_page = block_explorer_->get_transactions_by_address(address_query)();
+  address_page = unwrap_page(
+      block_explorer_->get_transactions_by_address(address_query)());
   ASSERT_EQ(address_page.refs.size(), 1UL);
   EXPECT_EQ(address_page.refs[0].height, 301);
   EXPECT_EQ(address_page.latest_block, 302);
@@ -480,7 +502,8 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     q.limit = 0;
 
     // Each eventless tx must still have produced its ROOT_TX row.
-    TransactionRefPage page = block_explorer_->get_transactions_by_address(q)();
+    TransactionRefPage page =
+        unwrap_page(block_explorer_->get_transactions_by_address(q)());
     ASSERT_EQ(page.refs.size(), 1);
     EXPECT_EQ(page.refs[0].tx_hash, logs[i].tx_hash);
   }
@@ -598,7 +621,8 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   event_query.limit = 0;
 
-  EventPage event_page = block_explorer_->get_events(event_query)();
+  EventPage event_page =
+      unwrap_page(block_explorer_->get_events(event_query)());
   EXPECT_EQ(event_page.latest_block, 10);
   ASSERT_EQ(event_page.events.size(), 1);
   EXPECT_EQ(event_page.events[0].block_height, 10);
@@ -610,7 +634,8 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   tx_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   tx_query.limit = 0;
 
-  TransactionPage tx_page = block_explorer_->get_transactions(tx_query)();
+  TransactionPage tx_page =
+      unwrap_page(block_explorer_->get_transactions(tx_query)());
   EXPECT_EQ(tx_page.latest_block, 10);
   ASSERT_EQ(tx_page.transactions.size(), 1);
   EXPECT_EQ(tx_page.transactions[0].height, 10);
@@ -624,11 +649,52 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   addr_query.limit = 0;
 
   TransactionRefPage addr_page =
-      block_explorer_->get_transactions_by_address(addr_query)();
+      unwrap_page(block_explorer_->get_transactions_by_address(addr_query)());
   EXPECT_EQ(addr_page.latest_block, 10);
   ASSERT_EQ(addr_page.refs.size(), 1);
   EXPECT_EQ(addr_page.refs[0].tx_hash, tx10);
   EXPECT_EQ(addr_page.refs[0].height, 10);
+}
+
+// A db-level failure must be reported as such, not as an empty page:
+// otherwise a broken or not-yet-open index is indistinguishable from an
+// empty chain (#3579).
+TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
+{
+  // Moving the database out leaves *db_ closed while the block explorer
+  // RPC still references it, mimicking a query racing a db that has not
+  // opened (or has shut down).
+  IndexDB moved_away = std::move(*db_);
+  ASSERT_FALSE(db_->is_open());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  EventQuery event_query{};
+  EventFilter filter{};
+  filter.contract_addresses.push_back(addr);
+  event_query.filters.push_back(std::move(filter));
+  event_query.order = IterationOrder::IterationOrderAscending;
+  event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  event_query.limit = 0;
+  EventPageResult events = block_explorer_->get_events(event_query)();
+  EXPECT_EQ(events.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
+
+  TransactionQuery tx_query{};
+  tx_query.order = IterationOrder::IterationOrderAscending;
+  tx_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  tx_query.limit = 0;
+  TransactionPageResult txs = block_explorer_->get_transactions(tx_query)();
+  EXPECT_EQ(txs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
+
+  AddressTransactionQuery addr_query{};
+  addr_query.address = addr;
+  addr_query.order = IterationOrder::IterationOrderAscending;
+  addr_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  addr_query.limit = 0;
+  TransactionRefPageResult refs =
+      block_explorer_->get_transactions_by_address(addr_query)();
+  EXPECT_EQ(refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
 }
 
 } // namespace hogd

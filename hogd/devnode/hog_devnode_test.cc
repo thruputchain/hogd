@@ -100,6 +100,18 @@ constexpr auto kIndexPollTimeout = std::chrono::seconds(10);
 constexpr std::size_t kMaxReadinessBytes = 16 * 1024;
 constexpr std::size_t kTestRamDbBytes = 15UL * 1024 * 1024 * 1024;
 
+// Unwraps a page-query result; a backend failure (e.g. the indexer db
+// still opening) yields an empty page, so pollers simply retry and
+// one-shot asserts fail on the page contents.
+TransactionRefPage
+page_or_empty(TransactionRefPageResult result)
+{
+  if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
+    return {};
+  }
+  return std::move(result.page());
+}
+
 std::tuple<uint64_t, uint64_t>
 make_erc20_amount(uint128_t amount)
 {
@@ -1059,7 +1071,7 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
   TransactionRefPage page;
   while (std::chrono::steady_clock::now() < deadline) {
-    page = reader.get_transactions_by_address(query)();
+    page = page_or_empty(reader.get_transactions_by_address(query)());
     if (page.latest_block == 2) {
       break;
     }
@@ -2113,7 +2125,8 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     AddressTransactionQuery startup_query{};
     startup_query.order = IterationOrder::IterationOrderAscending;
     startup_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-    EXPECT_EQ(reader.get_transactions_by_address(startup_query)().latest_block,
+    EXPECT_EQ(page_or_empty(reader.get_transactions_by_address(startup_query)())
+                  .latest_block,
               1);
 
     auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
@@ -2200,7 +2213,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
       query.address = wallet_address;
       query.order = IterationOrder::IterationOrderAscending;
       query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-      page = reader.get_transactions_by_address(query)();
+      page = page_or_empty(reader.get_transactions_by_address(query)());
       if (page.latest_block == latest_height) {
         break;
       }
@@ -2579,7 +2592,9 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  EXPECT_EQ(
+      page_or_empty(reader.get_transactions_by_address(query)()).latest_block,
+      2);
   expect_clean_exit(process);
 }
 
@@ -2651,7 +2666,9 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  EXPECT_EQ(
+      page_or_empty(reader.get_transactions_by_address(query)()).latest_block,
+      2);
   expect_clean_exit(process);
 
   auto recovered_store = IndexerOutboxStore::open(
@@ -2687,7 +2704,9 @@ TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  EXPECT_EQ(
+      page_or_empty(reader.get_transactions_by_address(query)()).latest_block,
+      2);
   expect_clean_exit(process);
 }
 

@@ -3,6 +3,7 @@
 #include <string_view>
 #include <utility>
 
+#include "hogd/base/log.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/status.h"
@@ -65,50 +66,70 @@ public:
     co_return BlockLookupResult(BlockLookupOutcome::BlockNotFound);
   }
 
-  x23::Async<EventPage> get_events(EventQuery query)
+  x23::Async<EventPageResult> get_events(EventQuery query)
   {
     auto status = db_.get_events(query);
     if (!status) {
-      // Return an empty page on db-level error.  Currently the only
-      // way to hit this is kDBNotOpen; higher layers surface that
-      // out-of-band.
-      co_return EventPage{};
+      co_return query_failure<EventPageResult>("get_events", status.error());
     }
-    co_return std::move(*status);
+    EventPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
+    ret.page() = std::move(*status);
+    co_return ret;
   }
 
-  x23::Async<TransactionPage> get_transactions(TransactionQuery query)
+  x23::Async<TransactionPageResult> get_transactions(TransactionQuery query)
   {
     auto status = db_.get_transactions(query);
     if (!status) {
-      co_return TransactionPage{};
+      co_return query_failure<TransactionPageResult>("get_transactions",
+                                                     status.error());
     }
-    co_return std::move(*status);
+    TransactionPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
+    ret.page() = std::move(*status);
+    co_return ret;
   }
 
-  x23::Async<TransactionRefPage>
+  x23::Async<TransactionRefPageResult>
   get_transactions_by_address(AddressTransactionQuery query)
   {
     auto status = db_.get_transactions_by_address(query);
     if (!status) {
-      co_return TransactionRefPage{};
+      co_return query_failure<TransactionRefPageResult>(
+          "get_transactions_by_address", status.error());
     }
-    co_return std::move(*status);
+    TransactionRefPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
+    ret.page() = std::move(*status);
+    co_return ret;
   }
 
-  x23::Async<TransactionRefPage>
+  x23::Async<TransactionRefPageResult>
   get_transactions_by_block(BlockTransactionQuery /*query*/)
   {
     // The transaction index is keyed by transaction hash and has no
     // block-height index yet.  Report the current serving bounds while
     // returning no refs until that index is added.
-    TransactionRefPage page;
-    page.latest_block = db_.latest_block();
-    page.oldest_block = IndexDB::oldest_block();
-    co_return page;
+    TransactionRefPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
+    ret.page().latest_block = db_.latest_block();
+    ret.page().oldest_block = IndexDB::oldest_block();
+    co_return ret;
   }
 
 private:
+  // query_failure maps a db-level error onto a page-query result union so a
+  // broken or not-yet-open index is distinguishable from an empty result set:
+  // kDBNotOpen is reported as IndexerQueryNotReady, everything else (corrupt
+  // key, failed XDR parse, RocksDB iterator error) as
+  // IndexerQueryInternalFailure.
+  template<typename Result>
+  static Result query_failure(std::string_view rpc, const IndexerError &err)
+  {
+    error("indexer {} query failed: {}", rpc, err.error_code().message());
+    const auto outcome = err.code() == IndexerErrorCode::kDBNotOpen
+                             ? IndexerQueryOutcome::IndexerQueryNotReady
+                             : IndexerQueryOutcome::IndexerQueryInternalFailure;
+    return Result(outcome);
+  }
+
   IndexDB &db_;
   RecentTxFailureCache &failure_cache_;
 };
