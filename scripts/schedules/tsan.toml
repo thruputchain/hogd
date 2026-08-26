@@ -159,9 +159,18 @@ export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsa
 
 # Configured with cmake directly rather than scripts/build.sh, which always
 # configures the top-level project; this job wants the x23 subproject on its
-# own. HAVE_STD_STACKTRACE=OFF for the same reason as the clang job:
-# libbacktrace is not TSAN-annotated and its symbolization produces hundreds
-# of bogus reports.
+# own. That means picking the compiler up by hand: prepare_env.sh above writes
+# GCC_CXX=g++-15 into scripts/conf.sh, which env.sh sources, and that is the
+# GCC 15 pin the hog schedules build against (#3243). Sourcing env.sh here is
+# what build.sh does, so this job stays on the pinned compiler instead of
+# whatever unversioned g++ the host happens to have. env.sh derives SCRIPT_DIR
+# from its caller.
+SCRIPT_DIR="$(pwd)/scripts"
+source ./scripts/env.sh
+
+# HAVE_STD_STACKTRACE=OFF for the same reason as the clang job: libbacktrace
+# is not TSAN-annotated and its symbolization produces hundreds of bogus
+# reports.
 for BUILD_TYPE in Debug Release; do
     BUILD_DIR="build/gcc_tsan_x23"
 
@@ -170,7 +179,7 @@ for BUILD_TYPE in Debug Release; do
     echo "build gcc tsan x23 ${BUILD_TYPE}"
     cmake -S x23 -B "${BUILD_DIR}" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-        -DCMAKE_CXX_COMPILER=g++ \
+        -DCMAKE_CXX_COMPILER="${GCC_CXX}" \
         -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
         -DX23_MAKE_ALL_DEPEND_ON_TESTS=ON \
