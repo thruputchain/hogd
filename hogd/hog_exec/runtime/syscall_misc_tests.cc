@@ -848,8 +848,9 @@ TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
 }
 
 // #39: forwarding an unowned auth token on a self-invoke reports kReentrance,
-// not kInvalidSyscallInput: reentrance is checked before the auth-token list is
-// read, so the token is never examined (#2973).
+// not kInvalidSyscallInput: reentrance is checked ahead of token ownership
+// (#2973). A malformed or duplicated list still wins over reentrance -- those
+// checks run before admission, in the syscall body.
 TEST_F(SyscallMiscTests, InvokeUnownedTokenLosesToReentrance)
 {
   auto handler = make_new_system_call_handler(
