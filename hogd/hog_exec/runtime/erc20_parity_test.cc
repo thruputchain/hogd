@@ -4,10 +4,12 @@
 #include <array>
 #include <concepts>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -135,6 +137,29 @@ step_erc20_error(CapturedRecord const &record)
   return erc20_error_of(*decoded);
 }
 
+// The amount a captured step's child frame returned, or nullopt unless the
+// step ran a child frame that returned a decodable Ok(amount_t). Lets tests
+// pin the numeric value a total_supply / get_balance_of step read, on top of
+// the cross-backend byte comparison.
+template<StringLiteral Name>
+std::optional<uint128_t>
+step_ok_amount(CapturedRecord const &record)
+{
+  if (record.size() < 2 || record[0] != 0x00 ||
+      static_cast<InvocationFrameStatusCode>(record[1]) !=
+          InvocationFrameStatusCode::Return) {
+    return std::nullopt;
+  }
+  auto payload = std::as_bytes(std::span(record.data() + 2, record.size() - 2));
+  auto decoded =
+      erc20_meta::decode_return<Name>(payload, /*manually_reverted=*/false);
+  if (!decoded.has_value() || !decoded->is_ok()) {
+    return std::nullopt;
+  }
+  auto const &[hi, lo] = decoded->ok();
+  return (uint128_t{hi} << 64) | lo;
+}
+
 } // namespace
 
 // Drives the native HOG precompile and the RV32 itc_erc20 contract through the
@@ -196,6 +221,9 @@ protected:
   static constexpr int32_t kNativeSpenderId = 54;
   static constexpr int32_t kRv32OwnerId = 55;
   static constexpr int32_t kRv32SpenderId = 56;
+  // The mint/burn capture driver (deployed at the genesis root address, or at
+  // an ordinary caller address for the unauthorized-caller tests).
+  static constexpr int32_t kMintBurnDriverId = 57;
 
   static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
   {
@@ -437,22 +465,24 @@ protected:
   // the rollback is itself part of the compared outcome.
   using MultiStepOutcome = std::pair<ExecResult, std::vector<CapturedRecord>>;
 
-  // Runs `addr`'s method-0 multi-step driver and returns its outcome. The
-  // driver always returns success, so root_invoke always succeeds; a
-  // divergence surfaces in the commit result and/or the per-step bytes.
+  // Runs `addr`'s multi-step driver (its `method_id` entrypoint) and returns
+  // its outcome. The driver always returns success, so root_invoke always
+  // succeeds; a divergence surfaces in the commit result and/or the per-step
+  // bytes.
   MultiStepOutcome
   run_multi_capture_tx(ContractAddress const &addr,
                        std::vector<StorageKeyContractData> const &result_keys,
-                       RuntimeContext &ctx)
+                       RuntimeContext &ctx, Runtime::MethodID method_id = 0)
   {
     auto handler_tx = SignedTransaction{
-        .tx = Transaction{.invocation =
-                              Invocation{.invoked_address = addr,
-                                         .entrypoint =
-                                             entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
-                                         .calldata = {}},
-                          .uniquifier = make_new_uniquifier()}};
+        .tx =
+            Transaction{.invocation =
+                            Invocation{.invoked_address = addr,
+                                       .entrypoint =
+                                           entrypoint_from_method_id(method_id),
+                                       .gas_limit = UINT64_MAX,
+                                       .calldata = {}},
+                        .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
     EXPECT_TRUE(handler.root_invoke().is_root_success());
     ExecResult commit = handler.try_commit_transaction();
@@ -1250,6 +1280,175 @@ protected:
     return {run_capture_tx(kNativeCallerAddr, native_result_key, ctx),
             run_capture_tx(kRv32CallerAddr, rv32_result_key, ctx)};
   }
+
+  // `count` distinct capture result keys named `prefix`0..`prefix`N-1.
+  static std::vector<StorageKeyContractData>
+  make_result_keys(std::string const &prefix, size_t count)
+  {
+    std::vector<StorageKeyContractData> keys;
+    keys.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      keys.push_back(make_storage_key(prefix + std::to_string(i)));
+    }
+    return keys;
+  }
+
+  // Compute the contract-data storage key that itc_erc20 uses for its total
+  // supply: the SDK's .hash() on the bare b"total_supply" byte string. A CXS
+  // fixed-opaque array encodes as its raw bytes, so the preimage is exactly
+  // the 12 ASCII bytes of "total_supply".
+  static StorageKeyContractData itc_erc20_total_supply_key()
+  {
+    // "total_supply" in ASCII/UTF-8
+    static constexpr std::array<uint8_t, 12> kTag = {0x74, 0x6f, 0x74, 0x61,
+                                                     0x6c, 0x5f, 0x73, 0x75,
+                                                     0x70, 0x70, 0x6c, 0x79};
+    return StorageKeyContractData{
+        sha256(std::span<const uint8_t>(kTag.data(), kTag.size()))};
+  }
+
+  // Hand-craft committed token state, bypassing the mint path: direct NNInt
+  // writes to each backend's total-supply and balance slots. These states
+  // (supply near INT128_MAX, or balances a mint could never have funded) are
+  // unreachable via normal supply flows but are needed to exercise the
+  // supply-edge code paths.
+  void write_native_total_supply(int128_t value)
+  {
+    StorageKey key(StorageKeyType::ContractData);
+    key.contract_data_key() = kNativeTokenTotalSupplyKey;
+    write_item(
+        AddressAndKey{.address = kNativeTokenAddr, .key = std::move(key)},
+        std::make_shared<const StorageItemWrapper>(value,
+                                                   get_default_cost_model()));
+  }
+
+  void write_rv32_total_supply(int128_t value)
+  {
+    StorageKey key(StorageKeyType::ContractData);
+    key.contract_data_key() = itc_erc20_total_supply_key();
+    write_item(AddressAndKey{.address = kRv32TokenAddr, .key = std::move(key)},
+               std::make_shared<const StorageItemWrapper>(
+                   value, get_default_cost_model()));
+  }
+
+  void write_native_balance(ContractAddress const &addr, int128_t value)
+  {
+    write_item(make_free_native_token_balance_addrkey(addr),
+               std::make_shared<const StorageItemWrapper>(
+                   value, get_default_cost_model()));
+  }
+
+  void write_rv32_balance(ContractAddress const &addr, int128_t value)
+  {
+    StorageKey key(StorageKeyType::ContractData);
+    key.contract_data_key() = itc_erc20_balance_key(addr);
+    write_item(AddressAndKey{.address = kRv32TokenAddr, .key = std::move(key)},
+               std::make_shared<const StorageItemWrapper>(
+                   value, get_default_cost_model()));
+  }
+
+  // Runs mint/burn capture steps against both backends. The native token's
+  // mint and burn are gated on msg_sender == kGenesisRootContractAddress, so
+  // the capture driver plays the genesis root: the fixture's genesis is empty,
+  // nothing occupies that address, and the test installs its own root
+  // stand-in there (the "custom genesis" of these tests). The rv32 itc_erc20
+  // is initialized with the genesis root as its owner, so the same caller
+  // address passes both backends' owner gates.
+  //
+  // `native_steps` run from `native_caller` against the native token (driver
+  // method 0); `rv32_steps` run from `rv32_caller` against the rv32 token
+  // (method 1). Pass ordinary caller addresses to exercise the unauthorized
+  // paths. `pre_capture_setup` runs after deployment and rv32 initialization,
+  // just before the capture transactions -- the hook for hand-crafting
+  // storage state (supply keys, balances).
+  std::pair<MultiStepOutcome, MultiStepOutcome> run_mint_burn_parity(
+      std::vector<CaptureStep> native_steps,
+      std::vector<CaptureStep> rv32_steps,
+      ContractAddress native_caller = kGenesisRootContractAddress,
+      ContractAddress rv32_caller = kGenesisRootContractAddress,
+      std::function<void()> const &pre_capture_setup = {})
+  {
+    std::vector<StorageKeyContractData> native_keys;
+    native_keys.reserve(native_steps.size());
+    for (auto const &step : native_steps) {
+      native_keys.push_back(step.result_key);
+    }
+    std::vector<StorageKeyContractData> rv32_keys;
+    rv32_keys.reserve(rv32_steps.size());
+    for (auto const &step : rv32_steps) {
+      rv32_keys.push_back(step.result_key);
+    }
+
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        driver_fns;
+    driver_fns.emplace(0, make_multi_capture_driver(std::move(native_steps)));
+    driver_fns.emplace(1, make_multi_capture_driver(std::move(rv32_steps)));
+    auto driver = std::make_unique<NativeContract>(std::move(driver_fns));
+
+    // The RV32 admin initializes itc_erc20 with the genesis root as owner.
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        rv32_admin_fns;
+    rv32_admin_fns.emplace(
+        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          ContractTraitClient<itc_erc20::ERC20> client(kRv32TokenAddr);
+          auto init =
+              client.invoke_opt<u8"initialize">(ctx,
+                                                kGenesisRootContractAddress);
+          if (!init.has_value() || !init.value().has_value()) {
+            ADD_FAILURE() << "itc initialize failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+    auto rv32_admin =
+        std::make_unique<NativeContract>(std::move(rv32_admin_fns));
+
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
+    native_map.emplace(
+        std::to_underlying(
+            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+        make_native_token_contract());
+    native_map.emplace(kRv32AdminId, std::move(rv32_admin));
+    native_map.emplace(kMintBurnDriverId, std::move(driver));
+    auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
+    auto rv32_ctx = std::make_unique<Rv32Context>();
+    MultiplexedContext ctx(
+        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+            {ContractType::kRv32, {rv32_ctx.release(), true}},
+            {ContractType::kNative, {native_ctx.release(), true}},
+        });
+
+    auto native_token_obj = make_native_contract(std::to_underlying(
+        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+    write_contract(native_token_obj);
+    write_deployment(kNativeTokenAddr, native_token_obj);
+
+    auto rv32_token_obj = erc20_meta::load_rv32();
+    EXPECT_TRUE(rv32_token_obj);
+    write_contract(rv32_token_obj);
+    write_deployment(kRv32TokenAddr, rv32_token_obj);
+
+    auto admin_obj = make_native_contract(kRv32AdminId);
+    write_contract(admin_obj);
+    write_deployment(kRv32AdminAddr, admin_obj);
+
+    auto driver_obj = make_native_contract(kMintBurnDriverId);
+    write_contract(driver_obj);
+    write_deployment(native_caller, driver_obj);
+    if (rv32_caller != native_caller) {
+      write_deployment(rv32_caller, driver_obj);
+    }
+
+    run_tx(kRv32AdminAddr, 0, ctx);
+    if (pre_capture_setup) {
+      pre_capture_setup();
+    }
+
+    return {run_multi_capture_tx(native_caller, native_keys, ctx,
+                                 /*method_id=*/0),
+            run_multi_capture_tx(rv32_caller, rv32_keys, ctx,
+                                 /*method_id=*/1)};
+  }
 };
 
 // Baseline: an ordinary funded transfer to a distinct recipient. Both backends
@@ -1653,6 +1852,583 @@ TEST_F(Erc20ParityTest, UnfundedTransferNettedByLaterCreditParity)
       << "the caller must end up holding the tokens the owner started with";
   EXPECT_EQ(records[3], records[4])
       << "the owner must be left with nothing after the delegated pull";
+}
+
+// ---------------------------------------------------------------------------
+// Mint/burn parity. The native token's mint and burn are only callable by the
+// genesis root contract, so these tests deploy the capture driver AT the
+// genesis root address (empty test genesis; see run_mint_burn_parity) and
+// initialize the rv32 itc_erc20 with the genesis root as its owner, so the
+// same caller passes both backends' owner gates.
+// ---------------------------------------------------------------------------
+
+// Baseline: an authorized mint to a fresh recipient. Both backends accept it
+// byte-identically, and the committed supply and balance equal the minted
+// amount.
+TEST_F(Erc20ParityTest, FundedMintParity)
+{
+  auto nk = make_result_keys("native_step", 3);
+  auto rk = make_result_keys("rv32_step", 3);
+  auto steps = [](ContractAddress token, ContractAddress recipient,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], recipient, make_amount(1'000)),
+        make_step<u8"total_supply">(token, keys[1]),
+        make_step<u8"get_balance_of">(token, keys[2], recipient)};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an authorized mint";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 3U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "an authorized mint must succeed";
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(1'000));
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[2]),
+            std::optional<uint128_t>(1'000));
+}
+
+// A zero-amount mint: a no-op credit both backends accept identically
+// (including the zero-amount Transfer event path).
+TEST_F(Erc20ParityTest, ZeroAmountMintParity)
+{
+  auto nk = make_result_keys("native_step", 3);
+  auto rk = make_result_keys("rv32_step", 3);
+  auto steps = [](ContractAddress token, ContractAddress recipient,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], recipient, make_amount(0)),
+        make_step<u8"total_supply">(token, keys[1]),
+        make_step<u8"get_balance_of">(token, keys[2], recipient)};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a zero-amount mint";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 3U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(0));
+}
+
+// An amount above INT128_MAX (not representable as a signed balance delta):
+// both backends reject the mint with the same TooLarge bytes, staging nothing.
+TEST_F(Erc20ParityTest, HugeAmountMintParity)
+{
+  auto nk = make_result_keys("native_step", 2);
+  auto rk = make_result_keys("rv32_step", 2);
+  auto steps = [](ContractAddress token, ContractAddress recipient,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], recipient,
+                            make_amount(uint128_t{1} << 127)),
+        make_step<u8"total_supply">(token, keys[1])};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on mint amount > "
+         "INT128_MAX";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 2U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"mint">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(0));
+}
+
+// Credit-side overflow: the recipient already holds INT128_MAX (hand-crafted;
+// unreachable under the supply bound). The credit leg fails on both backends
+// with the same TooLarge bytes -- native's supply pre-read stages nothing, and
+// the reference's strict balance inc fires before its supply add.
+TEST_F(Erc20ParityTest, MintToMaxBalanceRecipientParity)
+{
+  auto nk = make_result_keys("native_step", 2);
+  auto rk = make_result_keys("rv32_step", 2);
+  auto steps = [](ContractAddress token, ContractAddress recipient,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], recipient, make_amount(1)),
+        make_step<u8"total_supply">(token, keys[1])};
+  };
+  auto [native_outcome, rv32_outcome] = run_mint_burn_parity(
+      steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+      steps(kRv32TokenAddr, kRv32RecipientAddr, rk),
+      kGenesisRootContractAddress, kGenesisRootContractAddress, [this] {
+        write_native_balance(kNativeRecipientAddr,
+                             std::numeric_limits<int128_t>::max());
+        write_rv32_balance(kRv32RecipientAddr,
+                           std::numeric_limits<int128_t>::max());
+      });
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a mint credit "
+         "overflowing the recipient balance";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 2U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"mint">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge));
+}
+
+// A mint from an ordinary (non-genesis-root) caller: both backends reject it
+// with the reference's ERC20Error::MustBeContractOwner, byte-identically.
+TEST_F(Erc20ParityTest, UnauthorizedMintParity)
+{
+  auto nk = make_result_keys("native_step", 2);
+  auto rk = make_result_keys("rv32_step", 2);
+  auto steps = [](ContractAddress token, ContractAddress recipient,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], recipient, make_amount(100)),
+        make_step<u8"total_supply">(token, keys[1])};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk),
+                           kNativeCallerAddr, kRv32CallerAddr);
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an unauthorized "
+         "mint";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 2U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"mint">(records[0]),
+            std::optional(itc_erc20::ERC20Error::MustBeContractOwner));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(0));
+}
+
+// Baseline burn: mint then burn part of it. Both backends accept both ops
+// byte-identically, and supply and balance reflect the difference.
+TEST_F(Erc20ParityTest, FundedBurnParity)
+{
+  auto nk = make_result_keys("native_step", 4);
+  auto rk = make_result_keys("rv32_step", 4);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], holder, make_amount(1'000)),
+        make_step<u8"burn">(token, keys[1], holder, make_amount(400)),
+        make_step<u8"total_supply">(token, keys[2]),
+        make_step<u8"get_balance_of">(token, keys[3], holder)};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an authorized burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 4U);
+  ASSERT_GE(records[1].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "an authorized funded burn must succeed";
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[2]),
+            std::optional<uint128_t>(600));
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[3]),
+            std::optional<uint128_t>(600));
+}
+
+// Boundary: burning the holder's exact full balance lands balance and supply
+// at zero and succeeds on both backends.
+TEST_F(Erc20ParityTest, ExactBalanceBurnParity)
+{
+  auto nk = make_result_keys("native_step", 4);
+  auto rk = make_result_keys("rv32_step", 4);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], holder, make_amount(1'000)),
+        make_step<u8"burn">(token, keys[1], holder, make_amount(1'000)),
+        make_step<u8"total_supply">(token, keys[2]),
+        make_step<u8"get_balance_of">(token, keys[3], holder)};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an exact-balance "
+         "burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 4U);
+  ASSERT_GE(records[1].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "an exact-balance burn must succeed";
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[2]),
+            std::optional<uint128_t>(0));
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[3]),
+            std::optional<uint128_t>(0));
+}
+
+// Boundary: one past the holder's balance aborts on both backends with
+// identical TooLarge bytes, leaving balance and supply untouched.
+TEST_F(Erc20ParityTest, OneOverBalanceBurnParity)
+{
+  auto nk = make_result_keys("native_step", 4);
+  auto rk = make_result_keys("rv32_step", 4);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], holder, make_amount(1'000)),
+        make_step<u8"burn">(token, keys[1], holder, make_amount(1'001)),
+        make_step<u8"total_supply">(token, keys[2]),
+        make_step<u8"get_balance_of">(token, keys[3], holder)};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged one past the balance "
+         "boundary on burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 4U);
+  ASSERT_GE(records[1].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"burn">(records[1]),
+            std::optional(itc_erc20::ERC20Error::TooLarge));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[2]),
+            std::optional<uint128_t>(1'000));
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[3]),
+            std::optional<uint128_t>(1'000));
+}
+
+// A burn from a never-funded holder (no prior mint at all, so the native
+// supply key does not even exist): the strict balance debit fires first on
+// both backends, with identical TooLarge bytes.
+TEST_F(Erc20ParityTest, UnfundedBurnParity)
+{
+  auto nk = make_result_keys("native_step", 2);
+  auto rk = make_result_keys("rv32_step", 2);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{make_step<u8"burn">(token, keys[0], holder,
+                                                        make_amount(50)),
+                                    make_step<u8"total_supply">(token,
+                                                                keys[1])};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an unfunded burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 2U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"burn">(records[0]),
+            std::optional(itc_erc20::ERC20Error::TooLarge));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(0));
+}
+
+// A burn amount above INT128_MAX: both backends reject at the amount
+// conversion with identical TooLarge bytes, before touching any state.
+TEST_F(Erc20ParityTest, HugeAmountBurnParity)
+{
+  auto nk = make_result_keys("native_step", 2);
+  auto rk = make_result_keys("rv32_step", 2);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], holder, make_amount(10)),
+        make_step<u8"burn">(token, keys[1], holder,
+                            make_amount(uint128_t{1} << 127))};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on burn amount > "
+         "INT128_MAX";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 2U);
+  ASSERT_GE(records[1].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"burn">(records[1]),
+            std::optional(itc_erc20::ERC20Error::TooLarge));
+}
+
+// A burn from an ordinary (non-genesis-root) caller: both backends reject it
+// with the reference's ERC20Error::MustBeContractOwner, byte-identically.
+TEST_F(Erc20ParityTest, UnauthorizedBurnParity)
+{
+  auto nk = make_result_keys("native_step", 1);
+  auto rk = make_result_keys("rv32_step", 1);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"burn">(token, keys[0], holder, make_amount(100))};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk),
+                           kNativeCallerAddr, kRv32CallerAddr);
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an unauthorized "
+         "burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 1U);
+  ASSERT_GE(records[0].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
+  EXPECT_EQ(step_erc20_error<u8"burn">(records[0]),
+            std::optional(itc_erc20::ERC20Error::MustBeContractOwner));
+}
+
+// Supply accumulation across several operations in one transaction: an
+// initial empty-state read, two mints to distinct recipients, a partial burn,
+// then reads pinning supply = N + M - K and the individual balances --
+// byte-identically on both backends.
+TEST_F(Erc20ParityTest, TotalSupplyTracksMintBurnParity)
+{
+  auto nk = make_result_keys("native_step", 7);
+  auto rk = make_result_keys("rv32_step", 7);
+  auto steps = [](ContractAddress token, ContractAddress holder_a,
+                  ContractAddress holder_b,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"total_supply">(token, keys[0]),
+        make_step<u8"mint">(token, keys[1], holder_a, make_amount(1'000)),
+        make_step<u8"mint">(token, keys[2], holder_b, make_amount(500)),
+        make_step<u8"burn">(token, keys[3], holder_a, make_amount(300)),
+        make_step<u8"total_supply">(token, keys[4]),
+        make_step<u8"get_balance_of">(token, keys[5], holder_a),
+        make_step<u8"get_balance_of">(token, keys[6], holder_b)};
+  };
+  auto [native_outcome, rv32_outcome] = run_mint_burn_parity(
+      steps(kNativeTokenAddr, kNativeRecipientAddr, kNativeTfRecipientAddr, nk),
+      steps(kRv32TokenAddr, kRv32RecipientAddr, kRv32TfRecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on supply tracking "
+         "across mint/mint/burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 7U);
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[0]),
+            std::optional<uint128_t>(0));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[4]),
+            std::optional<uint128_t>(1'200));
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[5]),
+            std::optional<uint128_t>(700));
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[6]),
+            std::optional<uint128_t>(500));
+}
+
+// Mint and an equal burn as siblings in one transaction: the burn sees the
+// running in-tx supply and balance, both succeed, and the committed supply
+// nets back to the pre-mint value -- byte-identically on both backends.
+TEST_F(Erc20ParityTest, MintThenBurnSameTxNetsSupplyParity)
+{
+  auto nk = make_result_keys("native_step", 5);
+  auto rk = make_result_keys("rv32_step", 5);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"total_supply">(token, keys[0]),
+        make_step<u8"mint">(token, keys[1], holder, make_amount(1'000)),
+        make_step<u8"burn">(token, keys[2], holder, make_amount(1'000)),
+        make_step<u8"total_supply">(token, keys[3]),
+        make_step<u8"get_balance_of">(token, keys[4], holder)};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a same-tx "
+         "mint-then-burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 5U);
+  ASSERT_GE(records[1].size(), 2U);
+  ASSERT_GE(records[2].size(), 2U);
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(records[2][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "burning tokens minted earlier in the same tx must succeed";
+  EXPECT_EQ(records[0], records[3])
+      << "the committed supply must net back to the pre-mint value";
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[4]),
+            std::optional<uint128_t>(0));
+}
+
+// A burn against hand-crafted state where the balance exists but the supply
+// key was never written: the strict balance debit passes at invoke, the
+// supply decrement is deferred, and the commit rejects the transaction on
+// both backends (the supply floor would go negative) -- byte-identically.
+TEST_F(Erc20ParityTest, BurnWithoutSupplyKeyParity)
+{
+  auto nk = make_result_keys("native_step", 1);
+  auto rk = make_result_keys("rv32_step", 1);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"burn">(token, keys[0], holder, make_amount(50))};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk),
+                           kGenesisRootContractAddress,
+                           kGenesisRootContractAddress, [this] {
+                             write_native_balance(kNativeRecipientAddr, 100);
+                             write_rv32_balance(kRv32RecipientAddr, 100);
+                           });
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a burn with no "
+         "supply key";
+  EXPECT_NE(rv32_outcome.first, ExecResult::ExecResultOK)
+      << "the deferred supply decrement must be rejected at commit";
+}
+
+// A mint whose supply increment overflows the committed total supply
+// (hand-crafted near INT128_MAX): the increment is deferred like the
+// reference's non-strict supply add, the child returns Ok, and the commit
+// rejects the transaction on both backends -- byte-identically.
+TEST_F(Erc20ParityTest, MintSupplyOverflowParity)
+{
+  auto nk = make_result_keys("native_step", 1);
+  auto rk = make_result_keys("rv32_step", 1);
+  auto steps = [](ContractAddress token, ContractAddress recipient,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], recipient, make_amount(100))};
+  };
+  auto [native_outcome, rv32_outcome] = run_mint_burn_parity(
+      steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+      steps(kRv32TokenAddr, kRv32RecipientAddr, rk),
+      kGenesisRootContractAddress, kGenesisRootContractAddress, [this] {
+        write_native_total_supply(std::numeric_limits<int128_t>::max() - 10);
+        write_rv32_total_supply(std::numeric_limits<int128_t>::max() - 10);
+      });
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a mint "
+         "overflowing the committed total supply";
+  EXPECT_NE(rv32_outcome.first, ExecResult::ExecResultOK)
+      << "the deferred supply increment must be rejected at commit";
+}
+
+// A burn of more than the committed total supply against hand-crafted
+// inconsistent state (balance > supply, unreachable organically since supply
+// bounds every balance): the strict balance debit passes at invoke, the
+// deferred supply decrement leaves a negative final total, and the commit
+// rejects the transaction on both backends -- byte-identically.
+TEST_F(Erc20ParityTest, BurnBeyondSupplyParity)
+{
+  auto nk = make_result_keys("native_step", 1);
+  auto rk = make_result_keys("rv32_step", 1);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"burn">(token, keys[0], holder, make_amount(50))};
+  };
+  auto [native_outcome, rv32_outcome] =
+      run_mint_burn_parity(steps(kNativeTokenAddr, kNativeRecipientAddr, nk),
+                           steps(kRv32TokenAddr, kRv32RecipientAddr, rk),
+                           kGenesisRootContractAddress,
+                           kGenesisRootContractAddress, [this] {
+                             write_native_balance(kNativeRecipientAddr, 100);
+                             write_native_total_supply(10);
+                             write_rv32_balance(kRv32RecipientAddr, 100);
+                             write_rv32_total_supply(10);
+                           });
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on a burn beyond the "
+         "committed total supply";
+  EXPECT_NE(rv32_outcome.first, ExecResult::ExecResultOK)
+      << "the deferred supply decrement must be rejected at commit";
+}
+
+// Overflow of the in-transaction supply add accumulator: a mint of
+// INT128_MAX followed by a sibling mint of 1 in the same transaction. The
+// second mint's supply increment overflows the accumulated in-tx add, which
+// the reference reports by throwing LibraryExn::NonNegativeIntOverflow (a
+// library abort, not an ERC20 error). A compensating burn nets the staged
+// supply and balance back to zero so the transaction commits and the step
+// records survive for comparison. Byte-identical on both backends.
+TEST_F(Erc20ParityTest, MintSupplyAccumulatorOverflowParity)
+{
+  constexpr uint128_t kMax = std::numeric_limits<int128_t>::max();
+  auto nk = make_result_keys("native_step", 4);
+  auto rk = make_result_keys("rv32_step", 4);
+  auto steps = [&](ContractAddress token, ContractAddress holder_a,
+                   ContractAddress holder_b,
+                   std::vector<StorageKeyContractData> const &keys) {
+    return std::vector<CaptureStep>{
+        make_step<u8"mint">(token, keys[0], holder_a, make_amount(kMax)),
+        make_step<u8"mint">(token, keys[1], holder_b, make_amount(1)),
+        make_step<u8"burn">(token, keys[2], holder_a, make_amount(kMax)),
+        make_step<u8"total_supply">(token, keys[3])};
+  };
+  auto [native_outcome, rv32_outcome] = run_mint_burn_parity(
+      steps(kNativeTokenAddr, kNativeRecipientAddr, kNativeTfRecipientAddr, nk),
+      steps(kRv32TokenAddr, kRv32RecipientAddr, kRv32TfRecipientAddr, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on an in-tx supply "
+         "accumulator overflow";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK)
+      << "the netted transaction must commit";
+  ASSERT_EQ(records.size(), 4U);
+  ASSERT_GE(records[0].size(), 2U);
+  ASSERT_GE(records[1].size(), 2U);
+  ASSERT_GE(records[2].size(), 2U);
+  EXPECT_EQ(records[0][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(records[1][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Abort))
+      << "the accumulator-overflowing mint must abort at invoke";
+  EXPECT_EQ(step_erc20_error<u8"mint">(records[1]), std::nullopt)
+      << "the abort must be a library exception, not an ERC20 error";
+  EXPECT_EQ(records[2][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[3]),
+            std::optional<uint128_t>(0));
 }
 
 // NOLINTEND(bugprone-exception-escape)

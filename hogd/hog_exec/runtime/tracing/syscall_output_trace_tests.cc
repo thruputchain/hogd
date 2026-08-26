@@ -3,9 +3,13 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+
+#include "hog_exec_constants.hh"
 
 #include "auth_claim.hh"
 #include "auth_token.hh"
@@ -364,6 +368,134 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// Pins every contract-observable behavior of the incremental-hash buffers in
+// one traced sequence: interleaved independent indexes, the append-overflow
+// error leaving the buffer intact, finalize consuming its buffer, index reuse
+// via reset, and the finalize byte counts feeding
+// sha256_total_bytes_processed. The exact trace (inputs, digests, error
+// statuses, gas) must not move when the buffer representation changes.
+TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
+{
+  const std::array<uint8_t, 3> abc = {'a', 'b', 'c'};
+  const std::array<uint8_t, 4> wxyz = {'w', 'x', 'y', 'z'};
+  const std::array<uint8_t, 3> def = {'d', 'e', 'f'};
+  const std::array<uint8_t, 5> fresh = {'f', 'r', 'e', 's', 'h'};
+  const std::vector<uint8_t> oversized(kSHA256BufferMaxSize, 0xEE);
+
+  const SHA256Hash hash_wxyz = sha256(std::span(wxyz));
+  const SHA256Hash hash_abcdef =
+      sha256(std::vector<uint8_t>{'a', 'b', 'c', 'd', 'e', 'f'});
+  const SHA256Hash hash_fresh = sha256(std::span(fresh));
+
+  auto context = make_single_contract_context(
+      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef,
+       hash_fresh](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto expect = [](auto r, SyscallErrorCode code) {
+          return r.has_value() && r.value() == code;
+        };
+        constexpr auto kOk = SyscallErrorCode::kSyscallErrorCodeNone;
+        constexpr auto kInvalid =
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::as_bytes(std::span(abc)), true),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        1U, std::as_bytes(std::span(wxyz)), true),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Overflowing append: rejected, and index 0 keeps hashing as if the
+        // call never happened.
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::as_bytes(std::span(oversized)), false),
+                    kInvalid)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::as_bytes(std::span(def)), false),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        SHA256Hash out{};
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out), kOk) ||
+            out != hash_wxyz) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+            out != hash_abcdef) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Finalize consumed index 0.
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+                    kInvalid)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // The index is reusable with a fresh reset.
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::as_bytes(std::span(fresh)), true),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+            out != hash_fresh) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  auto update_entry = [](uint32_t index, std::span<const uint8_t> buffer,
+                         bool reset, HostFunctionStatusXdr status) {
+    SyscallTraceBody body(SyscallNo::kSHA256Update);
+    body.sha256_update().inputs.index = index;
+    body.sha256_update().inputs.buffer.append_range(buffer);
+    body.sha256_update().inputs.reset = reset;
+    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+  };
+  auto finalize_entry = [](uint32_t index, std::optional<SHA256Hash> hash,
+                           HostFunctionStatusXdr status) {
+    SyscallTraceBody body(SyscallNo::kSHA256Finalize);
+    body.sha256_finalize().inputs.index = index;
+    if (hash.has_value()) {
+      body.sha256_finalize().outputs =
+          SyscallSHA256FinalizeOutputs{.hash = hash.value()};
+    }
+    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+  };
+  const auto invalid =
+      error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  SyscallTraceVec expected;
+  expected.push_back(update_entry(0, abc, true, ok_status()));
+  expected.push_back(update_entry(1, wxyz, true, ok_status()));
+  expected.push_back(update_entry(0, oversized, false, invalid));
+  expected.push_back(update_entry(0, def, false, ok_status()));
+  expected.push_back(finalize_entry(1, hash_wxyz, ok_status()));
+  expected.push_back(finalize_entry(0, hash_abcdef, ok_status()));
+  expected.push_back(finalize_entry(0, std::nullopt, invalid));
+  expected.push_back(update_entry(0, fresh, true, ok_status()));
+  expected.push_back(finalize_entry(0, hash_fresh, ok_status()));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  // Byte counts flow through finalize into the transaction stats: 4 (wxyz) +
+  // 6 (abcdef) + 5 (fresh); the failed append and failed finalize add nothing.
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 15U);
 
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
