@@ -496,15 +496,14 @@ private:
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
     co_await db_rpc_->register_scheduler(scheduler_);
-    auth_rpc_->register_callback(
-        [this](BlockHeight height, KeyChangeBatch key_changes) {
-          return auth_data_changed(height, std::move(key_changes));
-        });
-
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
 
     initialized_.store(true, std::memory_order_release);
+    auth_rpc_->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        });
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }

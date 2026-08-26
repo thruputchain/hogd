@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string_view>
 #include <utility>
 
@@ -26,6 +27,7 @@ public:
 
   void register_callback(auth_data_callback &&callback)
   {
+    const std::lock_guard lock(callback_mutex_);
     CHECK(!callback_.has_value());
     callback_ = std::move(callback);
   }
@@ -55,9 +57,18 @@ public:
   x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
                                                  KeyChangeBatch key_changes)
   {
-    CHECK(callback_.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    co_await (*callback_)(height, std::move(key_changes));
+    std::optional<auth_data_callback> callback;
+    {
+      const std::lock_guard lock(callback_mutex_);
+      if (!callback_.has_value()) {
+        warn("Ignoring auth-data update for height {} before mempool "
+             "coordinator initialization",
+             height);
+        co_return;
+      }
+      callback = callback_;
+    }
+    co_await (*callback)(height, std::move(key_changes));
   }
 
   static x23::Async<auth_sched_client_t> get_client()
@@ -75,6 +86,7 @@ public:
   }
 
 private:
+  std::mutex callback_mutex_;
   std::optional<auth_data_callback> callback_;
 };
 

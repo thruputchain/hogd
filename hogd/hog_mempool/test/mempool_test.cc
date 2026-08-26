@@ -501,6 +501,25 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
+TEST(MempoolAuthRpc, AuthDataChangedBeforeCallbackRegistrationIsIgnored)
+{
+  MempoolAuthRpc auth_rpc;
+
+  EXPECT_NO_THROW(
+      auth_rpc.mempoolauth_auth_data_changed(1, KeyChangeBatch{})());
+
+  std::optional<BlockHeight> callback_height;
+  auth_rpc.register_callback(
+      [&callback_height](BlockHeight height,
+                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+        callback_height = height;
+        co_return;
+      });
+
+  auth_rpc.mempoolauth_auth_data_changed(2, KeyChangeBatch{})();
+  EXPECT_EQ(callback_height, 2);
+}
+
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
 {
   MempoolTestInfra server;
