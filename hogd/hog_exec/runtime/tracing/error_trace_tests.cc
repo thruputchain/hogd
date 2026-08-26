@@ -132,13 +132,13 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
       << x23::show(handler.get_trace()->system_calls);
 }
 
-TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
+TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
   ContractTraitClient<syscall_misc_tests::SyscallMiscTests> client(addr);
   const SignedTransaction tx{
       .tx = Transaction{.invocation = client.make_invocation<
-                            u8"test_invoke_unowned_token_beats_reentrance">(
+                            u8"test_invoke_unowned_token_loses_to_reentrance">(
                             kGasLimit),
                         .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, runtime_context_);
@@ -147,18 +147,19 @@ TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_entry(99'370, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'360, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kGetCurrentAddress);
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(99'336, 99'336, std::move(body),
+        make_entry(99'326, 99'326, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
-    // Self-invoke forwarding a fabricated token id 0xDEAD: the ownership
-    // check wins over the reentrance check, and no child frame runs.
+    // Self-invoke forwarding a fabricated token id 0xDEAD: the reentrance
+    // check wins before the forwarded token list is read, and no child frame
+    // runs.
     SyscallTraceBody body(SyscallNo::kInvoke);
     body.invoke().inputs.address = addr;
     body.invoke().inputs.owned_auth_token_ids_list.append_range(
@@ -168,11 +169,11 @@ TEST_F(ErrorTraceTest, UnownedTokenBeatsReentranceTraceIsExact)
         .gas_limit = UINT64_MAX,
         .flags = 0,
     };
-    expected.push_back(make_entry(
-        99'302, 99'302, std::move(body),
-        status_with(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
+    expected.push_back(
+        make_entry(99'292, 99'292, std::move(body),
+                   status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(99'264));
+  expected.push_back(empty_return_entry(99'254));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
