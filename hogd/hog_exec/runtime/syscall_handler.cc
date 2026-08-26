@@ -1852,20 +1852,25 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
     return entry.error();
   }
 
-  // A read that would exceed the per-tx concurrent-observation cap surfaces as
-  // a deterministic syscall error, so a contract can't drive the bounded
-  // observation vector past kMaxConcurrentRcqReadsPerTx (#2894). This is a
-  // dedicated resource-limit code contracts can handle as a stop condition,
-  // not a malformed-input error.
+  // Return whatever get_next_item resolved. Only a concurrent read consumes an
+  // observation slot; a self or past-block consume records no observation and
+  // so is never subject to the per-tx observation cap. get_next_item already
+  // returns nullptr for a concurrent read the cap blocked, so a non-null entry
+  // here is always a legitimate read -- return it even once the cap is exceeded
+  // rather than dropping it behind a read-limit error (#3611). The pointer
+  // aliases into owned storage and is copied here into the syscall result.
+  if (const QueueEntry *value = entry.value()) {
+    return *value;
+  }
+
+  // No entry resolved. If that is because a concurrent read hit the per-tx
+  // observation cap, surface the deterministic read-limit error so a contract
+  // can't drive the bounded observation vector past kMaxConcurrentRcqReadsPerTx
+  // (#2894). This is a dedicated resource-limit code contracts can handle as a
+  // stop condition, not a malformed-input error.
   if (observation_cap_exceeded(execution_mode_data)) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
-  }
-
-  // The pointer aliases into owned storage and is copied here into the syscall
-  // result (the one copy the contract's return value requires).
-  if (const QueueEntry *value = entry.value()) {
-    return *value;
   }
 
   return SyscallError{
