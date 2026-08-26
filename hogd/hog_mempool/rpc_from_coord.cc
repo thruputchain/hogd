@@ -230,8 +230,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(
-                batch, *txs, static_cast<size_t>(mempool_tx_size_limit_)))) {
+        // Not [mempool_tx_size_limit_]: a batch over capacity is admitted up
+        // to the free slots by [enforce capacity] below rather than dropped,
+        // so the decode itself is bounded only by the payload.
+        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
           info("submit_unvetted rejected malformed transaction batch");
@@ -415,8 +417,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(
-                batch, *txs, static_cast<size_t>(mempool_tx_size_limit_)))) {
+        // Not [mempool_tx_size_limit_]: a batch over capacity is admitted up
+        // to the free slots by [enforce capacity] below rather than dropped,
+        // so the decode itself is bounded only by the payload.
+        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_vetted_rpc_count.increment();
           info("submit_vetted rejected malformed transaction batch");
