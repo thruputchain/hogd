@@ -77,6 +77,11 @@ struct GenTs {
   static string map_write_method(const string &t);
   static string map_read_method(const string &t);
   static string map_bound(const string &b);
+  static string map_bound_type(const string &b);
+  static string map_bound_runtime(const string &b);
+  static bool const_fits_u32(const string &val);
+  static string xdr_doc(const Declaration &d, const string &base,
+                        bool is_typedef);
   static bool is_primitive_type(const string &t);
   static string to_camel_case(const string &name);
 
@@ -250,6 +255,87 @@ GenTs::map_bound(const string &b)
   return "proto." + b;
 }
 
+// Bound in a TYPE position (FixedBytes<N>, VarArray<T, N>, ...). Numeric
+// literals pass through; named constants resolve via their @hidden same-name
+// type companion on the proto barrel. Empty (unbounded vec/string) returns
+// "" — callers fall back to the un-annotated type.
+string
+GenTs::map_bound_type(const string &b)
+{
+  if (b.empty())
+    return {};
+  if (std::isdigit(b[0]))
+    return b;
+  return "proto." + b;
+}
+
+// Bound as a runtime number expression. Named constants are bigints and need
+// Number(); numeric literals pass through untouched.
+string
+GenTs::map_bound_runtime(const string &b)
+{
+  if (b.empty() || std::isdigit(b[0]))
+    return map_bound(b);
+  return "Number(proto." + b + ")";
+}
+
+// Whether a const's value fits in u32, and so may legally appear as an XDR
+// array/vec bound. Only these get a type-level companion: number literals
+// above 2^53 would silently lose precision.
+bool
+GenTs::const_fits_u32(const string &val)
+{
+  string v = val;
+  std::erase(v, '\'');
+  try {
+    size_t pos = 0;
+    unsigned long long n = std::stoull(v, &pos, 0);
+    return pos == v.size() && n <= 0xFFFFFFFFULL;
+  }
+  catch (const std::exception &) {
+    return false; // negative, overflowing, or malformed
+  }
+}
+
+// One-line JSDoc echoing the XDR declaration for length-carrying decls
+// (fixed arrays, bounded vecs/strings). Returns "" when the decl carries no
+// length information worth surfacing.
+string
+GenTs::xdr_doc(const Declaration &d, const string &base, bool is_typedef)
+{
+  string decl;
+  string suffix;
+  bool is_opaque = (base == "opaque");
+  string unit = is_opaque || d.qual == Declaration::kString ? "bytes"
+                                                            : "elements";
+  // Named bounds link to the const's doc page; literal bounds inline.
+  string linked_bound = d.bound;
+  if (!d.bound.empty() && !std::isdigit(d.bound[0]))
+    linked_bound = "{@link " + d.bound + "}";
+
+  switch (d.qual) {
+  case Declaration::kArray:
+    decl = std::format("{} {}[{}]", base, d.id, d.bound);
+    suffix = std::format(" — exactly {} {}", linked_bound, unit);
+    break;
+  case Declaration::kVec:
+    decl = std::format("{} {}<{}>", base, d.id, d.bound);
+    if (!d.bound.empty())
+      suffix = std::format(" — max {} {}", linked_bound, unit);
+    break;
+  case Declaration::kString:
+    decl = std::format("string {}<{}>", d.id, d.bound);
+    if (!d.bound.empty())
+      suffix = std::format(" — max {} {}", linked_bound, unit);
+    break;
+  default:
+    return {};
+  }
+
+  return std::format("/** XDR: `{}{}`{}. */", is_typedef ? "typedef " : "",
+                     decl, suffix);
+}
+
 // ---- Process all definitions ----
 
 void
@@ -268,6 +354,21 @@ GenTs::show_def(const ConstDef &c)
   string val = c.val;
   std::ranges::replace(val, '\'', '_');
   prtop("export const {} = {}n;\n", c.id, val);
+
+  // Type-level companion: a same-name type alias carrying the value as a
+  // numeric literal type, so the const can parameterize array-bound types
+  // (e.g. FixedArray<T, proto.kMaxSigners>). Emitted only for values that
+  // fit in u32 — XDR bounds are u32, and number literals at or above 2^53
+  // silently lose precision. @hidden keeps the alias out of TypeDoc output.
+  if (const_fits_u32(c.val)) {
+    prtop("/**\n");
+    prtop(" * Type-level value of {{@link {0}}}, for use in array-bound "
+          "positions.\n",
+          c.id);
+    prtop(" * @hidden\n");
+    prtop(" */\n");
+    prtop("export type {} = {};\n", c.id, val);
+  }
 }
 
 void
@@ -349,62 +450,74 @@ GenTs::show_def(const Typedef &d)
   }
   case Declaration::kArray:
   {
+    string bound_t = map_bound_type(d.bound);
+    string bound_rt = map_bound_runtime(d.bound);
     if (base == "opaque") {
-      // Fixed-size opaque: branded Uint8Array with length check
+      // Fixed-size opaque: branded, length-typed Uint8Array with length check
       string factory = to_camel_case(d.id);
 
-      prtop("export type {} = Uint8Array & {{ readonly __brand: {{ readonly "
-            "{}: true }} }};\n",
-            d.id, d.id);
+      prtop("{}\n", xdr_doc(d, base, true));
+      prtop("export type {} = FixedBytes<{}> & {{ readonly __brand: {{ "
+            "readonly {}: true }} }};\n",
+            d.id, bound_t, d.id);
       prtop("export function {}(data: Uint8Array): {} {{\n", factory, d.id);
       prtop("  if (data.length !== {}) throw new Error(`{} must be exactly {} "
             "bytes, got ${{data.length}}`);\n",
-            d.bound, d.id, d.bound);
+            bound_rt, d.id, d.bound);
       prtop("  return data as {};\n", d.id);
       prtop("}}\n");
 
       codec_names_.push_back(d.id);
       prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
       prbottom("  encode(w, val) {{ w.writeFixedOpaque(val, {0}); }},\n",
-               d.bound);
+               bound_rt);
       prbottom("  decode(r) {{ return {0}(r.readFixedOpaque({1})); }},\n",
-               factory, d.bound);
+               factory, bound_rt);
       prbottom("}};\n");
     }
     else {
-      // Fixed-size array of user type — branded
+      // Fixed-size array of user type — branded, length-typed
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      prtop("export type {} = {}[] & {{ readonly __brand: {{ readonly {}: "
-            "true }} }};\n",
-            d.id, tref, d.id);
+      prtop("{}\n", xdr_doc(d, base, true));
+      prtop("export type {} = FixedArray<{}, {}> & {{ readonly __brand: {{ "
+            "readonly {}: true }} }};\n",
+            d.id, tref, bound_t, d.id);
       prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
+      prtop("  if (val.length !== {}) throw new Error(`{} must have exactly "
+            "{} elements, got ${{val.length}}`);\n",
+            bound_rt, d.id, d.bound);
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
 
       codec_names_.push_back(d.id);
       prbottom("\nconst _{0} = FixedArrayCodec(() => {1}, Number({2})) as "
                "XdrCodec<{0}>;\n",
-               d.id, cref, d.bound);
+               d.id, cref, map_bound(d.bound));
     }
     break;
   }
   case Declaration::kVec:
   {
+    string bound_t = map_bound_type(d.bound);
     if (base == "opaque") {
-      // Variable-length opaque: branded Uint8Array
+      // Variable-length opaque: branded Uint8Array carrying its max_length
       string factory = to_camel_case(d.id);
       string bound_str = map_bound(d.bound);
+      string base_ts =
+          bound_t.empty() ? "Uint8Array"
+                          : std::format("VarBytes<{}>", bound_t);
 
-      prtop("export type {} = Uint8Array & {{ readonly __brand: {{ readonly "
+      prtop("{}\n", xdr_doc(d, base, true));
+      prtop("export type {} = {} & {{ readonly __brand: {{ readonly "
             "{}: true }} }};\n",
-            d.id, d.id);
+            d.id, base_ts, d.id);
       prtop("export function {}(data: Uint8Array): {} {{\n", factory, d.id);
       if (!d.bound.empty()) {
-        prtop("  if (data.length > Number({})) throw new Error(`{} exceeds "
+        prtop("  if (data.length > {}) throw new Error(`{} exceeds "
               "max length {}, got ${{data.length}}`);\n",
-              d.bound, d.id, d.bound);
+              map_bound_runtime(d.bound), d.id, d.bound);
       }
       prtop("  return data as {};\n", d.id);
       prtop("}}\n");
@@ -418,14 +531,23 @@ GenTs::show_def(const Typedef &d)
       prbottom("}};\n");
     }
     else {
-      // Variable-length array of user type — branded
+      // Variable-length array of user type — branded, carrying its max_length
       string tref = ts_ref(base);
       string cref = codec_ref(base);
       string factory = to_camel_case(d.id);
-      prtop("export type {} = {}[] & {{ readonly __brand: {{ readonly {}: "
+      string base_ts =
+          bound_t.empty() ? tref + "[]"
+                          : std::format("VarArray<{}, {}>", tref, bound_t);
+      prtop("{}\n", xdr_doc(d, base, true));
+      prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: "
             "true }} }};\n",
-            d.id, tref, d.id);
+            d.id, base_ts, d.id);
       prtop("export function {}(val: {}[]): {} {{\n", factory, tref, d.id);
+      if (!d.bound.empty()) {
+        prtop("  if (val.length > {}) throw new Error(`{} exceeds max "
+              "length {}, got ${{val.length}}`);\n",
+              map_bound_runtime(d.bound), d.id, d.bound);
+      }
       prtop("  return val as {};\n", d.id);
       prtop("}}\n");
 
@@ -440,10 +562,14 @@ GenTs::show_def(const Typedef &d)
   {
     string factory = to_camel_case(d.id);
     string bound_str = map_bound(d.bound);
+    string bound_t = map_bound_type(d.bound);
+    string base_ts =
+        bound_t.empty() ? "string" : std::format("VarString<{}>", bound_t);
 
-    prtop("export type {} = string & {{ readonly __brand: {{ readonly {}: "
+    prtop("{}\n", xdr_doc(d, "string", true));
+    prtop("export type {} = {} & {{ readonly __brand: {{ readonly {}: "
           "true }} }};\n",
-          d.id, d.id);
+          d.id, base_ts, d.id);
     prtop("export function {}(val: string): {} {{\n", factory, d.id);
     prtop("  return val as {};\n", d.id);
     prtop("}}\n");
@@ -609,6 +735,13 @@ GenTs::gen_struct_type(const StructBody &body, const string &name)
   for (const auto &d : body) {
     if (d.qual == Declaration::kVoid)
       continue;
+    if (d.qual == Declaration::kArray || d.qual == Declaration::kVec ||
+        d.qual == Declaration::kString) {
+      string base = base_type_name(d);
+      if (!holds_alternative<string>(d.type))
+        base = name + "_" + d.id;
+      prtop("{}\n", xdr_doc(d, base, false));
+    }
     prtop("{}: {};\n", d.id, ts_field_type(d, name));
   }
   --indent_;
@@ -912,19 +1045,25 @@ GenTs::ts_field_type(const Declaration &d, const string &parent_name)
   if (!holds_alternative<string>(d.type))
     base = parent_name + "_" + d.id;
 
+  string bound_t = map_bound_type(d.bound);
+
   switch (d.qual) {
   case Declaration::kScalar:
     return ts_ref(base);
   case Declaration::kArray:
     if (base == "opaque")
-      return "Uint8Array";
-    return ts_ref(base) + "[]";
+      return std::format("FixedBytes<{}>", bound_t);
+    return std::format("FixedArray<{}, {}>", ts_ref(base), bound_t);
   case Declaration::kVec:
     if (base == "opaque")
-      return "Uint8Array";
-    return ts_ref(base) + "[]";
+      return bound_t.empty() ? "Uint8Array"
+                             : std::format("VarBytes<{}>", bound_t);
+    return bound_t.empty()
+               ? ts_ref(base) + "[]"
+               : std::format("VarArray<{}, {}>", ts_ref(base), bound_t);
   case Declaration::kString:
-    return "string";
+    return bound_t.empty() ? "string"
+                           : std::format("VarString<{}>", bound_t);
   case Declaration::kPtr:
     return ts_ref(base) + " | null";
   case Declaration::kVoid:
@@ -1027,18 +1166,21 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
   case Declaration::kArray:
   {
     string bound = map_bound(d.bound);
+    // The runtime helpers return plain Uint8Array/T[]; cast to the
+    // length-typed field type (the length is guaranteed by the codec).
+    string cast = " as " + ts_field_type(d, parent_name);
     if (base == "opaque")
-      bottom_ += std::format("{}const {} = r.readFixedOpaque(Number({}));\n",
-                             indent, d.id, bound);
+      bottom_ += std::format("{}const {} = r.readFixedOpaque(Number({})){};\n",
+                             indent, d.id, bound, cast);
     else if (is_primitive_type(base))
       bottom_ +=
           std::format("{}const {} = Array.from({{ length: Number({}) }}, () => "
-                      "r.{}());\n",
-                      indent, d.id, bound, map_read_method(base));
+                      "r.{}()){};\n",
+                      indent, d.id, bound, map_read_method(base), cast);
     else
       bottom_ += std::format(
-          "{}const {} = FixedArrayCodec({}, Number({})).decode(r);\n", indent,
-          d.id, ref(), bound);
+          "{}const {} = FixedArrayCodec({}, Number({})).decode(r){};\n", indent,
+          d.id, ref(), bound, cast);
     break;
   }
 
@@ -1093,7 +1235,9 @@ gen_ts(vector<Definition> *defs)
 
   {
     string imports = "import { type XdrCodec"
-                     ", VoidCodec, OptionCodec, VarArrayCodec, FixedArrayCodec";
+                     ", VoidCodec, OptionCodec, VarArrayCodec, FixedArrayCodec"
+                     ", type FixedBytes, type FixedArray"
+                     ", type VarBytes, type VarArray, type VarString";
     if (gs.has_programs_)
       imports += ", type RpcProgramMeta";
     for (const auto &pc : gs.primitive_codecs_)
