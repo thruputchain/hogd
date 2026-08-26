@@ -966,7 +966,8 @@ TEST(Mempool, ProposalRecoversAfterInitializeBlockFailure)
   const SchedulerProposalResult retry = propose_block(server, db_tip);
   ASSERT_EQ(retry.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
   SignedTransactionBatch proposed_txs;
-  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs)());
+  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs,
+                                  kNoBatchSizeLimit)());
   EXPECT_EQ(proposed_txs, txs);
 }
 
