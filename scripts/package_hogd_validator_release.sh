@@ -81,9 +81,14 @@ copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
   "$validator_dir/contracts/dev_wallet.rv32a"
 copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
   "$hog_devnode_dir/contracts/dev_wallet.rv32a"
+copy_file "$build_dir/built_contracts/genesis_root.rv32a" \
+  "$validator_dir/contracts/genesis_root.rv32a"
+copy_file "$build_dir/built_contracts/genesis_root.rv32a" \
+  "$hog_devnode_dir/contracts/genesis_root.rv32a"
 
 tar -C "$validator_dir" -czf "$output_dir/$validator_package.tar.gz" \
   contracts/dev_wallet.rv32a \
+  contracts/genesis_root.rv32a \
   hog-auth \
   hog-db \
   hog-devnode \
@@ -95,4 +100,5 @@ tar -C "$validator_dir" -czf "$output_dir/$validator_package.tar.gz" \
 
 tar -C "$hog_devnode_dir" -czf "$output_dir/$hog_devnode_package.tar.gz" \
   contracts/dev_wallet.rv32a \
+  contracts/genesis_root.rv32a \
   hog-devnode

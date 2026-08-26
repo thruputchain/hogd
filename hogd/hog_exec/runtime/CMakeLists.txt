@@ -70,6 +70,7 @@ target_link_libraries(
 )
 
 add_library(runtime_test_objects OBJECT
+  auth_weight_tests.cc
   authclaim_test.cc
   balance_cost_tracking_test.cc
   block_cancel_tests.cc
@@ -126,6 +127,7 @@ add_library(runtime_test_objects OBJECT
   syscall_parse_tests.cc
   tracing_tests.cc
   try_invoke_test.cc
+  tx_context_tests.cc
 )
 
 target_link_libraries(

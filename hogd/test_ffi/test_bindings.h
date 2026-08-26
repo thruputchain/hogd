@@ -205,10 +205,13 @@ enum TestFFIErrorCode setup_create_contract(void *context, void *db,
                                             uint8_t const *contract_bytes,
                                             uint32_t contract_len);
 
-// setup_create_contract creates a contract that is _visible_ in the current
-// block.
+// setup_deploy_contract deploys a previously-created contract at an address so
+// it is _visible_ in the current block.
 // contract_hash must be a pointer to a 32-byte SHA256Hash.
 // contract_size is the size of the contract in bytes.
+// Native precompiles cannot be deployed this way
+// (kTestFFIErrorCodeInvalidArgument): they are installed at genesis, matching
+// the production deploy_contract() ban.
 enum TestFFIErrorCode setup_deploy_contract(void *db,
                                             const uint8_t *deployment_addr,
                                             const uint8_t *contract_hash,

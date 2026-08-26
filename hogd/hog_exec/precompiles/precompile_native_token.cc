@@ -24,6 +24,7 @@
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -195,6 +196,50 @@ using difference_t = std::tuple<int64_t, uint64_t>;
 
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
 
+using MintBurnStatus = InvokeStatus<Result<void, ERC20Exception>>;
+
+// Mirror the reference's add_to_total_supply (the SDK's plain, non-strict
+// non_negative_int_inc): combine the increment with the in-transaction values
+// only -- no snapshot force-load, and no invoke-time range check against the
+// committed base, which is validated at commit instead. The one invoke-time
+// failure is an overflow of the accumulated in-tx add, which the SDK reports
+// by throwing LibraryExn::NonNegativeIntOverflow -- returned here as the
+// byte-identical library abort. Returns nullopt once the increment is staged.
+x23::Async<std::optional<MintBurnStatus>>
+add_to_total_supply(NativeSyscallContext &ctx, int128_t diff)
+{
+  int128_t set_value{};
+  bool set_value_present{};
+  int128_t add_value{};
+  auto get = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+      kNativeTokenTotalSupplyKey,
+      /*load_from_snapshot=*/false, set_value, set_value_present, add_value);
+  if (!get) {
+    co_return MintBurnStatus{
+        NativeContractBuilder::host_fn_error_conversion(get.error())};
+  }
+  if (*get != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return MintBurnStatus{InvokeError{InvokeErrorCode::Deterministic}};
+  }
+  if (integer_add_overflow(add_value, diff)) {
+    co_return MintBurnStatus{
+        {Result<void, ERC20Exception>::make_err(LibraryException{
+            LibraryExn(LibraryExnKind::kLibraryExnNonNegativeIntOverflow)})}};
+  }
+  const int128_t *set_ptr = set_value_present ? &set_value : nullptr;
+  auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+      kNativeTokenTotalSupplyKey, set_ptr, add_value + diff,
+      std::to_underlying(StorageDeltaFlags::None));
+  if (!set) {
+    co_return MintBurnStatus{
+        NativeContractBuilder::host_fn_error_conversion(set.error())};
+  }
+  if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return MintBurnStatus{InvokeError{InvokeErrorCode::Deterministic}};
+  }
+  co_return std::nullopt;
+}
+
 x23::Async<InvokeStatus<Result<void, ERC20Exception>>>
 mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
 {
@@ -205,8 +250,10 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   if (!sender) {
     co_return sender.error();
   }
+  // The genesis root plays the reference's stored contract owner; any other
+  // caller gets the reference's rejection, byte-identically.
   if (*sender != kGenesisRootContractAddress) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+    co_return co_await erc20_error(itc_erc20::ERC20Error::MustBeContractOwner);
   }
 
   const uint128_t unsigned_amount =
@@ -216,27 +263,22 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   }
   const int128_t signed_amount = unsigned_amount;
 
-  int128_t supply_base{};
-  bool supply_base_present{};
-  int128_t supply_add{};
-  auto get = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
-      supply_add);
-  if (!get) {
-    co_return NativeContractBuilder::host_fn_error_conversion(get.error());
+  // Strict credit, mirroring the reference's add_to_balance: reject at
+  // invoke with TooLarge when the running balance (committed base + net
+  // in-tx delta) cannot absorb the credit, before staging any state.
+  auto receiver_balance =
+      co_await ctx.handler().get_native_token_balance(receiver);
+  if (!receiver_balance) {
+    co_return receiver_balance.error().to_invoke_error();
   }
-  if (*get == SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
-    supply_base = 0;
-    supply_base_present = true;
-    supply_add = 0;
-  }
-  if (*get != SyscallErrorCode::kSyscallErrorCodeNone &&
-      *get != SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+  if (!receiver_balance.value().has_value()) {
+    // Staged-negative balance (system-path state the WASM reference can never
+    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
+    // carve-out from byte parity, as in transfer_impl.
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
-  if (!supply_base_present || integer_add_overflow(supply_add, signed_amount) ||
-      integer_add_overflow(supply_base, supply_add + signed_amount)) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+  if (integer_add_overflow(receiver_balance.value().value(), signed_amount)) {
+    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
   auto credit =
@@ -246,18 +288,12 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
     co_return credit.error().to_invoke_error();
   }
   if (!credit.value().has_value()) {
-    co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
+    co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  const int128_t new_add = supply_add + signed_amount;
-  auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-      kNativeTokenTotalSupplyKey, &supply_base, new_add,
-      std::to_underlying(StorageDeltaFlags::None));
-  if (!set) {
-    co_return NativeContractBuilder::host_fn_error_conversion(set.error());
-  }
-  if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+  // Reference order: the balance credit first, then the deferred supply add.
+  if (auto supply_failure = co_await add_to_total_supply(ctx, signed_amount)) {
+    co_return std::move(*supply_failure);
   }
 
   ContractAddress zero{};
@@ -286,8 +322,10 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
   if (!sender) {
     co_return sender.error();
   }
+  // The genesis root plays the reference's stored contract owner; any other
+  // caller gets the reference's rejection, byte-identically.
   if (*sender != kGenesisRootContractAddress) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+    co_return co_await erc20_error(itc_erc20::ERC20Error::MustBeContractOwner);
   }
 
   const uint128_t unsigned_amount =
@@ -310,27 +348,8 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
     co_return co_await erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
-  int128_t supply_base{};
-  bool supply_base_present{};
-  int128_t supply_add{};
-  auto get = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
-      kNativeTokenTotalSupplyKey, true, supply_base, supply_base_present,
-      supply_add);
-  if (!get) {
-    co_return NativeContractBuilder::host_fn_error_conversion(get.error());
-  }
-  const int128_t supply_delta = -signed_amount;
-  if (*get != SyscallErrorCode::kSyscallErrorCodeNone || !supply_base_present ||
-      integer_add_overflow(supply_add, supply_delta)) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  const int128_t new_add = supply_add + supply_delta;
-  if (integer_add_overflow(supply_base, new_add) || supply_base + new_add < 0) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
-  }
-
   auto debit =
-      co_await ctx.handler().modify_native_token_balance(owner, supply_delta);
+      co_await ctx.handler().modify_native_token_balance(owner, -signed_amount);
   if (!debit) {
     co_return debit.error().to_invoke_error();
   }
@@ -338,14 +357,10 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
     co_return InvokeError{InvokeErrorCode::Deterministic};
   }
 
-  auto set = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-      kNativeTokenTotalSupplyKey, &supply_base, new_add,
-      std::to_underlying(StorageDeltaFlags::None));
-  if (!set) {
-    co_return NativeContractBuilder::host_fn_error_conversion(set.error());
-  }
-  if (*set != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return InvokeError{InvokeErrorCode::Deterministic};
+  // Reference order: the balance debit first, then the deferred supply
+  // decrement; a decrement past the committed supply is caught at commit.
+  if (auto supply_failure = co_await add_to_total_supply(ctx, -signed_amount)) {
+    co_return std::move(*supply_failure);
   }
 
   ContractAddress zero{};

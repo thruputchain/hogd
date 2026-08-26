@@ -37,6 +37,7 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "standard_asset_events.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -1819,6 +1820,166 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   auto runtime_context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(tx, *runtime_context);
   EXPECT_FALSE(handler.root_invoke()().is_root_success());
+}
+
+// Edge case: a native-token balance at (nearly) INT128_MAX must still be able
+// to receive a storage refund at commit. hogdb's release_balance() is
+// infallible -- it CHECK-fails rather than returning an error if the credited
+// refund exceeds the balance's remaining add-capacity (INT128_MAX - base). The
+// mint precompile no longer bounds total supply below INT128_MAX at invoke
+// (that check moved to commit for rv32 parity), so this pins the property that
+// keeps release_balance() safe even at the maximum: an address holding the
+// entire supply as balance has no storage to release, and more generally
+// (balance + its locked storage) <= total_supply <= INT128_MAX, so any storage
+// refund it receives is always <= its add-capacity. HOG conservation is what
+// makes the unreachable state (base == INT128_MAX AND a pending refund)
+// unreachable; if that ever regressed, the block-3 delete below would abort
+// the process on the CHECK inside release_balance() rather than committing.
+//
+// Sequence: block 1 mints INT128_MAX to the whale (the genesis root is the
+// only authorized minter); block 2 has the whale write a bytestring, locking
+// storage cost out of its near-max balance; block 3 has the whale delete it,
+// so the released storage cost is credited back via release_balance() against
+// a base a hair below INT128_MAX.
+TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
+{
+  constexpr static ContractAddress kWhaleAddr = make_contract_address(180);
+  constexpr static int128_t kMaxSupply = std::numeric_limits<int128_t>::max();
+
+  auto const *cost_model = get_default_cost_model();
+  const int128_t balance_cost = cost_model->get_balance_cost();
+
+  // The genesis root roots the mint tx; the native token address owns the
+  // freshly-created total-supply row.
+  setup_grant_storage_token(kGenesisRootContractAddress,
+                            replay_cache_cost_charged(1));
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            cost_model->get_nnint_cost());
+
+  // Genesis-root driver: method 0 mints INT128_MAX to the whale.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> root_fns;
+  root_fns.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+        auto mint = client.invoke_opt<u8"mint">(
+            ctx, kWhaleAddr, make_amount(static_cast<uint128_t>(kMaxSupply)));
+        if (!mint.has_value() || !mint.value().has_value() ||
+            !mint.value().value().has_value() ||
+            !mint.value().value().value().is_ok()) {
+          ADD_FAILURE() << "mint of INT128_MAX to the whale did not succeed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto root_contract = std::make_unique<NativeContract>(std::move(root_fns));
+
+  // Whale contract: method 0 writes a bytestring; method 1 deletes it.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> whale_fns;
+  whale_fns.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("whale_storage");
+        Bytestring payload = make_bytestring("release me back to a near-max "
+                                             "balance");
+        auto r = ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(payload.data(), payload.size())),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "whale failed to write storage";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  whale_fns.emplace(
+      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("whale_storage");
+        auto r = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "whale failed to delete storage";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto whale_contract = std::make_unique<NativeContract>(std::move(whale_fns));
+
+  constexpr int32_t kRootNativeId = 44;
+  constexpr int32_t kWhaleNativeId = 45;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kRootNativeId, std::move(root_contract));
+  contract_map.emplace(kWhaleNativeId, std::move(whale_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto root_xdr = make_native_contract(kRootNativeId);
+  write_contract(root_xdr);
+  write_deployment(kGenesisRootContractAddress, root_xdr);
+  auto whale_xdr = make_native_contract(kWhaleNativeId);
+  write_contract(whale_xdr);
+  write_deployment(kWhaleAddr, whale_xdr);
+
+  auto run_block_tx = [&](ContractAddress invoked, Runtime::MethodID method) {
+    auto tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = invoked,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto handler = make_new_system_call_handler(tx, *runtime_context);
+    EXPECT_TRUE(handler.root_invoke().is_root_success());
+    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_EQ(commit, ExecResult::ExecResultOK);
+    EXPECT_TRUE(
+        handler.emit_events(commit, ProposedTransaction{.signed_tx = tx})());
+    advance_block();
+    return commit;
+  };
+
+  // Block 1: mint INT128_MAX to the whale. Its stored balance is the mint
+  // amount minus the one-time balance-row cost (self-funded from the mint).
+  ASSERT_EQ(run_block_tx(kGenesisRootContractAddress, 0),
+            ExecResult::ExecResultOK);
+  auto whale_after_mint = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kWhaleAddr));
+  ASSERT_TRUE(whale_after_mint.has_value());
+  EXPECT_EQ(from_xdr(whale_after_mint->nnint()), kMaxSupply - balance_cost)
+      << "the whale must hold essentially the entire INT128_MAX supply";
+
+  // Block 2: the whale writes storage, locking cost out of its near-max
+  // balance.
+  ASSERT_EQ(run_block_tx(kWhaleAddr, 0), ExecResult::ExecResultOK);
+
+  // Block 3: the whale deletes the storage. The released cost is credited back
+  // via release_balance() against a base just below INT128_MAX. Reaching a
+  // clean commit here (rather than a CHECK-abort) is the property under test.
+  ASSERT_EQ(run_block_tx(kWhaleAddr, 1), ExecResult::ExecResultOK);
+
+  // The storage row is gone, and the refund landed: the balance is back within
+  // a hair of INT128_MAX (it dips only by the whale's own replay-cache costs
+  // for the two txs it rooted -- far below this generous slack).
+  auto whale_storage = lookup_storage_item_from_db(
+      AddressAndKey{.address = kWhaleAddr, .key = [] {
+                      StorageKey k(StorageKeyType::ContractData);
+                      k.contract_data_key() = make_storage_key("whale_storage");
+                      return k;
+                    }()});
+  EXPECT_FALSE(whale_storage.has_value())
+      << "the whale's storage row must be deleted";
+
+  auto whale_final = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kWhaleAddr));
+  ASSERT_TRUE(whale_final.has_value());
+  int128_t final_balance = from_xdr(whale_final->nnint());
+  EXPECT_LE(final_balance, kMaxSupply - balance_cost);
+  EXPECT_GT(final_balance, kMaxSupply - balance_cost - (int128_t{1} << 40))
+      << "the storage refund must credit back against a near-max base";
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

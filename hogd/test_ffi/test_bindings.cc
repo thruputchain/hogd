@@ -1102,6 +1102,22 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
+  // Native precompiles (the default wallet, the hog token) are installed at
+  // genesis and are never (re)deployed at an ordinary address: production
+  // deploy_contract() rejects them via is_banned_redeploy_native_contract().
+  // The setup path must apply the same ban -- otherwise a native contract can
+  // be deployed at a child address and later invoked in a nested frame, where
+  // e.g. the default wallet's root-only CHECK aborts the process instead of
+  // returning a structured error (#3592). Every native id currently defined is
+  // banned, so rejecting the type is sufficient.
+  if (contract.contract_type() == ContractType::kNative) {
+    best_effort_log([] {
+      error("Attempt to deploy a native precompile contract, which is "
+            "installed at genesis and cannot be redeployed");
+    });
+    return kTestFFIErrorCodeInvalidArgument;
+  }
+
   try {
     // write_deployment() throws (e.g. std::runtime_error) when the underlying
     // metadata write fails, such as RAMDB kNoMemory. Convert that to a
