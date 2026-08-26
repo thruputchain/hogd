@@ -75,9 +75,9 @@ protected:
 // XDR-encoded Transaction that was actually submitted.
 TEST_F(TxContextTests, GetSourceTxHashMatchesSubmittedTx)
 {
-  Transaction tx{
-      .invocation = client_.make_invocation<u8"get_source_tx_hash">(UINT64_MAX),
-      .uniquifier = make_new_uniquifier()};
+  Transaction tx{.invocation = client_.make_invocation<u8"get_source_tx_hash">(
+                     UINT64_MAX),
+                 .uniquifier = make_new_uniquifier()};
   SHA256Hash expected = sha256(tx);
 
   auto handler = make_new_system_call_handler(tx, *runtime_context_);
@@ -97,8 +97,7 @@ TEST_F(TxContextTests, GetSourceTxHashMatchesSubmittedTx)
 // parent tip's height + 1 (see SystemCallHandler::get_block_height).
 TEST_F(TxContextTests, GetBlockHeightMatchesExecutingBlock)
 {
-  BlockHeight expected =
-      get_db_tip().value.proposal_header.block_height + 1;
+  BlockHeight expected = get_db_tip().value.proposal_header.block_height + 1;
 
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
