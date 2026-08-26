@@ -112,7 +112,7 @@ CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/
 tsan_1 = "?"
 
 
-# A second TSAN job, on GCC, covering x23 only.
+# A second TSAN job, on GCC, over the whole tree.
 #
 # Why a second job at all: GCC and Clang lower coroutines differently, and
 # the difference is race-relevant. When a coroutine's initial_suspend() does
@@ -126,15 +126,29 @@ tsan_1 = "?"
 # Clang's ramp returns on suspend without touching the frame, so the job
 # above cannot see this class of bug however long it runs.
 #
-# Why x23 only: the job above instruments the Rust crates too (RUST_TSAN=ON,
-# which needs -Zsanitizer=thread plus -Zbuild-std on nightly), and
-# -Zexternal-clangrt deliberately leaves the runtime to the C++ link --
-# mixing rustc's LLVM instrumentation with GCC's libtsan is exactly what
-# that job's closing comment says to avoid. x23 has no Rust in it, so it
-# builds standalone against GCC's libtsan with no mixing at all, and it is
-# where the coroutine, threadpool and RPC machinery lives. Extending GCC
-# TSAN to the rest of hogd needs the Rust runtime question settled first
-# and is deliberately not attempted here.
+# Why RUST_TSAN stays off here: the job above turns it on, which needs
+# -Zsanitizer=thread plus -Zbuild-std on nightly, and -Zexternal-clangrt
+# deliberately leaves the runtime to the C++ link -- mixing rustc's LLVM
+# instrumentation with GCC's libtsan is what that job's closing comment says
+# to avoid. Leaving the Rust crates uninstrumented sidesteps that entirely.
+#
+# Uninstrumented Rust is a blind spot rather than a source of noise, and
+# since wasm was dropped it is a small one. TSAN records no loads or stores
+# from Rust code, but its pthread and memcpy interceptors still fire, because
+# those are link-time interposition rather than instrumentation. So races
+# *inside* Rust go unreported (the clang job covers those), and false
+# positives are confined to instrumented C++ touching memory whose ordering
+# is established by Rust-side synchronization -- Rust's std::sync is
+# futex-based on Linux, which TSAN cannot see through.
+#
+# There is very little of that left to worry about. The workspace is crypto,
+# unified and test_ffi_bindings, none of which spawn a thread or use a lock,
+# and the dependency graph has no rayon, tokio, crossbeam, parking_lot or
+# futures in it. Dropping wasmtime took the one genuinely concurrent
+# dependency out of the tree, along with the rustix mmap/munmap shadow
+# problem that --cfg=rustix_use_libc in hogd/rust/CMakeLists.txt exists to
+# work around (rustix is no longer in the lockfile at all; that rustflag is
+# now dead and can be removed separately).
 
 [[jobs]]
 name = "{{ .hog_schedule }}_gcc_{{ .hog_host }}"
@@ -151,53 +165,36 @@ git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
-# Same TSAN_OPTIONS as the clang job; see the comments there for why each
-# is set. The suppression file is shared: its one entry is a libc++
-# std::promise pattern that libstdc++ does not produce, so it is inert
-# here, but pointing at the same file keeps the two jobs from drifting.
+# Same TSAN_OPTIONS as the clang job; see the comments there for why each is
+# set. The suppression file is shared: its one entry is a libc++ std::promise
+# pattern that libstdc++ does not produce, so it is inert here, but pointing
+# at the same file keeps the two jobs from drifting.
 export TSAN_OPTIONS="halt_on_error=1:detect_deadlocks=0:suppressions=$(pwd)/.tsan_suppress:print_suppressions=0"
+export HOG_DEVNODE_STARTUP_TIMEOUT_SECS=180
+export HOG_DEVNODE_EXIT_TIMEOUT_SECS=120
 
-# Configured with cmake directly rather than scripts/build.sh, which always
-# configures the top-level project; this job wants the x23 subproject on its
-# own. That means picking the compiler up by hand: prepare_env.sh above writes
-# GCC_CXX=g++-15 into scripts/conf.sh, which env.sh sources, and that is the
-# GCC 15 pin the hog schedules build against (#3243). Sourcing env.sh here is
-# what build.sh does, so this job stays on the pinned compiler instead of
-# whatever unversioned g++ the host happens to have. env.sh derives SCRIPT_DIR
-# from its caller.
-SCRIPT_DIR="$(pwd)/scripts"
-source ./scripts/env.sh
+# Note the absence of -DRUST_TSAN=ON, which is the whole point of this job;
+# no nightly toolchain or -Zbuild-std fetch is needed as a result. The
+# architecture pin matches the sanitizer schedule's gcc job, which works
+# around GCC PR 120201 by avoiding the affected AVX-512 codegen.
+GCC_TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "-DHAVE_CXX_STACKTRACE=OFF" -x "-DHAVE_STD_STACKTRACE=OFF" -x "-DBUILD_ARCHITECTURE=x86-64-v3")
 
-# HAVE_STD_STACKTRACE=OFF for the same reason as the clang job: libbacktrace
-# is not TSAN-annotated and its symbolization produces hundreds of bogus
-# reports.
-for BUILD_TYPE in Debug Release; do
-    BUILD_DIR="build/gcc_tsan_x23"
+rm -rf build/gcc_tsan
 
-    rm -rf "${BUILD_DIR}"
+# Debug only for now. The clang job above spends most of the schedule's
+# 3600s budget on its two trees, and both jobs share that budget; add a
+# Release tree here once a few runs have shown what this one costs.
+echo 'build gcc tsan'
+./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug -j 64 "${GCC_TSAN_CMAKE_FLAGS[@]}"
 
-    echo "build gcc tsan x23 ${BUILD_TYPE}"
-    cmake -S x23 -B "${BUILD_DIR}" \
-        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-        -DCMAKE_CXX_COMPILER="${GCC_CXX}" \
-        -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
-        -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
-        -DX23_MAKE_ALL_DEPEND_ON_TESTS=ON \
-        -DBUILD_BENCHMARKS=OFF \
-        -DGOOGLETEST_PATH="$(pwd)/external/googletest" \
-        -DHAVE_STD_STACKTRACE=OFF
-    cmake --build "${BUILD_DIR}" -j 64
+echo 'run gcc tsan tests'
+ctest --test-dir build/gcc_tsan --parallel --timeout 300 --output-on-failure
 
-    echo "run gcc tsan x23 tests ${BUILD_TYPE}"
-    ctest --test-dir "${BUILD_DIR}" --parallel --timeout 300 --output-on-failure
-
-    # `set -e` aborts the script on a failing ctest, so this rm is reached
-    # only once this tree's tests have passed; a tree whose tests failed
-    # survives for the core-dump collection in `after`. Only one x23 tree is
-    # resident at a time, for the same disk-quota reason as the sanitizer
-    # schedule (#3559).
-    rm -rf "${BUILD_DIR}"
-done
+# `set -e` aborts the script on a failing ctest, so this rm is reached only
+# once the tests have passed; a tree whose tests failed survives for the
+# core-dump collection in `after`. Keeping at most one tree resident is the
+# same disk-quota concern as the sanitizer schedule (#3559).
+rm -rf build/gcc_tsan
 
 """
 after = """
