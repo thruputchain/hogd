@@ -166,8 +166,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // here is what makes kReentrance beat a malformed, duplicated, or unowned
   // auth-token list -- the list is not even looked at when the target address
   // is already on the invocation stack.
-  if (auto admitted = syscall_handler.validate_new_invocation_frame(
-          input_address, input_inputs.flags);
+  if (auto admitted =
+          syscall_handler.validate_new_invocation_frame(input_address,
+                                                        input_inputs.flags);
       !admitted.has_value()) {
     return {admitted.error().code(), WrappedGasAmount{0}};
   }
@@ -205,10 +206,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // have ReadOnly added by an enclosing read-only frame; ReadOnly is an allowed
   // flag and neither the reentrance nor the auth-token check looks at flags, so
   // the verdict is the same either way.
-  if (auto admitted =
-          syscall_handler.validate_new_invocation(input_address,
-                                                  input_inputs.flags,
-                                                  owned_auth_token_ids_vec);
+  if (auto admitted = syscall_handler.validate_new_invocation(
+          input_address, input_inputs.flags, owned_auth_token_ids_vec);
       !admitted.has_value()) {
     return {admitted.error().code(), WrappedGasAmount{0}};
   }

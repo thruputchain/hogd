@@ -824,13 +824,14 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_self;
   fns_self.emplace(
-      0, [kSelfAddress](NativeSyscallContext &ctx) noexcept
-             -> InvokeStatus<void> {
+      0,
+      [kSelfAddress](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
         // Valid base pointer, length the host must never act on: the syscall
         // has to reject before it looks at the span at all.
         std::array<std::byte, 1> anchor{};
-        std::span<const std::byte> uncopyable_calldata(
-            anchor.data(), Calldata::max_size() + 1);
+        std::span<const std::byte> uncopyable_calldata(anchor.data(),
+                                                       Calldata::max_size() +
+                                                           1);
 
         CopyableInvokeInputs inputs{.entrypoint_id = 0,
                                     .gas_limit = UINT64_MAX,
@@ -838,10 +839,10 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
         CopyableInvokeOutputs outputs{};
 
         auto const gas_before = ctx.total_gas_consumed();
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kSelfAddress,
-                                                 uncopyable_calldata,
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r =
+            ctx.syscall<SyscallNo::kInvoke>(kSelfAddress, uncopyable_calldata,
+                                            std::span<uint32_t>{}, inputs,
+                                            outputs);
         auto const gas_after = ctx.total_gas_consumed();
 
         if (!r.has_value()) {
@@ -874,11 +875,11 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
   auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
-                                Invocation{
-                                    .invoked_address = kSelfAddress,
-                                    .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
-                                    .calldata = {}},
+                                Invocation{.invoked_address = kSelfAddress,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
   auto res = handler.root_invoke();
