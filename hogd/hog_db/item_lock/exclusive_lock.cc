@@ -34,6 +34,13 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     return ctx.cost_model->get_nnint_cost();
   }
   if (after->is_deletion()) {
+    // A deletion admitted under an exclusive lock is validated here at
+    // execution time; the commit-time DeletionLock path can only surface an
+    // error by poisoning the block. Apply the RCQ cleanup fan-out bound so an
+    // over-budget retrocausal-queue delete fails as a transaction instead.
+    if (auto s = RetrocausalQueueLock::check_deletion_block_budget(ctx); !s) {
+      return s.error();
+    }
     return 0;
   }
   if (after->is_deploy_contract()) {

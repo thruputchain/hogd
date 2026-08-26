@@ -39,6 +39,26 @@ inline constexpr uint64_t kRetrocausalQueueLiveEntriesHardCap =
 static_assert(kRetrocausalQueueLiveEntriesHardCap <=
               static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
 
+// A single explicit deletion of a retrocausal queue expands at block close into
+// one ChangeSet::remove per live block row plus the metadata row (see
+// RetrocausalQueueLock::cleanup_on_deletion, driven from
+// DeletionLock::stage_committed_changes). Every RCQ block row is an independent
+// consensus state item (Prefix::kRetrocausalQueueBlock, folded into the
+// StorageLongHash), so that per-row removal is irreducible: it must read RAMDB,
+// update the hash delta, and stage a materialized remove for each row. A
+// constant-size delete admitted with no range-dependent charge would otherwise
+// force that fan-out over the queue's entire retained live-block history.
+//
+// Bound it: reject a deletion at admission when the queue still spans more than
+// this many live block rows, so one transaction can never concentrate more than
+// a fixed amount of cleanup work into block close. This is a consensus-uniform
+// per-transaction resource limit in the same family as
+// kMaxConcurrentRcqReadsPerTx and kMaxRetrocausalQueueLiveEntries (every node
+// derives the same live-block count from committed metadata and agrees on the
+// verdict). A contract holding a larger queue can consume it down below the
+// bound before deleting. Changing this value is a coordinated protocol change.
+inline constexpr uint64_t kMaxRetrocausalQueueBlocksPerDeletion = 16384;
+
 // Uses the process-wide random-keyed SipHash24 to defend against adversarial
 // hash collision attacks on entry_tracking_.
 struct QueueEntryHasher {
@@ -83,6 +103,17 @@ public:
   static HogDbStatus<void> cleanup_on_deletion(const LockContext &ctx,
                                                ChangeSet &changes,
                                                bool keep_metadata = false);
+
+  // Admission-time guard for an explicit deletion at ctx.key. Returns kTooBig
+  // when the item is a retrocausal queue whose block-close cleanup
+  // (cleanup_on_deletion) would remove more than
+  // kMaxRetrocausalQueueBlocksPerDeletion live block rows; otherwise {}
+  // (including for a non-RCQ key, a missing item, or a null DAO). Must be
+  // called from every deletion admission path -- DeletionLock and the
+  // ExclusiveLock deletion branch -- so an over-budget delete fails as a
+  // transaction during execution rather than reaching the commit-time
+  // cleanup, where the error would poison the whole block.
+  static HogDbStatus<void> check_deletion_block_budget(const LockContext &ctx);
 
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.

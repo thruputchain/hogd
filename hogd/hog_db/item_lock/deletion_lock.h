@@ -14,13 +14,12 @@ public:
 
   DeletionLock() = default;
 
-  static HogDbStatus<int128_t>
-  try_atomic_change_lock(const Deletion * /*unused*/,
-                         const Deletion * /*unused*/,
-                         const LockContext & /*ctx*/)
-  {
-    return {0};
-  }
+  // Admits a deletion. Bounds the block-close cleanup fan-out of a
+  // retrocausal-queue delete (see the .cc for details); other deletions and
+  // lock releases (`after == nullptr`) are admitted unconditionally.
+  static HogDbStatus<int128_t> try_atomic_change_lock(const Deletion *before,
+                                                      const Deletion *after,
+                                                      const LockContext &ctx);
 
   static int128_t commit_change(bool did_finalize, int128_t snapshot_cost,
                                 Deletion & /*unused*/,

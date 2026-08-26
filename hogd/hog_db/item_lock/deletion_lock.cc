@@ -3,14 +3,39 @@
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_db/change_set.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hog_db/status.h"
 
 namespace hogd {
+
+HogDbStatus<int128_t>
+DeletionLock::try_atomic_change_lock(const Deletion * /*before*/,
+                                     const Deletion *after,
+                                     const LockContext &ctx)
+{
+  // `after == nullptr` is a lock release, not a new deletion (see
+  // BlockTX::do_unlock_item, which CHECKs success); nothing to validate.
+  if (after == nullptr) {
+    return {0};
+  }
+
+  // Bound the block-close cleanup fan-out of a retrocausal-queue deletion (see
+  // RetrocausalQueueLock::check_deletion_block_budget). This is the admission
+  // path for a non-exclusive deletion; an exclusive deletion is instead
+  // admitted through ExclusiveLock::try_atomic_change_lock, which applies the
+  // same guard, so an over-budget delete fails as a transaction here rather
+  // than at the commit-time cleanup.
+  if (auto s = RetrocausalQueueLock::check_deletion_block_budget(ctx); !s) {
+    return s.error();
+  }
+  return {0};
+}
 
 HogDbStatus<void>
 DeletionLock::stage_committed_changes(const LockContext &ctx,

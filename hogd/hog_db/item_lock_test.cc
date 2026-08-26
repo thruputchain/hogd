@@ -25,8 +25,11 @@
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/item_lock/deletion_lock.h"
+#include "hogd/hog_db/item_lock/exclusive_lock.h"
 #include "hogd/hog_db/item_lock/new_deployment_lock.h"
 #include "hogd/hog_db/item_lock/nnint128_lock.h"
+#include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -1421,6 +1424,81 @@ TEST(ItemLockTest, ExclusiveDeployContractReportsRefundAgainstSnapshotCost)
   auto committed = lock.commit_change(exclusive, make_dummy_context());
   ASSERT_TRUE(committed.has_value());
   EXPECT_EQ(committed.value(), -5000);
+}
+
+// Deleting a retrocausal queue stages one ChangeSet::remove per live block row
+// at block close. That fan-out is bounded at admission: a delete of a queue
+// whose live-block span exceeds kMaxRetrocausalQueueBlocksPerDeletion is
+// rejected (kTooBig) so it can never concentrate unbounded cleanup work into
+// one block close, while queues at or below the bound delete normally. Both
+// admission paths are covered: the non-exclusive DeletionLock and the
+// ExclusiveLock deletion branch (an explicit delete carries ExclusiveLock, so
+// this is the path that must reject over-budget rather than deferring to the
+// commit-time cleanup, which would poison the block).
+TEST(DeletionLockTest, BoundsRetrocausalQueueDeletionBlockCleanup)
+{
+  auto dir_status = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir_status));
+  Directory dir(std::move(*dir_status));
+
+  auto db =
+      Database::open(dir.get_path(), Database::estimate_heap_size(10_MiB), 0);
+  ASSERT_TRUE(static_cast<bool>(db));
+  HogDbDAO dao(RAMDB(std::move(*db)));
+
+  ItemKey key = make_item_key(make_address(1), 7);
+  ASSERT_TRUE(key.is_contract_data());
+
+  ItemChange deletion = make_deletion_change();
+  const Deletion *deletion_inner = deletion.get_inner<Deletion>();
+  ASSERT_NE(deletion_inner, nullptr);
+  ExclusiveLock exclusive_lock;
+
+  // Metadata for a queue with `live_blocks` unconsumed block rows (one live
+  // entry each); cleanup_on_deletion would stage that many removes at close.
+  auto write_meta = [&](uint64_t live_blocks) {
+    RetrocausalQueueMetadata meta{};
+    meta.consume_state.max_fully_consumed_block_number = 0;
+    meta.consume_state.partial_consumed_number = 0;
+    meta.max_live_block_num = live_blocks;
+    meta.live_entries = live_blocks;
+    return dao.write_retrocausal_queue_metadata(key, meta);
+  };
+
+  // At the budget: admitted on both paths.
+  ASSERT_TRUE(write_meta(kMaxRetrocausalQueueBlocksPerDeletion).has_value());
+  {
+    LockContext ctx(&dao, 0, key, &kTestCostModel);
+    EXPECT_TRUE(
+        DeletionLock::try_atomic_change_lock(nullptr, deletion_inner, ctx)
+            .has_value());
+    EXPECT_TRUE(exclusive_lock.try_atomic_change_lock(nullptr, &deletion, ctx)
+                    .has_value());
+  }
+
+  // One row over the budget: rejected with kTooBig on both paths (a clean
+  // transaction failure at execution time, not a commit-time block poison).
+  ASSERT_TRUE(
+      write_meta(kMaxRetrocausalQueueBlocksPerDeletion + 1).has_value());
+  {
+    LockContext ctx(&dao, 0, key, &kTestCostModel);
+    auto d = DeletionLock::try_atomic_change_lock(nullptr, deletion_inner, ctx);
+    ASSERT_FALSE(d.has_value());
+    EXPECT_EQ(d.error(), HogDbCode::kTooBig);
+
+    auto x = exclusive_lock.try_atomic_change_lock(nullptr, &deletion, ctx);
+    ASSERT_FALSE(x.has_value());
+    EXPECT_EQ(x.error(), HogDbCode::kTooBig);
+  }
+
+  // A lock release (after == nullptr) is always admitted, even for an
+  // over-budget queue, so BlockTX::do_unlock_item's success CHECK never trips.
+  {
+    LockContext ctx(&dao, 0, key, &kTestCostModel);
+    EXPECT_TRUE(
+        DeletionLock::try_atomic_change_lock(deletion_inner, nullptr, ctx)
+            .has_value());
+  }
 }
 
 } // namespace hogd

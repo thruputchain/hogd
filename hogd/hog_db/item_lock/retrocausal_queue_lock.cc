@@ -613,6 +613,45 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDbStatus<void>
+RetrocausalQueueLock::check_deletion_block_budget(const LockContext &ctx)
+{
+  // No DAO (unit-test dummy contexts) means no committed state to inspect;
+  // the bound only concerns real persisted RCQ block history.
+  if (ctx.dao == nullptr || !ctx.key.is_contract_data()) {
+    return {};
+  }
+
+  // Mirror the error handling in DeletionLock::stage_committed_changes and
+  // cleanup_on_deletion: kNotFound means there is nothing to clean up, but a
+  // real read error must propagate (rejecting the transaction) rather than be
+  // treated as a passing budget check that admits an unchecked delete.
+  auto type_ret = ctx.dao->get_item_type(ctx.key);
+  if (!type_ret) {
+    if (type_ret.error() == HogDbCode::kNotFound) {
+      return {};
+    }
+    return type_ret.error();
+  }
+  if (type_ret.value() != kRetrocausalQueue) {
+    // A non-RCQ item has no auxiliary block rows to enumerate at close.
+    return {};
+  }
+
+  auto meta_ret = ctx.dao->read_retrocausal_queue_metadata(ctx.key);
+  if (!meta_ret.has_value()) {
+    if (meta_ret.error() == HogDbCode::kNotFound) {
+      return {};
+    }
+    return meta_ret.error();
+  }
+  if (live_block_count(meta_ret.value()) >
+      kMaxRetrocausalQueueBlocksPerDeletion) {
+    return HogDbError{HogDbCode::kTooBig};
+  }
+  return {};
+}
+
+HogDbStatus<void>
 RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
                                           ChangeSet &changes,
                                           bool keep_metadata)
