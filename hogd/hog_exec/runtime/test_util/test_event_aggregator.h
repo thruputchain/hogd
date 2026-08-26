@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <optional>
 #include <utility>
@@ -42,6 +43,9 @@ public:
   x23::Async<RPCError> abandon_block(BlockID block_id);
   x23::Async<RPCError> emit_event(BlockID block_id, TransactionID tx_id,
                                   TxEventLog event_log);
+
+  // Make the next scheduler open_block call fail. The flag is consumed once.
+  void fail_next_open_block() { fail_next_open_block_.store(true); }
 
   // Executor handle tracking (mirrors real event server behavior).
   x23::Async<void> executor_open_block(BlockID block_id);
@@ -89,6 +93,7 @@ private:
   };
 
   x23::CoroLock lock_;
+  std::atomic_bool fail_next_open_block_{false};
   x23::CoroFutex<bool> should_block_futex_{false};
   x23::CoroFutex<int64_t> failure_report_count_{0};
   std::vector<std::pair<TransactionHash, TxFailureDiagnostic>> failure_reports_;

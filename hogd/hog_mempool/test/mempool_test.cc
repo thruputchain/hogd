@@ -937,6 +937,31 @@ TEST(Mempool, ProposalExceptionRollsBackPendingNomination)
   EXPECT_EQ(proposed_txs, txs);
 }
 
+TEST(Mempool, ProposalRecoversAfterInitializeBlockFailure)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  const DbTip db_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()().db_tip();
+
+  server.event_aggregator().fail_next_open_block();
+  const SchedulerProposalResult failed = propose_block(server, db_tip);
+  EXPECT_EQ(failed.outcome(), SchedulerProposalOutcome::SchedulerProposalError);
+
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), txs.size());
+  const SchedulerProposalResult retry = propose_block(server, db_tip);
+  ASSERT_EQ(retry.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  SignedTransactionBatch proposed_txs;
+  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs)());
+  EXPECT_EQ(proposed_txs, txs);
+}
+
 TEST(Mempool, NominateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
