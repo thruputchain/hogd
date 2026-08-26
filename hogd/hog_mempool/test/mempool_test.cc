@@ -1310,12 +1310,14 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
             SchedulerValidationResult::SchedulerValidationMalformed);
 }
 
+namespace {
+
 // Builds a single-segment ParallelBatch that repeats the encoding of
 // [one_element_batch]'s sole element [count] times.  The result is
 // self-consistent -- its segment metadata matches its payload and every
 // element decodes -- so only an explicit size bound rejects it.
 template<typename Batch>
-static ParallelBatch
+ParallelBatch
 repeated_parallel_batch(const Batch &one_element_batch, size_t count)
 {
   const ParallelBatch one = t_to_parallel_batch(one_element_batch)();
@@ -1333,6 +1335,8 @@ repeated_parallel_batch(const Batch &one_element_batch, size_t count)
   }
   return batch;
 }
+
+} // namespace
 
 // A nomination claiming more transactions than a block may hold is rejected
 // on its claimed size, before the decode allocates for it.  Both batches
