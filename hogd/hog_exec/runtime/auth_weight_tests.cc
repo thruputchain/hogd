@@ -81,7 +81,7 @@ TEST_F(AuthWeightTests, WriteWeightCommitsAuthData)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -119,7 +119,7 @@ TEST_F(AuthWeightTests, WriteWeightRejectedInReadOnlyFrame)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
 

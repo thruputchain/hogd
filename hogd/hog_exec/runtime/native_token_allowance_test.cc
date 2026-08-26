@@ -1934,7 +1934,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(tx, *runtime_context);
     EXPECT_TRUE(handler.root_invoke()().is_root_success());
-    ExecResult commit = handler.try_commit_transaction();
+    ExecResult commit = handler.try_commit_transaction()();
     EXPECT_EQ(commit, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(commit, ProposedTransaction{.signed_tx = tx})());
