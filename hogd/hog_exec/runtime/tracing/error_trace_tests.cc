@@ -132,11 +132,11 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
       << x23::show(handler.get_trace()->system_calls);
 }
 
-// KNOWN RED until #3540 lands, for the reason in syscall_misc_tests.cc's
-// InvokeUnownedTokenLosesToReentrance: the guest aborts, so root_invoke()
-// below fails before the trace is compared. The gas figures are already the
-// post-#3540 ones -- 10 below their predecessors, the cost of the renamed
-// entrypoint record sitting one slot later in the dispatch table.
+// The gas figures below sit 10 under their pre-#2973 values: renaming this
+// entrypoint moved its record one slot later in the rv32 entrypoint table, and
+// the guest dispatcher scans that table linearly, so every syscall in the frame
+// starts 10 gas lower. Measured rather than predicted -- the table order does
+// not follow the method name.
 TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();
@@ -162,9 +162,9 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
-    // Self-invoke forwarding a fabricated token id 0xDEAD: the reentrance
-    // check wins before the forwarded token list is read, and no child frame
-    // runs.
+    // Self-invoke forwarding a fabricated token id 0xDEAD: reentrance wins
+    // over the ownership check, and no child frame runs. The losing input is
+    // still traced (#2973).
     SyscallTraceBody body(SyscallNo::kInvoke);
     body.invoke().inputs.address = addr;
     body.invoke().inputs.owned_auth_token_ids_list.append_range(
