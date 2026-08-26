@@ -156,21 +156,9 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const CopyableInvokeInputs &input_inputs,
                      CopyableInvokeOutputs &output_outputs)
 {
-  // Nothing below this point copies a contract-supplied span until admission
-  // has had its say. Both spans are contract-sized, and every rejection here
-  // reports gas 0, so copying first would hand a contract unpriced,
-  // length-proportional host work it could repeat at will (issue #2973).
-  //
-  // Flags first, then reentrance: this is the whole of admission that can be
-  // decided without parsing anything out of guest memory. Deciding reentrance
-  // here is what makes kReentrance beat a malformed, duplicated, or unowned
-  // auth-token list -- the list is not even looked at when the target address
-  // is already on the invocation stack.
-  if (auto admitted =
-          syscall_handler.validate_new_invocation_frame(input_address,
-                                                        input_inputs.flags);
-      !admitted.has_value()) {
-    return {admitted.error().code(), WrappedGasAmount{0}};
+  if (!SystemCallHandler::validate_invoke_flags(input_inputs.flags)) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
   }
 
   if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
@@ -197,15 +185,10 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
             WrappedGasAmount{0}};
   }
 
-  // The rest of admission -- auth-token ownership -- now that the ids are
-  // parsed, and still before the calldata is materialized.
-  //
-  // invoke() re-runs the whole gate below; it is also entered directly from the
-  // test FFI mock frame path (#3301), and it is a pure query on the handler, so
-  // running it twice is free of side effects. The flags it validates there may
-  // have ReadOnly added by an enclosing read-only frame; ReadOnly is an allowed
-  // flag and neither the reentrance nor the auth-token check looks at flags, so
-  // the verdict is the same either way.
+  // Admission before the calldata is copied: a rejection reports gas 0, so
+  // copying first would be unpriced, length-proportional work a contract could
+  // repeat at will (#2973). invoke() runs the same checks again below, which is
+  // a pure query on the handler.
   if (auto admitted = syscall_handler.validate_new_invocation(
           input_address, input_inputs.flags, owned_auth_token_ids_vec);
       !admitted.has_value()) {
