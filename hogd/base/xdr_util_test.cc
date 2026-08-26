@@ -176,8 +176,8 @@ TEST(ParallelBatchToTTest, RejectsABatchOverTheObjectLimit)
   EXPECT_TRUE(parsed.empty());
 }
 
-// The limit is applied to what the metadata claims, so an overclaim is
-// rejected without the payload ever having to be large enough to back it.
+// The limit applies to what the metadata claims, so the payload never has to
+// be large enough to back it.
 TEST(ParallelBatchToTTest, RejectsAnOverclaimAgainstTheObjectLimit)
 {
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(
@@ -191,7 +191,6 @@ TEST(ParallelBatchToTTest, RejectsAnOverclaimAgainstTheObjectLimit)
   EXPECT_TRUE(parsed.empty());
 }
 
-// A zero limit admits nothing, including an empty batch's zero objects.
 TEST(ParallelBatchToTTest, AZeroObjectLimitAcceptsOnlyAnEmptyBatch)
 {
   ParallelSignedTransactionBatch empty =

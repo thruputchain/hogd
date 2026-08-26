@@ -230,9 +230,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        // Not [mempool_tx_size_limit_]: a batch over capacity is admitted up
-        // to the free slots by [enforce capacity] below rather than dropped,
-        // so the decode itself is bounded only by the payload.
+        // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
+        // over-capacity batch up to the free slots rather than dropping it.
         if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
@@ -417,9 +416,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        // Not [mempool_tx_size_limit_]: a batch over capacity is admitted up
-        // to the free slots by [enforce capacity] below rather than dropped,
-        // so the decode itself is bounded only by the payload.
+        // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
+        // over-capacity batch up to the free slots rather than dropping it.
         if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_vetted_rpc_count.increment();
@@ -2118,12 +2116,10 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         cache.result_tx_hashes.reserve(kMaxBlockSize);
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
-        // The nomination reaches us over the coordinator RPC, whose server
-        // runs with [kBulkRpcMaxMessageSize], so a peer's proposal can claim
-        // far more transactions than a block may hold.  Nothing downstream
-        // bounds that: [prepare_and_validate_chunk] would fan every claimed
-        // transaction out across the executors before the block finally
-        // failed on missing txs.
+        // The coordinator RPC runs with [kBulkRpcMaxMessageSize], so a peer
+        // can claim far more transactions than a block holds, and
+        // [prepare_and_validate_chunk] would fan every one out across the
+        // executors before the block failed on missing txs.
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                 tx_nominations, kMaxBlockSize);

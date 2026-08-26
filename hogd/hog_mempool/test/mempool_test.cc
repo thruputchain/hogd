@@ -1350,10 +1350,8 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
 
 namespace {
 
-// Builds a single-segment ParallelBatch that repeats the encoding of
-// [one_element_batch]'s sole element [count] times.  The result is
-// self-consistent -- its segment metadata matches its payload and every
-// element decodes -- so only an explicit size bound rejects it.
+// Repeats [one_element_batch]'s sole element [count] times into one segment.
+// The result is self-consistent, so only an explicit size bound rejects it.
 template<typename Batch>
 ParallelBatch
 repeated_parallel_batch(const Batch &one_element_batch, size_t count)
@@ -1376,9 +1374,7 @@ repeated_parallel_batch(const Batch &one_element_batch, size_t count)
 
 } // namespace
 
-// A nomination claiming more transactions than a block may hold is rejected
-// on its claimed size, before the decode allocates for it.  Both batches
-// here decode cleanly, so without that bound validation would fan
+// Both batches decode cleanly, so without the bound validation would fan
 // [kMaxBlockSize] + 1 transactions out across the executors.
 TEST(Mempool, ValidateOversizedProposalIsRejected)
 {

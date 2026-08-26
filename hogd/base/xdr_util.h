@@ -192,21 +192,15 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
-// Pass as [max_objects] when the only bound that applies is what the payload
-// itself can encode.  Correct for a batch this node produced; anything a peer
-// or a client can send should name the real limit instead, so grepping this
-// name finds every decode that trusts its source.
+// [max_objects] for input this node produced itself.  Grep it to find every
+// decode that trusts its source.
 inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
 
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs
 // xdr.size()) as well as per-object XDR deserialization failures.
-//
-// [max_objects] bounds how many objects the batch may claim.  It is checked
-// against the running segment-token total the decode already computes, before
-// anything is allocated for them, so a caller cannot pay for an over-large
-// batch and cannot forget to bound one.  Use [kNoBatchSizeLimit] only for
-// locally produced input.
+// [max_objects] caps what the batch may claim, rejected before anything is
+// allocated for it.  Use [kNoBatchSizeLimit] only for locally produced input.
 template<typename T>
 inline x23::Async<bool>
 parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
@@ -240,10 +234,8 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
   // divide rather than multiply so the bound cannot overflow [size_t]. The sum
   // itself cannot overflow either: [segment_tokens] holds at most 0xffffffff
   // entries each at most 0xffffffff, so the total is below SIZE_MAX.
-  //
-  // The caller's [max_objects] joins the same bound rather than getting a
-  // scan of its own: the loop below already accumulates the claimed total, so
-  // an over-cap batch is rejected in that one pass.
+  // [max_objects] joins that bound rather than getting a scan of its own: the
+  // loop below already accumulates the claimed total.
   constexpr size_t kMinObjectSize = x23::detail::xdr_size_bounds<T>().min_;
   static_assert(kMinObjectSize > 0,
                 "ParallelBatch element type must have a nonzero minimum XDR "
