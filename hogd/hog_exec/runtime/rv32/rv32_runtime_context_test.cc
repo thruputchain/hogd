@@ -268,7 +268,7 @@ make_host_panic_result(HostFnErrorCode code, uint64_t gas_consumed = 4)
   return {HostFnError{code}, gas_consumed};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 unrecoverable_entry(ExternHostCallContext /*unused*/,
                     ExecutionContext /*unused*/, uint32_t, uint32_t, uint32_t,
                     uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
@@ -276,7 +276,7 @@ unrecoverable_entry(ExternHostCallContext /*unused*/,
   return make_host_panic_result(HostFnErrorCode::Unrecoverable);
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 validation_failure_entry(ExternHostCallContext /*unused*/,
                          ExecutionContext /*unused*/, uint32_t, uint32_t,
                          uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
@@ -285,7 +285,7 @@ validation_failure_entry(ExternHostCallContext /*unused*/,
   return make_host_panic_result(HostFnErrorCode::ValidationFailure);
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 abandon_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
               uint32_t, uint32_t)
@@ -293,7 +293,7 @@ abandon_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
   return make_host_panic_result(HostFnErrorCode::Abandon);
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 throwing_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
                uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                uint32_t, uint32_t)
@@ -301,7 +301,7 @@ throwing_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
   throw 1;
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 host_out_of_gas_entry(ExternHostCallContext /*unused*/,
                       ExecutionContext /*unused*/, uint32_t, uint32_t, uint32_t,
                       uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)
@@ -309,7 +309,7 @@ host_out_of_gas_entry(ExternHostCallContext /*unused*/,
   return make_host_panic_result(HostFnErrorCode::OutOfGas, 0);
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 exit_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
            uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
            uint32_t)
@@ -317,7 +317,7 @@ exit_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
   return make_host_panic_result(HostFnErrorCode::Exit, 0);
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+MaybeAsyncSyscallResult
 return_entry(ExternHostCallContext /*unused*/, ExecutionContext /*unused*/,
              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
              uint32_t, uint32_t)

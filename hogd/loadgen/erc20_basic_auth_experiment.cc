@@ -13,6 +13,7 @@
 #include "auth_claim.hh"
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/simple_wallet_authclaim.h"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
@@ -75,8 +76,8 @@ ERC20BasicAuthExperimentState::initialize_wallets(
     wallets_.push_back(WalletInfo{
         .public_key = keys.first,
         .secret_key = keys.second,
-        .address = GenesisConfigurationLoader::calculate_deployed_address(
-            wallet_contract_hash, make_nonce(i)),
+        .address = calculate_genesis_deployment_address(wallet_contract_hash,
+                                                        make_nonce(i)),
         .initial_nonce = make_nonce(i),
     });
   }
@@ -91,7 +92,8 @@ ERC20BasicAuthExperimentState::add_signature(SignedTransaction &tx,
   Signature sig(CryptographicScheme::Ed25519);
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   sig.ed25519() =
-      ed25519_sign(wallets_[wallet_index].secret_key, x23::serialize(tx.tx))
+      ed25519_sign(wallets_[wallet_index].secret_key,
+                   transaction_signature_preimage(config_.network_hash, tx.tx))
           .value();
   // NOLINTEND(bugprone-unchecked-optional-access)
   tx.signatures.push_back(DecoratedSignature{
@@ -131,18 +133,18 @@ ERC20BasicAuthExperimentState::generate_experiment()
   const auto num_initial_allocations =
       static_cast<int128_t>(wallets_.size()) + 1;
   const int128_t wallet_initial_hogs =
-      (GenesisConfigurationLoader::initial_hog_token_supply() /
+      ((int128_t{kTotalHogSupply} * int128_t{kHogDivisibility}) /
        num_initial_allocations) -
       kWalletInitialHogsEpsilon;
   GenesisConfigurationBuilder builder;
-  builder.add_initial_config(erc20_contract, make_nonce(0),
-                             erc20_meta::entrypoint<u8"initialize">(),
-                             erc20_meta::make_calldata<u8"initialize">(
-                                 owner_address),
-                             // The number of hogs each wallet starts with.
-                             wallet_initial_hogs);
-  erc20_address_ = GenesisConfigurationLoader::calculate_deployed_address(
-      sha256(*erc20_contract), make_nonce(0));
+  builder.add_distribution(erc20_contract, make_nonce(0),
+                           erc20_meta::entrypoint<u8"initialize">(),
+                           erc20_meta::make_calldata<u8"initialize">(
+                               owner_address),
+                           // The number of hogs each wallet starts with.
+                           wallet_initial_hogs);
+  erc20_address_ = calculate_genesis_deployment_address(sha256(*erc20_contract),
+                                                        make_nonce(0));
 
   // initialize wallets
   for (auto const &wallet : wallets_) {
@@ -150,11 +152,11 @@ ERC20BasicAuthExperimentState::generate_experiment()
     // storage available to support their token balances. This will be changed
     // in the future, with whatever initialization procedures we use, but it
     // works for now.
-    builder.add_initial_config(wallet_contract, wallet.initial_nonce,
-                               wallet_meta::entrypoint<u8"initialize">(),
-                               wallet_meta::make_calldata<u8"initialize">(
-                                   wallet.public_key),
-                               wallet_initial_hogs);
+    builder.add_distribution(wallet_contract, wallet.initial_nonce,
+                             wallet_meta::entrypoint<u8"initialize">(),
+                             wallet_meta::make_calldata<u8"initialize">(
+                                 wallet.public_key),
+                             wallet_initial_hogs);
   }
 
   // make mint txs
@@ -208,7 +210,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
   co_return LoadgenSuccessResult{
       .genesis_configuration =
-          builder.build_v2(config_.network_hash, cost_model, *root_contract),
+          builder.build(config_.network_hash, cost_model, *root_contract),
       .genesis_ceremony_txs = std::move(genesis_ceremony_txs),
       .initialization_txs = std::move(initialization_txs),
   };

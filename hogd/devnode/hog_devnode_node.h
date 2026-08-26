@@ -86,10 +86,6 @@ public:
   {
     return genesis_configuration_;
   }
-  GenesisConfigurationV2 const &genesis_configuration_v2() const
-  {
-    return genesis_configuration_v2_;
-  }
   bool recovered_existing_chain() const noexcept
   {
     return recovered_existing_chain_;
@@ -133,7 +129,6 @@ private:
   LocalBootstrapConfig bootstrap_config_;
   const std::size_t ramdb_bytes_;
   GenesisConfiguration genesis_configuration_;
-  GenesisConfigurationV2 genesis_configuration_v2_;
   std::vector<BootstrapAccountMetadata> bootstrap_accounts_;
   bool recovered_existing_chain_ = false;
 

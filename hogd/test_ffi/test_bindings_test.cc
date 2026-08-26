@@ -18,6 +18,7 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -51,10 +52,14 @@ namespace hogd {
 
 namespace {
 
+// Non-zero, so a signature preimage that dropped the network hash would still
+// fail to verify against a database built here.
+constexpr NetworkHash kTestNetworkHash{0x5a};
+
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0);
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -548,7 +553,10 @@ DecoratedSignature
 make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
 {
   Signature sig(CryptographicScheme::Ed25519);
-  sig.ed25519() = ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+  sig.ed25519() =
+      ed25519_sign(sk.ed25519(),
+                   transaction_signature_preimage(kTestNetworkHash, tx))
+          .value();
   return {.public_key_id = public_key_id, .signature = sig};
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
@@ -597,11 +605,10 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
 
   // Test good verification
   {
-    VerifyAuthResult result =
-        verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                        .len = static_cast<uint32_t>(
-                                            serialized_stx.size())},
-                                       make_source_auth_data(serialized_auth));
+    VerifyAuthResult result = verify_signed_transaction_auth(
+        {.data = serialized_stx.data(),
+         .len = static_cast<uint32_t>(serialized_stx.size())},
+        make_source_auth_data(serialized_auth), kTestNetworkHash.data());
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code, 0);
@@ -620,7 +627,7 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
     VerifyAuthResult result = verify_signed_transaction_auth(
         {.data = serialized_stx.data(),
          .len = static_cast<uint32_t>(serialized_stx.size())},
-        make_source_auth_data(serialized_wrong_auth));
+        make_source_auth_data(serialized_wrong_auth), kTestNetworkHash.data());
 
     EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
     EXPECT_EQ(result.auth_error_code,
@@ -656,22 +663,20 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   auto serialized_stx = x23::serialize(stx);
 
   // No registered auth data: the pubkey claim succeeds.
-  VerifyAuthResult success =
-      verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                      .len = static_cast<uint32_t>(
-                                          serialized_stx.size())},
-                                     {.data = nullptr, .len = 0});
+  VerifyAuthResult success = verify_signed_transaction_auth(
+      {.data = serialized_stx.data(),
+       .len = static_cast<uint32_t>(serialized_stx.size())},
+      {.data = nullptr, .len = 0}, kTestNetworkHash.data());
   EXPECT_EQ(success.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(success.auth_error_code, 0);
 
   // Supplying auth data means the address is already registered, so a pubkey
   // claim is no longer valid.
   auto serialized_auth = x23::serialize(auth_data);
-  VerifyAuthResult result =
-      verify_signed_transaction_auth({.data = serialized_stx.data(),
-                                      .len = static_cast<uint32_t>(
-                                          serialized_stx.size())},
-                                     make_source_auth_data(serialized_auth));
+  VerifyAuthResult result = verify_signed_transaction_auth(
+      {.data = serialized_stx.data(),
+       .len = static_cast<uint32_t>(serialized_stx.size())},
+      make_source_auth_data(serialized_auth), kTestNetworkHash.data());
 
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.auth_error_code,
@@ -829,7 +834,8 @@ TEST(TestBindingsTest, CostModelRoundtrip)
 
   // Create a DB seeded with the custom cost model.
   auto db_result = create_db(serialized_model.data(),
-                             static_cast<uint32_t>(serialized_model.size()));
+                             static_cast<uint32_t>(serialized_model.size()),
+                             NetworkHash{}.data());
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });
@@ -1699,6 +1705,90 @@ TEST(TestBindingsTest, MockFrameInvokeContractCallerAddressTest)
   x23::deserialize(&output, x23::BufView{finish_res.serialized_output.data,
                                          finish_res.serialized_output.len});
   EXPECT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+}
+
+// Two handlers open against one runtime context, each holding a mock frame at
+// the same time. sdk_rs works this way: a TestEnvironment holds exactly one
+// runtime context and opens every TransactionHandler against it, and hog_exec
+// proper has the same shape (one thread_local RuntimeContext per executor
+// thread). So the runtime context must resolve each mock invocation back to the
+// handler running it rather than to a single context-wide slot.
+TEST(TestBindingsTest, TwoHandlersShareOneRuntimeContext)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  CallerCheckData check_data;
+  auto contract_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_check_caller, &check_data);
+  check_data.expected_self = contract_addr;
+
+  auto handler_a = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_a.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d3([&] { close_syscall_handler(handler_a.syscall_handler); });
+
+  auto handler_b = make_mocked_handler(db, rc);
+  ASSERT_EQ(handler_b.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d4([&] { close_syscall_handler(handler_b.syscall_handler); });
+
+  ContractAddress addr_a{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+  ContractAddress addr_b{2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2};
+
+  auto open = [](void *handler, ContractAddress const &frame_addr) {
+    Invocation invocation = {
+        .invoked_address = frame_addr,
+        .entrypoint = entrypoint_from_method_id(0x1234),
+        .gas_limit = 1'000'000,
+        .calldata = {},
+    };
+    ASSERT_EQ(open_frame(handler, invocation), kTestFFIErrorCodeNone);
+  };
+
+  // Both frames stay open across both invocations, so each invocation has to
+  // find its own handler while the other is equally live.
+  open(handler_a.syscall_handler, addr_a);
+  open(handler_b.syscall_handler, addr_b);
+
+  // The contract reads get_msg_sender() off whichever handler is running, so a
+  // mismatch means the invocation attached to the wrong one.
+  auto invoke_from = [&](void *handler, ContractAddress const &frame_addr) {
+    check_data.expected_sender = frame_addr;
+    check_data.sender_check_passed = false;
+    check_data.self_check_passed = false;
+
+    ASSERT_EQ(push_context(handler), kTestFFIErrorCodeNone);
+    Calldata calldata;
+    RuntimeMemoryLength output_return_buffer_len = 0,
+                        output_returned_auth_token_len = 0;
+    auto res = test_ffi_invoke(contract_addr, 0x1234, UINT64_MAX, calldata,
+                               InvokeFlagSet{}, {}, output_return_buffer_len,
+                               output_returned_auth_token_len);
+    EXPECT_TRUE(res.has_value());
+    EXPECT_EQ(*res, SyscallErrorCode::kSyscallErrorCodeNone);
+    EXPECT_TRUE(check_data.sender_check_passed);
+    EXPECT_TRUE(check_data.self_check_passed);
+    ASSERT_EQ(pop_context(), kTestFFIErrorCodeNone);
+  };
+
+  invoke_from(handler_a.syscall_handler, addr_a);
+  invoke_from(handler_b.syscall_handler, addr_b);
+
+  auto finish = [](void *handler) {
+    auto finish_res =
+        finish_mock_invocation_frame(handler,
+                                     std::to_underlying(InvokeErrorCode::None));
+    EXPECT_EQ(finish_res.ffi_error_code, kTestFFIErrorCodeNone);
+    free_ffi_data_buffer(finish_res.serialized_output);
+    free_ffi_data_buffer(finish_res.serialized_trace);
+    free_ffi_data_buffer(finish_res.serialized_events);
+  };
+  finish(handler_a.syscall_handler);
+  finish(handler_b.syscall_handler);
 }
 
 // Verify that a contract invoked from a mock frame sees get_current_address()
@@ -3294,6 +3384,40 @@ TEST(TestBindingsTest, SetupCreateContractRejectsUnknownNative)
 
   auto result = setup_create_contract(rc, db, bytes.data(), bytes.size());
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
+}
+
+// Regression test for #3592: a native precompile (here the default wallet)
+// verifies and stores through setup_create_contract(), but deploying it at an
+// ordinary address must be rejected -- production deploy_contract() bans
+// redeploying native precompiles. Without the setup-path ban, the deployment
+// row is written and a later nested invoke of the default wallet trips its
+// root-only CHECK and aborts the process instead of returning an error.
+TEST(TestBindingsTest, SetupDeployContractRejectsNativePrecompile)
+{
+  auto *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  Contract wallet_contract(ContractType::kNative);
+  wallet_contract.native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+  auto bytes = x23::serialize(wallet_contract);
+
+  // The native default wallet is registered with the runtime, so it verifies
+  // and stores successfully.
+  ASSERT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  // Deploying it at an ordinary child address is rejected with a structured
+  // error rather than persisting the invariant-breaking deployment.
+  ContractAddress addr{0x44};
+  EXPECT_EQ(setup_deploy_contract(db, addr.data(),
+                                  sha256(wallet_contract).data(), bytes.size()),
+            kTestFFIErrorCodeInvalidArgument);
 }
 
 // Since #2569 hog_db chunks large code rows across multiple RAMDB items, so an

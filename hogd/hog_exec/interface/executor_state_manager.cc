@@ -23,6 +23,7 @@ namespace hogd {
 x23::Async<PerThreadARC<ExecutorContext> *>
 ExecutorStateManager::get_executor_context_slow(BlockID block_id)
 {
+  using result_t = PerThreadARC<ExecutorContext> *;
   PerThreadARC<ExecutorContext> *ctx = nullptr;
 
   x23::CoroGuard g;
@@ -32,18 +33,22 @@ ExecutorStateManager::get_executor_context_slow(BlockID block_id)
     ctx = &it->second.context;
   }
   if (!ctx) {
-    co_return nullptr;
+    co_await g.reset_and_return(result_t{nullptr});
+    panic("unreachable");
   }
 
-  if (!ctx->try_acquire_reference()) [[unlikely]]
-    co_return nullptr;
+  if (!ctx->try_acquire_reference()) [[unlikely]] {
+    co_await g.reset_and_return(result_t{nullptr});
+    panic("unreachable");
+  }
 
   // cache in threadlocal so we avoid contention on the active_blocks_ map
   {
-    std::scoped_lock g(context_cache_->lock_);
+    std::scoped_lock cache_guard(context_cache_->lock_);
     context_cache_->contexts_.emplace(block_id, ctx);
   }
-  co_return ctx;
+  co_await g.reset_and_return(ctx);
+  panic("unreachable");
 }
 
 x23::Async<ExecResult>
@@ -55,17 +60,20 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   if (auto it = active_blocks_.find(new_block_id); it != active_blocks_.end()) {
     // Increase the refcount on an existing block
     if (it->second.context.get().mode() != mode) {
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
     }
     if (it->second.open_block_count <= 0) {
       error("Tried to reopen block {} that is closing", new_block_id);
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
     }
     assert(it->second.open_block_count > 0);
     it->second.open_block_count++;
     trace("Increased ref count on existing block {} in mode {}", new_block_id,
           mode);
-    co_return ExecResult::ExecResultOK;
+    co_await g.reset_and_return(ExecResult::ExecResultOK);
+    panic("unreachable");
   }
 
   // Create a new block
@@ -97,7 +105,8 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   }
 
   trace("Opened new block {} in mode {}", new_block_id, mode);
-  co_return ExecResult::ExecResultOK;
+  co_await g.reset_and_return(ExecResult::ExecResultOK);
+  panic("unreachable");
 }
 
 x23::Async<ExecResult>
@@ -116,6 +125,30 @@ x23::Async<ExecResult>
 ExecutorStateManager::remove_block(BlockID block_id)
 {
   trace("Removing reference to block {}", block_id);
+  auto [result, do_gc] = co_await remove_block_locked(block_id);
+  if (do_gc) {
+    // We hold the last reference, so gc runs here before we return: a late
+    // event error from a straggler callback can still be folded into the
+    // finish_block result. (gc_executor_context filters Abandon as WAI; the
+    // only remaining code an emit can produce is Unrecoverable.)
+    if (auto gc_status = co_await gc_executor_context(block_id);
+        !gc_status.has_value()) [[unlikely]] {
+      error("Unrecoverable: late event-server error {} during gc of block {}",
+            std::to_underlying(gc_status.error().code()), block_id);
+      result = ExecResult::ExecResultUnrecoverable;
+    }
+  }
+  co_return result;
+}
+
+// Split from remove_block() so active_blocks_lock_ is released through
+// reset_and_return. Releasing it by letting ~CoroGuard run resumes the next
+// waiter as a nested call on this stack, which under contention nests once per
+// waiter and grows the stack without bound.
+x23::Async<std::pair<ExecResult, bool>>
+ExecutorStateManager::remove_block_locked(BlockID block_id)
+{
+  using result_t = std::pair<ExecResult, bool>;
   ExecResult result = ExecResult::ExecResultOK;
   bool do_gc = false;
   {
@@ -124,7 +157,9 @@ ExecutorStateManager::remove_block(BlockID block_id)
     auto it = active_blocks_.find(block_id);
     if (it == active_blocks_.end()) {
       error("Tried to remove block {} that does not exist", block_id);
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(
+          result_t{ExecResult::ExecResultSystemError, false});
+      panic("unreachable");
     }
     if (it->second.open_block_count <= 0) [[unlikely]] {
       // Validate before mutating: a stray remove on an already-closing block
@@ -132,7 +167,9 @@ ExecutorStateManager::remove_block(BlockID block_id)
       // reopen guard in open_block and let a shut-down context be revived.
       error("Tried to remove block {} that has a non-positive open_block_count",
             block_id);
-      co_return ExecResult::ExecResultSystemError;
+      co_await g.reset_and_return(
+          result_t{ExecResult::ExecResultSystemError, false});
+      panic("unreachable");
     }
     it->second.open_block_count--;
 
@@ -171,20 +208,9 @@ ExecutorStateManager::remove_block(BlockID block_id)
         }
       }
     }
+    co_await g.reset_and_return(result_t{result, do_gc});
+    panic("unreachable");
   }
-  if (do_gc) {
-    // We hold the last reference, so gc runs here before we return: a late
-    // event error from a straggler callback can still be folded into the
-    // finish_block result. (gc_executor_context filters Abandon as WAI; the
-    // only remaining code an emit can produce is Unrecoverable.)
-    if (auto gc_status = co_await gc_executor_context(block_id);
-        !gc_status.has_value()) [[unlikely]] {
-      error("Unrecoverable: late event-server error {} during gc of block {}",
-            std::to_underlying(gc_status.error().code()), block_id);
-      result = ExecResult::ExecResultUnrecoverable;
-    }
-  }
-  co_return result;
 }
 
 x23::Async<SystemStatus<void>>
@@ -217,15 +243,19 @@ ExecutorStateManager::gc_executor_context(BlockID block_id)
   // has been sent, so a straggler emit rejected with BadBlockID is expected.
   // Any other late error is a genuine failure the caller must surface.
   if (!event_error.has_value()) {
-    co_return SystemStatus<void>{};
+    co_await g.reset_and_return(SystemStatus<void>{});
+    panic("unreachable");
   }
   if (event_error.value() == SystemErrorCode::Abandon) {
     warn("Dropped events for block {}: a straggler emit was rejected with "
          "Abandon after close_block (working-as-intended)",
          block_id);
-    co_return SystemStatus<void>{};
+    co_await g.reset_and_return(SystemStatus<void>{});
+    panic("unreachable");
   }
-  co_return SystemStatus<void>{SystemError{event_error.value()}};
+  co_await g.reset_and_return(
+      SystemStatus<void>{SystemError{event_error.value()}});
+  panic("unreachable");
 }
 
 void

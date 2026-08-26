@@ -482,8 +482,6 @@ private:
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.
   static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
                                         BlockHeight executing_height);
-  SystemStatus<bool> root_is_legacy_initial_token_claim();
-
   // Whether this handler's transaction has an already-expired replay uniquifier
   // (reads the db tip via get_block_height(); a tip-read failure is
   // propagated). Returns false for the test-harness constructor (no

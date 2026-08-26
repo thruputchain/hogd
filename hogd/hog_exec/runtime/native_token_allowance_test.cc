@@ -37,6 +37,7 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "standard_asset_events.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -61,8 +62,7 @@ protected:
     auto token_contract = make_native_contract(std::to_underlying(
         HogexecPrecompiledNativeContracts::kNativeContractHogToken));
     write_contract(token_contract);
-    write_deployment(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                     token_contract);
+    write_deployment(kNativeTokenContractAddress, token_contract);
   }
 
   static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
@@ -96,8 +96,8 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r = client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value() || !r.value().value().value().is_ok() ||
@@ -150,14 +150,13 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
   // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
   // to pay the replay-cache storage cost.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r_adj = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                          make_difference(100));
     if (!r_adj.has_value() || !r_adj.value().has_value() ||
@@ -218,14 +217,13 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
   constexpr static ContractAddress kReceiverAddr = make_contract_address(176);
 
   setup_grant_storage_token(kOwnerAddr, 1'000'000);
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r =
         client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                              make_amount(50));
@@ -271,14 +269,13 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
   // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
   // to pay the replay-cache storage cost.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     for (int128_t d : {100, 50}) {
       auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                        make_difference(d));
@@ -346,15 +343,14 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   setup_grant_storage_token(kOwnerAddr,
                             1'000'000 + replay_cache_cost_charged(2));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost() * 4);
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost() * 4);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                     make_difference(100'000));
@@ -368,8 +364,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
       });
   fns_owner.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
         if (!r.has_value() || !r.value().has_value() ||
@@ -386,8 +382,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                                  make_amount(50'000));
@@ -401,8 +397,8 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
       });
   fns_spender.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r =
             client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                                  make_amount(60'000));
@@ -523,14 +519,13 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   // to pay the replay-cache storage cost, so the commit assertion below turns
   // on the allowance semantics rather than on the invoked address's funding.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
     auto grant =
         client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
@@ -612,8 +607,7 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
   auto allowance_item = lookup_storage_item_from_db(
-      AddressAndKey{.address =
-                        GenesisConfigurationLoader::kPresetNativeTokenAddress,
+      AddressAndKey{.address = kNativeTokenContractAddress,
                     .key = std::move(allowance_storage_key)});
   ASSERT_TRUE(allowance_item.has_value());
   EXPECT_EQ(from_xdr(allowance_item->nnint()), kGrant);
@@ -634,8 +628,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r = client.invoke_opt<u8"transfer">(ctx, kOwnerAddr, make_amount(37));
     if (!r.has_value() || !r.value().has_value() ||
         !r.value().value().has_value() || !r.value().value().value().is_ok()) {
@@ -717,17 +711,16 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                             1'000'000 + replay_cache_cost_charged(2));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost() * 4);
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost() * 4);
 
   // Owner method 0: seed allowance for spender.
   // Owner method 1: adjust allowance for spender by +10 (must abort: overflow).
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                          make_difference(
                                                              kSeedAllowance));
@@ -741,8 +734,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
       });
   fns_owner.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r_adj = client.invoke_opt<u8"adjust_allowance">(
             ctx, kSpenderAddr, make_difference(kOverflowIncrement));
         // Strict allowance must reject the overflowing increment at invoke.
@@ -762,8 +755,8 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r_xfer =
             client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                                  make_amount(kTransferAmount));
@@ -865,14 +858,13 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfFails)
   // kOwnerAddr is the root invoked address and commits 1 tx; grant it enough
   // to pay the replay-cache storage cost.
   setup_grant_storage_token(kOwnerAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kOwnerAddr,
                                                      make_difference(100));
     if (r.has_value() && r.value().has_value() &&
@@ -927,23 +919,21 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   setup_grant_storage_token(kOwnerAddr,
                             1'000'000 + replay_cache_cost_charged(1));
   setup_grant_storage_token(kReceiverAddr, 0);
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress, 0);
+  setup_grant_storage_token(kNativeTokenContractAddress, 0);
 
   auto allowance_key_data =
       Serializer<SerializationFormat::kTxs>::serialize(kOwnerAddr, kOwnerAddr);
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  AddressAndKey allowance_addrkey{
-      .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      .key = std::move(allowance_storage_key)};
+  AddressAndKey allowance_addrkey{.address = kNativeTokenContractAddress,
+                                  .key = std::move(allowance_storage_key)};
   ASSERT_FALSE(lookup_storage_item_from_db(allowance_addrkey).has_value());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto r =
         client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                              make_amount(100));
@@ -991,9 +981,8 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   EXPECT_FALSE(lookup_storage_item_from_db(allowance_addrkey).has_value())
       << "self transfer_from must not create an allowance row";
 
-  auto native_token_balance_item =
-      lookup_storage_item_from_db(make_free_native_token_balance_addrkey(
-          GenesisConfigurationLoader::kPresetNativeTokenAddress));
+  auto native_token_balance_item = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kNativeTokenContractAddress));
   ASSERT_TRUE(native_token_balance_item.has_value());
   EXPECT_EQ(from_xdr(native_token_balance_item->nnint()), 0)
       << "native token contract storage balance must be unchanged";
@@ -1003,10 +992,10 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
 // ContractAddress{}, amount) by an allowance-authorized spender is accepted
 // just like any other delegated transfer. The spender's allowance is consumed,
 // the owner is debited, and the all-zero address is credited as an ordinary
-// native-token balance row. Because the native token has no burn semantics
-// (burn() is disabled and total_supply() is a fixed constant), the zero
-// recipient is NOT special-cased as a supply-reducing burn: total_supply()
-// stays fixed and a standard Transfer(owner, zero, amount) event is emitted.
+// native-token balance row. Because the native token has no transfer-to-zero
+// burn semantics, the zero recipient is NOT special-cased as a
+// supply-reducing burn: total_supply() stays unchanged and a standard
+// Transfer(owner, zero, amount) event is emitted.
 // This locks in the behavior as working-as-intended.
 TEST_F(NativeTokenAllowanceTest,
        TransferFromToZeroConsumesAllowanceAndKeepsSupply)
@@ -1038,16 +1027,15 @@ TEST_F(NativeTokenAllowanceTest,
   setup_grant_storage_token(kOwnerAddr, kInitialOwnerBalance +
                                             replay_cache_cost_charged(1));
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      cost_model->get_nnint_cost() * 4);
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            cost_model->get_nnint_cost() * 4);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   // Method 0: owner grants the spender an allowance for the transfer.
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto delta = make_difference(kTransferAmount);
         auto r =
             client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr, delta);
@@ -1060,11 +1048,12 @@ TEST_F(NativeTokenAllowanceTest,
         return {};
       });
   // Method 1: after the zero-recipient transfer_from, the allowance is fully
-  // consumed and total_supply() is still the fixed native HOG supply.
+  // consumed and total_supply() is still zero because this direct-storage test
+  // setup has no supply record.
   fns_owner.emplace(
       1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto allowance =
             client.invoke_opt<u8"allowance">(ctx, kOwnerAddr, kSpenderAddr);
@@ -1076,8 +1065,7 @@ TEST_F(NativeTokenAllowanceTest,
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto const expected_total_supply = make_amount(
-            uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility});
+        auto const expected_total_supply = make_amount(uint128_t{0});
         auto total_supply = client.invoke_opt<u8"total_supply">(ctx);
         if (!total_supply.has_value() || !total_supply.value().has_value() ||
             !total_supply.value().value().has_value() ||
@@ -1096,8 +1084,8 @@ TEST_F(NativeTokenAllowanceTest,
   // Method 0: spender transfers the owner's funds to the all-zero address.
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"transfer_from">(
             ctx, kOwnerAddr, kZeroAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
@@ -1192,8 +1180,7 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_EQ(tx_event_log.value().events.size(), 1);
 
   auto const &event = tx_event_log.value().events[0];
-  EXPECT_EQ(event.contract_address,
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+  EXPECT_EQ(event.contract_address, kNativeTokenContractAddress);
   EXPECT_EQ(event.num_topics, 3U);
   auto expected_event =
       make_event_from_cxs_struct(native_token_transfer_event_signature(),
@@ -1252,16 +1239,15 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
   // Native token contract pays for the new allowance NNInt entry created in
   // Tx1; Tx2's staged debit reverts with the aborted frame so no extra cost.
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   // Owner method 0: grant the spender an allowance of kGrantAllowance.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_owner;
   fns_owner.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"adjust_allowance">(ctx, kSpenderAddr,
                                                          make_difference(
                                                              kGrantAllowance));
@@ -1282,8 +1268,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_spender;
   fns_spender.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto r = client.invoke_opt<u8"transfer_from">(
             ctx, kOwnerAddr, kReceiverAddr,
             make_amount(static_cast<uint128_t>(kTransferAmount)));
@@ -1380,9 +1366,8 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  AddressAndKey allowance_addrkey{
-      .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      .key = std::move(allowance_storage_key)};
+  AddressAndKey allowance_addrkey{.address = kNativeTokenContractAddress,
+                                  .key = std::move(allowance_storage_key)};
   auto allowance_item = lookup_storage_item_from_db(allowance_addrkey);
   ASSERT_TRUE(allowance_item.has_value())
       << "allowance NNInt entry must exist after Tx1";
@@ -1412,15 +1397,14 @@ TEST_F(NativeTokenAllowanceTest,
       kTransferAmount + kCommittedOwnerRemainder + replay_cache_cost_charged(1);
 
   setup_grant_storage_token(kOwnerAddr, kOwnerGrant);
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      cost_model->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            cost_model->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> spender_fns;
   spender_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
         auto first = client.invoke_opt<u8"transfer_from">(
             ctx, kOwnerAddr, kReceiverAddr,
@@ -1461,8 +1445,8 @@ TEST_F(NativeTokenAllowanceTest,
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> owner_fns;
   owner_fns.emplace(
       0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto client = ContractTraitClient<itc_erc20::ERC20>(
-            GenesisConfigurationLoader::kPresetNativeTokenAddress);
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
         auto grant = client.invoke_opt<u8"adjust_allowance">(
             ctx, kSpenderAddr, make_difference(kGrantedAllowance));
         if (!grant.has_value() || !grant.value().has_value() ||
@@ -1537,9 +1521,8 @@ TEST_F(NativeTokenAllowanceTest,
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  AddressAndKey allowance_addrkey{
-      .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      .key = std::move(allowance_storage_key)};
+  AddressAndKey allowance_addrkey{.address = kNativeTokenContractAddress,
+                                  .key = std::move(allowance_storage_key)};
   auto allowance_item = lookup_storage_item_from_db(allowance_addrkey);
   ASSERT_TRUE(allowance_item.has_value());
   EXPECT_EQ(from_xdr(allowance_item->nnint()), kResidualAllowance);
@@ -1573,14 +1556,13 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
   constexpr static ContractAddress kReceiverAddr = make_contract_address(235);
 
   setup_grant_storage_token(kSpenderAddr, replay_cache_cost_charged(1));
-  setup_grant_storage_token(
-      GenesisConfigurationLoader::kPresetNativeTokenAddress,
-      get_default_cost_model()->get_nnint_cost());
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            get_default_cost_model()->get_nnint_cost());
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto client = ContractTraitClient<itc_erc20::ERC20>(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress);
+    auto client =
+        ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
     auto transfer =
         client.invoke_opt<u8"transfer_from">(ctx, kOwnerAddr, kReceiverAddr,
                                              make_amount(0));
@@ -1645,12 +1627,10 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
   ASSERT_TRUE(allowance_key_data.has_value());
   StorageKey allowance_storage_key(StorageKeyType::ContractData);
   allowance_storage_key.contract_data_key() = sha256(*allowance_key_data);
-  EXPECT_FALSE(
-      lookup_storage_item_from_db(
-          AddressAndKey{
-              .address = GenesisConfigurationLoader::kPresetNativeTokenAddress,
-              .key = std::move(allowance_storage_key)})
-          .has_value());
+  EXPECT_FALSE(lookup_storage_item_from_db(
+                   AddressAndKey{.address = kNativeTokenContractAddress,
+                                 .key = std::move(allowance_storage_key)})
+                   .has_value());
 }
 
 TEST_F(NativeTokenAllowanceTest,
@@ -1811,6 +1791,166 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   auto runtime_context = make_hog_exec_context();
   auto handler = make_new_system_call_handler(tx, *runtime_context);
   EXPECT_FALSE(handler.root_invoke().is_root_success());
+}
+
+// Edge case: a native-token balance at (nearly) INT128_MAX must still be able
+// to receive a storage refund at commit. hogdb's release_balance() is
+// infallible -- it CHECK-fails rather than returning an error if the credited
+// refund exceeds the balance's remaining add-capacity (INT128_MAX - base). The
+// mint precompile no longer bounds total supply below INT128_MAX at invoke
+// (that check moved to commit for rv32 parity), so this pins the property that
+// keeps release_balance() safe even at the maximum: an address holding the
+// entire supply as balance has no storage to release, and more generally
+// (balance + its locked storage) <= total_supply <= INT128_MAX, so any storage
+// refund it receives is always <= its add-capacity. HOG conservation is what
+// makes the unreachable state (base == INT128_MAX AND a pending refund)
+// unreachable; if that ever regressed, the block-3 delete below would abort
+// the process on the CHECK inside release_balance() rather than committing.
+//
+// Sequence: block 1 mints INT128_MAX to the whale (the genesis root is the
+// only authorized minter); block 2 has the whale write a bytestring, locking
+// storage cost out of its near-max balance; block 3 has the whale delete it,
+// so the released storage cost is credited back via release_balance() against
+// a base a hair below INT128_MAX.
+TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
+{
+  constexpr static ContractAddress kWhaleAddr = make_contract_address(180);
+  constexpr static int128_t kMaxSupply = std::numeric_limits<int128_t>::max();
+
+  auto const *cost_model = get_default_cost_model();
+  const int128_t balance_cost = cost_model->get_balance_cost();
+
+  // The genesis root roots the mint tx; the native token address owns the
+  // freshly-created total-supply row.
+  setup_grant_storage_token(kGenesisRootContractAddress,
+                            replay_cache_cost_charged(1));
+  setup_grant_storage_token(kNativeTokenContractAddress,
+                            cost_model->get_nnint_cost());
+
+  // Genesis-root driver: method 0 mints INT128_MAX to the whale.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> root_fns;
+  root_fns.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto client =
+            ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+        auto mint = client.invoke_opt<u8"mint">(
+            ctx, kWhaleAddr, make_amount(static_cast<uint128_t>(kMaxSupply)));
+        if (!mint.has_value() || !mint.value().has_value() ||
+            !mint.value().value().has_value() ||
+            !mint.value().value().value().is_ok()) {
+          ADD_FAILURE() << "mint of INT128_MAX to the whale did not succeed";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto root_contract = std::make_unique<NativeContract>(std::move(root_fns));
+
+  // Whale contract: method 0 writes a bytestring; method 1 deletes it.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> whale_fns;
+  whale_fns.emplace(
+      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("whale_storage");
+        Bytestring payload = make_bytestring("release me back to a near-max "
+                                             "balance");
+        auto r = ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(payload.data(), payload.size())),
+            std::to_underlying(StorageDeltaFlags::None));
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "whale failed to write storage";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  whale_fns.emplace(
+      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto key = make_storage_key("whale_storage");
+        auto r = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "whale failed to delete storage";
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto whale_contract = std::make_unique<NativeContract>(std::move(whale_fns));
+
+  constexpr int32_t kRootNativeId = 44;
+  constexpr int32_t kWhaleNativeId = 45;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kRootNativeId, std::move(root_contract));
+  contract_map.emplace(kWhaleNativeId, std::move(whale_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto root_xdr = make_native_contract(kRootNativeId);
+  write_contract(root_xdr);
+  write_deployment(kGenesisRootContractAddress, root_xdr);
+  auto whale_xdr = make_native_contract(kWhaleNativeId);
+  write_contract(whale_xdr);
+  write_deployment(kWhaleAddr, whale_xdr);
+
+  auto run_block_tx = [&](ContractAddress invoked, Runtime::MethodID method) {
+    auto tx = SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = invoked,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()}};
+    auto handler = make_new_system_call_handler(tx, *runtime_context);
+    EXPECT_TRUE(handler.root_invoke().is_root_success());
+    ExecResult commit = handler.try_commit_transaction();
+    EXPECT_EQ(commit, ExecResult::ExecResultOK);
+    EXPECT_TRUE(
+        handler.emit_events(commit, ProposedTransaction{.signed_tx = tx})());
+    advance_block();
+    return commit;
+  };
+
+  // Block 1: mint INT128_MAX to the whale. Its stored balance is the mint
+  // amount minus the one-time balance-row cost (self-funded from the mint).
+  ASSERT_EQ(run_block_tx(kGenesisRootContractAddress, 0),
+            ExecResult::ExecResultOK);
+  auto whale_after_mint = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kWhaleAddr));
+  ASSERT_TRUE(whale_after_mint.has_value());
+  EXPECT_EQ(from_xdr(whale_after_mint->nnint()), kMaxSupply - balance_cost)
+      << "the whale must hold essentially the entire INT128_MAX supply";
+
+  // Block 2: the whale writes storage, locking cost out of its near-max
+  // balance.
+  ASSERT_EQ(run_block_tx(kWhaleAddr, 0), ExecResult::ExecResultOK);
+
+  // Block 3: the whale deletes the storage. The released cost is credited back
+  // via release_balance() against a base just below INT128_MAX. Reaching a
+  // clean commit here (rather than a CHECK-abort) is the property under test.
+  ASSERT_EQ(run_block_tx(kWhaleAddr, 1), ExecResult::ExecResultOK);
+
+  // The storage row is gone, and the refund landed: the balance is back within
+  // a hair of INT128_MAX (it dips only by the whale's own replay-cache costs
+  // for the two txs it rooted -- far below this generous slack).
+  auto whale_storage = lookup_storage_item_from_db(
+      AddressAndKey{.address = kWhaleAddr, .key = [] {
+                      StorageKey k(StorageKeyType::ContractData);
+                      k.contract_data_key() = make_storage_key("whale_storage");
+                      return k;
+                    }()});
+  EXPECT_FALSE(whale_storage.has_value())
+      << "the whale's storage row must be deleted";
+
+  auto whale_final = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(kWhaleAddr));
+  ASSERT_TRUE(whale_final.has_value());
+  int128_t final_balance = from_xdr(whale_final->nnint());
+  EXPECT_LE(final_balance, kMaxSupply - balance_cost);
+  EXPECT_GT(final_balance, kMaxSupply - balance_cost - (int128_t{1} << 40))
+      << "the storage refund must credit back against a near-max base";
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

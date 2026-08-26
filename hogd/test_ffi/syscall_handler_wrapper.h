@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -59,13 +61,15 @@ public:
     // so reaching this point uncommitted is a programming error.
     CHECK(transaction_committed_or_aborted_);
     CHECK(mock_runtime_stack_.empty());
-    // Destroying a handler that is still published in this thread's TLS context
-    // slot would leave current_context_ dangling, so the next pop_context()
-    // would dereference freed storage (issue #2784). close_syscall_handler()
+    // Destroying a handler that is still published on this thread's context
+    // stack would leave a dangling entry, so the next pop_context() would
+    // dereference freed storage (issue #2784). Scanning rather than checking
+    // just the top: with a stack an entry can be buried under a nested guest
+    // call, and that is equally fatal. close_syscall_handler()
     // rejects that close up front; this CHECK turns any other path that reaches
     // destruction while still installed into a deterministic abort rather than
     // a latent use-after-free.
-    CHECK(get_context() != this);
+    CHECK(std::ranges::find(context_stack_, this) == context_stack_.end());
     // The open-handler guard is released by open_handler_guard_'s destructor
     // (declared before handler_, destroyed after it), not here -- see #2572.
   }
@@ -88,15 +92,81 @@ public:
   ForeignTracedInvokeResult
   finish_mock_invocation_frame(InvokeErrorCode invoke_error_code);
 
-  static SyscallHandlerContext *get_context() { return current_context_; }
+  // Recovers the context owning a handler. MockRuntimeContext::make_new_runtime
+  // is handed the SystemCallHandler* hog_exec is running and has to reach the
+  // harness state around it. It cannot ask the thread: a database read inside
+  // hog_exec suspends the transaction and resumes it on whichever thread took
+  // the reply, not the one that entered the FFI call.
+  //
+  // Every handler a MockRuntimeContext sees is the TestSystemCallHandler member
+  // of some SyscallHandlerContext, so this is an ordinary base-to-derived
+  // conversion -- defined, with no assumption about layout.
+  //
+  // kHandlerMagic still rejects a handler that is not one of ours. The
+  // downcast itself cannot detect that (nor could the arithmetic this
+  // replaced): nothing in the tree builds a bare SystemCallHandler and hands
+  // it to a MockRuntimeContext, and if that changes this aborts rather than
+  // returning a reference to whatever the bytes happen to hold.
+  static SyscallHandlerContext *from_handler(SystemCallHandler *handler)
+  {
+    CHECK(handler != nullptr);
+    auto *test_handler = static_cast<TestSystemCallHandler *>(handler);
+    CHECK(test_handler->magic == kHandlerMagic);
+    return &test_handler->owner;
+  }
 
+  static SyscallHandlerContext *get_context()
+  {
+    return context_stack_.empty() ? nullptr : context_stack_.back();
+  }
+
+  // Publishes a context on the calling thread for as long as it is alive.
+  // MockRuntime::invoke_internal -- the one place control crosses back from
+  // hog_exec into the harness -- installs the context its runtime was built
+  // with for the duration of the guest call, rather than relying on the thread
+  // already holding it. It cannot: a database read inside hog_exec suspends the
+  // transaction and resumes it on whichever thread took the reply, not the one
+  // that entered the FFI call.
+  class ScopedContext {
+  public:
+    explicit ScopedContext(SyscallHandlerContext *ctx) noexcept : pushed_(ctx)
+    {
+      try {
+        context_stack_.push_back(ctx);
+      } catch (std::exception const &e) {
+        std::fputs("ScopedContext: cannot grow the context stack: ", stderr);
+        std::fputs(e.what(), stderr);
+        std::fputc('\n', stderr);
+        throw; // noexcept: terminates here, with the reason already reported
+      }
+    }
+    ~ScopedContext()
+    {
+      CHECK(!context_stack_.empty() && context_stack_.back() == pushed_);
+      context_stack_.pop_back();
+    }
+
+    ScopedContext(ScopedContext const &) = delete;
+    ScopedContext &operator=(ScopedContext const &) = delete;
+    ScopedContext(ScopedContext &&) = delete;
+    ScopedContext &operator=(ScopedContext &&) = delete;
+
+  private:
+    SyscallHandlerContext *pushed_;
+  };
+
+  // noexcept because this is reachable through the exported C entry point,
+  // where a throw would unwind across the ABI into Rust. Growing the stack can
+  // fail; making that a deterministic terminate at the throw point is the
+  // defined behavior, and the diagnostic below is allocation-free so the reason
+  // still lands (same reasoning as the guard logging, issue #2559).
   [[nodiscard]]
-  bool push_context()
+  bool push_context() noexcept
   {
     if (get_context() != nullptr) {
-      // The exported pop/push_context() FFI entries are not noexcept, so a
-      // std::bad_alloc from this guard diagnostic (error() formats and
-      // allocates) would propagate across the C ABI. Keep it best-effort, and
+      // error() formats and allocates, so this diagnostic can throw. That must
+      // not escape: this function is noexcept and has a structured rejection to
+      // report, which a terminate would throw away. Keep it best-effort and
       // report a logging failure via fputs (no allocation) rather than silently
       // dropping it, so the guard still returns false (issue #2559).
       try {
@@ -110,15 +180,22 @@ public:
       return false;
     }
 
-    current_context_ = this;
+    try {
+      context_stack_.push_back(this);
+    } catch (std::exception const &e) {
+      std::fputs("push_context: cannot grow the context stack: ", stderr);
+      std::fputs(e.what(), stderr);
+      std::fputc('\n', stderr);
+      throw; // noexcept: terminates here, with the reason already reported
+    }
     return true;
   }
 
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  void pop_context()
+  void pop_context() noexcept
   {
     CHECK(get_context() == this);
-    current_context_ = nullptr;
+    context_stack_.pop_back();
   }
 
   void push_mock_runtime(Runtime *runtime)
@@ -157,13 +234,14 @@ public:
   // all frames off of the transaction.
   //
   // This intentionally keys off mock_runtime_stack_ rather than the lower
-  // invocation-frame stack (handler_.is_running()): a mock callback that throws
-  // unwinds before finish_frame() pops the lower frame, so the invocation-frame
-  // stack can legitimately retain a dangling frame on a handler that must still
-  // close cleanly (#2470). mock_runtime_stack_ is RAII-managed, so it is the
-  // signal for "frames the harness still owes a finish". The half-open-frame
-  // window where the two stacks could diverge during open is closed by making
-  // start_mock_invocation_frame() exception-atomic (#2507, #2560).
+  // invocation-frame stack (to_handler().is_running()): a mock callback that
+  // throws unwinds before finish_frame() pops the lower frame, so the
+  // invocation-frame stack can legitimately retain a dangling frame on a
+  // handler that must still close cleanly (#2470). mock_runtime_stack_ is
+  // RAII-managed, so it is the signal for "frames the harness still owes a
+  // finish". The half-open-frame window where the two stacks could diverge
+  // during open is closed by making start_mock_invocation_frame()
+  // exception-atomic (#2507, #2560).
   [[nodiscard]] bool can_be_closed() const
   {
     return mock_runtime_stack_.empty();
@@ -240,7 +318,18 @@ private:
     };
   };
 
-  inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
+  // The contexts running on this thread, innermost last. A stack rather than a
+  // single slot because a mock contract's guest call can nest: every frame
+  // pushes on entry to MockRuntime::invoke_internal and pops on the way out, so
+  // an inner frame does not have to clobber the outer one's entry.
+  // Defined out of line in syscall_handler_wrapper.cc rather than inline here:
+  // a vector needs dynamic initialization, so an inline thread_local emits a
+  // TLS initialization routine in every translation unit that includes this
+  // header, and macOS ld rejects those as duplicate symbols. Linux CI does not
+  // see it -- test_bindings.yml is the only PR workflow that sets
+  // ENABLE_TEST_FFI and it runs on Linux, so the macOS test_ffi build happens
+  // only in release_test_ffi.yml.
+  static thread_local std::vector<SyscallHandlerContext *> context_stack_;
 
   DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
@@ -255,7 +344,30 @@ private:
   // it.
   std::shared_ptr<MockRuntimeContext> runtime_context_owner_;
 
-  SystemCallHandler handler_;
+  static constexpr std::uint64_t kHandlerMagic = 0x4d41524d4f54ULL; // MARMOT
+
+  // The handler, carrying a reference back to the context that owns it.
+  // Deriving keeps the backreference in the test-specific object: production
+  // SystemCallHandler is untouched, and recovering the owner is a defined
+  // downcast rather than pointer arithmetic over a layout we would have to
+  // assume. SystemCallHandler has no virtual functions and is never deleted
+  // through a base pointer here -- this is a by-value member -- so the absent
+  // virtual destructor is not a hazard.
+  //
+  // Declared where the plain handler used to be, so the ordering the guard and
+  // the runtime-context owner rely on (#2572, #2432) is unchanged.
+  struct TestSystemCallHandler : SystemCallHandler {
+    template<typename... Args>
+    explicit TestSystemCallHandler(SyscallHandlerContext &owner_in,
+                                   Args &&...args)
+      : SystemCallHandler(std::forward<Args>(args)...), owner(owner_in)
+    {}
+
+    SyscallHandlerContext &owner;
+    std::uint64_t magic = kHandlerMagic;
+  };
+
+  TestSystemCallHandler handler_;
   std::vector<Runtime *> mock_runtime_stack_;
   std::vector<std::unique_ptr<InvocationFrameTrace>>
       invocation_frame_trace_stack_;
@@ -356,10 +468,13 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
                    typename syscall_t::template arg_i<Is>>(guard,
                                                            input_args)...};
 
+    // The mock entrypoint is an extern "C" ABI the Rust test harness calls
+    // synchronously, so it blocks on the syscall result rather than awaiting
+    // it.  Its database is a local mock, so nothing suspends anyway.
     auto [inner_res, gas] =
-        wrap_after_parse<SyscallMeta>(guard, handler->to_handler(),
+        wrap_after_parse<SyscallMeta>(guard.check(), handler->to_handler(),
                                       gas_runtime->gas_remaining(), syscall_no,
-                                      std::move(parsed_args));
+                                      std::move(parsed_args))();
     gas_runtime->consume_gas(gas);
 
     return from_status(inner_res);

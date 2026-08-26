@@ -18,7 +18,6 @@ members = [
     "integration_test_contracts/genesis_root",
     "integration_test_contracts/hash_bug",
     "integration_test_contracts/htlc",
-    "integration_test_contracts/initial_token_claim",
     "integration_test_contracts/itc_erc20",
     "integration_test_contracts/manual_revert_caller",
     "integration_test_contracts/manual_revert_test",
@@ -39,6 +38,8 @@ members = [
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/txs_roundtrip",
     "integration_test_contracts/view_gateway_test",
+    "local_test_contracts/auth_weight_test",
+    "local_test_contracts/tx_context_test",
 ]
 
 [workspace.package]

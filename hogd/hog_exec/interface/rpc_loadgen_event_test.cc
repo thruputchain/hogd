@@ -25,7 +25,6 @@
 #include "hogd/loadgen/loadgen_server.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_event.hh"
@@ -126,7 +125,7 @@ protected:
 
     // We use [block_id] as the height as well.
     auto event_close_res =
-        event_client_.eventsched_close_block(block_id, block_id, ProposalTxs{});
+        event_client_.eventsched_close_block(block_id, block_id);
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
@@ -158,7 +157,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 
@@ -259,7 +258,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   // Load the genesis configuration from loadgen to the database
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto db_res = db_client_.dbsched_load_genesis_configuration_v2(
+  auto db_res = db_client_.dbsched_load_genesis_configuration(
       result.success().genesis_configuration, genesis_value);
   ASSERT_EQ(db_res, DbSchedResult::DbSchedResultOK);
 

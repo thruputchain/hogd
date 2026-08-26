@@ -237,7 +237,8 @@ enable_syscall_logging(int32_t level) noexcept
 
 CreateDBResult
 make_new_db(const uint8_t *serialized_cost_model,
-            uint32_t serialized_cost_model_len) noexcept
+            uint32_t serialized_cost_model_len,
+            const uint8_t *serialized_network_hash) noexcept
 {
   // First-use init can fail (allocation failure); return a structured error
   // rather than letting it cross this noexcept boundary (issue #2575).
@@ -246,6 +247,14 @@ make_new_db(const uint8_t *serialized_cost_model,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
   try {
+    static_assert(sizeof(NetworkHash) == 32);
+    NetworkHash network_hash{};
+    if (serialized_network_hash == nullptr) {
+      return {.db = nullptr, .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    }
+    std::memcpy(network_hash.data(), serialized_network_hash,
+                network_hash.size());
+
     StorageCostModelXdr cost_model_xdr =
         StorageCostModel::default_cost_model().to_xdr();
     if (serialized_cost_model != nullptr) {
@@ -259,7 +268,7 @@ make_new_db(const uint8_t *serialized_cost_model,
                 .ffi_error_code = kTestFFIErrorCodeDeserializeError};
       }
     }
-    auto *db = new DBContext(cost_model_xdr);
+    auto *db = new DBContext(cost_model_xdr, network_hash);
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
@@ -1093,6 +1102,22 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
+  // Native precompiles (the default wallet, the hog token) are installed at
+  // genesis and are never (re)deployed at an ordinary address: production
+  // deploy_contract() rejects them via is_banned_redeploy_native_contract().
+  // The setup path must apply the same ban -- otherwise a native contract can
+  // be deployed at a child address and later invoked in a nested frame, where
+  // e.g. the default wallet's root-only CHECK aborts the process instead of
+  // returning a structured error (#3592). Every native id currently defined is
+  // banned, so rejecting the type is sufficient.
+  if (contract.contract_type() == ContractType::kNative) {
+    best_effort_log([] {
+      error("Attempt to deploy a native precompile contract, which is "
+            "installed at genesis and cannot be redeployed");
+    });
+    return kTestFFIErrorCodeInvalidArgument;
+  }
+
   try {
     // write_deployment() throws (e.g. std::runtime_error) when the underlying
     // metadata write fails, such as RAMDB kNoMemory. Convert that to a
@@ -1145,8 +1170,10 @@ deserialize_signed_transaction(FFISerializedSignedTransaction signed_tx,
 }
 
 VerifyAuthResult
-verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
-                                    FFISourceAuthData source_auth_data) noexcept
+verify_signed_transaction_auth_impl(
+    FFISerializedSignedTransaction signed_tx,
+    FFISourceAuthData source_auth_data,
+    const uint8_t *serialized_network_hash) noexcept
 {
   constexpr auto kNullptrError =
       make_ffi_result_type<VerifyAuthResult>(kTestFFIErrorCodeInvalidPointer);
@@ -1166,6 +1193,14 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
       return kNullptrError;
     }
 
+    static_assert(sizeof(NetworkHash) == 32);
+    if (serialized_network_hash == nullptr) {
+      return kNullptrError;
+    }
+    NetworkHash network_hash{};
+    std::memcpy(network_hash.data(), serialized_network_hash,
+                network_hash.size());
+
     std::optional<AddressAuthData> source_data;
     if (source_auth_data.data) {
       source_data.emplace();
@@ -1175,7 +1210,7 @@ verify_signed_transaction_auth_impl(FFISerializedSignedTransaction signed_tx,
 
     // Perform the appropriate level of verification
     AuthVerifyStatus<void> result =
-        verify_auth(stx, source_data ? &*source_data : nullptr);
+        verify_auth(stx, source_data ? &*source_data : nullptr, network_hash);
 
     if (result.has_value()) {
       return {.auth_error_code = 0, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -1281,18 +1316,24 @@ extern "C" {
 
 CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
-          uint32_t serialized_cost_model_len)
+          uint32_t serialized_cost_model_len,
+          const uint8_t *serialized_network_hash)
 {
-  hogd::do_ffi_trace("FFI (start): create_db(serialized_cost_model={}, "
-                     "serialized_cost_model_len={})",
-                     static_cast<const void *>(serialized_cost_model),
-                     serialized_cost_model_len);
+  hogd::do_ffi_trace(
+      "FFI (start): create_db(serialized_cost_model={}, "
+      "serialized_cost_model_len={}, serialized_network_hash={})",
+      static_cast<const void *>(serialized_cost_model),
+      serialized_cost_model_len,
+      static_cast<const void *>(serialized_network_hash));
   auto result =
-      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len);
-  hogd::do_ffi_trace("FFI (end): create_db(serialized_cost_model={}, "
-                     "serialized_cost_model_len={}) -> {}",
-                     static_cast<const void *>(serialized_cost_model),
-                     serialized_cost_model_len, result);
+      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len,
+                        serialized_network_hash);
+  hogd::do_ffi_trace(
+      "FFI (end): create_db(serialized_cost_model={}, "
+      "serialized_cost_model_len={}, serialized_network_hash={}) -> {}",
+      static_cast<const void *>(serialized_cost_model),
+      serialized_cost_model_len,
+      static_cast<const void *>(serialized_network_hash), result);
   return result;
 }
 
@@ -1607,12 +1648,14 @@ enable_syscall_logging(int32_t level)
 
 VerifyAuthResult
 verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
-                               FFISourceAuthData source_auth_data)
+                               FFISourceAuthData source_auth_data,
+                               const uint8_t *serialized_network_hash)
 {
   hogd::do_ffi_trace(
       "FFI (start): verify_signed_transaction_auth(signed_tx={}, "
-      "source_auth_data={})",
-      signed_tx, source_auth_data);
+      "source_auth_data={}, serialized_network_hash={})",
+      signed_tx, source_auth_data,
+      static_cast<const void *>(serialized_network_hash));
   // Install a logger before entering auth verification: an invalid signature
   // logs a debug-build trace() that would otherwise dereference a null logger
   // when this is the first test_ffi call in the process (issue #2464).
@@ -1626,10 +1669,13 @@ verify_signed_transaction_auth(FFISerializedSignedTransaction signed_tx,
                                 kTestFFIErrorCodeUnrecoverableError};
   }
   auto result =
-      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data);
+      hogd::verify_signed_transaction_auth_impl(signed_tx, source_auth_data,
+                                                serialized_network_hash);
   hogd::do_ffi_trace("FFI (end): verify_signed_transaction_auth(signed_tx={}, "
-                     "source_auth_data={}) -> {}",
-                     signed_tx, source_auth_data, result);
+                     "source_auth_data={}, serialized_network_hash={}) -> {}",
+                     signed_tx, source_auth_data,
+                     static_cast<const void *>(serialized_network_hash),
+                     result);
   return result;
 }
 

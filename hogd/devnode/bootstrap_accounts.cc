@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <format>
 #include <memory>
-#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -13,7 +12,6 @@
 
 #include "built_contracts/dev_wallet.h"
 #include "contract.hh"
-#include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -61,14 +59,13 @@ append_bootstrap_account(GenesisConfigurationBuilder &builder,
   auto keypair = derive_bootstrap_account_keypair(seed, index);
   SHA256Hash nonce = derive_wallet_nonce(seed, index);
   ContractAddress address =
-      GenesisConfigurationLoader::calculate_deployed_address(
-          sha256(*wallet_contract), nonce);
+      calculate_genesis_deployment_address(sha256(*wallet_contract), nonce);
 
-  builder.add_initial_config(wallet_contract, nonce,
-                             wallet_meta::entrypoint<u8"initialize">(),
-                             wallet_meta::make_calldata<u8"initialize">(
-                                 keypair.first),
-                             static_cast<int128_t>(storage_tokens));
+  builder.add_distribution(wallet_contract, nonce,
+                           wallet_meta::entrypoint<u8"initialize">(),
+                           wallet_meta::make_calldata<u8"initialize">(
+                               keypair.first),
+                           static_cast<int128_t>(storage_tokens));
   return BootstrapAccountMetadata{
       .index = index,
       .role = role,
@@ -85,20 +82,18 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
                           NetworkHash const &network_hash,
                           StorageCostModel const &cost_model)
 {
-  std::optional<GenesisConfiguration> genesis_configuration =
-      builder.build(cost_model);
-  if (!genesis_configuration) {
-    throw std::runtime_error("bootstrap accounts allocate more hogs than the "
-                             "initial hog token supply");
+  auto initialization_txs =
+      builder.try_make_genesis_ceremony_transactions(cost_model);
+  if (!initialization_txs.has_value()) {
+    throw std::runtime_error(
+        "bootstrap accounts and ceremony funding exceed the native token "
+        "supply");
   }
-
   return BootstrapAccountArtifact{
-      .genesis_configuration = std::move(*genesis_configuration),
-      .genesis_configuration_v2 =
-          builder.build_v2(network_hash, cost_model,
-                           *load_stock_genesis_root_contract()),
-      .initialization_txs =
-          builder.make_genesis_ceremony_transactions(cost_model),
+      .genesis_configuration =
+          builder.build(network_hash, cost_model,
+                        *load_stock_genesis_root_contract()),
+      .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
   };
 }

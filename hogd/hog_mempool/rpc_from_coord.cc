@@ -536,22 +536,12 @@ MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
                                                                   value);
 }
 
-x23::Async<RPCError>
-MempoolCoordinatorRpc::eventsched_confirm_committed_block(
-    const ConsensusValue &value)
-{
-  co_return co_await event_sched_client_->eventsched_confirm_committed_block(
-      value);
-}
-
 x23::Async<EventBlockResult>
 MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
-                                              BlockHeight block_height,
-                                              const ProposalTxs &txs)
+                                              BlockHeight block_height)
 {
   co_return co_await event_sched_client_->eventsched_close_block(block_id,
-                                                                 block_height,
-                                                                 txs);
+                                                                 block_height);
 }
 
 x23::Async<DbBlockResult>
@@ -1201,14 +1191,16 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
                                  co_return co_await close_snapshot(
                                      cache.block_id);
                                });
+  nodes.proposal_txs_hash = dag.cpu<ProposalTxsHash>(
+      "compute proposal txs hash", proposal_txs_deps, [&cache] {
+        return proposal_txs_compatibility_hash(
+            cache.proposal_result.proposed_block().proposal.transactions);
+      });
   nodes.close_event = dag.async<EventBlockResult>(
-      "close event block", proposal_txs_deps,
+      "close event block", proposal_deps,
       [&]() -> x23::Async<EventBlockResult> {
-        const ProposalTxs &proposal_txs =
-            cache.proposal_result.proposed_block().proposal.transactions;
         co_return co_await eventsched_close_block(
-            cache.block_id, db_tip.value.proposal_header.block_height + 1,
-            proposal_txs);
+            cache.block_id, db_tip.value.proposal_header.block_height + 1);
       });
   nodes.txset_hash =
       dag.cpu<SHA256Hash>("compute txset hash", txset_hash_deps, [txset_trie] {
@@ -1238,8 +1230,6 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         proposal.header = ProposalHeader{
             .ext = {},
             .network_hash = network_hash_,
-            .genesis_configuration_hash =
-                db_tip.value.proposal_header.genesis_configuration_hash,
             .proposer = context.proposer,
             .block_timepoint = context.block_timepoint,
             .block_height = db_tip.value.proposal_header.block_height + 1,
@@ -1294,11 +1284,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   if (first_exception) {
     std::rethrow_exception(first_exception);
-  }
-  if (result.db.result() == DbSchedResult::DbSchedResultOK &&
-      result.event_commit == RPCError::kRPCNone) {
-    result.event_confirmation =
-        co_await eventsched_confirm_committed_block(cache.db_tip.value);
   }
   co_return result;
 }
@@ -1448,7 +1433,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                               auth_data_node,
                                               prepare_cache_node),
                          nomination_dag.after(check_initialize_block_node));
-  add_finish_nominating_block_nodes(
+  FinishNominationNodes finish_nodes = add_finish_nominating_block_nodes(
       nomination_dag, last_committed_block_, context, nominated_block_cache_,
       dag_deps_from_nodes(schedule_nodes.propose_chunks),
       dag_deps_from_nodes(schedule_nodes.serialize_chunks), executor_cleanups,
@@ -1511,8 +1496,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .ext = {},
                        .prev_hash = sha256(last_committed_block_.value),
                        .proposal_header = proposal.header,
-                       .proposal_txs_hash = proposal_txs_compatibility_hash(
-                           proposal.transactions),
+                       .proposal_txs_hash =
+                           finish_nodes.proposal_txs_hash.get(),
                        .upgrades = {}};
   // default_wallet comes from the committed parent tip: the cache's db_tip
   // only ever receives storage/event hashes from the scheduler's close
@@ -1694,7 +1679,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
                                  ceremony_proposal_txs.nondeterministic_data);
     const DbBlockResult db_close = co_await close_snapshot(block_id);
     const EventBlockResult event_close =
-        co_await eventsched_close_block(block_id, 1, ceremony_proposal_txs);
+        co_await eventsched_close_block(block_id, 1);
     if (db_close.result() != DbSchedResult::DbSchedResultOK ||
         event_close.error() != RPCError::kRPCNone) {
       co_await cleanup();
@@ -1714,9 +1699,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     proposed.proposal.header = ProposalHeader{
         .ext = {},
         .network_hash = network_hash_,
-        .genesis_configuration_hash =
-            last_committed_block_.value.proposal_header
-                .genesis_configuration_hash,
         .proposer = request.context.proposer,
         .block_timepoint = request.context.block_timepoint,
         .block_height = 1,
@@ -2361,13 +2343,17 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       [&]() -> x23::Async<DbBlockResult> {
         co_return co_await close_snapshot(validation_block_id);
       });
+  auto proposal_txs_hash_node = validation_dag.cpu<ProposalTxsHash>(
+      "compute proposal txs hash", validation_dag.after(check_validation_node),
+      [&proposal] {
+        return proposal_txs_compatibility_hash(proposal.transactions);
+      });
   auto close_event_node = validation_dag.async<EventBlockResult>(
       "close event block", validation_dag.after(check_validation_node),
       [&]() -> x23::Async<EventBlockResult> {
         co_return co_await eventsched_close_block(validation_block_id,
                                                   scheduler_->current_block() +
-                                                      1,
-                                                  proposal.transactions);
+                                                      1);
       });
   x23::DagDeps close_validation_deps =
       merge_dag_deps(validation_dag.after(close_snapshot_node, close_event_node,
@@ -2420,15 +2406,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       });
 
   validation_dag.async<void>(
-      "build validation result", validation_dag.after(check_closed_node),
+      "build validation result",
+      validation_dag.after(check_closed_node, proposal_txs_hash_node),
       [&]() -> x23::Async<void> {
         ConsensusValue value{.protocol = 0,
                              .ext = {},
                              .prev_hash = sha256(last_committed_block_.value),
                              .proposal_header = proposal.header,
-                             .proposal_txs_hash =
-                                 proposal_txs_compatibility_hash(
-                                     proposal.transactions),
+                             .proposal_txs_hash = proposal_txs_hash_node.get(),
                              .upgrades = {}};
         // default_wallet comes from the committed parent tip (see the
         // nomination-path comment).
@@ -2847,7 +2832,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         const JointCommitResult &joint_commit = commit_block_node.get();
         CHECK_EQ(joint_commit.db.result(), DbSchedResult::DbSchedResultOK);
         CHECK_EQ(joint_commit.event_commit, RPCError::kRPCNone);
-        CHECK_EQ(joint_commit.event_confirmation, RPCError::kRPCNone);
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later

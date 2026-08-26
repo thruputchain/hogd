@@ -112,28 +112,13 @@ public:
 
   void advance_block();
 
-  void set_event_proposal_transactions(
-      std::span<const SignedTransaction> transactions)
-  {
-    x23::XdrVec<TransactionHash> hashes;
-    x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
-    hashes.reserve(transactions.size());
-    nondeterministic_data.resize(transactions.size());
-    for (const SignedTransaction &transaction : transactions) {
-      hashes.push_back(sha256(transaction.tx));
-    }
-    event_proposal_txs_.hash = t_to_parallel_batch(hashes)();
-    event_proposal_txs_.nondeterministic_data =
-        t_to_parallel_batch(nondeterministic_data)();
-  }
-
   void run_genesis_configuration(
       GenesisConfigurationBuilder const &genesis_configuration_builder);
   void run_genesis_configuration(
       GenesisConfiguration const &genesis_configuration,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
   void run_genesis_configuration(
-      GenesisConfigurationV2 const &genesis_configuration,
+      GenesisConfiguration const &genesis_configuration,
       InitializationBlock const &genesis_ceremony_txs,
       x23::XdrVec<InitializationBlock> const &initialization_txs);
 
@@ -267,8 +252,7 @@ private:
     }
     // We use [block_number] as the height as well.
     auto r =
-        event_sched_client_->eventsched_close_block(block_number, block_number,
-                                                    event_proposal_txs_);
+        event_sched_client_->eventsched_close_block(block_number, block_number);
     if (r.error() != RPCError::kRPCNone) {
       panic("Failed to close event block");
     }
@@ -289,7 +273,6 @@ private:
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
-  ProposalTxs event_proposal_txs_;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
@@ -322,15 +305,11 @@ CommonBenchState::advance_block()
 
   ConsensusValue value{};
   value.proposal_header.block_height = block_number_;
-  value.proposal_txs_hash =
-      proposal_txs_compatibility_hash(event_proposal_txs_);
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot for block {}: {}", block_number_,
           r2.result());
   }
-  event_proposal_txs_ = {};
-
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
@@ -351,13 +330,15 @@ inline void
 CommonBenchState::run_genesis_configuration(
     GenesisConfigurationBuilder const &genesis_configuration_builder)
 {
-  auto unfurl_txs =
-      genesis_configuration_builder.make_unfurl_genesis_transactions();
-  InitializationBlock initialization_txs = {unfurl_txs.begin(),
-                                            unfurl_txs.end()};
-  run_genesis_configuration(genesis_configuration_builder.build_or_panic(
-                                StorageCostModel::default_cost_model()),
-                            {initialization_txs});
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto root_contract = load_stock_genesis_root_contract();
+  auto ceremony_txs =
+      genesis_configuration_builder.make_genesis_ceremony_transactions(
+          cost_model);
+  run_genesis_configuration(
+      genesis_configuration_builder.build(NetworkHash{}, cost_model,
+                                          *root_contract),
+      InitializationBlock{ceremony_txs.begin(), ceremony_txs.end()}, {});
 }
 
 inline void
@@ -410,15 +391,16 @@ CommonBenchState::run_genesis_configuration(
 
 inline void
 CommonBenchState::run_genesis_configuration(
-    GenesisConfigurationV2 const &genesis_configuration,
+    GenesisConfiguration const &genesis_configuration,
     InitializationBlock const &genesis_ceremony_txs,
     x23::XdrVec<InitializationBlock> const &initialization_txs)
 {
   assert(block_number_ == 0);
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
-  auto r = coord_client_->dbsched_load_genesis_configuration_v2(
-      genesis_configuration, genesis_value);
+  auto r =
+      coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
+                                                        genesis_value);
   if (r != DbSchedResult::DbSchedResultOK) {
     panic("Failed to write genesis configuration");
   }

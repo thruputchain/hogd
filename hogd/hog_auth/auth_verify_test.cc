@@ -6,12 +6,12 @@
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "auth_server_test_framework.h"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -52,7 +52,9 @@ make_signature(SecretKey sk, Transaction const &tx, uint32_t public_key_id)
   signature.public_key_id = public_key_id;
   signature.signature = Signature(CryptographicScheme::Ed25519);
   signature.signature.ed25519() =
-      ed25519_sign(sk.ed25519(), x23::serialize(tx)).value();
+      ed25519_sign(sk.ed25519(), transaction_signature_preimage(
+                                     AuthServerTestFramework::kNetworkHash, tx))
+          .value();
   return signature;
 }
 // NOLINTEND(bugprone-unchecked-optional-access)

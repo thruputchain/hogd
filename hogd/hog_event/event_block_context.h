@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <fcntl.h>
 #include <memory>
 #include <span>
@@ -23,7 +24,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "indexer.hh"
-#include "proposal.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -56,16 +56,12 @@ struct EventWithBody {
 using EventWithBodyBatch = std::vector<detail::EventWithBody>;
 
 struct ReusableEventBlockContextData {
-  ReusableEventBlockContextData(
-      std::unique_ptr<MerkleTriePrefix> trie,
-      PerThread<EventWithBodyBatch> events_with_bodies,
-      PerThread<detail::EventContext> buffers)
-    : trie(std::move(trie)), events_with_bodies(std::move(events_with_bodies)),
-      buffers(std::move(buffers))
+  ReusableEventBlockContextData(std::unique_ptr<MerkleTriePrefix> trie,
+                                PerThread<detail::EventContext> buffers)
+    : trie(std::move(trie)), buffers(std::move(buffers))
   {}
 
   std::unique_ptr<MerkleTriePrefix> trie;
-  PerThread<EventWithBodyBatch> events_with_bodies;
   PerThread<detail::EventContext> buffers;
 
   ReusableEventBlockContextData(
@@ -77,6 +73,29 @@ struct ReusableEventBlockContextData {
   ReusableEventBlockContextData &
   operator=(ReusableEventBlockContextData const &) = delete;
 };
+
+// The event logs and transaction bodies a block streamed to its events file.
+struct EventBlockPairs {
+  TxEventLogBatch event_logs;
+  ProposedTransactionBatch tx_bodies;
+};
+
+// Parses the byte contents of a finalized events file: a flat sequence of
+// [TxEventLog][ProposedTransaction] pairs with no header or counts. [name] is
+// used in diagnostics only.
+std::expected<EventBlockPairs, std::string>
+parse_events_file_pairs(std::span<const uint8_t> bytes, std::string_view name);
+
+// Reads back a finalized events file, which is a flat sequence of
+// [TxEventLog][ProposedTransaction] pairs.
+//
+// The file is content-addressed by the block's event root, which is exactly
+// the finalized ProposalHeader.events_hash, so promotion can open the right
+// file directly instead of searching. Pair order follows whichever per-thread
+// buffer flushed first and is not significant: the indexer does not depend on
+// it, and promotion re-derives the event and transaction roots from the pairs.
+std::expected<EventBlockPairs, std::string>
+read_final_events_file(std::string_view work_directory, SHA256Hash const &hash);
 
 class EventBlockContext {
 public:
@@ -112,20 +131,25 @@ public:
   // was not called). Events must only be emitted while an executor handle is
   // held.
   //
-  // Keep [body] paired with its event log for the durable indexer outbox. It is
-  // not hashed into the consensus event trie.
+  // Keep [body] paired with its event log for the durable indexer outbox. Its
+  // nondeterministic proposal data, but not its signature wrapper, is hashed
+  // into the consensus event trie.
   x23::Async<bool> add_event(TxEventLog event, ProposedTransaction body);
   SHA256Hash get_root_hash();
   x23::Async<void> finish_file_write();
   x23::Async<void> finish_file(SHA256Hash const &hash);
 
-  x23::Async<IndexerOutboxCandidatePayload>
-  snapshot_indexer_outbox_candidate(BlockHeight block_height,
-                                    SHA256Hash event_root,
-                                    ProposalTxs proposal_txs);
-
   x23::Async<void> wait_file_done();
   void delete_events_file();
+
+  // Set once the block has published its events file; the name is shared, so
+  // reclamation is EventRPCContext's job rather than this context's.
+  bool has_root_hash() const { return has_root_hash_; }
+  SHA256Hash const &root_hash() const
+  {
+    CHECK(has_root_hash_);
+    return root_hash_;
+  }
 
   void set_block_height(BlockHeight h)
   {
@@ -171,14 +195,26 @@ private:
   // so that we do not nondeterministically exclude events from the block.
   x23::Detached flush_buffer_async(std::vector<uint8_t> buf);
   void sync_file(x23::CoroGuard const &g);
-  // The rename is slow if there's already a file of the same hash.
-  // (the time to delete the previous file).
-  // In actual practice, it should be impossible for this to occur,
-  // as the output files contain transaction hashes (which are uniquified)
-  // unless multiple replicas make the exact same nomination.  We could deal
-  // with this edge case if this becomes a problem, but I suspect this will not
-  // matter significantly.
-  void rename_file(x23::CoroGuard const & /*unused*/, SHA256Hash const &hash);
+  // Publishes the temp file under its content-addressed name, first writer
+  // wins.
+  //
+  // The name is many-to-one over blocks, not one-to-one: every empty block
+  // shares one name (the empty-trie root is a constant), and two identical
+  // nominations share one.  So the file is not owned by the block that created
+  // it, and a link() that treats EEXIST as success is what keeps it immutable
+  // once published -- a rename would let a later block silently replace an
+  // earlier block's durable record.
+  //
+  // An already-present file is equally valid, not necessarily byte-identical:
+  // a shared event root pins the event logs and the nondeterministic proposal
+  // data, but pair order follows per-thread flush order, and the signature
+  // wrappers are outside both consensus roots.  Which copy survives is
+  // therefore not observable to anything that validates against the header.
+  //
+  // Because the name outlives its creator, no block may unlink it on its own
+  // authority.  EventRPCContext refcounts the name across live block contexts
+  // and reclaims it when the last holder is torn down.
+  void publish_file(x23::CoroGuard const & /*unused*/, SHA256Hash const &hash);
 
   static x23::ThreadPool &get_threadpool()
   {
@@ -198,9 +234,6 @@ private:
   std::string work_directory_;
   BlockID block_id_;
 
-  // Keep event logs and transaction bodies paired while per-thread batches are
-  // flattened into the durable candidate snapshot (#2826).
-  PerThread<EventWithBodyBatch> events_with_bodies_;
   PerThread<detail::EventContext> buffers_;
 
   // State transitions:

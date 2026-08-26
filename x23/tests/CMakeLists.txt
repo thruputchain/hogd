@@ -60,6 +60,17 @@ set_tests_properties(writebuf_stale_worker PROPERTIES TIMEOUT 15)
 add_x23_test(poll_writer_uaf)
 set_tests_properties(poll_writer_uaf PROPERTIES TIMEOUT 15)
 
+# Reproducers for a clang 22 coroutine codegen regression (see the header
+# comments): the .destroy clone of a MaybeAsync-returning coroutine destroys
+# an uninitialized copy of the ramp's return-object temporary.  Expected to
+# fail (SIGSEGV) on toolchains carrying the bug, e.g. Homebrew clang 22.1.5;
+# passes on clang 21.  The _standalone variant uses only standard headers so
+# it can be handed to LLVM verbatim.
+add_x23_test(coro_return_object_destroy)
+set_tests_properties(coro_return_object_destroy PROPERTIES TIMEOUT 15)
+# add_x23_test(coro_return_object_destroy_standalone)
+# set_tests_properties(coro_return_object_destroy_standalone PROPERTIES TIMEOUT 15)
+
 add_executable(test_canary ${EXCLUDE_TOKEN} canary.cc)
 target_link_libraries(test_canary x23)
 list(APPEND TEST_EXECUTABLES test_canary)

@@ -32,10 +32,13 @@ using AuthCacheEntry =
 
 class AuthServer {
 public:
-  explicit AuthServer(dbauth_client_t &&dbauth_client,
+  explicit AuthServer(dbauth_client_t &&dbauth_client, NetworkHash network_hash,
                       int bucket_size = 1'048'576)
-    : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client))
+    : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client)),
+      network_hash_(network_hash)
   {}
+
+  NetworkHash const &network_hash() const { return network_hash_; }
 
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
@@ -88,6 +91,8 @@ private:
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
 
   std::optional<sched_auth_client_t> mempool_client_;
+
+  const NetworkHash network_hash_;
 };
 
 class AuthDBRpc {

@@ -39,18 +39,17 @@ public:
     }
     max_observed_height_ = std::max(max_observed_height_, auth_data->first);
 
-    auto *it = std::ranges::find_if(cache_, [address](const auto &item) {
-      return item.address == address;
-    });
-    if (it != cache_.end()) {
-      // the update must be newer than the entry already present, so replace it
-      if (it->auth_data) {
-        assert(it->auth_data->first <= auth_data->first);
-      }
-      it->address = address;
-      it->auth_data = std::move(auth_data);
+    for (auto &entry : cache_) {
+      if (entry.address == address) {
+        // the update must be newer than the existing entry, so replace it
+        if (entry.auth_data) {
+          assert(entry.auth_data->first <= auth_data->first);
+        }
+        entry.address = address;
+        entry.auth_data = std::move(auth_data);
 
-      return;
+        return;
+      }
     }
 
     // otherwise evict from the cache.
@@ -75,14 +74,13 @@ public:
   get(ContractAddress const &address)
   {
     std::lock_guard lock(lock_);
-    auto *it = std::ranges::find_if(cache_, [address](const auto &item) {
-      return item.address == address;
-    });
-    if (it == cache_.end()) {
-      return nullptr;
+    for (auto &entry : cache_) {
+      if (entry.address == address) {
+        entry.read = true;
+        return entry.auth_data;
+      }
     }
-    it->read = true;
-    return it->auth_data;
+    return nullptr;
   }
 
   void evict_all()

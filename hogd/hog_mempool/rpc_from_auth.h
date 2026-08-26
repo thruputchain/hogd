@@ -42,8 +42,13 @@ public:
     Registration::registration().register_auth(card);
     x23::XdrVec<ShardCard> shard_cards;
     Registration::registration().shards_registered(&shard_cards);
+    NetworkHash network_hash{};
+    Registration::registration().get_network_hash(&network_hash);
     IntroAuthResult result(IntroAuthOutcome::kSuccess);
-    result.shards() = shard_cards;
+    result.success() = MempoolAuthIntroSuccess{
+        .shards = shard_cards,
+        .network_hash = network_hash,
+    };
     co_return result;
   }
 

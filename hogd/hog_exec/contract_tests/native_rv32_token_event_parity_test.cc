@@ -19,7 +19,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
@@ -78,6 +78,7 @@ public:
   constexpr static uint128_t kTransferAmount = 500'000;
   constexpr static int128_t kAllowanceAmount = 400'000;
   constexpr static uint128_t kTransferFromAmount = 200'000;
+  constexpr static uint128_t kBurnAmount = 300'000;
 
   // Wrapper method IDs.
   constexpr static Runtime::MethodID kMethodTransfer = 0;
@@ -86,6 +87,8 @@ public:
   constexpr static Runtime::MethodID kMethodInitialize = 3;
   constexpr static Runtime::MethodID kMethodMint = 4;
   constexpr static Runtime::MethodID kMethodNettedNegativeApproval = 5;
+  constexpr static Runtime::MethodID kMethodInitializeGenesisRoot = 6;
+  constexpr static Runtime::MethodID kMethodBurn = 7;
 
   constexpr static int32_t kWrapperNativeId = 40;
 
@@ -188,11 +191,9 @@ protected:
     auto token_contract = make_native_contract(std::to_underlying(
         HogexecPrecompiledNativeContracts::kNativeContractHogToken));
     write_contract(token_contract);
-    write_deployment(GenesisConfigurationLoader::kPresetNativeTokenAddress,
-                     token_contract);
+    write_deployment(kNativeTokenContractAddress, token_contract);
     // Cover the native token's own storage writes (e.g. the allowance row).
-    setup_grant_storage_token(
-        GenesisConfigurationLoader::kPresetNativeTokenAddress, 10'000'000);
+    setup_grant_storage_token(kNativeTokenContractAddress, 10'000'000);
 
     // Build the wrapper contract. Each method takes the target token address as
     // its sole calldata argument and drives the shared ERC20 trait.
@@ -231,6 +232,20 @@ protected:
            ContractAddress target) -> InvokeStatus<void> {
           return call_ok<u8"mint">(ctx, target, kAlice,
                                    make_amount(kMintAmount));
+        });
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        kMethodInitializeGenesisRoot,
+        [](NativeSyscallContext &ctx,
+           ContractAddress target) -> InvokeStatus<void> {
+          return call_ok<u8"initialize">(ctx, target,
+                                         kGenesisRootContractAddress);
+        });
+    builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+        kMethodBurn,
+        [](NativeSyscallContext &ctx,
+           ContractAddress target) -> InvokeStatus<void> {
+          return call_ok<u8"burn">(ctx, target, kAlice,
+                                   make_amount(kBurnAmount));
         });
     // The netting sequence from hogd#1918: decrement a fresh (Alice, Spender)
     // allowance and then, as a sibling call in the same transaction, increment
@@ -271,17 +286,22 @@ protected:
             {ContractType::kNative, {native_context.release(), true}},
             {ContractType::kRv32, {rv32_context.release(), true}}});
 
-    // Deploy the wrapper at both the Alice and Spender addresses so that the
-    // msg_sender seen by the token equals the acting party.
+    // Deploy the wrapper at the Alice and Spender addresses so that the
+    // msg_sender seen by the token equals the acting party, and at the genesis
+    // root address so mint/burn pass the native token's owner gate (the test
+    // genesis is empty, so nothing else occupies that address).
     auto wrapper_xdr = make_native_contract(kWrapperNativeId);
     write_contract(wrapper_xdr);
     write_deployment(kAlice, wrapper_xdr);
     write_deployment(kSpender, wrapper_xdr);
+    write_deployment(kGenesisRootContractAddress, wrapper_xdr);
 
     // Fund Alice (native balance for the native-token transfers + storage +
-    // replay cache for the txs she roots) and Spender (replay cache).
+    // replay cache for the txs she roots), Spender (replay cache), and the
+    // genesis root (replay cache for the mint/burn txs it roots).
     setup_grant_storage_token(kAlice, 50'000'000);
     setup_grant_storage_token(kSpender, 10'000'000);
+    setup_grant_storage_token(kGenesisRootContractAddress, 10'000'000);
   }
 
   // Calldata carrying just the target token address.
@@ -378,8 +398,7 @@ TEST_F(NativeRv32TokenEventParityTest,
   auto rv32_transfer_from = run_op(kMethodTransferFrom, kSpender, kRv32Token);
 
   // --- native token: balance was granted in SetUp, so just the three ops. ---
-  ContractAddress const native_token =
-      GenesisConfigurationLoader::kPresetNativeTokenAddress;
+  ContractAddress const native_token = kNativeTokenContractAddress;
   auto native_transfer = run_op(kMethodTransfer, kAlice, native_token);
   auto native_approval = run_op(kMethodAdjustAllowance, kAlice, native_token);
   auto native_transfer_from =
@@ -395,6 +414,41 @@ TEST_F(NativeRv32TokenEventParityTest,
   expect_events_match(rv32_approval, native_approval, "adjust_allowance");
   expect_events_match(rv32_transfer_from, native_transfer_from,
                       "transfer_from");
+}
+
+// Mint and burn Transfer events: a mint emits Transfer(zero -> receiver) and
+// a burn emits Transfer(owner -> zero), byte-identically on the rv32
+// itc_erc20 and the native precompile (modulo the emitting contract address).
+// Both run from the genesis root address: the native token's mint/burn are
+// gated on it, and the rv32 token is initialized with it as owner so the same
+// caller passes both gates.
+TEST_F(NativeRv32TokenEventParityTest, MintBurnEventsMatchRv32AndNative)
+{
+  // --- rv32 itc_erc20: initialize with the genesis root as owner. ---
+  run_setup(kMethodInitializeGenesisRoot, kAlice, kRv32Token);
+  auto rv32_mint = run_op(kMethodMint, kGenesisRootContractAddress, kRv32Token);
+  auto rv32_burn = run_op(kMethodBurn, kGenesisRootContractAddress, kRv32Token);
+
+  // --- native token: the mint also creates the supply key the burn needs. ---
+  ContractAddress const native_token = kNativeTokenContractAddress;
+  auto native_mint =
+      run_op(kMethodMint, kGenesisRootContractAddress, native_token);
+  auto native_burn =
+      run_op(kMethodBurn, kGenesisRootContractAddress, native_token);
+
+  // Sanity: the events really were emitted by the two different contracts.
+  ASSERT_TRUE(rv32_mint.has_value());
+  ASSERT_TRUE(native_mint.has_value());
+  EXPECT_EQ(rv32_mint->contract_address, kRv32Token);
+  EXPECT_EQ(native_mint->contract_address, native_token);
+
+  expect_events_match(rv32_mint, native_mint, "mint");
+  expect_events_match(rv32_burn, native_burn, "burn");
+
+  // Non-vacuity: mint and burn events differ (from/to roles are swapped and
+  // the amounts differ), so the two matches above pin two distinct payloads.
+  ASSERT_TRUE(rv32_burn.has_value());
+  EXPECT_NE(rv32_mint->serialized_event, rv32_burn->serialized_event);
 }
 
 // hogd#1918: a decrement below a fresh allowance, followed by a sibling
@@ -417,8 +471,7 @@ TEST_F(NativeRv32TokenEventParityTest,
       run_op(kMethodNettedNegativeApproval, kAlice, kRv32Token);
 
   // --- native token: nothing to set up beyond SetUp(). ---
-  ContractAddress const native_token =
-      GenesisConfigurationLoader::kPresetNativeTokenAddress;
+  ContractAddress const native_token = kNativeTokenContractAddress;
   auto native_approval =
       run_op(kMethodNettedNegativeApproval, kAlice, native_token);
 

@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "auth_weight_test"
+version = "0.2.0"
+dependencies = [
+ "sdk",
+]
+
+[[package]]
 name = "authclaim_test"
 version = "0.1.0"
 dependencies = [
@@ -689,15 +696,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "initial_token_claim"
-version = "0.1.0"
-dependencies = [
- "groundhog-erc20-if",
- "initial_token_claim",
- "sdk",
-]
-
-[[package]]
 name = "itc_erc20"
 version = "0.2.0"
 dependencies = [
@@ -1181,6 +1179,13 @@ version = "0.1.0"
 dependencies = [
  "sdk",
  "tuple_return",
+]
+
+[[package]]
+name = "tx_context_test"
+version = "0.2.0"
+dependencies = [
+ "sdk",
 ]
 
 [[package]]

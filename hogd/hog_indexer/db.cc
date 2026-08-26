@@ -1124,12 +1124,10 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
       .origin = origin,
       .contiguous_height = origin.first_height - 1,
       .last_consensus_hash = origin.first_prev_hash,
-      .last_payload_digest = {},
   };
   if (durable_progress_) {
     progress.contiguous_height = durable_progress_->contiguous_height;
     progress.last_consensus_hash = durable_progress_->last_consensus_hash;
-    progress.last_payload_digest = durable_progress_->last_payload_digest;
   }
 
   const x23::Buf progress_bytes = x23::serialize(progress);
@@ -1326,7 +1324,6 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     IndexerInitializedProgress progress = *durable_progress_;
     progress.contiguous_height = height;
     progress.last_consensus_hash = block.identity.consensus_hash;
-    progress.last_payload_digest = block.identity.payload_digest;
     const x23::Buf identity_bytes = x23::serialize(block.identity);
     const x23::Buf progress_bytes = x23::serialize(progress);
     const uint64_t encoded_watermark =
@@ -1639,8 +1636,7 @@ IndexDB::initialize_progress_from_db()
       error("malformed durable indexer boundary identity: {}", e.what());
       return IndexerError(IndexerErrorCode::kInternal);
     }
-    if (identity.consensus_hash != progress.last_consensus_hash ||
-        identity.payload_digest != progress.last_payload_digest) {
+    if (identity.consensus_hash != progress.last_consensus_hash) {
       error("durable indexer boundary identity disagrees with progress");
       return IndexerError(IndexerErrorCode::kInternal);
     }
@@ -1653,8 +1649,7 @@ IndexDB::initialize_progress_from_db()
     }
     if (progress.contiguous_height == 0) {
       if (progress.origin.first_height != kFirstOutboxBlockHeight ||
-          progress.origin.first_prev_hash == ConsensusValueHash{} ||
-          progress.last_payload_digest != SHA256Hash{}) {
+          progress.origin.first_prev_hash == ConsensusValueHash{}) {
         error("fresh durable indexer epoch has invalid genesis boundary");
         return IndexerError(IndexerErrorCode::kInternal);
       }
@@ -1681,9 +1676,7 @@ IndexDB::initialize_progress_from_db()
         error("malformed prior epoch boundary identity: {}", e.what());
         return IndexerError(IndexerErrorCode::kInternal);
       }
-      if (identity.consensus_hash != progress.last_consensus_hash ||
-          identity.payload_digest != progress.last_payload_digest ||
-          progress.last_payload_digest == SHA256Hash{}) {
+      if (identity.consensus_hash != progress.last_consensus_hash) {
         error("prior epoch boundary identity disagrees with progress");
         return IndexerError(IndexerErrorCode::kInternal);
       }

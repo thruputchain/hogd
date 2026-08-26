@@ -45,8 +45,8 @@
 #include "event.hh"
 #include "event_outbox_internal.hh"
 #include "exec_result.hh"
-#include "genesis.hh"
 #include "header.hh"
+#include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
@@ -60,16 +60,16 @@
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/manifest_hex.h"
 #include "hogd/devnode/runtime_manifest.h"
-#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
@@ -515,11 +515,28 @@ source_address_auth_claim()
   return claim;
 }
 
+// The network a node is serving, as clients learn it: from the networkHash
+// field of the runtime manifest the node emits when it becomes ready.
+NetworkHash
+readiness_network_hash(Readiness const &readiness)
+{
+  std::optional<NetworkHash> hash = parse_network_hash(readiness.network_hash);
+  if (!hash.has_value()) {
+    throw std::runtime_error(
+        std::format("readiness reported an unparseable network hash '{}'",
+                    readiness.network_hash));
+  }
+  return *hash;
+}
+
 SignedTransaction
-sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key)
+sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key,
+                 NetworkHash const &network_hash)
 {
   Signature signature(CryptographicScheme::Ed25519);
-  auto signed_bytes = ed25519_sign(secret_key, x23::serialize(tx));
+  auto signed_bytes =
+      ed25519_sign(secret_key,
+                   transaction_signature_preimage(network_hash, tx));
   if (!signed_bytes.has_value()) {
     throw std::runtime_error("failed to sign test transaction");
   }
@@ -971,14 +988,13 @@ make_empty_outbox_append(BlockHeight height, ConsensusValueHash prev_hash)
   value.prev_hash = std::move(prev_hash);
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_logs);
+      compute_indexer_outbox_event_root(event_logs, {});
   auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
   return {.format_version = kIndexerOutboxFormatVersion,
           .consensus_value = std::move(value),
-          .proposal_txs = std::move(proposal_txs),
           .event_logs = std::move(event_logs),
           .tx_bodies = {}};
 }
@@ -1053,27 +1069,15 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
   expect_clean_exit(process);
 }
 
-GenesisConfigurationV2
-build_test_data_dir_genesis(LocalBootstrapConfig const &config)
-{
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact(config);
-  artifact.genesis_configuration_v2.storage_cost_model =
-      StorageCostModel::default_cost_model().to_xdr();
-  return std::move(artifact.genesis_configuration_v2);
-}
-
 void
 write_test_data_dir_metadata(std::filesystem::path const &data_dir,
                              LocalBootstrapConfig const &config,
                              std::int64_t schema_version = 2)
 {
-  const GenesisConfigurationV2 genesis = build_test_data_dir_genesis(config);
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", schema_version);
     w.field("kind", "hog-devnode-data");
-    w.field("genesisHash", hex_string(sha256(genesis)));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
       w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
@@ -1153,12 +1157,6 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   if (!git_hash.empty() && git_hash != "unknown") {
     EXPECT_EQ(require_string_field(*producer, "commitHash", ""), git_hash);
   }
-
-  BootstrapAccountArtifact artifact =
-      build_local_bootstrap_account_artifact({});
-  GenesisConfigurationV2 genesis = std::move(artifact.genesis_configuration_v2);
-  EXPECT_EQ(require_string_field(readiness.manifest, "genesisHash", ""),
-            hex_string(sha256(genesis)));
 
   const json::Value *bootstrap = readiness.manifest.find("bootstrap");
   ASSERT_NE(bootstrap, nullptr);
@@ -1578,7 +1576,6 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
   std::string manifest =
       R"({"schemaVersion":2,"kind":"hogd-dev-runtime","chainState":"fresh",)"
       R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
-      R"("genesisHash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
@@ -1645,7 +1642,6 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 
   ASSERT_EQ(first.accounts.size(), 4UL);
   ASSERT_EQ(first.initialization_txs.size(), 1UL);
-  ASSERT_EQ(first.genesis_configuration.initial_config.size(), 4UL);
   ASSERT_EQ(second.accounts.size(), first.accounts.size());
 
   for (std::uint32_t i = 0; i < first.accounts.size(); ++i) {
@@ -1675,12 +1671,15 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
 }
 
-TEST(HogDevnode, LocalBootstrapRejectsAggregateAllocationAboveSupply)
+TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 {
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
   LocalBootstrapConfig config{
-      .user_account_count = 2,
-      .user_storage_tokens = std::numeric_limits<std::uint64_t>::max(),
+      .user_account_count = 1,
+      .user_storage_tokens = kTokenSupply,
   };
+
   EXPECT_THROW(build_local_bootstrap_account_artifact(config),
                std::runtime_error);
 }
@@ -2143,7 +2142,9 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
         .auth_claim = source_address_auth_claim(),
     };
     Signature signature(CryptographicScheme::Ed25519);
-    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    auto signed_bytes = ed25519_sign(
+        keypair.second,
+        transaction_signature_preimage(readiness_network_hash(readiness), tx));
     ASSERT_TRUE(signed_bytes.has_value());
     signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
@@ -2272,7 +2273,9 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         .auth_claim = source_address_auth_claim(),
     };
     Signature signature(CryptographicScheme::Ed25519);
-    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    auto signed_bytes = ed25519_sign(
+        keypair.second,
+        transaction_signature_preimage(readiness_network_hash(readiness), tx));
     ASSERT_TRUE(signed_bytes.has_value());
     signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
@@ -2486,7 +2489,7 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
         .format_version = kIndexerOutboxFormatVersion,
         .block_id = 91,
         .block_height = 1,
-        .event_root = compute_indexer_outbox_event_root({}),
+        .event_root = compute_indexer_outbox_event_root({}, {}),
     };
     ASSERT_TRUE(store->publish_candidate(candidate)().has_value());
   }
@@ -2538,7 +2541,7 @@ TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
                          "required");
 }
 
-TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
+TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2549,10 +2552,13 @@ TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
   std::filesystem::copy(data_dir, ahead_data_dir,
                         std::filesystem::copy_options::recursive);
   advance_persistent_data_dir(ahead_data_dir);
-  ASSERT_GT(std::filesystem::remove_all(data_dir / "events" / "indexer-outbox"),
-            0UL);
-  std::filesystem::copy(ahead_data_dir / "events" / "indexer-outbox",
-                        data_dir / "events" / "indexer-outbox",
+  // Carry the event service's whole durable directory, not just the outbox
+  // inside it: a committed record stores its payload as the content-addressed
+  // <event_root>.events file next to the outbox, and on a real node that file
+  // is durable before the record that references it, so an outbox that is
+  // ahead always brings its events files along.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "events"), 0UL);
+  std::filesystem::copy(ahead_data_dir / "events", data_dir / "events",
                         std::filesystem::copy_options::recursive);
   ASSERT_GT(std::filesystem::remove_all(data_dir / "indexer" / "indexer-db"),
             0UL);
@@ -2560,15 +2566,107 @@ TEST(HogDevnode, DataDirRejectsOutboxAndIndexerAheadOfHogDb)
                         data_dir / "indexer" / "indexer-db",
                         std::filesystem::copy_options::recursive);
 
-  expect_startup_failure(
+  HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--dev-accounts", "1",
        "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
-       "1000000000"},
-      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
-      "chain tip 1");
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  expect_clean_exit(process);
 }
 
-TEST(HogDevnode, DataDirPullDoesNotReplayOutboxOneAheadOfHogDb)
+TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::path finalized_data_dir = make_test_data_dir();
+  Defer cleanup_finalized_data_dir(
+      [&] { std::filesystem::remove_all(finalized_data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::filesystem::copy(data_dir, finalized_data_dir,
+                        std::filesystem::copy_options::recursive);
+  advance_persistent_data_dir(finalized_data_dir);
+
+  // Model a stop after HogDB finalized height two but before event promoted
+  // the already-durable events file it wrote at close, or the indexer observed
+  // that height.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "ramdb"), 0UL);
+  std::filesystem::copy(finalized_data_dir / "ramdb", data_dir / "ramdb",
+                        std::filesystem::copy_options::recursive);
+
+  constexpr BlockID kClosedCandidate = 900;
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value()) << tip.error();
+    ASSERT_EQ(tip->value.proposal_header.block_height, 2);
+    ASSERT_NE(tip->id, kClosedCandidate);
+  }
+  ConsensusValue finalized;
+  {
+    auto finalized_store = IndexerOutboxStore::open(
+        (finalized_data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(finalized_store.has_value()) << finalized_store.error();
+    auto committed = finalized_store->load_committed(2)();
+    ASSERT_TRUE(committed.has_value()) << committed.error();
+    finalized = committed->consensus_value;
+
+    // Model what closing left behind: the block's events file, content
+    // addressed by its event root, with the height never promoted to a
+    // committed record. The finalized run retains it -- its committed record
+    // references it as its payload -- so copy it from there.
+    std::filesystem::copy_file(
+        EventBlockContext::final_events_filename(
+            (finalized_data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        EventBlockContext::final_events_filename(
+            (data_dir / "events").string(),
+            finalized.proposal_header.events_hash),
+        std::filesystem::copy_options::overwrite_existing);
+
+    auto recovering_store = IndexerOutboxStore::open(
+        (data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(recovering_store.has_value()) << recovering_store.error();
+    EXPECT_FALSE(recovering_store->has_committed(2).value());
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "1",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"});
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
+  expect_clean_exit(process);
+
+  auto recovered_store = IndexerOutboxStore::open(
+      (data_dir / "events" / "indexer-outbox").string());
+  ASSERT_TRUE(recovered_store.has_value()) << recovered_store.error();
+  auto committed = recovered_store->load_committed(2)();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(committed->consensus_value, finalized);
+  // The promoted committed record references this file as its payload, so it
+  // is retained for as long as the record lives.
+  EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
+      (data_dir / "events").string(), finalized.proposal_header.events_hash)));
+}
+
+TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
@@ -2589,7 +2687,7 @@ TEST(HogDevnode, DataDirPullDoesNotReplayOutboxOneAheadOfHogDb)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 1);
+  EXPECT_EQ(reader.get_transactions_by_address(query)().latest_block, 2);
   expect_clean_exit(process);
 }
 
@@ -2614,8 +2712,8 @@ TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)
       {"--data-dir", data_dir.string(), "--dev-accounts", "1",
        "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
        "1000000000"},
-      "recovered hog-devnode indexer is ahead of chain tip: indexed height 2, "
-      "chain tip 1");
+      "recovered hog-devnode indexer is ahead of finalized event outbox: "
+      "indexed height 2, finalized height 1");
 }
 
 TEST(HogDevnode, DataDirAcceptsMatchingOutboxIndexerAndHogDb)
@@ -2993,7 +3091,9 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
     };
 
     Signature signature(CryptographicScheme::Ed25519);
-    auto signed_bytes = ed25519_sign(keypair.second, x23::serialize(tx));
+    auto signed_bytes = ed25519_sign(
+        keypair.second,
+        transaction_signature_preimage(readiness_network_hash(readiness), tx));
     ASSERT_TRUE(signed_bytes.has_value());
     signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
     SignedTransaction signed_tx{
@@ -3100,7 +3200,7 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
 
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
     Calldata transfer_calldata =
-        x23::serialize(GenesisConfigurationLoader::kPresetNativeTokenAddress,
+        x23::serialize(kNativeTokenContractAddress,
                        erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{10'000'000},
                        erc20_meta::make_calldata<u8"transfer">(
@@ -3119,7 +3219,8 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
         .auth_claim = source_address_auth_claim(),
     };
     SignedTransaction signed_prefund_wallet_tx =
-        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second);
+        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second,
+                         readiness_network_hash(readiness));
     const TransactionHash prefund_wallet_tx_hash =
         sha256(signed_prefund_wallet_tx.tx);
     TransactionHashBatch prefund_hashes =
@@ -3151,7 +3252,8 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
         .auth_claim = source_address_auth_claim(),
     };
     SignedTransaction signed_create_wallet_tx =
-        sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second);
+        sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second,
+                         readiness_network_hash(readiness));
     const TransactionHash create_wallet_tx_hash =
         sha256(signed_create_wallet_tx.tx);
     TransactionHashBatch create_hashes =

@@ -62,3 +62,7 @@
 // Does std::condition_variable::wait_until mishandle a custom clock
 // with an unsigned duration rep and time_point::max()?
 #cmakedefine01 HAVE_BROKEN_WAIT_UNTIL
+
+// Set to 1 with versions of LLVM that don't have the following patch:
+// https://github.com/llvm/llvm-project/pull/194281
+#cmakedefine01 HAVE_BROKEN_CORO_GRO_CLEANUP

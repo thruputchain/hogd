@@ -42,6 +42,9 @@ domain_separator_cxs()
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
     domain_separator_cxs<u8"PubkeyAccount">();
 
+constexpr static auto kTransactionSignatureDomainSeparatorCxs =
+    domain_separator_cxs<u8"Transaction">();
+
 // Derives the address of a standalone-pubkey account:
 // SHA256(domain_separator || cxs(preimage)). Returns std::nullopt if the
 // preimage cannot be CXS-serialized (e.g. an unrecognized pubkey scheme),

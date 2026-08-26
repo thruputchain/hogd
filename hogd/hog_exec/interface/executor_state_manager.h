@@ -64,6 +64,11 @@ private:
   x23::Async<PerThreadARC<ExecutorContext> *>
   get_executor_context_slow(BlockID block_id);
 
+  // The active_blocks_lock_ half of remove_block(), split out so the lock is
+  // released through reset_and_return rather than by ~CoroGuard. Returns the
+  // result so far and whether this caller took the last reference.
+  x23::Async<std::pair<ExecResult, bool>> remove_block_locked(BlockID block_id);
+
   void
   stash_snapshot_cache(std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                        x23::CoroGuard const &g);

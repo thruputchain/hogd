@@ -213,6 +213,8 @@ release_memory_slot(std::vector<uint8_t> &&slot) noexcept
 // slot must be destroyed on its constructing thread while that thread is alive
 // (true for the per-invocation stack machines); do not give one static storage
 // duration.
+// Still holds with suspending syscalls: a slot is acquired and released within
+// one rv32 invocation. Re-check once the invoke loop itself co_awaits.
 class MemorySlot {
 public:
   MemorySlot() : buf_(acquire_memory_slot()) {}

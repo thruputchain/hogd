@@ -180,7 +180,7 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
 }
 
 std::string
-build_genesis_json(GenesisConfigurationV2 const &genesis)
+build_genesis_json(GenesisConfiguration const &genesis)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -218,7 +218,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
   auto wallet_contract = load_dev_wallet_contract(wallet_profile);
   const SHA256Hash dev_wallet_hash = sha256(*wallet_contract);
   const StorageCostModel storage_cost_model(
-      artifact.genesis_configuration_v2.storage_cost_model);
+      artifact.genesis_configuration.storage_cost_model);
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -226,7 +226,6 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
     w.field("kind", "hog-hosted-bootstrap");
     w.field("networkHash", format_network_hash(config.network_hash));
     w.field("protocol", version::kHogdProtocol());
-    w.field("genesisHash", hex_string(artifact.genesis_hash));
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.bootstrap_config.dev_wallet_profile);
       w.field("devAccounts",
@@ -442,8 +441,7 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     const SHA256Hash nonce =
         derive_hosted_faucet_nonce(config.faucet->public_key);
     const ContractAddress wallet_address =
-        GenesisConfigurationLoader::calculate_deployed_address(
-            wallet_contract_hash, nonce);
+        calculate_genesis_deployment_address(wallet_contract_hash, nonce);
 
     for (BootstrapAccountMetadata const &account : accounts) {
       if (account.address == wallet_address) {
@@ -453,7 +451,7 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     }
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
-    builder.add_initial_config(
+    builder.add_distribution(
         wallet_contract, nonce, wallet_meta::entrypoint<u8"initialize">(),
         wallet_meta::make_calldata<u8"initialize">(config.faucet->public_key),
         static_cast<int128_t>(config.faucet->storage_tokens));
@@ -464,29 +462,24 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
     };
   }
 
-  // The allocations come from the hosted bootstrap config, so over-allocating
-  // is a reportable input error. devnode's main() turns this into a clean
-  // message; it still reports failures by exception (see hogd #3001).
-  std::optional<GenesisConfiguration> genesis_configuration =
-      builder.build(StorageCostModel::default_cost_model());
-  if (!genesis_configuration) {
-    throw std::runtime_error("hosted bootstrap config allocates more hogs than "
-                             "the initial hog token supply");
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  auto initialization_txs =
+      builder.try_make_genesis_ceremony_transactions(cost_model);
+  if (!initialization_txs.has_value()) {
+    throw std::runtime_error(
+        "hosted bootstrap accounts, faucet, and ceremony funding exceed the "
+        "native token supply");
   }
 
   HostedBootstrapArtifact artifact{
-      .genesis_configuration = std::move(*genesis_configuration),
-      .genesis_configuration_v2 =
-          builder.build_v2(config.network_hash,
-                           StorageCostModel::default_cost_model(),
-                           *load_stock_genesis_root_contract()),
-      .initialization_txs = builder.make_genesis_ceremony_transactions(
-          StorageCostModel::default_cost_model()),
+      .genesis_configuration =
+          builder.build(config.network_hash, cost_model,
+                        *load_stock_genesis_root_contract()),
+      .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),
   };
-  artifact.genesis_hash = sha256(artifact.genesis_configuration_v2);
-  artifact.genesis_json = build_genesis_json(artifact.genesis_configuration_v2);
+  artifact.genesis_json = build_genesis_json(artifact.genesis_configuration);
   artifact.metadata_json = build_metadata_json(config, artifact);
   return artifact;
 }

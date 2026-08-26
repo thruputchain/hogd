@@ -17,6 +17,8 @@
 namespace hogd {
 
 class MockRuntime;
+class SyscallHandlerContext;
+class SystemCallHandler;
 
 // Context for a runtime that has been mocked out to some function pointer.
 // Returns a MockRuntime when the input to make_new_runtime is an appropriate
@@ -132,7 +134,15 @@ private:
 
 class MockRuntime : public MockGasRuntime {
 public:
-  MockRuntime(MockContract contract) : backing_contract_(std::move(contract)) {}
+  // [owner] is the handler context this runtime executes under. It is captured
+  // here rather than read from the thread_local slot inside invoke_internal, so
+  // the guest call does not depend on running on the thread that entered the
+  // FFI call.
+  MockRuntime(MockContract contract, SyscallHandlerContext *owner)
+    : backing_contract_(std::move(contract)), owner_(owner)
+  {
+    CHECK(owner_ != nullptr);
+  }
 
   ~MockRuntime() override = default;
 
@@ -141,6 +151,7 @@ private:
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
   MockContract backing_contract_;
+  SyscallHandlerContext *owner_;
 };
 
 class EmptyRuntime : public MockGasRuntime {
