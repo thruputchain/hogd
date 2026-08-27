@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <arpa/inet.h>
 #include <cstdint>
+#include <netinet/in.h>
 #include <string>
+#include <sys/socket.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -123,15 +127,37 @@ commit_empty_block(event_sched_client &rpc, BlockID block_id,
   return value;
 }
 
+std::uint16_t
+unused_loopback_port()
+{
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  CHECK_GE(fd, 0);
+  const int opt = 1;
+  CHECK_EQ(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  CHECK_EQ(::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
+  socklen_t len = sizeof(addr);
+  CHECK_EQ(::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len), 0);
+  CHECK_EQ(::close(fd), 0);
+  const auto port = ntohs(addr.sin_port);
+  CHECK_NE(port, 0);
+  return port;
+}
+
 std::vector<std::string>
 event_args(const std::string &mempool_addr, const std::string &work_dir,
-           const std::string &exec_port, const std::string &indexer_port,
-           const std::string &mempool_port, const std::string &metrics_port)
+           std::uint16_t exec_port, std::uint16_t indexer_port,
+           std::uint16_t mempool_port, std::uint16_t metrics_port)
 {
-  return {"--mempool-addr", mempool_addr, "--work-dir",      work_dir,
-          "--bind-ip",      "127.0.0.1",  "--executor-port", exec_port,
-          "--indexer-port", indexer_port, "--mempool-port",  mempool_port,
-          "--metrics-port", metrics_port};
+  return {"--mempool-addr",  mempool_addr,
+          "--work-dir",      work_dir,
+          "--bind-ip",       "127.0.0.1",
+          "--executor-port", std::to_string(exec_port),
+          "--indexer-port",  std::to_string(indexer_port),
+          "--mempool-port",  std::to_string(mempool_port),
+          "--metrics-port",  std::to_string(metrics_port)};
 }
 
 TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
@@ -152,21 +178,20 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
       std::string(x23::HostPort{"127.0.0.1", mempool_listen_port}.show());
 
   TmpDir work_dir;
-  std::uint16_t event_mempool_port = 0;
-  std::uint16_t event_indexer_port = 0;
-  std::uint16_t event_exec_port = 0;
-  std::uint16_t event_metrics_port = 0;
+  // EventCard advertises these listen addresses, so restart must reuse them.
+  // Use concrete ports on the first start so the existing listener
+  // SO_REUSEADDR path applies; port 0 skips that flag.
+  const std::uint16_t event_exec_port = unused_loopback_port();
+  const std::uint16_t event_indexer_port = unused_loopback_port();
+  const std::uint16_t event_mempool_port = unused_loopback_port();
+  const std::uint16_t event_metrics_port = unused_loopback_port();
   ConsensusValue block_one;
   {
-    DaemonProcess event =
-        DaemonProcess::start(HOG_EVENT_BINARY,
-                             event_args(mempool_addr, work_dir.directory(), "0",
-                                        "0", "0", "0"));
+    DaemonProcess event = DaemonProcess::start(
+        HOG_EVENT_BINARY,
+        event_args(mempool_addr, work_dir.directory(), event_exec_port,
+                   event_indexer_port, event_mempool_port, event_metrics_port));
     event.wait_until_log_contains("event initialization complete.");
-    event_exec_port = event.require_port("event.exec");
-    event_indexer_port = event.require_port("event.indexer");
-    event_mempool_port = event.require_port("event.mempool");
-    event_metrics_port = event.require_port("event.metrics");
 
     event_sched_client sched = connect_event_sched(event_mempool_port);
     block_one = commit_empty_block(sched, 11, 1, sha256(genesis));
@@ -194,10 +219,8 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   DaemonProcess restarted =
       DaemonProcess::start(HOG_EVENT_BINARY,
                            event_args(mempool_addr, work_dir.directory(),
-                                      std::to_string(event_exec_port),
-                                      std::to_string(event_indexer_port),
-                                      std::to_string(event_mempool_port),
-                                      std::to_string(event_metrics_port)));
+                                      event_exec_port, event_indexer_port,
+                                      event_mempool_port, event_metrics_port));
   restarted.wait_until_log_contains("event initialization complete.");
 
   event_indexer_client indexer = connect_event_indexer(event_indexer_port);

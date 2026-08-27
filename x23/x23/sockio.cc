@@ -77,13 +77,11 @@ set_cloexec(BorrowedFd fd)
     Errno{}.raise("F_SETFD");
 }
 
-// Always set SO_REUSEADDR, including port-0 binds. The kernel still assigns a
-// concrete port, and Linux TIME_WAIT remembers whether the previous socket had
-// SO_REUSEADDR. Skipping it on the first listen makes same-volume restart
-// fail with EADDRINUSE when a later process rebinds that port.
 void
-enable_reuseaddr(BorrowedFd fd)
+enable_reuseaddr_if_needed(BorrowedFd fd, std::uint16_t port)
 {
+  if (!port)
+    return;
   int opt = 1;
   if (setsockopt(fd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     Errno{}.raise("SO_REUSEADDR");
@@ -142,7 +140,7 @@ stcplisten(std::uint16_t port, int backlog)
   int opt = 0;
   if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
     Errno{}.raise("IPV6_V6ONLY");
-  enable_reuseaddr(lfd);
+  enable_reuseaddr_if_needed(lfd, port);
 
   struct sockaddr_in6 addr;
   memset(&addr, 0, sizeof(addr));
@@ -168,14 +166,14 @@ stcplisten(const sockaddr_storage &bind_addr, int backlog)
 
   switch (bind_addr.ss_family) {
   case AF_INET:
-    enable_reuseaddr(lfd);
+    enable_reuseaddr_if_needed(lfd, get_port(bind_addr));
     break;
   case AF_INET6:
   {
     int opt = 1;
     if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
       Errno{}.raise("IPV6_V6ONLY");
-    enable_reuseaddr(lfd);
+    enable_reuseaddr_if_needed(lfd, get_port(bind_addr));
     break;
   }
   default:
