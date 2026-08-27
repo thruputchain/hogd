@@ -536,14 +536,14 @@ TEST(IndexerPullController, IngestsLiveCommitsAfterCatchingUpAtGenesis)
       std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
       options);
   controller.wait_until_caught_up();
-  EXPECT_EQ(db->latest_block(), 0);
+  EXPECT_EQ(*db->latest_block(), 0);
 
   // The first commit is the regression case: the caught-up poll loop must
   // pick it up on its own, not just find it on a later startup replay.
   const ProposedTransaction first_body = make_body(101);
   ConsensusValue tip = commit_block(event, 1, 1, sha256(genesis), first_body);
   ASSERT_TRUE(
-      wait_for_condition([&] { return db->latest_block() == BlockHeight{1}; },
+      wait_for_condition([&] { return *db->latest_block() == BlockHeight{1}; },
                          std::chrono::seconds(5)))
       << "indexer never ingested the first live commit";
 
@@ -555,9 +555,9 @@ TEST(IndexerPullController, IngestsLiveCommitsAfterCatchingUpAtGenesis)
     tip = commit_block(event, height, height, sha256(tip), bodies.back());
   }
   ASSERT_TRUE(
-      wait_for_condition([&] { return db->latest_block() == kLastHeight; },
+      wait_for_condition([&] { return *db->latest_block() == kLastHeight; },
                          std::chrono::seconds(5)))
-      << "indexer stalled at block " << db->latest_block();
+      << "indexer stalled at block " << *db->latest_block();
   EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
 
   const IndexerProgress progress = db->durable_progress();
@@ -616,7 +616,7 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   event_server->start_accepting(std::move(replacement_listener));
 
   ASSERT_TRUE(
-      wait_for_condition([&] { return db->latest_block() == BlockHeight{2}; },
+      wait_for_condition([&] { return *db->latest_block() == BlockHeight{2}; },
                          std::chrono::seconds(5)));
   const IndexerProgress progress = db->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);

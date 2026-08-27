@@ -149,7 +149,12 @@ public:
   // cursor can observe is immutable.  BlockHeight(0) if nothing has
   // been indexed yet.  Lock-free read, safe concurrently with
   // ingestion.
-  BlockHeight latest_block() const;
+  //
+  // Fails with kDBNotOpen when the db is not open.  The watermark alone
+  // cannot express that: a closed db and a db with nothing indexed would
+  // both read as height 0, which is how a broken indexer ends up looking
+  // like a healthy empty chain to a caller.
+  IndexerStatus<BlockHeight> latest_block() const;
 
   // Oldest block height still retained by the indexer.  Today always
   // BlockHeight{0} — retention/pruning is not implemented.  Once it
@@ -258,6 +263,11 @@ private:
   std::function<void()> legacy_ingest_test_hook_;
   std::function<void()> initialize_epoch_test_hook_;
   std::function<void()> apply_validation_test_hook_;
+
+  // Raw watermark read, with no open-db check.  Only valid on a path that
+  // has already established is_open(); everything else goes through
+  // latest_block().
+  BlockHeight serve_watermark() const;
 
   // Highest CONTIGUOUSLY ingested block height (see latest_block()),
   // kNoBlocksIndexed until the first ingest, seeded from the on-disk

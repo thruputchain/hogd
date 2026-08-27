@@ -831,7 +831,12 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
 
   const DbTip tip = ctx_->get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
-  const BlockHeight indexed_height = indexer_db_->latest_block();
+  IndexerStatus<BlockHeight> indexed_height_status =
+      indexer_db_->latest_block();
+  if (!indexed_height_status) {
+    throw std::runtime_error("failed to read indexer watermark");
+  }
+  const BlockHeight indexed_height = *indexed_height_status;
   auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
   if (!latest) {
     throw std::runtime_error(

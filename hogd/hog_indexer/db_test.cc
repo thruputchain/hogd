@@ -661,7 +661,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   ASSERT_TRUE(db.has_value());
 
   // Initial: no ingestion, latest is 0.
-  EXPECT_EQ(db->latest_block(), 0);
+  EXPECT_EQ(*db->latest_block(), 0);
 
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
@@ -672,7 +672,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   log.events.push_back(make_event(addr, 0, 0));
 
   ASSERT_TRUE(db->consume_events(42, std::vector{log}, {}));
-  EXPECT_EQ(db->latest_block(), 42);
+  EXPECT_EQ(*db->latest_block(), 42);
 
   // A height at or below the watermark is treated as already seen
   // and skipped; the watermark holds.
@@ -682,7 +682,7 @@ TEST_F(IndexDBTest, GetEventsLatestBlockTracking)
   event_log2.tx_hash = tx2;
   event_log2.events.push_back(make_event(addr, 0, 0));
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}, {}));
-  EXPECT_EQ(db->latest_block(), 42);
+  EXPECT_EQ(*db->latest_block(), 42);
 }
 
 // A legacy watermark remains authoritative even when its index key is not
@@ -712,14 +712,14 @@ TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
     ASSERT_TRUE(db.has_value());
     ASSERT_TRUE(db->consume_events(100, std::vector{log_high}, {}));
     ASSERT_TRUE(db->consume_events(101, std::vector{log_low}, {}));
-    EXPECT_EQ(db->latest_block(), 101);
+    EXPECT_EQ(*db->latest_block(), 101);
   }
 
   // Recognized legacy metadata reopens for reads and continued legacy ingest.
   // Strict epoch initialization remains blocked until an explicit migration.
   auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
-  EXPECT_EQ(db->latest_block(), 101);
+  EXPECT_EQ(*db->latest_block(), 101);
   EXPECT_TRUE(db->get_tx_events(tx_low).has_value());
   EXPECT_TRUE(db->get_tx_events(tx_high).has_value());
 
@@ -729,7 +729,7 @@ TEST_F(IndexDBTest, LegacyWatermarkWithoutDurableProgressReopensLegacyMode)
   log_next.tx_hash = tx_next;
   log_next.events.push_back(make_event(addr_low, 0, 0));
   ASSERT_TRUE(db->consume_events(102, std::vector{log_next}, {}));
-  EXPECT_EQ(db->latest_block(), 102);
+  EXPECT_EQ(*db->latest_block(), 102);
   EXPECT_TRUE(db->get_tx_events(tx_next).has_value());
 }
 
@@ -740,11 +740,11 @@ TEST_F(IndexDBTest, FreshDatabaseReopensUninitialized)
   {
     auto db = IndexDB::make_new(tmp_dir_.directory());
     ASSERT_TRUE(db.has_value());
-    EXPECT_EQ(db->latest_block(), 0);
+    EXPECT_EQ(*db->latest_block(), 0);
   }
   auto db = IndexDB::open(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
-  EXPECT_EQ(db->latest_block(), 0);
+  EXPECT_EQ(*db->latest_block(), 0);
 }
 
 TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
@@ -844,15 +844,15 @@ TEST_F(IndexDBTest, OutOfOrderIngestHoldsWatermarkUntilGapFills)
 
   // First block defines the base — no need to start at 0.
   ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x01)}, {}));
-  EXPECT_EQ(db->latest_block(), 7);
+  EXPECT_EQ(*db->latest_block(), 7);
 
   // Block 9 arrives before block 8: ingested but the watermark holds.
   ASSERT_TRUE(db->consume_events(9, std::vector{log_with_tx(addr, 0x03)}, {}));
-  EXPECT_EQ(db->latest_block(), 7);
+  EXPECT_EQ(*db->latest_block(), 7);
 
   // The gap fills; the watermark drains through the buffered height.
   ASSERT_TRUE(db->consume_events(8, std::vector{log_with_tx(addr, 0x02)}, {}));
-  EXPECT_EQ(db->latest_block(), 9);
+  EXPECT_EQ(*db->latest_block(), 9);
 }
 
 TEST_F(IndexDBTest, DuplicateIngestIsSkippedEntirely)
@@ -869,14 +869,14 @@ TEST_F(IndexDBTest, DuplicateIngestIsSkippedEntirely)
   // returned, and the conflicting rows are NOT ingested (served
   // history is immutable).
   ASSERT_TRUE(db->consume_events(7, std::vector{log_with_tx(addr, 0x02)}, {}));
-  EXPECT_EQ(db->latest_block(), 7);
+  EXPECT_EQ(*db->latest_block(), 7);
   SHA256Hash tx2;
   std::ranges::fill(tx2, 0x02);
   EXPECT_FALSE(db->get_tx_events(tx2).has_value());
 
   // Below the base: also treated as already-seen.
   ASSERT_TRUE(db->consume_events(3, std::vector{log_with_tx(addr, 0x04)}, {}));
-  EXPECT_EQ(db->latest_block(), 7);
+  EXPECT_EQ(*db->latest_block(), 7);
   SHA256Hash tx4;
   std::ranges::fill(tx4, 0x04);
   EXPECT_FALSE(db->get_tx_events(tx4).has_value());
@@ -893,7 +893,7 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
   ASSERT_TRUE(db->consume_events(10, std::vector{log_with_tx(addr, 0x01)}, {}));
   // Out-of-order: block 12 lands before block 11.
   ASSERT_TRUE(db->consume_events(12, std::vector{log_with_tx(addr, 0x03)}, {}));
-  ASSERT_EQ(db->latest_block(), 10);
+  ASSERT_EQ(*db->latest_block(), 10);
 
   // Ascending full scan stops at the watermark: block 12's rows are
   // ingested but not servable, and the page reports exhaustion
@@ -926,7 +926,7 @@ TEST_F(IndexDBTest, GetEventsDoesNotServeAboveContiguousWatermark)
 
   // Once the gap fills, everything becomes servable.
   ASSERT_TRUE(db->consume_events(11, std::vector{log_with_tx(addr, 0x02)}, {}));
-  ASSERT_EQ(db->latest_block(), 12);
+  ASSERT_EQ(*db->latest_block(), 12);
   {
     EventFilterList filters;
     filters.push_back(filter_with_contracts_no_topics({addr}));

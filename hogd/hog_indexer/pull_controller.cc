@@ -18,6 +18,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/hog_indexer/status.h"
 #include "hogd/metrics/health.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
@@ -169,7 +170,12 @@ IndexerPullController::pull_tx_failures(event_indexer_client_t &client)
                           "indexer tx-failure pull", [&] {
                             return client.event_indexer_pull_tx_failures()();
                           });
-    const BlockHeight watermark = db_.latest_block();
+    IndexerStatus<BlockHeight> watermark_status = db_.latest_block();
+    if (!watermark_status) {
+      error("indexer tx-failure pull: {}", watermark_status.error());
+      return false;
+    }
+    const BlockHeight watermark = *watermark_status;
     for (const IndexerTxFailureNotice &notice : notices) {
       failure_cache_.report(notice.tx_hash, notice.diagnostic, watermark);
     }
