@@ -3880,6 +3880,52 @@ TEST(HogDevnode, DataDirRejectsMetadataWithUnknownDevWalletProfile)
 // where the line falls: consuming a uniquifier is an effect of the block that
 // carried the transaction, so it survives iff that block committed.
 
+// The control for the two replay tests below: a transaction the chain has
+// never seen has to commit normally on a recovered node. Without this, an
+// empty block after a restart cannot be read as "the replay was rejected" --
+// it could just as well mean the node stopped accepting transactions at all.
+// No other test submits a real transaction after a restart; they all commit
+// empty blocks.
+TEST(HogDevnode, DataDirAcceptsNewTransactionAfterRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+  initialize_persistent_data_dir(data_dir);
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(args);
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  ASSERT_EQ(committed_tip_height(scheduler), 1);
+
+  SignedTransaction deploy_tx = make_wallet_deploy_tx(readiness, /*nonce=*/91);
+  const TransactionHash tx_hash = sha256(deploy_tx.tx);
+  TransactionHashBatch committed =
+      submit_settle_and_commit(scheduler, deploy_tx);
+  ASSERT_EQ(committed.size(), 1UL)
+      << "a recovered node accepted no new transactions at all";
+  EXPECT_EQ(committed[0], tx_hash);
+  EXPECT_EQ(committed_tip_height(scheduler), 2);
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  EXPECT_EQ(poll_indexer_latest_block(reader, 2), 2);
+  TxInfoResult result = reader.get_transaction_info(tx_hash)();
+  ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(result.info().height, 2);
+  EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+
+  expect_clean_exit(process);
+}
+
 TEST(HogDevnode, DataDirRejectsReplayOfCommittedTransactionAfterRestart)
 {
   std::filesystem::path data_dir = make_test_data_dir();

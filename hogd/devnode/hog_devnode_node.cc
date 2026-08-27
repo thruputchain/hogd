@@ -47,6 +47,7 @@
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
@@ -1105,6 +1106,17 @@ HogDevnodeNode::init_db_backend(
     }
     ctx_->initialize_cost_model(*cost_model);
     recovered_existing_chain_ = true;
+    // Hog ages are scheduler-visible state derived from committed balances,
+    // and nothing republishes them for blocks that committed before this
+    // process started. hog-db's own main does this at startup; a composed
+    // devnode has to as well, or every account reads zero hogs available and
+    // the scheduler discards every transaction it is handed.
+    HogDbStatus<void> reconciled = reconcile_startup_hog_ages(ctx_->get_db());
+    if (!reconciled.has_value()) {
+      throw std::runtime_error(
+          std::format("failed to reconcile startup hog ages: {}",
+                      reconciled.error()));
+    }
     info("recovered hog-devnode database at committed height {}",
          ctx_->get_tip().value.proposal_header.block_height);
   }
