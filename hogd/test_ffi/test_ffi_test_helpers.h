@@ -34,10 +34,17 @@
 
 namespace hogd {
 
+// Placeholder genesis root blob: these tests drive contract bodies through
+// the mock trampoline, so the genesis root's code never runs and any
+// non-empty bytes satisfy create_db.
+inline constexpr uint8_t kTestGenesisRootContract[] = "test genesis root";
+
 inline void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, NetworkHash{}.data());
+  auto db =
+      create_db(nullptr, 0, NetworkHash{}.data(), kTestGenesisRootContract,
+                sizeof(kTestGenesisRootContract));
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }

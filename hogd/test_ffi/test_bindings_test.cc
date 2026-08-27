@@ -56,10 +56,16 @@ namespace {
 // fail to verify against a database built here.
 constexpr NetworkHash kTestNetworkHash{0x5a};
 
+// Placeholder genesis root blob: these tests drive contract bodies through
+// the mock trampoline, so the genesis root's code never runs and any
+// non-empty bytes satisfy create_db.
+constexpr uint8_t kGenesisRootContract[] = "test genesis root";
+
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, kTestNetworkHash.data());
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), kGenesisRootContract,
+                      sizeof(kGenesisRootContract));
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -835,7 +841,8 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   // Create a DB seeded with the custom cost model.
   auto db_result = create_db(serialized_model.data(),
                              static_cast<uint32_t>(serialized_model.size()),
-                             NetworkHash{}.data());
+                             NetworkHash{}.data(), kGenesisRootContract,
+                             sizeof(kGenesisRootContract));
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });
@@ -3309,6 +3316,21 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
 
 // Regression test: concurrent create_db calls from multiple threads used to
 // cause use-after-free in PerThread storage (fixed in #1327).
+// The genesis root blob is a required argument: genesis validation needs a
+// non-empty contract, so a null or empty blob is rejected up front instead of
+// failing genesis construction.
+TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
+{
+  auto null_res = create_db(nullptr, 0, NetworkHash{}.data(), nullptr, 0);
+  EXPECT_EQ(null_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(null_res.db, nullptr);
+
+  auto empty_res =
+      create_db(nullptr, 0, NetworkHash{}.data(), kGenesisRootContract, 0);
+  EXPECT_EQ(empty_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(empty_res.db, nullptr);
+}
+
 TEST(TestBindingsTest, ConcurrentCreateDB)
 {
   constexpr int kThreadCount = 8;

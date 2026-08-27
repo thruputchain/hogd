@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <span>
 
 #include "auth_rpc.hh"
 #include "db_sched.hh"
@@ -30,7 +32,13 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash);
+  // `genesis_root_contract` is the raw rv32 blob installed (without artifact
+  // verification) as the genesis root deployment; genesis validation requires
+  // it to be non-empty. Test consumers execute contract bodies through the
+  // mock trampoline, so the blob's code never runs -- callers that never
+  // invoke real genesis code can pass any placeholder bytes.
+  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash,
+            std::span<const uint8_t> genesis_root_contract);
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
