@@ -10,6 +10,8 @@
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/genesis_root_artifact.h"
 #include "consensus.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
@@ -75,6 +77,11 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
+  // A shipped test_ffi has no hogd build tree or installed contracts
+  // directory to load the genesis artifact from; serve the embedded copy.
+  register_embedded_contract_artifact("genesis_root.rv32a",
+                                      {embedded::genesis_root_artifact,
+                                       embedded::genesis_root_artifact_len});
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis_configuration{.network_hash = {},
                                              .storage_cost_model = cost_model,

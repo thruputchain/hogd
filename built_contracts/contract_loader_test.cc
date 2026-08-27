@@ -1,6 +1,8 @@
 #include "contract_loader.h"
 
+#include <algorithm>
 #include <filesystem>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -39,6 +41,27 @@ TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
 
   auto rv32_blob = load_contract_blob("dev_wallet.rv32a");
   EXPECT_FALSE(rv32_blob.data.empty());
+}
+
+TEST(ContractLoaderTest, EmbeddedArtifactServedBeforeDiskSearch)
+{
+  // A name that exists in no search directory: without the registration the
+  // load would panic, so a successful load proves the registry served it.
+  constexpr std::string_view kName = "embedded-only-test-artifact.rv32a";
+  static constexpr unsigned char kBytes[] = {0xDE, 0xAD, 0xBE, 0xEF};
+  register_embedded_contract_artifact(kName, kBytes);
+
+  auto blob = load_contract_blob(kName);
+  ASSERT_EQ(blob.data.size(), sizeof(kBytes));
+  EXPECT_TRUE(
+      std::equal(blob.data.begin(), blob.data.end(), std::begin(kBytes)));
+
+  // Re-registration replaces the previous bytes.
+  static constexpr unsigned char kReplaced[] = {0x01};
+  register_embedded_contract_artifact(kName, kReplaced);
+  auto replaced = load_contract_blob(kName);
+  ASSERT_EQ(replaced.data.size(), sizeof(kReplaced));
+  EXPECT_EQ(replaced.data[0], 0x01);
 }
 
 } // namespace

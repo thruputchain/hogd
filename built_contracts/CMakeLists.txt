@@ -182,6 +182,25 @@ function(add_contract_header target_name)
   add_dependencies(all_contract_headers ${target_name}_header)
 endfunction()
 
+# Embed genesis_root.rv32a as a C++ array so shipped libraries (test_ffi)
+# can construct a genesis without a hogd build tree or an installed
+# contracts directory on disk (see register_embedded_contract_artifact).
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/genesis_root_artifact.cc
+         ${CMAKE_CURRENT_BINARY_DIR}/genesis_root_artifact.h
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/embed_artifact.py
+      ${CMAKE_CURRENT_BINARY_DIR}/genesis_root.rv32a
+      -n genesis_root
+      -o ${CMAKE_CURRENT_BINARY_DIR}/genesis_root_artifact.cc
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/embed_artifact.py
+    ${CMAKE_CURRENT_BINARY_DIR}/genesis_root.rv32a
+  COMMENT "Embedding genesis_root.rv32a"
+)
+add_custom_target(genesis_root_artifact_cc
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/genesis_root_artifact.cc)
+add_dependencies(genesis_root_artifact_cc all_riscvs_built)
+
 add_executable(contract_loader_test contract_loader_test.cc)
 target_link_libraries(contract_loader_test
   contract_loader

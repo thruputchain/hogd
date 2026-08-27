@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -12,6 +13,14 @@ namespace hogd {
 // User-provided contract artifact directories searched before defaults.
 void set_contract_artifact_directories(
     std::vector<std::filesystem::path> directories);
+
+// Registers an in-memory copy of a contract artifact, served before any
+// directory is searched. For artifacts that shipped libraries (test_ffi)
+// must load without a hogd build tree or an installed contracts directory
+// on disk. `bytes` must outlive the process (embedded arrays qualify);
+// registering a filename again replaces the previous bytes.
+void register_embedded_contract_artifact(std::string_view filename,
+                                         std::span<const unsigned char> bytes);
 
 // Directories searched for contract artifacts, in priority order.
 std::vector<std::filesystem::path> contract_search_directories();
