@@ -597,7 +597,7 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
 
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
-  EXPECT_EQ(reopened->latest_block(), 1);
+  EXPECT_EQ(*reopened->latest_block(), 1);
   EXPECT_TRUE(
       reopened->get_tx_record(sha256(first_body.signed_tx.tx)).has_value());
   EXPECT_EQ(reopened->initialize_epoch(make_origin()).outcome(),
@@ -609,7 +609,7 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
                   ->consume_events(2, TxEventLogBatch{second_log},
                                    ProposedTransactionBatch{second_body})
                   .has_value());
-  EXPECT_EQ(reopened->latest_block(), 2);
+  EXPECT_EQ(*reopened->latest_block(), 2);
 }
 
 TEST_F(StrictIndexerTest, LegacyWatermarkWithStrictMetadataResidueFailsClosed)

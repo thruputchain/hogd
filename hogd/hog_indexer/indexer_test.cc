@@ -40,7 +40,7 @@ public:
   {
     CHECK(tx_events.size() == tx_bodies.size());
     CHECK(db_->consume_events(block_height, tx_events, tx_bodies).has_value());
-    failure_cache_.prune(db_->latest_block());
+    failure_cache_.prune(*db_->latest_block());
     co_await Health::instance().set_current_block_height(block_height);
     co_return;
   }
@@ -516,7 +516,7 @@ TEST_F(IndexerTest, RecentFailureVisibleThenCommittedRecordWins)
   const TransactionHash tx_hash = events[0].tx_hash;
 
   // Report a failure for a tx with no committed record.
-  failure_cache_.report(tx_hash, make_failure_diag(100), db_->latest_block());
+  failure_cache_.report(tx_hash, make_failure_diag(100), *db_->latest_block());
 
   TxInfoResult result = block_explorer_->get_transaction_info(tx_hash)();
   ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoRecentFailure);
@@ -536,7 +536,7 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   TransactionHash failed_hash;
   std::ranges::fill(failed_hash, 0x7F);
   failure_cache_.report(failed_hash, make_failure_diag(100),
-                        db_->latest_block());
+                        *db_->latest_block());
 
   // Ingest committed blocks 100..105; each ingest prunes against the new
   // watermark. Give each block one distinct committed tx.
@@ -601,7 +601,7 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   // ingested but held behind the watermark at 10.
   ingest_at(10, tx10);
   ingest_at(12, tx12);
-  ASSERT_EQ(db().latest_block(), 10);
+  ASSERT_EQ(*db().latest_block(), 10);
 
   // Point lookup cannot expose a row above the durable serving boundary.
   TxInfoResult pending = block_explorer_->get_transaction_info(tx12)();

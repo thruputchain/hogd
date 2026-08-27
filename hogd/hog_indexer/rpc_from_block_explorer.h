@@ -108,17 +108,13 @@ public:
     // The transaction index is keyed by transaction hash and has no
     // block-height index yet.  Report the current serving bounds while
     // returning no refs until that index is added.
-    //
-    // [latest_block] reads its watermark without consulting the db handle, so
-    // a closed db would otherwise report a perfectly healthy empty page at
-    // height 0 -- exactly the ambiguity the other page queries now avoid.
-    if (!db_.is_open()) {
+    auto watermark = db_.latest_block();
+    if (!watermark) {
       co_return query_failure<TransactionRefPageResult>(
-          "get_transactions_by_block",
-          IndexerError(IndexerErrorCode::kDBNotOpen));
+          "get_transactions_by_block", watermark.error());
     }
     TransactionRefPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
-    ret.page().latest_block = db_.latest_block();
+    ret.page().latest_block = *watermark;
     ret.page().oldest_block = IndexDB::oldest_block();
     co_return ret;
   }
