@@ -551,11 +551,8 @@ sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key,
 }
 
 TransactionHashBatch
-submit_and_commit(sched_coord_client_t &scheduler,
-                  SignedTransactionBatch const &txs)
+propose_and_commit(sched_coord_client_t &scheduler)
 {
-  scheduler.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
-
   SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
   if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
     ADD_FAILURE() << "schedcoord_get_tip did not return OK";
@@ -587,6 +584,14 @@ submit_and_commit(sched_coord_client_t &scheduler,
     return {};
   }
   return tx_hashes;
+}
+
+TransactionHashBatch
+submit_and_commit(sched_coord_client_t &scheduler,
+                  SignedTransactionBatch const &txs)
+{
+  scheduler.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
+  return propose_and_commit(scheduler);
 }
 
 class HogDevnodeProcess {
@@ -3463,6 +3468,40 @@ submit_and_propose_without_commit(sched_coord_client_t &scheduler,
   return tx_hashes;
 }
 
+// How long to keep committing blocks while waiting to see whether a submitted
+// transaction lands. The mempool vets asynchronously and a recovered node
+// re-establishes its auth subscriptions during startup, so the block right
+// after a submission is not necessarily the one that carries it.
+constexpr auto kTransactionLandTimeout = std::chrono::seconds(10);
+
+// Submits [tx] and keeps committing blocks until it lands, returning the
+// height it committed at, or -1 if it never landed. The negative result is
+// the point for a transaction expected to be rejected: it says the
+// transaction stayed out of every block for the whole window, not merely out
+// of the next one, which an asynchronous vetting delay would also produce.
+BlockHeight
+commit_blocks_until_transaction_lands(sched_coord_client_t &scheduler,
+                                      SignedTransaction const &tx)
+{
+  const TransactionHash tx_hash = sha256(tx.tx);
+  scheduler.schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{tx})())();
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + kTransactionLandTimeout;
+  for (;;) {
+    for (TransactionHash const &committed : propose_and_commit(scheduler)) {
+      if (committed == tx_hash) {
+        return committed_tip_height(scheduler);
+      }
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return -1;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+}
+
 std::vector<std::string>
 persistent_data_dir_args(std::filesystem::path const &data_dir)
 {
@@ -3890,20 +3929,31 @@ TEST(HogDevnode, DataDirRejectsReplayOfCommittedTransactionAfterRestart)
     ASSERT_EQ(committed_tip_height(scheduler), 2);
 
     // Block two committed, so it consumed this transaction's uniquifier for
-    // good. Resubmitting the identical transaction must not put it in another
-    // block, even though the mempool that first vetted it is long gone.
-    TransactionHashBatch replayed =
-        submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx});
-    EXPECT_TRUE(replayed.empty());
-    EXPECT_EQ(committed_tip_height(scheduler), 3);
+    // good. The mempool that first vetted it is gone, so only the durable
+    // replay cache can keep it out -- and it has to stay out of every block
+    // for the whole window, not just the next one.
+    EXPECT_EQ(commit_blocks_until_transaction_lands(scheduler, deploy_tx), -1);
+
+    // Blocks really were committed during that window; the transaction just
+    // was not in any of them.
+    EXPECT_GT(committed_tip_height(scheduler), 2);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
                                                        /*retry=*/true)()
                       .value();
-    EXPECT_EQ(poll_indexer_latest_block(reader, 3), 3);
-    // Still the height-two execution, not a second one at height three.
-    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    // The height-two execution is still the only one on record. Waiting on
+    // the record rather than on the indexer reaching the tip keeps this off
+    // the back of the empty blocks the window above committed.
+    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+    while (std::chrono::steady_clock::now() < deadline) {
+      result = reader.get_transaction_info(tx_hash)();
+      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(result.info().height, 2);
 
@@ -3959,21 +4009,21 @@ TEST(HogDevnode, DataDirReplaysTransactionWhoseBlockNeverCommitted)
     // it committed before the crash.
     ASSERT_EQ(committed_tip_height(scheduler), 1);
 
-    // So the transaction is still live and commits normally.
-    TransactionHashBatch committed =
-        submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx});
-    ASSERT_EQ(committed.size(), 1UL);
-    EXPECT_EQ(committed[0], tx_hash);
-    EXPECT_EQ(committed_tip_height(scheduler), 2);
+    // So the transaction is still live and commits, as itself, on top of the
+    // recovered chain.
+    const BlockHeight commit_height =
+        commit_blocks_until_transaction_lands(scheduler, deploy_tx);
+    ASSERT_GT(commit_height, 1)
+        << "transaction from the abandoned proposal never committed";
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
                                                        /*retry=*/true)()
                       .value();
-    EXPECT_EQ(poll_indexer_latest_block(reader, 2), 2);
+    EXPECT_EQ(poll_indexer_latest_block(reader, commit_height), commit_height);
     TxInfoResult result = reader.get_transaction_info(tx_hash)();
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(result.info().height, 2);
+    EXPECT_EQ(result.info().height, commit_height);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
 
     expect_clean_exit(process);
