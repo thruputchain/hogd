@@ -35,6 +35,7 @@
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/control_client.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
@@ -504,6 +505,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       [&](const GenesisConfiguration &genesis_configuration) {
         ConsensusValue genesis_value{};
         genesis_value.proposal_header.block_height = 0;
+        genesis_value.proposal_header.config_hash =
+            compute_config_hash(genesis_configuration.storage_cost_model);
         auto res = db_sched_client.dbsched_load_genesis_configuration(
             genesis_configuration, genesis_value);
         if (res != DbSchedResult::DbSchedResultOK) {

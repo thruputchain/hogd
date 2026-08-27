@@ -63,7 +63,7 @@ public:
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override
+                   SystemCallHandler *syscall_handler) const override
   {
     if (throw_after_mock_lookup_ &&
         deployed_contract.hash.contract_type == ContractType::kMockTest) {
@@ -86,7 +86,10 @@ public:
   void throw_after_mock_lookup_once() { throw_after_mock_lookup_ = true; }
 
 private:
-  bool throw_after_mock_lookup_ = false;
+  // Fault-injection latch, not logical state: make_new_runtime() is const on
+  // RuntimeContext (a shared sub-context must not mutate through it), and this
+  // test-only context arms itself for exactly one throw.
+  mutable bool throw_after_mock_lookup_ = false;
 };
 
 } // namespace

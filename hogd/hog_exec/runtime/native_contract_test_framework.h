@@ -43,6 +43,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -741,6 +742,8 @@ private:
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;
+      genesis_value.proposal_header.config_hash =
+          compute_config_hash(genesis_configuration.storage_cost_model);
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (r != DbSchedResult::DbSchedResultOK) {

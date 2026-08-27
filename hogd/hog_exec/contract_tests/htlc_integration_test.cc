@@ -435,7 +435,8 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
 
     // Create MultiplexedContext with our native contract and RV32 context
     auto balance_check_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_context.release(), true}},
             {ContractType::kNative, {native_runtime_context.get(), false}}});
 

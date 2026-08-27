@@ -764,12 +764,14 @@ SystemCallHandler::validate_new_invocation(
   if (!validate_invoke_flags(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  // Above the auth-token check, so a reentrant invoke reports kReentrance even
+  // when the caller also forwarded a token it does not own (#2973).
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
   return {};
 }
