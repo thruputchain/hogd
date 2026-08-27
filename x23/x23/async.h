@@ -780,9 +780,15 @@ struct MaybeAsync : void_variant<Awaitable, T> {
   decltype(auto) operator()(Args &&...args)
       noexcept(noexcept((*asyncp())(std::declval<Args>()...)))
   {
+    using async_result = decltype((*asyncp())(std::declval<Args>()...));
+
     if (has_value()) {
       if constexpr (sizeof...(Args) == 0)
         return xval();
+      else if constexpr (std::same_as<async_result, CoResume>) {
+        compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
+        return CoResume{};
+      }
       else
         return compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
     }
