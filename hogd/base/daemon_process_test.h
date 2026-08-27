@@ -32,6 +32,20 @@ public:
   static DaemonProcess start(const char *binary,
                              const std::vector<std::string> &args)
   {
+    // Build argv in the parent. After fork() in a multithreaded test
+    // process (RpcServer worker threads), the child may only use
+    // async-signal-safe calls until execv.
+    std::vector<std::string> argv_storage;
+    argv_storage.reserve(args.size() + 1);
+    argv_storage.emplace_back(binary);
+    argv_storage.insert(argv_storage.end(), args.begin(), args.end());
+    std::vector<char *> argv;
+    argv.reserve(argv_storage.size() + 1);
+    for (std::string &arg : argv_storage) {
+      argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+
     int log_pipe[2];
     if (pipe(log_pipe) != 0) {
       throw std::runtime_error(errno_message("pipe", errno));
@@ -51,18 +65,7 @@ public:
         _exit(127);
       }
       close(log_pipe[1]);
-
-      std::vector<std::string> argv_storage;
-      argv_storage.reserve(args.size() + 1);
-      argv_storage.emplace_back(binary);
-      argv_storage.insert(argv_storage.end(), args.begin(), args.end());
-      std::vector<char *> argv;
-      argv.reserve(argv_storage.size() + 1);
-      for (std::string &arg : argv_storage) {
-        argv.push_back(arg.data());
-      }
-      argv.push_back(nullptr);
-      execv(binary, argv.data());
+      execv(argv[0], argv.data());
       _exit(127);
     }
 
