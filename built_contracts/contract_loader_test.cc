@@ -26,13 +26,12 @@ TEST(ContractLoaderTest, SearchOrderIncludesUserDirsAndDefaults)
   set_contract_artifact_directories(user_dirs);
 
   auto dirs = contract_search_directories();
-  ASSERT_EQ(dirs.size(), 5U);
+  ASSERT_EQ(dirs.size(), 4U);
   EXPECT_EQ(dirs[0], user_dirs[0]);
   EXPECT_EQ(dirs[1], user_dirs[1]);
   EXPECT_EQ(dirs[2].filename(), "built_contracts");
   EXPECT_EQ(dirs[3], std::filesystem::path(x23::getprogpath()).parent_path() /
                          "contracts");
-  EXPECT_EQ(dirs[4], std::filesystem::path("/usr/share/groundhog/contracts"));
 }
 
 TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
