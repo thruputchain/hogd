@@ -18,9 +18,6 @@ namespace hogd {
 
 namespace {
 
-constexpr std::string_view kSystemContractsDir =
-    "/usr/share/groundhog/contracts";
-
 std::mutex contract_artifact_directories_mutex;
 std::vector<std::filesystem::path> contract_artifact_directories;
 
@@ -43,7 +40,6 @@ contract_search_directories()
   directories.push_back(std::filesystem::path(kBuildRoot) / "built_contracts");
   directories.push_back(
       std::filesystem::path(x23::getprogpath()).parent_path() / "contracts");
-  directories.emplace_back(kSystemContractsDir);
   return directories;
 }
 
