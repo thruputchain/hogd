@@ -24,7 +24,6 @@
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"

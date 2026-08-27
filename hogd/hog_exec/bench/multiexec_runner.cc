@@ -38,7 +38,6 @@
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
 #include "network.hh"
 #include "rpc_types.hh"
