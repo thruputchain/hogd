@@ -88,7 +88,7 @@ public:
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const & /*unused*/,
-                   SystemCallHandler * /*unused*/) override
+                   SystemCallHandler * /*unused*/) const override
   {
     return nullptr;
   }
@@ -734,7 +734,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   NativeContext native_context(std::move(cmap));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
