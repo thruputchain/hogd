@@ -2,8 +2,10 @@
 
 #include <array>
 
+#include "header.hh"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "storage_cost.hh"
 
 namespace hogd {
 

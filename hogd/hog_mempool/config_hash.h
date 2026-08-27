@@ -1,5 +1,6 @@
 #pragma once
 
+#include "header.hh"
 #include "hogd/crypto/crypto.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "storage_cost.hh"
