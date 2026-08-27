@@ -3468,38 +3468,31 @@ submit_and_propose_without_commit(sched_coord_client_t &scheduler,
   return tx_hashes;
 }
 
-// How long to keep committing blocks while waiting to see whether a submitted
-// transaction lands. The mempool vets asynchronously and a recovered node
-// re-establishes its auth subscriptions during startup, so the block right
-// after a submission is not necessarily the one that carries it.
-constexpr auto kTransactionLandTimeout = std::chrono::seconds(10);
+// How long to let the mempool vet a submitted transaction before proposing.
+// Vetting is asynchronous and a recovered node re-establishes its auth
+// subscriptions during startup, so a proposal issued right after a
+// submission can miss the transaction entirely.
+//
+// A retry loop that keeps committing blocks until the transaction shows up
+// is NOT a safe substitute: schedulercoord_propose_block waits on
+// wait_for_auth_data(), whose CHECK_EQ(current + 1, expected) assumes the
+// auth-data height never falls more than one block behind the committed
+// tip. Committing blocks faster than the auth pipeline publishes them
+// violates that and wedges the node. So wait once, then take exactly one
+// block -- the same single proposal the surrounding tests make.
+constexpr auto kVettingSettleDelay = std::chrono::seconds(5);
 
-// Submits [tx] and keeps committing blocks until it lands, returning the
-// height it committed at, or -1 if it never landed. The negative result is
-// the point for a transaction expected to be rejected: it says the
-// transaction stayed out of every block for the whole window, not merely out
-// of the next one, which an asynchronous vetting delay would also produce.
-BlockHeight
-commit_blocks_until_transaction_lands(sched_coord_client_t &scheduler,
-                                      SignedTransaction const &tx)
+// Submits [tx], gives vetting a wide margin, and commits exactly one block,
+// returning the hashes that block carried. Empty means the transaction was
+// kept out of it on the merits, not merely that vetting had not caught up.
+TransactionHashBatch
+submit_settle_and_commit(sched_coord_client_t &scheduler,
+                         SignedTransaction const &tx)
 {
-  const TransactionHash tx_hash = sha256(tx.tx);
   scheduler.schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{tx})())();
-
-  const auto deadline =
-      std::chrono::steady_clock::now() + kTransactionLandTimeout;
-  for (;;) {
-    for (TransactionHash const &committed : propose_and_commit(scheduler)) {
-      if (committed == tx_hash) {
-        return committed_tip_height(scheduler);
-      }
-    }
-    if (std::chrono::steady_clock::now() >= deadline) {
-      return -1;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
+  std::this_thread::sleep_for(kVettingSettleDelay);
+  return propose_and_commit(scheduler);
 }
 
 std::vector<std::string>
@@ -3930,13 +3923,13 @@ TEST(HogDevnode, DataDirRejectsReplayOfCommittedTransactionAfterRestart)
 
     // Block two committed, so it consumed this transaction's uniquifier for
     // good. The mempool that first vetted it is gone, so only the durable
-    // replay cache can keep it out -- and it has to stay out of every block
-    // for the whole window, not just the next one.
-    EXPECT_EQ(commit_blocks_until_transaction_lands(scheduler, deploy_tx), -1);
+    // replay cache can keep it out -- and it stays out of a block proposed
+    // well after vetting would have finished, so an unfinished vetting pass
+    // is not what is keeping it out.
+    EXPECT_TRUE(submit_settle_and_commit(scheduler, deploy_tx).empty());
 
-    // Blocks really were committed during that window; the transaction just
-    // was not in any of them.
-    EXPECT_GT(committed_tip_height(scheduler), 2);
+    // A block really was committed; the transaction just was not in it.
+    EXPECT_EQ(committed_tip_height(scheduler), 3);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
@@ -4011,19 +4004,21 @@ TEST(HogDevnode, DataDirReplaysTransactionWhoseBlockNeverCommitted)
 
     // So the transaction is still live and commits, as itself, on top of the
     // recovered chain.
-    const BlockHeight commit_height =
-        commit_blocks_until_transaction_lands(scheduler, deploy_tx);
-    ASSERT_GT(commit_height, 1)
+    TransactionHashBatch committed =
+        submit_settle_and_commit(scheduler, deploy_tx);
+    ASSERT_EQ(committed.size(), 1UL)
         << "transaction from the abandoned proposal never committed";
+    EXPECT_EQ(committed[0], tx_hash);
+    EXPECT_EQ(committed_tip_height(scheduler), 2);
 
     auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
                                                        readiness.indexer.port,
                                                        /*retry=*/true)()
                       .value();
-    EXPECT_EQ(poll_indexer_latest_block(reader, commit_height), commit_height);
+    EXPECT_EQ(poll_indexer_latest_block(reader, 2), 2);
     TxInfoResult result = reader.get_transaction_info(tx_hash)();
     ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(result.info().height, commit_height);
+    EXPECT_EQ(result.info().height, 2);
     EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
 
     expect_clean_exit(process);
