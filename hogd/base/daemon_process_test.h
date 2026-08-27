@@ -127,7 +127,7 @@ public:
     const std::string digits =
         log_.substr(start,
                     (end == std::string::npos ? log_.size() : end) - start);
-    const unsigned long port = std::stoul(digits);
+    const std::uint64_t port = std::stoull(digits);
     if (port == 0 || port > 65535) {
       throw std::runtime_error(std::format("invalid port in {}", marker));
     }

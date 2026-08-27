@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <sys/wait.h>
@@ -18,8 +17,8 @@
 #include "hogd/base/daemon_process_test.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/rpc_context.h"
 #include "hogd/hog_event/rpc_from_indexer.h"
@@ -27,7 +26,6 @@
 #include "hogd/hog_indexer/db.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
-#include "network.hh"
 #include "pagination.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -45,10 +43,11 @@ namespace {
 ProposalTxs
 empty_proposal_txs()
 {
+  x23::XdrVec<TransactionHash> hashes;
+  x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(x23::span<const TransactionHash>({}),
-                           proposal_txs.hash)();
-  append_to_parallel_batch(x23::span<const NondeterministicProposalData>({}),
+  append_to_parallel_batch(hashes, proposal_txs.hash)();
+  append_to_parallel_batch(nondeterministic_data,
                            proposal_txs.nondeterministic_data)();
   return proposal_txs;
 }

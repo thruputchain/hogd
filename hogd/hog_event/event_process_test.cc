@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <span>
 #include <string>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -17,6 +16,7 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/hog_mempool/registration.h"
@@ -42,10 +42,11 @@ namespace {
 ProposalTxs
 empty_proposal_txs()
 {
+  x23::XdrVec<TransactionHash> hashes;
+  x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(x23::span<const TransactionHash>({}),
-                           proposal_txs.hash)();
-  append_to_parallel_batch(x23::span<const NondeterministicProposalData>({}),
+  append_to_parallel_batch(hashes, proposal_txs.hash)();
+  append_to_parallel_batch(nondeterministic_data,
                            proposal_txs.nondeterministic_data)();
   return proposal_txs;
 }
