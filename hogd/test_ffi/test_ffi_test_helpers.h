@@ -34,17 +34,23 @@
 
 namespace hogd {
 
-// Placeholder genesis root blob: these tests drive contract bodies through
-// the mock trampoline, so the genesis root's code never runs and any
-// non-empty bytes satisfy create_db.
-inline constexpr uint8_t kTestGenesisRootContract[] = "test genesis root";
+// Serialized mock contract installed as the genesis root: these tests drive
+// contract bodies through the mock trampoline, so the genesis root's code
+// never runs and any deployable contract satisfies create_db.
+inline auto
+test_genesis_root_contract_bytes()
+{
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 0;
+  return x23::serialize(contract);
+}
 
 inline void *
 make_db()
 {
-  auto db =
-      create_db(nullptr, 0, NetworkHash{}.data(), kTestGenesisRootContract,
-                sizeof(kTestGenesisRootContract));
+  auto genesis_root = test_genesis_root_contract_bytes();
+  auto db = create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                      genesis_root.size());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }

@@ -240,8 +240,8 @@ CreateDBResult
 make_new_db(const uint8_t *serialized_cost_model,
             uint32_t serialized_cost_model_len,
             const uint8_t *serialized_network_hash,
-            const uint8_t *genesis_root_contract,
-            uint32_t genesis_root_contract_len) noexcept
+            const uint8_t *serialized_genesis_root_contract,
+            uint32_t serialized_genesis_root_contract_len) noexcept
 {
   // First-use init can fail (allocation failure); return a structured error
   // rather than letting it cross this noexcept boundary (issue #2575).
@@ -258,10 +258,18 @@ make_new_db(const uint8_t *serialized_cost_model,
     std::memcpy(network_hash.data(), serialized_network_hash,
                 network_hash.size());
 
-    // Genesis validation requires a non-empty root contract; reject before
-    // constructing rather than tearing down a half-built context.
-    if (genesis_root_contract == nullptr || genesis_root_contract_len == 0) {
+    if (serialized_genesis_root_contract == nullptr) {
       return {.db = nullptr, .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    }
+    Contract genesis_root_contract;
+    try {
+      x23::deserialize(&genesis_root_contract,
+                       x23::BufView{serialized_genesis_root_contract,
+                                    serialized_genesis_root_contract_len});
+    } catch (x23::XdrException const &e) {
+      log_error("error deserializing genesis root contract: {}", e);
+      return {.db = nullptr,
+              .ffi_error_code = kTestFFIErrorCodeDeserializeError};
     }
 
     StorageCostModelXdr cost_model_xdr =
@@ -278,9 +286,7 @@ make_new_db(const uint8_t *serialized_cost_model,
       }
     }
     auto *db =
-        new DBContext(cost_model_xdr, network_hash,
-                      std::span<const uint8_t>{genesis_root_contract,
-                                               genesis_root_contract_len});
+        new DBContext(cost_model_xdr, network_hash, genesis_root_contract);
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
@@ -1330,31 +1336,34 @@ CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
           uint32_t serialized_cost_model_len,
           const uint8_t *serialized_network_hash,
-          const uint8_t *genesis_root_contract,
-          uint32_t genesis_root_contract_len)
+          const uint8_t *serialized_genesis_root_contract,
+          uint32_t serialized_genesis_root_contract_len)
 {
   hogd::do_ffi_trace(
       "FFI (start): create_db(serialized_cost_model={}, "
       "serialized_cost_model_len={}, serialized_network_hash={}, "
-      "genesis_root_contract={}, genesis_root_contract_len={})",
+      "serialized_genesis_root_contract={}, "
+      "serialized_genesis_root_contract_len={})",
       static_cast<const void *>(serialized_cost_model),
       serialized_cost_model_len,
       static_cast<const void *>(serialized_network_hash),
-      static_cast<const void *>(genesis_root_contract),
-      genesis_root_contract_len);
+      static_cast<const void *>(serialized_genesis_root_contract),
+      serialized_genesis_root_contract_len);
   auto result =
       hogd::make_new_db(serialized_cost_model, serialized_cost_model_len,
-                        serialized_network_hash, genesis_root_contract,
-                        genesis_root_contract_len);
+                        serialized_network_hash,
+                        serialized_genesis_root_contract,
+                        serialized_genesis_root_contract_len);
   hogd::do_ffi_trace(
       "FFI (end): create_db(serialized_cost_model={}, "
       "serialized_cost_model_len={}, serialized_network_hash={}, "
-      "genesis_root_contract={}, genesis_root_contract_len={}) -> {}",
+      "serialized_genesis_root_contract={}, "
+      "serialized_genesis_root_contract_len={}) -> {}",
       static_cast<const void *>(serialized_cost_model),
       serialized_cost_model_len,
       static_cast<const void *>(serialized_network_hash),
-      static_cast<const void *>(genesis_root_contract),
-      genesis_root_contract_len, result);
+      static_cast<const void *>(serialized_genesis_root_contract),
+      serialized_genesis_root_contract_len, result);
   return result;
 }
 

@@ -26,6 +26,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "x23/cleanup.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -106,10 +107,16 @@ dummy_entrypoint(void * /*unused*/, uint64_t /*unused*/)
   return ForeignInvokeResult{};
 }
 
-// Placeholder genesis root blob: these tests drive contract bodies through
-// the mock trampoline, so the genesis root's code never runs and any
-// non-empty bytes satisfy environment creation.
-constexpr uint8_t kGenesisRootContract[] = "test genesis root";
+// Mock contract installed as the genesis root: these tests drive contract
+// bodies through the mock trampoline, so the genesis root's code never runs
+// and any deployable contract satisfies environment creation.
+Contract
+make_genesis_root_contract()
+{
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 0;
+  return contract;
+}
 
 } // namespace
 
@@ -205,7 +212,7 @@ struct ErrorSyscallMeta {
 TEST(MockSyscallTest, IntTypeTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
 
@@ -248,7 +255,7 @@ TEST(MockSyscallTest, IntTypeTest)
 TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -286,7 +293,7 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
 TEST(MockSyscallTest, SpanTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -323,7 +330,7 @@ TEST(MockSyscallTest, SpanTest)
 TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -364,7 +371,7 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
 TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -414,7 +421,7 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
 TEST(MockSyscallTest, NoReturnTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
@@ -440,9 +447,9 @@ TEST(MockSyscallTest, NoReturnTest)
 
 TEST(MockSyscallTest, NoSyscallTest)
 {
-  auto db_result =
-      create_db(nullptr, 0, NetworkHash{}.data(), kGenesisRootContract,
-                sizeof(kGenesisRootContract));
+  auto genesis_root = x23::serialize(make_genesis_root_contract());
+  auto db_result = create_db(nullptr, 0, NetworkHash{}.data(),
+                             genesis_root.data(), genesis_root.size());
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   x23::Defer free_db_defer([&] { free_db(db_result.db); });
   auto &db_context = *static_cast<DBContext *>(db_result.db);
@@ -473,7 +480,7 @@ TEST(MockSyscallTest, NoSyscallTest)
 TEST(MockSyscallTest, ErrorSyscallTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, kGenesisRootContract);
+                       NetworkHash{}, make_genesis_root_contract());
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},

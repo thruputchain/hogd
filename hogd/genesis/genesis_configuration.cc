@@ -89,8 +89,20 @@ native_default_wallet_hash()
 bool
 valid_genesis_configuration(GenesisConfiguration const &config)
 {
-  return config.root_contract.contract_type() == ContractType::kRv32 &&
-         !config.root_contract.rv32_contract().data.empty();
+  // Any deployable contract type may serve as the root; code-bearing types
+  // must actually carry code. Test harnesses install mock roots whose code
+  // never runs; production configurations come from
+  // GenesisConfigurationBuilder, which requires an rv32 root.
+  switch (config.root_contract.contract_type()) {
+  case ContractType::kRv32:
+    return !config.root_contract.rv32_contract().data.empty();
+  case ContractType::kWasmi:
+    return !config.root_contract.wasmi_contract().data.empty();
+  case ContractType::kNative:
+  case ContractType::kMockTest:
+    return true;
+  }
+  return false;
 }
 
 void

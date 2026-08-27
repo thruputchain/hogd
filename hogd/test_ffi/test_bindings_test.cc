@@ -56,16 +56,23 @@ namespace {
 // fail to verify against a database built here.
 constexpr NetworkHash kTestNetworkHash{0x5a};
 
-// Placeholder genesis root blob: these tests drive contract bodies through
-// the mock trampoline, so the genesis root's code never runs and any
-// non-empty bytes satisfy create_db.
-constexpr uint8_t kGenesisRootContract[] = "test genesis root";
+// Serialized mock contract installed as the genesis root: these tests drive
+// contract bodies through the mock trampoline, so the genesis root's code
+// never runs and any deployable contract satisfies create_db.
+auto
+genesis_root_contract_bytes()
+{
+  Contract contract(ContractType::kMockTest);
+  contract.mock_contract_id() = 0;
+  return x23::serialize(contract);
+}
 
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), kGenesisRootContract,
-                      sizeof(kGenesisRootContract));
+  auto genesis_root = genesis_root_contract_bytes();
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                      genesis_root.size());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -839,10 +846,11 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   auto serialized_model = x23::serialize(custom_model);
 
   // Create a DB seeded with the custom cost model.
-  auto db_result = create_db(serialized_model.data(),
-                             static_cast<uint32_t>(serialized_model.size()),
-                             NetworkHash{}.data(), kGenesisRootContract,
-                             sizeof(kGenesisRootContract));
+  auto genesis_root = genesis_root_contract_bytes();
+  auto db_result =
+      create_db(serialized_model.data(),
+                static_cast<uint32_t>(serialized_model.size()),
+                NetworkHash{}.data(), genesis_root.data(), genesis_root.size());
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });
@@ -3316,19 +3324,20 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
 
 // Regression test: concurrent create_db calls from multiple threads used to
 // cause use-after-free in PerThread storage (fixed in #1327).
-// The genesis root blob is a required argument: genesis validation needs a
-// non-empty contract, so a null or empty blob is rejected up front instead of
-// failing genesis construction.
+// The genesis root contract is a required argument: a null pointer is
+// rejected up front, and bytes that do not deserialize to a Contract fail
+// with a structured error instead of failing genesis construction.
 TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
 {
   auto null_res = create_db(nullptr, 0, NetworkHash{}.data(), nullptr, 0);
   EXPECT_EQ(null_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
   EXPECT_EQ(null_res.db, nullptr);
 
-  auto empty_res =
-      create_db(nullptr, 0, NetworkHash{}.data(), kGenesisRootContract, 0);
-  EXPECT_EQ(empty_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
-  EXPECT_EQ(empty_res.db, nullptr);
+  constexpr uint8_t kGarbage[] = {0xFF, 0xFF, 0xFF};
+  auto garbage_res =
+      create_db(nullptr, 0, NetworkHash{}.data(), kGarbage, sizeof(kGarbage));
+  EXPECT_EQ(garbage_res.ffi_error_code, kTestFFIErrorCodeDeserializeError);
+  EXPECT_EQ(garbage_res.db, nullptr);
 }
 
 TEST(TestBindingsTest, ConcurrentCreateDB)

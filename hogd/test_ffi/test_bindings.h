@@ -154,16 +154,18 @@ struct GetSnapshotStorageItemResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
-// genesis_root_contract is the raw rv32 blob installed (without artifact
-// verification) as the genesis root deployment; it must be non-null and
-// non-empty. Consumers execute contract bodies through the mock trampoline,
-// so the blob's code never runs -- callers that never invoke real genesis
-// code can pass any placeholder bytes.
+// serialized_genesis_root_contract is an XDR-serialized Contract installed
+// (without artifact verification) as the genesis root deployment; it must be
+// non-null and deserialize to a contract genesis validation accepts (any
+// deployable type; code-bearing types must carry code). Consumers execute
+// contract bodies through the mock trampoline, so the contract's code never
+// runs -- callers that never invoke real genesis code can pass a mock
+// contract.
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
                                 uint32_t serialized_cost_model_len,
                                 const uint8_t *serialized_network_hash,
-                                const uint8_t *genesis_root_contract,
-                                uint32_t genesis_root_contract_len);
+                                const uint8_t *serialized_genesis_root_contract,
+                                uint32_t serialized_genesis_root_contract_len);
 enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);
