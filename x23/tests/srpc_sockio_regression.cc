@@ -74,6 +74,34 @@ TEST(SockioRegression, ExplicitIpv4BindReportsActualPort)
   EXPECT_NE(get_port(actual_addr), 0);
 }
 
+// hog-event unclean restart rebinds the EventCard listen ports. The first
+// process typically bound port 0; Linux TIME_WAIT then rejects the replacement
+// bind unless that original listener had SO_REUSEADDR.
+TEST(SockioRegression, EphemeralIpv4ListenRebindsAfterConnectedClose)
+{
+  auto bind_addr = HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(bind_addr.has_value());
+  UniqueFd listener = stcplisten(*bind_addr);
+  ASSERT_TRUE(listener);
+  const std::uint16_t port = get_port(local_addr(listener));
+  ASSERT_NE(port, 0);
+
+  UniqueFd client = tcpconnect("127.0.0.1", port);
+  ASSERT_TRUE(client);
+  UniqueFd accepted(::accept(listener.get(), nullptr, nullptr));
+  ASSERT_TRUE(accepted);
+
+  listener.reset();
+  accepted.reset();
+  client.reset();
+
+  auto rebound_addr = HostPort{"127.0.0.1", port}.to_addr();
+  ASSERT_TRUE(rebound_addr.has_value());
+  UniqueFd rebound = stcplisten(*rebound_addr);
+  ASSERT_TRUE(rebound);
+  EXPECT_EQ(get_port(local_addr(rebound)), port);
+}
+
 TEST(SockioRegression, ExplicitIpv6BindReportsActualPort)
 {
   auto bind_addr = HostPort{"::1", 0}.to_addr();
