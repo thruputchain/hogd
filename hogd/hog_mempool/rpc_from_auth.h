@@ -103,7 +103,7 @@ public:
     }
     x23::Defer release_callback([this] {
       const std::lock_guard lock(callback_mutex_);
-      CHECK_GT(callbacks_in_flight_, 0);
+      CHECK_GT(callbacks_in_flight_, size_t{0});
       --callbacks_in_flight_;
       if (callbacks_in_flight_ == 0) {
         callback_drained_.notify_all();
