@@ -26,21 +26,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bitflags"
-version = "2.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
-
-[[package]]
-name = "block-buffer"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
-dependencies = [
- "generic-array",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -52,7 +37,7 @@ dependencies = [
 [[package]]
 name = "bottle-test-if"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "sdk",
 ]
@@ -94,30 +79,11 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "cpufeatures"
-version = "0.2.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "cpufeatures"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "crypto-common"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
-dependencies = [
- "generic-array",
- "typenum",
 ]
 
 [[package]]
@@ -137,9 +103,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
+ "cpufeatures",
  "curve25519-dalek-derive",
- "digest 0.11.3",
+ "digest",
  "fiat-crypto",
  "rand_core",
  "rustc_version",
@@ -169,9 +135,9 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88490bf1b990d87eaaa7ac8aa887f629a08e7359765b4911faf63c3763347d23"
+checksum = "ed17f5901b6630b993ca003def43f2f8ef4014fc13b047b57aad617ff32bc2ec"
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -179,26 +145,26 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "084e274f91c482280130e1e34e0b8d6e66776a060d7b6de7b84289ca778868c4"
+checksum = "6837e2cf7485aaae18f86181d2f0e9a7ed297a025e220aeabf63fdebd3a2ddff"
 dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
  "strsim",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
 name = "darling_macro"
-version = "0.24.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f5792fa0d41cd2325ce0ffa64f0a340eaebd4971a3a0c5e1ffd2cc488a355e"
+checksum = "2ac7135c3ef02b2f7833bbeb1be5ba7f966dcde8a87c6b87f65a778d71a02785"
 dependencies = [
  "darling_core",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -239,23 +205,13 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.10.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
-dependencies = [
- "block-buffer 0.10.4",
- "crypto-common 0.1.7",
-]
-
-[[package]]
-name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
- "block-buffer 0.12.1",
+ "block-buffer",
  "const-oid",
- "crypto-common 0.2.2",
+ "crypto-common",
 ]
 
 [[package]]
@@ -290,7 +246,7 @@ dependencies = [
  "curve25519-dalek",
  "ed25519",
  "rand_core",
- "sha2 0.11.0",
+ "sha2",
  "signature",
  "subtle",
  "zeroize",
@@ -314,8 +270,8 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "erc20-native-test"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "erc20-test",
  "groundhog-erc20-if",
@@ -326,8 +282,8 @@ dependencies = [
 
 [[package]]
 name = "erc20-test"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-erc20-if",
  "sdk",
@@ -381,12 +337,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "foldhash"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
-
-[[package]]
 name = "fslock"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -394,16 +344,6 @@ checksum = "04412b8935272e3a9bae6f48c7bfff74c2911f60525404edfdd28e49884c3bfb"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "generic-array"
-version = "0.14.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
-dependencies = [
- "typenum",
- "version_check",
 ]
 
 [[package]]
@@ -429,8 +369,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-contract-spec"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-spec",
  "groundhog-xdr",
@@ -441,28 +381,28 @@ dependencies = [
 
 [[package]]
 name = "groundhog-contract-util"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-xdr",
- "sha2 0.11.0",
- "syn 3.0.3",
+ "sha2",
+ "syn 3.0.4",
 ]
 
 [[package]]
 name = "groundhog-domain-separator"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-xdr",
- "sha2 0.11.0",
+ "sha2",
  "xdrs",
 ]
 
 [[package]]
 name = "groundhog-erc1271-if"
-version = "0.1.9"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.1.15"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "sdk",
  "thiserror",
@@ -470,8 +410,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-erc20-if"
-version = "0.1.9"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.1.15"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-xdr",
  "sdk",
@@ -480,8 +420,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-event"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -489,22 +429,22 @@ dependencies = [
 
 [[package]]
 name = "groundhog-macros"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "darling",
  "groundhog-contract-util",
  "groundhog-xdr",
  "proc-macro2",
  "quote",
- "sha2 0.11.0",
- "syn 3.0.3",
+ "sha2",
+ "syn 3.0.4",
 ]
 
 [[package]]
 name = "groundhog-native-exec"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-event",
  "groundhog-storage-cost",
@@ -512,15 +452,15 @@ dependencies = [
  "groundhog-trace",
  "groundhog-xdr",
  "hogexec-internal",
- "sha2 0.11.0",
+ "sha2",
  "xdr-common",
  "xdrs",
 ]
 
 [[package]]
 name = "groundhog-rv32-runtime"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 
 [[package]]
 name = "groundhog-serde_arrays"
@@ -533,9 +473,9 @@ dependencies = [
 
 [[package]]
 name = "groundhog-spec"
-version = "0.20.6"
+version = "0.24.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "9868ddd2086fdb868e541ece9e7d4eece2ebe99e1beec989dd53eff9ead0861e"
+checksum = "a519d3dbde2fed3be793f16da5dcac002ea8311014e8be2d875b5a954e99878b"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -543,8 +483,8 @@ dependencies = [
 
 [[package]]
 name = "groundhog-storage-cost"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-xdr",
  "xdrs",
@@ -552,25 +492,25 @@ dependencies = [
 
 [[package]]
 name = "groundhog-sys"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "fslock",
- "sha2 0.11.0",
+ "sha2",
  "thiserror",
 ]
 
 [[package]]
 name = "groundhog-syscall"
-version = "0.20.6"
+version = "0.24.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "489c4ae3ca5701cd27a14e9d6d1af6c05e86a367243b5131bb727a49f8d15409"
+checksum = "33c301065c917652ce5189318791f2d55d955266092b2bd9f6c14fade8c54446"
 
 [[package]]
 name = "groundhog-trace"
-version = "0.20.6"
+version = "0.24.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "b3e1520120b1c3f6a3cacdf2c17a50250bde40381b4c5373ef5119195b37376d"
+checksum = "0dc9121c5a926b8090ac298f94257162234aa468d3e547e47224f60a8504ddbf"
 dependencies = [
  "groundhog-xdr",
  "hogexec-internal",
@@ -580,29 +520,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "groundhog-wasm-meter"
-version = "0.8.1"
-source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "a2d027a3b193a374ae5ead85ec75c87a09f810792fc8bb9efd6d3c0059db75ee"
+name = "groundhog-u256"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
- "wasm-encoder",
- "wasmparser",
-]
-
-[[package]]
-name = "groundhog-wasm-runtime"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
-dependencies = [
- "groundhog-xdr",
- "heapless",
+ "groundhog-contract-spec",
+ "groundhog-macros",
+ "xdrs",
 ]
 
 [[package]]
 name = "groundhog-xdr"
-version = "0.20.6"
+version = "0.24.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "8012588d2bf462472dca5e77efd325711977931b316949b03d45fc6b42ae53ca"
+checksum = "866181cd441161c4771d7765b5f347c1793d81b9b24a95b780e3d7b0ec0551d8"
 dependencies = [
  "groundhog-serde_arrays",
  "groundhog-syscall",
@@ -616,9 +547,9 @@ dependencies = [
 
 [[package]]
 name = "groundhog-xdr-macros"
-version = "0.20.6"
+version = "0.24.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "5e579eea9ca5ebb593af3f6632ddd54e45f4094652ff9f497822860b4baad68a"
+checksum = "9ef81715120e297a73bc2514698658620d3781f79999865d5f268cee38ec14cd"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -626,7 +557,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -644,7 +575,7 @@ version = "0.1.0"
 dependencies = [
  "hex-literal",
  "sdk",
- "sha2 0.10.9",
+ "sha2",
 ]
 
 [[package]]
@@ -652,11 +583,6 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
-dependencies = [
- "foldhash",
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "heapless"
@@ -676,9 +602,9 @@ checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hogexec-internal"
-version = "0.20.6"
+version = "0.24.0"
 source = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-checksum = "f6f9e74fc9c62a6926282dd769c5b6c8a554f4a535061be84d7724df36830f42"
+checksum = "985113bb25ca4387d0d1f0bb8aa62c80c53ea7b1a530b449e454b4aa77fb8d4a"
 dependencies = [
  "xdrs",
 ]
@@ -715,8 +641,6 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -734,12 +658,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "leb128fmt"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
@@ -764,7 +682,7 @@ checksum = "77060ebe535362c3da75682cd17b0431017b6e7c5661e714fc69a7ad017d1301"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -882,22 +800,22 @@ dependencies = [
 
 [[package]]
 name = "ref-cast"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "216e8f773d7923bcba9ceb86a86c93cabb3903a11872fc3f138c49630e50b96d"
+checksum = "7e440fb4e4b4147295338efb76001ab9e4efc0e5839df2c47fc5ac2381d365c3"
 dependencies = [
  "ref-cast-impl",
 ]
 
 [[package]]
 name = "ref-cast-impl"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c9283685feec7d69af75fb0e858d5e7378f33fe4fc699383b2916ab9273e03c"
+checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -952,13 +870,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde_derive_internals",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
 name = "sdk"
-version = "0.19.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#6ec03ba5de81172f76e5a0cff5c20d23cefe7ca3"
+version = "0.23.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#01a7fcaafb0b576da12cae7db8ca640531a2548f"
 dependencies = [
  "groundhog-contract-spec",
  "groundhog-event",
@@ -966,13 +884,12 @@ dependencies = [
  "groundhog-native-exec",
  "groundhog-rv32-runtime",
  "groundhog-storage-cost",
- "groundhog-wasm-meter",
- "groundhog-wasm-runtime",
+ "groundhog-u256",
  "groundhog-xdr",
  "heapless",
  "hogexec-internal",
  "linkme",
- "sha2 0.11.0",
+ "sha2",
  "thiserror",
  "xdrs",
 ]
@@ -1010,7 +927,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -1021,7 +938,7 @@ checksum = "f852137cce035d6a4df67ccce505ff6b3e9fd3a10e3e52b24dc71e650bb1a9bd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -1052,24 +969,13 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.10.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
-]
-
-[[package]]
-name = "sha2"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
- "digest 0.11.3",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]
@@ -1086,7 +992,7 @@ version = "0.2.0"
 dependencies = [
  "bottle-test-if",
  "sdk",
- "sha2 0.10.9",
+ "sha2",
  "sha256_wrapper",
 ]
 
@@ -1147,9 +1053,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1163,7 +1069,7 @@ dependencies = [
  "groundhog-syscall",
  "groundhog-xdr",
  "sdk",
- "sha2 0.10.9",
+ "sha2",
  "syscall_misc_tests",
 ]
 
@@ -1179,22 +1085,22 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.19"
+version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09a43598840e33d5b0331f38c5e30d13bb11c11210a4b58f0d9b18a5a5eefcd9"
+checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.19"
+version = "2.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
+checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -1240,39 +1146,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
-name = "version_check"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
 name = "view_gateway_test"
 version = "0.2.0"
 dependencies = [
  "sdk",
-]
-
-[[package]]
-name = "wasm-encoder"
-version = "0.252.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8185ae345fa5687c054626ff9a50e7089797a343d9904d1dc9820eb4c4d3196f"
-dependencies = [
- "leb128fmt",
- "wasmparser",
-]
-
-[[package]]
-name = "wasmparser"
-version = "0.252.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3eb099dcadcde5be9eef55e3a337128efd4e44b4c93122487e4d2e4e1c6627c"
-dependencies = [
- "bitflags",
- "hashbrown",
- "indexmap",
- "semver",
- "serde",
 ]
 
 [[package]]
@@ -1316,7 +1193,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]

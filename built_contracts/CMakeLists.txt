@@ -197,11 +197,11 @@ gtest_discover_tests(contract_loader_test)
 # Contracts live in two sibling directories: integration_test_contracts (a
 # submodule) and local_test_contracts (checked into this repo directly).
 #
-# A few contracts are intentionally excluded because they cannot be lowered to
-# an RV32 artifact:
-#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro and no
-#     [[bin]] wrapper, so there is no RV32 entry point to lower.
-#   - nocontract_wallet: client-stub-only crate, not built for either target.
+# A few contracts are intentionally excluded:
+#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro, so they
+#     produce no spec and nothing here loads their artifacts.
+#   - nocontract_wallet: client-stub-only crate with no [[bin]] wrapper, so
+#     there is no RV32 entry point to lower.
 add_riscv_builds(
   SPEC_CONTRACTS
     integration_test_contracts/fibonacci

@@ -5,6 +5,7 @@
 // These tests are just wrappers around the tests in the syscall_misc_tests
 // contract.
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -15,10 +16,11 @@
 #include "built_contracts/syscall_misc_tests.h"
 #include "contract.hh"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -30,6 +32,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
 
 namespace hogd {
 
@@ -707,13 +710,14 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
-// ── Wasm function that returns without calling the Return syscall ────
+// ── An entrypoint that returns without calling the Return syscall ────
 
 TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
 {
   // The contract invokes raw entrypoint 0xFF on the target, whose body
-  // returns without calling the Return syscall; on rv32 the contract asserts
-  // the child frame faults (the SDK dispatcher ebreaks on wrapper return).
+  // returns without calling the Return syscall. The contract asserts the
+  // child frame aborts and that the payload decodes as the SDK's typed
+  // LibraryExn::UnknownMethod.
   deploy_target();
 
   auto handler = make_new_system_call_handler(
@@ -724,6 +728,25 @@ TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// The contrast with InvokeNoReturnSyscall: a panicking entrypoint carries no
+// payload at all, so the child frame faults rather than aborting. The contract
+// asserts the frame status and that neither buffer came back.
+TEST_F(SyscallMiscTests, InvokePanicFaults)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_invoke_panic_faults">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
@@ -903,9 +926,11 @@ TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
 
 // A hand-written entrypoint record registered outside the #[contract] macro
 // (method id 0xFF) has a wrapper that returns without issuing the Return
-// syscall: verification passes, but dispatch ebreaks.
-TEST_F(SyscallMiscTests,
-       RootInvokeOfEntrypointWithoutReturnSyscallIsDeterministicFault)
+// syscall. The SDK dispatcher falls through to its unknown-method arm, so the
+// frame aborts with LibraryExn::UnknownMethod rather than trapping: the
+// transaction executes, and the caller can tell this apart from an OOB access
+// or a bad instruction by decoding the selector.
+TEST_F(SyscallMiscTests, RootInvokeOfEntrypointWithoutReturnSyscallAborts)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
@@ -921,8 +946,15 @@ TEST_F(SyscallMiscTests,
                                  .nonce = nonce_++}},
       *runtime_context_);
   auto result = handler.root_invoke();
-  ASSERT_FALSE(result.is_root_success());
-  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+  ASSERT_TRUE(result.is_root_success());
+
+  auto const output = handler.get_most_recent_frame_output();
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Abort);
+
+  LibraryExn exn(LibraryExnKind::kLibraryExnUnknownMethod);
+  auto expected = x23::serialize_cxs(kLibraryExceptionSelector, exn);
+  ASSERT_TRUE(expected.has_value());
+  EXPECT_TRUE(std::ranges::equal(output.abort_buffer(), *expected));
 }
 
 // #40: reentrance beats resolution. The misc contract runs as the configured
