@@ -16,11 +16,11 @@
 #include "built_contracts/syscall_misc_tests.h"
 #include "contract.hh"
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -32,6 +32,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize_cxs.h"
 
 namespace hogd {
 
@@ -739,12 +740,13 @@ TEST_F(SyscallMiscTests, InvokePanicFaults)
   deploy_target();
 
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client_.make_invocation<u8"test_invoke_panic_faults">(
-              UINT64_MAX, kTargetAddress),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_invoke_panic_faults">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
