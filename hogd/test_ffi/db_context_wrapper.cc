@@ -21,6 +21,8 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_mempool/config_hash.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
@@ -81,6 +83,8 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                                                  native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration.storage_cost_model);
   auto res =
       db_sched_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                           genesis_value);
