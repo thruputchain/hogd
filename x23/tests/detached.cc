@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
 
@@ -203,6 +204,17 @@ TEST(AsyncCallback, CompletionRacesTheRamp)
     }
   });
 
+  // Declared after [completer] so it runs first: the ASSERT below returns
+  // from the test on failure, and ~jthread's request_stop() cannot wake a
+  // semaphore wait, so without this the join would hang and CI would time
+  // out instead of reporting the failure.  [go] is always 0 here -- the
+  // done.acquire() that ends each iteration happens after the completer
+  // consumed its token -- so exactly one release is owed.
+  Defer wake_completer{[&] {
+    completer.request_stop();
+    go.release();
+  }};
+
   int got = 0;
   for (int i = 0; i < kIters; i++) {
     auto [async, cb] = make_async<int>();
@@ -219,9 +231,6 @@ TEST(AsyncCallback, CompletionRacesTheRamp)
     done.acquire();
     ASSERT_EQ(got, 7) << "iteration " << i;
   }
-
-  completer.request_stop();
-  go.release();
 }
 
 // Same race for an Async<void>, whose callback takes no argument.
@@ -244,6 +253,12 @@ TEST(AsyncCallback, VoidCompletionRacesTheRamp)
     }
   });
 
+  // As above: teardown must run even if the test exits early.
+  Defer wake_completer{[&] {
+    completer.request_stop();
+    go.release();
+  }};
+
   for (int i = 0; i < kIters; i++) {
     auto [async, cb] = make_async<void>();
     pending = cb;
@@ -255,9 +270,6 @@ TEST(AsyncCallback, VoidCompletionRacesTheRamp)
 
     done.acquire();
   }
-
-  completer.request_stop();
-  go.release();
 }
 
 // Multiple suspend points per coroutine — parameters intact after each.
