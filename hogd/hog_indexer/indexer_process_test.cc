@@ -5,7 +5,6 @@
 #include <format>
 #include <stdexcept>
 #include <string>
-#include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
 #include <tuple>
@@ -30,6 +29,7 @@
 #include "proposal.hh"
 #include "proposal_hash.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
@@ -127,9 +127,7 @@ TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
     explorer_port = indexer.require_port("indexer.block_explorer");
     EXPECT_EQ(query_latest_block(explorer_port), 1);
 
-    const int status = indexer.kill_unclean();
-    ASSERT_TRUE(WIFSIGNALED(status));
-    EXPECT_EQ(WTERMSIG(status), SIGKILL);
+    EXPECT_EQ(indexer.kill_unclean(), SIGKILL);
   }
 
   {
@@ -155,9 +153,7 @@ TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
   explorer_port = restarted.require_port("indexer.block_explorer");
   EXPECT_EQ(query_latest_block(explorer_port), 2);
 
-  const int status = restarted.kill_unclean();
-  ASSERT_TRUE(WIFSIGNALED(status));
-  EXPECT_EQ(WTERMSIG(status), SIGKILL);
+  EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
 }
 
 } // namespace

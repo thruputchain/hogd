@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <string>
-#include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
 #include <utility>
@@ -28,6 +27,7 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
 #include "x23/vec.h"
@@ -179,9 +179,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
     registration.publish_event_canonical_tip(
         EventCanonicalTip{.block_id = 11, .consensus_value = block_one});
 
-    const int status = event.kill_unclean();
-    ASSERT_TRUE(WIFSIGNALED(status));
-    EXPECT_EQ(WTERMSIG(status), SIGKILL);
+    EXPECT_EQ(event.kill_unclean(), SIGKILL);
   }
 
   {
@@ -219,9 +217,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
 
-  const int status = restarted.kill_unclean();
-  ASSERT_TRUE(WIFSIGNALED(status));
-  EXPECT_EQ(WTERMSIG(status), SIGKILL);
+  EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
 }
 
 } // namespace

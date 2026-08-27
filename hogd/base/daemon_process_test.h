@@ -146,7 +146,12 @@ public:
     if (!status.has_value()) {
       throw std::runtime_error("process did not exit after SIGKILL");
     }
-    return *status;
+    if (!WIFSIGNALED(*status)) {
+      throw std::runtime_error(
+          std::format("process did not die from a signal (status={})",
+                      *status));
+    }
+    return WTERMSIG(*status);
   }
 
   const std::string &log() const { return log_; }
