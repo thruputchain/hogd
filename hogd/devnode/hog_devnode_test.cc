@@ -3378,13 +3378,16 @@ committed_tip_height(sched_coord_client_t &scheduler)
   return tip.db_tip().value.proposal_header.block_height;
 }
 
-// Commits a deploy from dev account 1's wallet, the shape the CLI submits.
-// One such block leaves durable state in every subsystem a restart has to
-// reconcile: a contract in HogDB, a consumed uniquifier and a gas charge
-// against the wallet, a record in the event outbox, and a row in the indexer.
-TransactionHash
-commit_wallet_deploy(sched_coord_client_t &scheduler,
-                     Readiness const &readiness, std::uint64_t nonce)
+// A deploy from dev account 1's wallet, the shape the CLI submits. Committing
+// one leaves durable state in every subsystem a restart has to reconcile: a
+// contract in HogDB, a consumed uniquifier and a gas charge against the
+// wallet, a record in the event outbox, and a row in the indexer.
+//
+// Signing is deterministic, so rebuilding this with the same nonce after a
+// restart yields the identical transaction -- which is what makes it usable
+// as a replay.
+SignedTransaction
+make_wallet_deploy_tx(Readiness const &readiness, std::uint64_t nonce)
 {
   auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
   CHECK(fibonacci_contract != nullptr);
@@ -3411,14 +3414,53 @@ commit_wallet_deploy(sched_coord_client_t &scheduler,
       .contracts_to_deploy = {*fibonacci_contract},
       .auth_claim = source_address_auth_claim(),
   };
-  SignedTransaction signed_tx =
-      sign_transaction(std::move(tx), keypair.second,
-                       readiness_network_hash(readiness));
+  return sign_transaction(std::move(tx), keypair.second,
+                          readiness_network_hash(readiness));
+}
+
+TransactionHash
+commit_wallet_deploy(sched_coord_client_t &scheduler,
+                     Readiness const &readiness, std::uint64_t nonce)
+{
+  SignedTransaction signed_tx = make_wallet_deploy_tx(readiness, nonce);
   const TransactionHash tx_hash = sha256(signed_tx.tx);
   TransactionHashBatch committed =
       submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
   EXPECT_EQ(committed.size(), 1UL);
   return tx_hash;
+}
+
+// Submits [txs] and proposes a block carrying them, deliberately stopping
+// short of committing it. Returns the hashes the proposal picked up. Nothing
+// this does is durable: the uniquifiers the proposed transactions would
+// consume are only consumed when the block commits.
+TransactionHashBatch
+submit_and_propose_without_commit(sched_coord_client_t &scheduler,
+                                  SignedTransactionBatch const &txs)
+{
+  scheduler.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
+
+  SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+  if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
+    ADD_FAILURE() << "schedcoord_get_tip did not return OK";
+    return {};
+  }
+  SchedulerProposalResult proposal =
+      scheduler.schedulercoord_propose_block(tip.db_tip().id,
+                                             ProposalContext{})();
+  if (proposal.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
+    ADD_FAILURE() << "schedulercoord_propose_block did not return OK";
+    return {};
+  }
+  SignedTransactionBatch proposed_txs;
+  EXPECT_TRUE(
+      parallel_batch_to_t(proposal.proposed_block().txs, proposed_txs)());
+  TransactionHashBatch tx_hashes;
+  tx_hashes.reserve(proposed_txs.size());
+  for (const SignedTransaction &tx : proposed_txs) {
+    tx_hashes.push_back(sha256(tx.tx));
+  }
+  return tx_hashes;
 }
 
 std::vector<std::string>
@@ -3800,6 +3842,142 @@ TEST(HogDevnode, DataDirRejectsMetadataWithUnknownDevWalletProfile)
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
       "unsupported dev wallet profile 'hog-devnode-from-the-future'");
+}
+
+// Replay protection is durable state, so a restart has to preserve exactly
+// where the line falls: consuming a uniquifier is an effect of the block that
+// carried the transaction, so it survives iff that block committed.
+
+TEST(HogDevnode, DataDirRejectsReplayOfCommittedTransactionAfterRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+
+  SignedTransaction deploy_tx;
+  TransactionHash tx_hash{};
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "fresh");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    deploy_tx = make_wallet_deploy_tx(readiness, /*nonce=*/71);
+    tx_hash = sha256(deploy_tx.tx);
+    TransactionHashBatch committed =
+        submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx});
+    ASSERT_EQ(committed.size(), 1UL);
+    ASSERT_EQ(committed[0], tx_hash);
+    ASSERT_EQ(committed_tip_height(scheduler), 2);
+
+    expect_clean_exit(process);
+  }
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    ASSERT_EQ(committed_tip_height(scheduler), 2);
+
+    // Block two committed, so it consumed this transaction's uniquifier for
+    // good. Resubmitting the identical transaction must not put it in another
+    // block, even though the mempool that first vetted it is long gone.
+    TransactionHashBatch replayed =
+        submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx});
+    EXPECT_TRUE(replayed.empty());
+    EXPECT_EQ(committed_tip_height(scheduler), 3);
+
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    EXPECT_EQ(poll_indexer_latest_block(reader, 3), 3);
+    // Still the height-two execution, not a second one at height three.
+    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+
+    expect_clean_exit(process);
+  }
+}
+
+TEST(HogDevnode, DataDirReplaysTransactionWhoseBlockNeverCommitted)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+
+  SignedTransaction deploy_tx;
+  TransactionHash tx_hash{};
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "fresh");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    deploy_tx = make_wallet_deploy_tx(readiness, /*nonce=*/81);
+    tx_hash = sha256(deploy_tx.tx);
+
+    // Propose a block carrying the transaction and crash before committing
+    // it. The proposal executed the transaction, but only a commit makes its
+    // consumed uniquifier durable, so nothing here may outlive the process.
+    TransactionHashBatch proposed =
+        submit_and_propose_without_commit(scheduler,
+                                          SignedTransactionBatch{deploy_tx});
+    ASSERT_EQ(proposed.size(), 1UL);
+    ASSERT_EQ(proposed[0], tx_hash);
+    ASSERT_EQ(committed_tip_height(scheduler), 1);
+
+    expect_killed_exit(process);
+  }
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    // The abandoned proposal left no trace: the chain is still at the height
+    // it committed before the crash.
+    ASSERT_EQ(committed_tip_height(scheduler), 1);
+
+    // So the transaction is still live and commits normally.
+    TransactionHashBatch committed =
+        submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx});
+    ASSERT_EQ(committed.size(), 1UL);
+    EXPECT_EQ(committed[0], tx_hash);
+    EXPECT_EQ(committed_tip_height(scheduler), 2);
+
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    EXPECT_EQ(poll_indexer_latest_block(reader, 2), 2);
+    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+    EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+
+    expect_clean_exit(process);
+  }
 }
 
 } // namespace
