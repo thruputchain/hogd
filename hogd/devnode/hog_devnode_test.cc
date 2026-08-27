@@ -717,6 +717,21 @@ public:
     return *status;
   }
 
+  int kill_unclean()
+  {
+    if (pid_ <= 0) {
+      throw std::runtime_error("hog-devnode process already reaped");
+    }
+    if (kill(pid_, SIGKILL) != 0 && errno != ESRCH) {
+      throw std::runtime_error(errno_message("kill SIGKILL", errno));
+    }
+    std::optional<int> status = wait_for_exit(kShutdownTimeout);
+    if (!status.has_value()) {
+      throw std::runtime_error("hog-devnode did not exit after SIGKILL");
+    }
+    return *status;
+  }
+
   std::string read_remaining_stdout()
   {
     std::string output = std::move(stdout_buffer_);
@@ -833,6 +848,14 @@ expect_clean_exit(HogDevnodeProcess &process)
   ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
   EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
   EXPECT_TRUE(process.read_remaining_stdout().empty());
+}
+
+void
+expect_killed(HogDevnodeProcess &process)
+{
+  int status = process.kill_unclean();
+  ASSERT_TRUE(WIFSIGNALED(status));
+  EXPECT_EQ(WTERMSIG(status), SIGKILL);
 }
 
 std::string
@@ -2664,6 +2687,85 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
   // is retained for as long as the record lives.
   EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
       (data_dir / "events").string(), finalized.proposal_header.events_hash)));
+}
+
+// Graceful shutdown is an optimization. Same-volume recovery must still reopen
+// canonical state after SIGKILL and keep producing blocks.
+TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--dev-accounts",
+        "1",
+        "--dev-account-seed",
+        "groundhog-dev-accounts",
+        "--dev-account-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ASSERT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+    expect_killed(process);
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+  TransactionRefPage page;
+  while (std::chrono::steady_clock::now() < deadline) {
+    page = reader.get_transactions_by_address(query)();
+    if (page.latest_block == 2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(page.latest_block, 2);
+
+  EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+  tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 3);
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)

@@ -2317,6 +2317,45 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
             SchedulerProposalOutcome::SchedulerProposalError);
 }
 
+// starve-exec: event is up, executor never registers. Readiness must stay
+// starting and finish_runtime_init must not return. Register the executor at
+// the end so test teardown does not hang.
+TEST(Mempool, RuntimeStaysUnreadyWhenExecutorNeverRegisters)
+{
+  MempoolTestInfra server(/*skip_genesis_block=*/true);
+  GenesisConfigurationBuilder builder;
+  auto root_contract = load_stock_genesis_root_contract();
+  ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
+                builder.build(MempoolTestInfra::kNetworkHash,
+                              StorageCostModel::default_cost_model(),
+                              *root_contract))(),
+            DbSchedResult::DbSchedResultOK);
+
+  HttpServer health_server;
+  add_health_metrics_routes(health_server);
+  const uint16_t health_port =
+      health_server.start_server(x23::HostPort{"127.0.0.1", 0});
+  auto health_status = [&] {
+    return request(health_port,
+                   "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
+  };
+
+  auto runtime_init = std::async(std::launch::async, [&] {
+    server.mempool_coord_rpc().finish_runtime_init()();
+  });
+  server.register_event_only_after_genesis();
+  EXPECT_EQ(runtime_init.wait_for(std::chrono::milliseconds(200)),
+            std::future_status::timeout);
+  EXPECT_FALSE(server.mempool_coord_rpc().ready());
+  EXPECT_NE(health_status().find("\"status\":\"starting\""), std::string::npos);
+
+  server.register_executor_only_after_event();
+  ASSERT_EQ(runtime_init.wait_for(std::chrono::seconds(5)),
+            std::future_status::ready);
+  runtime_init.get();
+  EXPECT_TRUE(server.mempool_coord_rpc().ready());
+}
+
 TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);

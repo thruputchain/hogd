@@ -5,7 +5,7 @@
 # Usage: startup_order_test.sh <scenario>
 #   scenarios: mempool-first mempool-middle mempool-last
 #              indexer-before-event event-before-indexer
-#              coordinator-first starve-auth
+#              coordinator-first starve-auth starve-exec starve-db starve-event
 #
 # Env overrides (defaults target the namespace cpp gcc-debug build layout):
 #   BUILD_DIR   build directory holding the C++ binaries (default build/gcc)
@@ -18,7 +18,7 @@ set -Eeuo pipefail
 
 usage() {
   echo "Usage: $0 <scenario>" >&2
-  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first starve-auth" >&2
+  echo "  scenarios: mempool-first mempool-middle mempool-last indexer-before-event event-before-indexer coordinator-first starve-auth starve-exec starve-db starve-event" >&2
 }
 
 SCENARIO="${1:-}"
@@ -68,6 +68,15 @@ starve-auth)
   # (If the mempool instead blocks until auth registers, every launched proc
   # stays alive and this passes -- telling us the hub gates on downstreams.)
   ORDER=(mempool loadgen hog-exec hog-db event indexer chuckd)
+  ;;
+starve-exec)
+  ORDER=(mempool loadgen hog-db event indexer auth chuckd)
+  ;;
+starve-db)
+  ORDER=(mempool loadgen hog-exec event indexer auth chuckd)
+  ;;
+starve-event)
+  ORDER=(mempool loadgen hog-exec hog-db indexer auth chuckd)
   ;;
 *)
   echo "unknown scenario: $SCENARIO" >&2

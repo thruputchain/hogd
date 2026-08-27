@@ -226,7 +226,7 @@ event, indexer, and devnode suites.
 | Durable progress and indexed rows reopen atomically, then resume from the exact next height | `StrictIndexerTest.SuccessfulStrictApplyReopensAllRowsAndProgressTogether`; `IndexerPullController.RealEventServerReplaysArchivedAndCurrentEpochsAndResumesAfterRestart` |
 | A lost reply repeats the same immutable block and duplicate application is idempotent | `EventRpcTest.ExactProgressReturnsNextAndUnchangedProgressRepeatsIt`; `StrictIndexerTest.DuplicateLedgerAndFutureGapWriteNothing` |
 | Finalized scheduler commit makes the durable record pullable | `EventRpcTest.FinalizedCommitMakesRecordPullable` |
-| Restart promotion ignores regenerated process-local block IDs and selects the candidate whose event root binds the finalized nondeterministic data | `EventRpcTest.ReconciliationPromotesRetainedCandidateWithRegeneratedBlockId`; `HogDevnode.DataDirPromotesFinalizedCandidateAfterRestart` |
+| Restart promotion ignores regenerated process-local block IDs and selects the candidate whose event root binds the finalized nondeterministic data | `EventRpcTest.RecoveryPicksCanonicalEventsFileAmongCompetingBlocks`; `HogDevnode.DataDirPromotesFinalizedEventsFileAfterRestart` |
 | Event commitment binds nondeterministic proposal data while excluding signature-wrapper malleability | `IndexerOutboxTest.EventRootBindsNondeterministicDataButNotSignatureWrapper`; `IndexerOutboxTest.EventLeafSerializesEventBeforeNondeterministicData` |
 | A dropped event connection clears readiness, is retried, and live indexing resumes | `IndexerPullController.ReconnectsAfterEventServerTransportLoss` |
 | A blocked pull is bounded by its RPC deadline and reconnects | `IndexerPullController.RpcTimeoutReconnectsAfterBlockedPull` |

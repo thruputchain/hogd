@@ -166,6 +166,15 @@ jobs:
       - name: "Scenario: starve-auth"
         run: ./scripts/ci/startup_order_test.sh starve-auth
 
+      - name: "Scenario: starve-exec"
+        run: ./scripts/ci/startup_order_test.sh starve-exec
+
+      - name: "Scenario: starve-db"
+        run: ./scripts/ci/startup_order_test.sh starve-db
+
+      - name: "Scenario: starve-event"
+        run: ./scripts/ci/startup_order_test.sh starve-event
+
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
