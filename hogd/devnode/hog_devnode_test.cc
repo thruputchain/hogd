@@ -717,6 +717,26 @@ public:
     return *status;
   }
 
+  // Models a crash: the node gets no shutdown path at all, so whatever it
+  // already made durable is exactly what the next start has to recover from.
+  // Unlike [terminate()] there is no SIGTERM grace period to fall back on --
+  // SIGKILL cannot be caught, so a process that fails to die is a test bug.
+  int kill_ungracefully()
+  {
+    if (pid_ <= 0) {
+      throw std::runtime_error("hog-devnode process already reaped");
+    }
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    if (kill(pid_, SIGKILL) != 0 && errno != ESRCH) {
+      throw std::runtime_error(errno_message("kill SIGKILL", errno));
+    }
+    std::optional<int> status = wait_for_exit(kShutdownTimeout);
+    if (!status.has_value()) {
+      throw std::runtime_error("hog-devnode did not exit after SIGKILL");
+    }
+    return *status;
+  }
+
   std::string read_remaining_stdout()
   {
     std::string output = std::move(stdout_buffer_);
@@ -833,6 +853,16 @@ expect_clean_exit(HogDevnodeProcess &process)
   ASSERT_TRUE(WIFEXITED(status)) << stderr_output;
   EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS) << stderr_output;
   EXPECT_TRUE(process.read_remaining_stdout().empty());
+}
+
+void
+expect_killed_exit(HogDevnodeProcess &process)
+{
+  int status = process.kill_ungracefully();
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFSIGNALED(status)) << stderr_output;
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  EXPECT_EQ(WTERMSIG(status), SIGKILL) << stderr_output;
 }
 
 std::string
@@ -1070,9 +1100,10 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
 }
 
 void
-write_test_data_dir_metadata(std::filesystem::path const &data_dir,
-                             LocalBootstrapConfig const &config,
-                             std::int64_t schema_version = 2)
+write_test_data_dir_metadata(
+    std::filesystem::path const &data_dir, LocalBootstrapConfig const &config,
+    std::int64_t schema_version = 2,
+    std::uint64_t faucet_tokens = kLocalFaucetStorageTokens)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
@@ -1080,7 +1111,7 @@ write_test_data_dir_metadata(std::filesystem::path const &data_dir,
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.dev_wallet_profile);
-      w.field("faucetTokens", std::to_string(kLocalFaucetStorageTokens));
+      w.field("faucetTokens", std::to_string(faucet_tokens));
       w.field("devAccounts",
               static_cast<std::int64_t>(config.user_account_count));
       w.field("devAccountSeed", config.seed);
@@ -3281,6 +3312,494 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
   }
 
   expect_clean_exit(process);
+}
+
+// The tests below exercise what a devnode data dir has to survive between
+// runs. The existing DataDir* cases above pin the rejection paths a bad or
+// mismatched directory takes; these pin the other half of the contract --
+// that a good directory comes back with its committed state intact, that it
+// does so after a crash and not just a clean stop, and that the recovery
+// preflight rejects metadata it cannot honor.
+
+// The slice of committed chain state a client can observe per account: the
+// free native token balance and the address auth data, both labeled with the
+// height they were read at. A restart has to reproduce all of it exactly.
+DbGatewayPayload
+read_account_gateway_items(auto &gateway,
+                           std::vector<ContractAddress> const &addresses)
+{
+  AddressAndKeyBatch batch;
+  for (ContractAddress const &address : addresses) {
+    AddressAndKey balance;
+    balance.address = address;
+    balance.key.key_type(StorageKeyType::FreeNativeTokenBalance);
+    batch.push_back(balance);
+
+    AddressAndKey auth_data;
+    auth_data.address = address;
+    auth_data.key.key_type(StorageKeyType::AuthData);
+    batch.push_back(auth_data);
+  }
+
+  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  CHECK(result.error() == RPCError::kRPCNone);
+  return result.payload();
+}
+
+// The indexer catches up asynchronously after a restart, so its recovered
+// height is only ever observable by polling. Returns the last height the
+// indexer reported, so a caller that never sees [expected] fails on the
+// height it did see.
+BlockHeight
+poll_indexer_latest_block(auto &reader, BlockHeight expected)
+{
+  const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+  for (;;) {
+    AddressTransactionQuery query{};
+    query.order = IterationOrder::IterationOrderAscending;
+    query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    const BlockHeight latest =
+        reader.get_transactions_by_address(query)().latest_block;
+    if (latest == expected || std::chrono::steady_clock::now() >= deadline) {
+      return latest;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+}
+
+BlockHeight
+committed_tip_height(sched_coord_client_t &scheduler)
+{
+  SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+  if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
+    ADD_FAILURE() << "schedcoord_get_tip did not return OK";
+    return -1;
+  }
+  return tip.db_tip().value.proposal_header.block_height;
+}
+
+// Commits a deploy from dev account 1's wallet, the shape the CLI submits.
+// One such block leaves durable state in every subsystem a restart has to
+// reconcile: a contract in HogDB, a consumed uniquifier and a gas charge
+// against the wallet, a record in the event outbox, and a row in the indexer.
+TransactionHash
+commit_wallet_deploy(sched_coord_client_t &scheduler,
+                     Readiness const &readiness, std::uint64_t nonce)
+{
+  auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
+  CHECK(fibonacci_contract != nullptr);
+  auto keypair =
+      derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+  using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
+  const ContractAddress wallet_address =
+      build_local_bootstrap_account_artifact({.user_account_count = 1})
+          .accounts[1]
+          .address;
+
+  Transaction tx{
+      .invocation =
+          Invocation{
+              .invoked_address = wallet_address,
+              .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
+              .gas_limit = GasAmount{10'000'000},
+              .calldata = wallet_meta::make_calldata<u8"deploy">(
+                  make_nonce(nonce), sha256(*fibonacci_contract)),
+          },
+      .uniquifier = Uniquifier{.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = nonce},
+      .contracts_to_deploy = {*fibonacci_contract},
+      .auth_claim = source_address_auth_claim(),
+  };
+  SignedTransaction signed_tx =
+      sign_transaction(std::move(tx), keypair.second,
+                       readiness_network_hash(readiness));
+  const TransactionHash tx_hash = sha256(signed_tx.tx);
+  TransactionHashBatch committed =
+      submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
+  EXPECT_EQ(committed.size(), 1UL);
+  return tx_hash;
+}
+
+std::vector<std::string>
+persistent_data_dir_args(std::filesystem::path const &data_dir)
+{
+  return {
+      "--data-dir",           data_dir.string(),
+      "--dev-accounts",       "1",
+      "--dev-account-seed",   "groundhog-dev-accounts",
+      "--dev-account-tokens", "1000000000",
+  };
+}
+
+std::vector<ContractAddress>
+single_dev_account_addresses()
+{
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact({.user_account_count = 1});
+  return {artifact.accounts[0].address, artifact.accounts[1].address};
+}
+
+TEST(HogDevnode, DataDirServesIdenticalCommittedStateAfterCleanRestart)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+  const std::vector<ContractAddress> addresses = single_dev_account_addresses();
+
+  TransactionHash tx_hash{};
+  DbGatewayPayload committed_items;
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "fresh");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    tx_hash = commit_wallet_deploy(scheduler, readiness, /*nonce=*/51);
+    ASSERT_EQ(committed_tip_height(scheduler), 2);
+
+    auto gateway = create_client<DbGateway1>(readiness.db_gateway.host,
+                                             readiness.db_gateway.port,
+                                             /*retry=*/true)()
+                       .value();
+    committed_items = read_account_gateway_items(gateway, addresses);
+    ASSERT_EQ(committed_items.block_height, 2);
+    ASSERT_EQ(committed_items.items.size(), 2 * addresses.size());
+    for (DbGatewayItemResult const &item : committed_items.items) {
+      ASSERT_EQ(item.error(), RPCError::kRPCNone);
+    }
+
+    expect_clean_exit(process);
+  }
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    EXPECT_EQ(committed_tip_height(scheduler), 2);
+
+    auto gateway = create_client<DbGateway1>(readiness.db_gateway.host,
+                                             readiness.db_gateway.port,
+                                             /*retry=*/true)()
+                       .value();
+    // Same items, same height: the restart is invisible to a gateway client.
+    EXPECT_EQ(read_account_gateway_items(gateway, addresses), committed_items);
+
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    EXPECT_EQ(poll_indexer_latest_block(reader, 2), 2);
+    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+    EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+
+    expect_clean_exit(process);
+  }
+}
+
+TEST(HogDevnode, DataDirRecoversCommittedStateAfterUngracefulKill)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+  const std::vector<ContractAddress> addresses = single_dev_account_addresses();
+
+  TransactionHash tx_hash{};
+  DbGatewayPayload committed_items;
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "fresh");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    tx_hash = commit_wallet_deploy(scheduler, readiness, /*nonce=*/61);
+    auto gateway = create_client<DbGateway1>(readiness.db_gateway.host,
+                                             readiness.db_gateway.port,
+                                             /*retry=*/true)()
+                       .value();
+    committed_items = read_account_gateway_items(gateway, addresses);
+    // schedulercoord_commit_block only returns once both the HogDB snapshot
+    // and the event outbox record are durable, so everything read here has to
+    // survive the kill below.
+    ASSERT_EQ(committed_tip_height(scheduler), 2);
+    ASSERT_EQ(committed_items.block_height, 2);
+
+    expect_killed_exit(process);
+  }
+
+  {
+    // The killed node held an flock on the data dir; the kernel dropped it
+    // when the process died, so a restart is not locked out by its corpse.
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    EXPECT_EQ(committed_tip_height(scheduler), 2);
+
+    auto gateway = create_client<DbGateway1>(readiness.db_gateway.host,
+                                             readiness.db_gateway.port,
+                                             /*retry=*/true)()
+                       .value();
+    EXPECT_EQ(read_account_gateway_items(gateway, addresses), committed_items);
+
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    EXPECT_EQ(poll_indexer_latest_block(reader, 2), 2);
+    TxInfoResult result = reader.get_transaction_info(tx_hash)();
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().height, 2);
+
+    // Recovering read-only is not enough: the chain has to keep advancing on
+    // top of what the crashed run committed.
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    EXPECT_EQ(committed_tip_height(scheduler), 3);
+    EXPECT_EQ(poll_indexer_latest_block(reader, 3), 3);
+
+    expect_clean_exit(process);
+  }
+}
+
+TEST(HogDevnode, DataDirRecoversAcrossRepeatedUngracefulKills)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+
+  // Genesis leaves the chain at height 1, and each crash cycle adds one block.
+  constexpr int kCrashCycles = 3;
+  for (int cycle = 0; cycle < kCrashCycles; ++cycle) {
+    SCOPED_TRACE(std::format("crash cycle {}", cycle));
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, cycle == 0 ? "fresh" : "recovered");
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    ASSERT_EQ(committed_tip_height(scheduler), 1 + cycle);
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    ASSERT_EQ(committed_tip_height(scheduler), 2 + cycle);
+
+    expect_killed_exit(process);
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start(args);
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  EXPECT_EQ(committed_tip_height(scheduler), 1 + kCrashCycles);
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  EXPECT_EQ(poll_indexer_latest_block(reader, 1 + kCrashCycles),
+            1 + kCrashCycles);
+
+  expect_clean_exit(process);
+}
+
+TEST(HogDevnode, DataDirRejectsOutboxTwoBlocksAheadOfHogDb)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  // One outbox record ahead of HogDB is the ordinary crash window between the
+  // event commit and the HogDB commit, and DataDirPullReplaysFinalizedOutbox-
+  // OneAheadOfHogDb pins that it replays. Two records ahead is not a window
+  // any crash can open, so recovery must refuse it rather than replay it.
+  std::ignore = append_next_test_outbox_record(data_dir);
+  std::ignore = append_next_test_outbox_record(data_dir);
+
+  expect_startup_failure(
+      persistent_data_dir_args(data_dir),
+      "recovered event outbox does not reconcile with HogDB tip");
+}
+
+TEST(HogDevnode, DataDirRejectsHogDbAheadWithoutFinalizedEventsFile)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  std::filesystem::path finalized_data_dir = make_test_data_dir();
+  Defer cleanup_finalized_data_dir(
+      [&] { std::filesystem::remove_all(finalized_data_dir); });
+  initialize_persistent_data_dir(data_dir);
+  std::filesystem::copy(data_dir, finalized_data_dir,
+                        std::filesystem::copy_options::recursive);
+  advance_persistent_data_dir(finalized_data_dir);
+
+  // Same stop as DataDirPromotesFinalizedEventsFileAfterRestart -- HogDB
+  // finalized height two, the outbox never promoted it -- except that this
+  // run's events directory does not hold the block's events file. Promotion
+  // is what recovers an unpromoted height, and it is content addressed by the
+  // event root, so with the file gone there is nothing to promote from and the
+  // outbox stays a block behind a HogDB tip it can never reach.
+  ASSERT_GT(std::filesystem::remove_all(data_dir / "ramdb"), 0UL);
+  std::filesystem::copy(finalized_data_dir / "ramdb", data_dir / "ramdb",
+                        std::filesystem::copy_options::recursive);
+
+  {
+    auto finalized_store = IndexerOutboxStore::open(
+        (finalized_data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(finalized_store.has_value()) << finalized_store.error();
+    auto committed = finalized_store->load_committed(2)();
+    ASSERT_TRUE(committed.has_value()) << committed.error();
+    ASSERT_FALSE(
+        std::filesystem::exists(EventBlockContext::final_events_filename(
+            (data_dir / "events").string(),
+            committed->consensus_value.proposal_header.events_hash)));
+
+    auto recovering_store = IndexerOutboxStore::open(
+        (data_dir / "events" / "indexer-outbox").string());
+    ASSERT_TRUE(recovering_store.has_value()) << recovering_store.error();
+    ASSERT_FALSE(recovering_store->has_committed(2).value());
+  }
+
+  expect_startup_failure(
+      persistent_data_dir_args(data_dir),
+      "recovered event outbox does not reconcile with HogDB tip");
+}
+
+// The recovery preflight parses hog-devnode-data.json before it opens or
+// migrates any persisted state, so every rejection below has to come out of
+// the process before it touches the chain.
+
+void
+write_raw_test_data_dir_metadata(std::filesystem::path const &data_dir,
+                                 std::string_view contents)
+{
+  std::filesystem::create_directories(data_dir);
+  std::ofstream metadata(data_dir / "hog-devnode-data.json",
+                         std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(metadata);
+  metadata << contents;
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataRootThatIsNotAnObject)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_raw_test_data_dir_metadata(data_dir, "[]");
+
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "hog-devnode data metadata root is not an object");
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataFromANewerSchemaVersion)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/3);
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string()},
+      "unsupported hog-devnode data metadata schemaVersion 3, expected 2");
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_raw_test_data_dir_metadata(
+      data_dir, R"({"schemaVersion":2,"kind":"hog-hosted-data"})");
+
+  expect_startup_failure({"--data-dir", data_dir.string()},
+                         "unsupported hog-devnode data metadata kind "
+                         "'hog-hosted-data', expected 'hog-devnode-data'");
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataWithoutBootstrapConfig)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_raw_test_data_dir_metadata(
+      data_dir, R"({"schemaVersion":2,"kind":"hog-devnode-data"})");
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string()},
+      "hog-devnode data metadata missing root.bootstrapConfig");
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataWithDevAccountsAboveMaximum)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_test_data_dir_metadata(data_dir, {.user_account_count =
+                                              kMaxBootstrapAccounts + 1});
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string()},
+      std::format("hog-devnode data metadata devAccounts {} exceeds maximum {}",
+                  kMaxBootstrapAccounts + 1, kMaxBootstrapAccounts));
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataWithForeignFaucetTokens)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  // The faucet allocation is fixed by the local bootstrap profile, so a data
+  // dir claiming a different one was not written by this bootstrap.
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/2,
+                               /*faucet_tokens=*/1);
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string()},
+      std::format("hog-devnode data metadata faucetTokens must be {}, got 1",
+                  kLocalFaucetStorageTokens));
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataWithEmptyDevAccountSeed)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_test_data_dir_metadata(data_dir, {.seed = ""});
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string()},
+      "hog-devnode data metadata devAccountSeed must not be empty");
+}
+
+TEST(HogDevnode, DataDirRejectsMetadataWithUnknownDevWalletProfile)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  write_test_data_dir_metadata(data_dir, {.dev_wallet_profile =
+                                              "hog-devnode-from-the-future"});
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string()},
+      "unsupported dev wallet profile 'hog-devnode-from-the-future'");
 }
 
 } // namespace
