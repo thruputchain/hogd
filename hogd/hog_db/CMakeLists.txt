@@ -42,7 +42,6 @@ add_library(
 
 target_link_libraries(
   hog_db
-  config_hash
   ramdb
   hogd
   metrics
