@@ -1,13 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <arpa/inet.h>
 #include <cstdint>
-#include <netinet/in.h>
 #include <string>
-#include <sys/socket.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -34,6 +30,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
+#include "x23/sockio.h"
 #include "x23/vec.h"
 
 #ifndef HOG_EVENT_BINARY
@@ -130,19 +127,12 @@ commit_empty_block(event_sched_client &rpc, BlockID block_id,
 std::uint16_t
 unused_loopback_port()
 {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  CHECK_GE(fd, 0);
-  const int opt = 1;
-  CHECK_EQ(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)), 0);
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  CHECK_EQ(::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
-  socklen_t len = sizeof(addr);
-  CHECK_EQ(::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len), 0);
-  CHECK_EQ(::close(fd), 0);
-  const auto port = ntohs(addr.sin_port);
-  CHECK_NE(port, 0);
+  auto bind_addr = x23::HostPort{"127.0.0.1", 0}.to_addr();
+  CHECK(bind_addr.has_value());
+  x23::UniqueFd listener = x23::stcplisten(*bind_addr);
+  CHECK(static_cast<bool>(listener));
+  const std::uint16_t port = x23::get_port(x23::local_addr(listener));
+  CHECK_NE(port, std::uint16_t{0});
   return port;
 }
 
