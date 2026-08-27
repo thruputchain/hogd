@@ -147,7 +147,7 @@ TEST_P(ManualRevertRv32Test, BasicManualRevert)
   auto rv32_context = std::make_unique<Rv32Context>();
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
           {ContractType::kRv32, {rv32_context.release(), true}}});
 
@@ -227,7 +227,7 @@ TEST_P(ManualRevertRv32Test, BasicNoRevert)
   write_deployment(native_contract_addr, native_contract_xdr);
   auto rv32_context = std::make_unique<Rv32Context>();
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
           {ContractType::kRv32, {rv32_context.release(), true}}});
 
@@ -294,7 +294,7 @@ TEST_P(ManualRevertRv32Test, NestedManualRevert)
 
   auto rv32_context = std::make_unique<Rv32Context>();
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
           {ContractType::kRv32, {rv32_context.release(), true}}});
 
@@ -369,7 +369,8 @@ TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
 
     auto rv32_context = std::make_unique<Rv32Context>();
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
             {ContractType::kRv32, {rv32_context.release(), true}}});
 
@@ -442,7 +443,7 @@ TEST_P(ManualRevertRv32Test, ErrorTypeNoError)
 
   auto rv32_context = std::make_unique<Rv32Context>();
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {native_runtime_context.get(), false}},
           {ContractType::kRv32, {rv32_context.release(), true}}});
 
@@ -514,7 +515,8 @@ TEST_P(ManualRevertRv32Test, StorageManualRevert)
 
     auto rv32_context = std::make_unique<Rv32Context>();
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
             {ContractType::kRv32, {rv32_context.release(), true}}});
 
@@ -573,7 +575,8 @@ TEST_P(ManualRevertRv32Test, StorageManualRevert)
 
     auto rv32_context = std::make_unique<Rv32Context>();
     auto multiplexed_context = std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kNative, {native_runtime_context.get(), false}},
             {ContractType::kRv32, {rv32_context.release(), true}}});
 

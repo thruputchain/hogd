@@ -156,7 +156,8 @@ protected:
       native_context = std::make_unique<NativeContext>(std::move(map));
       auto rv32_context = std::make_unique<Rv32Context>();
       context = std::make_unique<MultiplexedContext>(
-          std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          std::unordered_map<ContractType,
+                             std::pair<RuntimeContext const *, bool>>{
               {ContractType::kRv32, {rv32_context.release(), true}},
               {ContractType::kNative, {native_context.get(), false}}});
     }

@@ -14,14 +14,14 @@
 namespace hogd {
 
 MultiplexedContext::MultiplexedContext(
-    std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
+    std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>
         contexts)
   : contexts_(std::move(contexts))
 {}
 
 SystemStatus<std::unique_ptr<Runtime>>
 MultiplexedContext::make_new_runtime(DeployedContract const &deployed_contract,
-                                     SystemCallHandler *syscall_handler)
+                                     SystemCallHandler *syscall_handler) const
 {
   auto it = contexts_.find(deployed_contract.hash.contract_type);
   if (it == contexts_.end()) {
