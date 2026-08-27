@@ -19,8 +19,17 @@ class Runtime;
 // of function pointers to link, or an environment allocator).
 //
 // We assume each RuntimeContext can be used by multiple Runtimes.
-// Each RuntimeContext can be used across multiple transactions,
-// but is not threadsafe.
+// Each RuntimeContext can be used across multiple transactions.
+//
+// Both entry points are const: resolving a contract and building a Runtime
+// must not mutate the context. Any per-invocation state belongs in the
+// returned Runtime or behind the SystemCallHandler, never here. An
+// implementation that honors that is safe to share across threads, which is
+// what lets make_hog_exec_context() hand out one process-wide instance of the
+// stateless native/RV32 contexts instead of a per-thread copy whose lifetime
+// can end under a longer-lived borrower (issue #2682). Mutating operations
+// outside these two (e.g. MockRuntimeContext::set_trampoline) stay non-const
+// and are not threadsafe.
 class RuntimeContext {
 public:
   RuntimeContext() = default;
@@ -39,7 +48,7 @@ public:
 
   virtual SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) = 0;
+                   SystemCallHandler *syscall_handler) const = 0;
 };
 
 // Virtual class that abstracts the interface required for an invocable

@@ -88,7 +88,7 @@ public:
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const & /*unused*/,
-                   SystemCallHandler * /*unused*/) override
+                   SystemCallHandler * /*unused*/) const override
   {
     return nullptr;
   }
@@ -500,6 +500,117 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// Pins the contract-observable behavior of SHA256Copy in one traced sequence:
+// forking an in-progress stream, both forks diverging independently to their
+// one-shot digests, and the missing-source error. The copy itself contributes
+// nothing to sha256_total_bytes_processed; only finalized bytes count.
+TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
+{
+  const std::array<uint8_t, 3> abc = {'a', 'b', 'c'};
+  const std::array<uint8_t, 3> def = {'d', 'e', 'f'};
+  const std::array<uint8_t, 3> xyz = {'x', 'y', 'z'};
+
+  const SHA256Hash hash_abcdef =
+      sha256(std::vector<uint8_t>{'a', 'b', 'c', 'd', 'e', 'f'});
+  const SHA256Hash hash_abcxyz =
+      sha256(std::vector<uint8_t>{'a', 'b', 'c', 'x', 'y', 'z'});
+
+  auto context = make_single_contract_context(
+      [abc, def, xyz, hash_abcdef,
+       hash_abcxyz](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto expect = [](auto r, SyscallErrorCode code) {
+          return r.has_value() && r.value() == code;
+        };
+        constexpr auto kOk = SyscallErrorCode::kSyscallErrorCodeNone;
+        constexpr auto kInvalid =
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::as_bytes(std::span(abc)), true),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Fork the in-progress stream, then diverge the two copies.
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Copy>(0U, 1U), kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::as_bytes(std::span(def)), false),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        1U, std::as_bytes(std::span(xyz)), false),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        SHA256Hash out{};
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+            out != hash_abcdef) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out), kOk) ||
+            out != hash_abcxyz) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        // Copying from a missing source is rejected.
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Copy>(5U, 3U), kInvalid)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  handler.enable_transaction_stats();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  auto update_entry = [](uint32_t index, std::span<const uint8_t> buffer,
+                         bool reset, HostFunctionStatusXdr status) {
+    SyscallTraceBody body(SyscallNo::kSHA256Update);
+    body.sha256_update().inputs.index = index;
+    body.sha256_update().inputs.buffer.append_range(buffer);
+    body.sha256_update().inputs.reset = reset;
+    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+  };
+  auto copy_entry = [](uint32_t src_index, uint32_t dst_index,
+                       HostFunctionStatusXdr status) {
+    SyscallTraceBody body(SyscallNo::kSHA256Copy);
+    body.sha256_copy().inputs.src_index = src_index;
+    body.sha256_copy().inputs.dst_index = dst_index;
+    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+  };
+  auto finalize_entry = [](uint32_t index, SHA256Hash hash,
+                           HostFunctionStatusXdr status) {
+    SyscallTraceBody body(SyscallNo::kSHA256Finalize);
+    body.sha256_finalize().inputs.index = index;
+    body.sha256_finalize().outputs = SyscallSHA256FinalizeOutputs{.hash = hash};
+    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+  };
+  const auto invalid =
+      error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  SyscallTraceVec expected;
+  expected.push_back(update_entry(0, abc, true, ok_status()));
+  expected.push_back(copy_entry(0, 1, ok_status()));
+  expected.push_back(update_entry(0, def, false, ok_status()));
+  expected.push_back(update_entry(1, xyz, false, ok_status()));
+  expected.push_back(finalize_entry(0, hash_abcdef, ok_status()));
+  expected.push_back(finalize_entry(1, hash_abcxyz, ok_status()));
+  expected.push_back(copy_entry(5, 3, invalid));
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  // 6 (abcdef) + 6 (abcxyz) finalized bytes; the copy adds nothing.
+  ASSERT_NE(handler.get_transaction_stats(), nullptr);
+  EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 12U);
+
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 {
   const auto executing_height = static_cast<BlockHeight>(get_block_number());
@@ -734,7 +845,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   NativeContext native_context(std::move(cmap));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 

@@ -33,6 +33,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
@@ -937,6 +938,31 @@ TEST(Mempool, ProposalExceptionRollsBackPendingNomination)
   EXPECT_EQ(proposed_txs, txs);
 }
 
+TEST(Mempool, ProposalRecoversAfterInitializeBlockFailure)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  const DbTip db_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()().db_tip();
+
+  server.event_aggregator().fail_next_open_block();
+  const SchedulerProposalResult failed = propose_block(server, db_tip);
+  EXPECT_EQ(failed.outcome(), SchedulerProposalOutcome::SchedulerProposalError);
+
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), txs.size());
+  const SchedulerProposalResult retry = propose_block(server, db_tip);
+  ASSERT_EQ(retry.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  SignedTransactionBatch proposed_txs;
+  ASSERT_TRUE(parallel_batch_to_t(retry.proposed_block().txs, proposed_txs)());
+  EXPECT_EQ(proposed_txs, txs);
+}
+
 TEST(Mempool, NominateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1245,6 +1271,27 @@ TEST(Mempool, Validate)
                                                                proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
+}
+
+TEST(Mempool, RejectsMismatchedConfigHash)
+{
+  MempoolTestInfra server;
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  SchedulerProposalResult nominated = propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(nominated.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal proposal = nominated.proposed_block().proposal;
+  const ProposalHeader original_header = proposal.header;
+  proposal.header.config_hash[0] ^= 1;
+  EXPECT_NE(sha256(original_header), sha256(proposal.header));
+
+  SchedulerValidationResult validated =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, std::move(proposal))();
+  EXPECT_EQ(validated.outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
 }
 
 TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
@@ -2315,6 +2362,10 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+  const ConfigHash expected_config_hash =
+      compute_config_hash(make_config_hash_preimage(cost_model));
+  EXPECT_EQ(parent.db_tip().value.proposal_header.config_hash,
+            expected_config_hash);
 
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
@@ -2367,6 +2418,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(result.commit().db_tip.value.proposal_header.config_hash,
+            expected_config_hash);
 
   const ContractAddress deployed =
       calculate_genesis_deployment_address(sha256(*fibonacci_contract),

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <span>
+#include <utility>
 
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
@@ -53,6 +54,33 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
   }
   it->second.hasher.update(data);
   it->second.size = data.size();
+  return {};
+}
+
+SyscallStatus<void>
+HashBuffers::copy(uint32_t src_index, uint32_t dst_index)
+{
+  auto src = streams_.find(src_index);
+  if (src == streams_.end()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  if (src_index == dst_index) {
+    return {};
+  }
+  auto dst = streams_.find(dst_index);
+  if (dst == streams_.end()) {
+    if (streams_.size() >= kMaxSHA256Buffers) {
+      return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    }
+    // Copy to a local first: emplace may rehash, which would invalidate the
+    // src iterator mid-construction.
+    Stream copied = src->second;
+    streams_.emplace(dst_index, std::move(copied));
+  }
+  else {
+    dst->second = src->second;
+  }
   return {};
 }
 

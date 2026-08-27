@@ -108,7 +108,8 @@ enum LibraryExnKind {
   kLibraryExnStorageIndexOutOfBounds = 9,
   kLibraryExnStorageKeypathOverflow = 10,
   kLibraryExnRetrocausalQueueEntryWrongSize = 11,
-  kLibraryExnCapacityConstraintAlreadyWritten = 12
+  kLibraryExnCapacityConstraintAlreadyWritten = 12,
+  kLibraryExnUnknownMethod = 13
 };
 
 union LibraryExn switch (LibraryExnKind kind) {
@@ -137,6 +138,8 @@ case kLibraryExnStorageKeypathOverflow:
 case kLibraryExnRetrocausalQueueEntryWrongSize:
   LibraryExnRetrocausalQueueEntryWrongSize entry_wrong_size;
 case kLibraryExnCapacityConstraintAlreadyWritten:
+  void;
+case kLibraryExnUnknownMethod:
   void;
 };
 

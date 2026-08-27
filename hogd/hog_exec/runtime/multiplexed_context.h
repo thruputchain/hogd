@@ -16,12 +16,12 @@ namespace hogd {
 class MultiplexedContext : public RuntimeContext {
 public:
   MultiplexedContext(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>
           contexts);
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override;
+                   SystemCallHandler *syscall_handler) const override;
 
   InvokeErrorCode verify_contract(Contract const &contract) const override;
 
@@ -35,7 +35,8 @@ public:
   }
 
 private:
-  std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>> contexts_;
+  std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>
+      contexts_;
 };
 
 } // namespace hogd

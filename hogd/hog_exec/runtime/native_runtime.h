@@ -93,7 +93,7 @@ public:
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override;
+                   SystemCallHandler *syscall_handler) const override;
 
   InvokeErrorCode verify_contract(Contract const &contract) const override
   {
@@ -124,7 +124,8 @@ private:
 class NativeRuntime : public Runtime {
 public:
   // should be called only from within NativeContext::make_new_runtime
-  NativeRuntime(NativeContract &contract, SystemCallHandler *syscall_handler);
+  NativeRuntime(NativeContract const &contract,
+                SystemCallHandler *syscall_handler);
 
   ~NativeRuntime() override = default;
 
@@ -132,7 +133,7 @@ private:
   std::pair<InvokeStatus<void>, GasAmount>
   invoke_internal(MethodID method_id, uint64_t gas_limit) override;
 
-  NativeContract &contract_;
+  NativeContract const &contract_;
 };
 
 } // namespace hogd

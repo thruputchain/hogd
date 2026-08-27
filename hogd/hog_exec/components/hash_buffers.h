@@ -18,6 +18,7 @@ public:
                                      size_t *output_size = nullptr);
   SyscallStatus<void> update(uint32_t index, std::span<const std::byte> data,
                              bool reset);
+  SyscallStatus<void> copy(uint32_t src_index, uint32_t dst_index);
 
 private:
   // One incremental hash in progress: a streaming SHA-256 midstate plus the

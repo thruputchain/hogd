@@ -61,7 +61,12 @@ add_custom_command(
 add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
 # Build all RV32 contracts via build_risc.sh (groundhog-cli)
-# Usage: add_riscv_builds(SPEC_CONTRACTS c1 c2 ... RAW_CONTRACTS c3 c4 ...)
+# Usage: add_riscv_builds(SPEC_CONTRACTS d1/c1 d2/c2 ... RAW_CONTRACTS d3/c3 ...)
+# Contracts are named by their crate directory relative to this directory
+# (e.g. integration_test_contracts/fibonacci, local_test_contracts/foo); the
+# cargo package name is the last path component. Outputs land flat in
+# ${CMAKE_CURRENT_BINARY_DIR}, so package names must be unique across all
+# contract directories.
 # SPEC_CONTRACTS produce <name>.rv32a + <name>.rv32.json + <name>_spec.json
 # RAW_CONTRACTS produce only <name>.rv32a + <name>.rv32.json (no #[contract]
 # macro, no spec)
@@ -77,17 +82,18 @@ function(add_riscv_builds)
   set(all_depends ${common_depends})
   set(build_commands "")
 
-  foreach(target_name ${ARG_SPEC_CONTRACTS})
+  foreach(contract_path ${ARG_SPEC_CONTRACTS})
+    cmake_path(GET contract_path FILENAME target_name)
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32a)
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32.json)
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json)
 
     file(GLOB target_rs_files
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/src/*.rs)
     list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
 
     list(APPEND all_depends
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/Cargo.toml
       ${target_rs_files})
 
     list(APPEND build_commands
@@ -96,16 +102,17 @@ function(add_riscv_builds)
         ${CMAKE_CURRENT_BINARY_DIR})
   endforeach()
 
-  foreach(target_name ${ARG_RAW_CONTRACTS})
+  foreach(contract_path ${ARG_RAW_CONTRACTS})
+    cmake_path(GET contract_path FILENAME target_name)
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32a)
     list(APPEND all_outputs ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.rv32.json)
 
     file(GLOB target_rs_files
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs)
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/src/*.rs)
     list(FILTER target_rs_files EXCLUDE REGEX "roundtrip\\.rs$")
 
     list(APPEND all_depends
-      ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
+      ${CMAKE_CURRENT_SOURCE_DIR}/${contract_path}/Cargo.toml
       ${target_rs_files})
 
     list(APPEND build_commands
@@ -187,49 +194,57 @@ gtest_discover_tests(contract_loader_test)
 # SPEC_CONTRACTS also produce <name>_spec.json, consumed by the header/XDR
 # generators below.
 #
-# A few contracts are intentionally excluded because they cannot be lowered to
-# an RV32 artifact:
-#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro and no
-#     [[bin]] wrapper, so there is no RV32 entry point to lower.
-#   - nocontract_wallet: client-stub-only crate, not built for either target.
-message(STATUS "RV32 contracts: building 30 spec contracts + hash_bug (raw)")
+# Contracts live in two sibling directories: integration_test_contracts (a
+# submodule) and local_test_contracts (checked into this repo directly).
+#
+# A few contracts are intentionally excluded:
+#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro, so they
+#     produce no spec and nothing here loads their artifacts.
+#   - nocontract_wallet: client-stub-only crate with no [[bin]] wrapper, so
+#     there is no RV32 entry point to lower.
 add_riscv_builds(
   SPEC_CONTRACTS
-    fibonacci
-    fibonacci_call
-    default_wallet
-    dev_wallet
-    deploy_and_transfer
-    genesis_root
-    read_only_test
-    manual_revert_test
-    manual_revert_caller
-    simple_wallet
-    simple_wallet_authclaim
-    sha256_wrapper
-    itc_erc20
-    authclaim_test
-    htlc
-    payment_channel
-    return_fault_test
-    tuple_return
-    no_syscall_test
-    syscall_misc_tests
-    syscall_parse_hardening_test
-    nnint_output_fault_test
-    output_alias_test
-    calldata_wrapper
-    delegate_call_test
-    ed25519_verify_wrapper
-    view_gateway_test
-    cxs_roundtrip
-    txs_roundtrip
+    integration_test_contracts/fibonacci
+    integration_test_contracts/fibonacci_call
+    integration_test_contracts/default_wallet
+    integration_test_contracts/dev_wallet
+    integration_test_contracts/deploy_and_transfer
+    integration_test_contracts/genesis_root
+    integration_test_contracts/read_only_test
+    integration_test_contracts/manual_revert_test
+    integration_test_contracts/manual_revert_caller
+    integration_test_contracts/simple_wallet
+    integration_test_contracts/simple_wallet_authclaim
+    integration_test_contracts/sha256_wrapper
+    integration_test_contracts/itc_erc20
+    integration_test_contracts/authclaim_test
+    integration_test_contracts/htlc
+    integration_test_contracts/payment_channel
+    integration_test_contracts/return_fault_test
+    integration_test_contracts/tuple_return
+    integration_test_contracts/no_syscall_test
+    integration_test_contracts/syscall_misc_tests
+    integration_test_contracts/syscall_parse_hardening_test
+    integration_test_contracts/nnint_output_fault_test
+    integration_test_contracts/output_alias_test
+    integration_test_contracts/calldata_wrapper
+    integration_test_contracts/delegate_call_test
+    integration_test_contracts/ed25519_verify_wrapper
+    integration_test_contracts/view_gateway_test
+    integration_test_contracts/cxs_roundtrip
+    integration_test_contracts/txs_roundtrip
+    local_test_contracts/airdrop_faucet
+    local_test_contracts/auth_weight_test
+    local_test_contracts/drip_faucet
+    local_test_contracts/faucet_caller
+    local_test_contracts/tx_context_test
   RAW_CONTRACTS
-    hash_bug
+    integration_test_contracts/hash_bug
 )
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types
 add_types_xdr(default_wallet)
+add_types_xdr(drip_faucet)
 add_types_xdr(genesis_root)
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
@@ -240,6 +255,7 @@ add_types_xdr(payment_channel)
 
 # XDR .x -> .hh via x23c
 add_xdr(default_wallet_hh ./default_wallet.x)
+add_xdr(drip_faucet_hh ./drip_faucet.x)
 add_xdr(genesis_root_hh ./genesis_root.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
@@ -250,6 +266,7 @@ add_xdr(payment_channel_hh ./payment_channel.x)
 
 # Ensure XDR generation waits for spec JSONs (produced by rv32 build)
 add_dependencies(build_default_wallet_hh all_riscvs_built)
+add_dependencies(build_drip_faucet_hh all_riscvs_built)
 add_dependencies(build_genesis_root_hh all_riscvs_built)
 add_dependencies(build_itc_erc20_hh all_riscvs_built)
 add_dependencies(build_manual_revert_test_hh all_riscvs_built)
@@ -290,8 +307,14 @@ add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
 add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
+add_contract_header(airdrop_faucet)
+add_contract_header(auth_weight_test)
+add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
+add_contract_header(faucet_caller)
+add_contract_header(tx_context_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
+add_dependencies(drip_faucet_header drip_faucet_hh)
 add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)

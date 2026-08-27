@@ -1,0 +1,22 @@
+[package]
+name = "airdrop_faucet"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+sdk = { workspace = true }
+groundhog-erc20-if = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = ["sdk/dev"]
+logging = ["sdk/logging"]
+
+[[bin]]
+name = "airdrop_faucet"
+path = "src/main.rs"
+required-features = ["entrypoints"]
