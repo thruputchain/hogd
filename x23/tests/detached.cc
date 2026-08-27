@@ -2,8 +2,7 @@
 //
 // Verifies the construct/move/destroy-resumes contract and that
 // parameters survive cross-thread suspend/resume.  Also covers
-// Async<R>::operator()(cb), which spawns a Detached for the same
-// reason.
+// Async<R>::operator()(cb).
 
 #include <atomic>
 #include <cstdint>

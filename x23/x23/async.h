@@ -74,10 +74,11 @@
 //   but cannot itself be co_awaited.  This is useful for completing
 //   work in the background.
 //
-// * Any function returning void whose final argument is a
-//   Callback-like type (meaning Callback<T> or any other movable type
-//   for which callback_traits has been specialized) can be a
-//   co_routine if it returns via "co_return t" for some t of type T.
+// * Any function returning void or (preferably) CoResume whose final
+//   argument is a Callback-like type (meaning Callback<T> or any
+//   other movable type for which callback_traits has been
+//   specialized) can be a co_routine if it returns via "co_return t"
+//   for some t of type T.
 //
 // * If a coroutine's return_value function expects type
 //   std::expected<T, E> and the coroutine has an object r of type
