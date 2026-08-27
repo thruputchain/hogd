@@ -503,23 +503,67 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
-TEST(MempoolAuthRpc, AuthDataChangedBeforeCallbackRegistrationIsIgnored)
+TEST(MempoolAuthRpc, StartupWatermarkMustNotExceedRecoveredDbTip)
 {
   MempoolAuthRpc auth_rpc;
-
-  EXPECT_NO_THROW(
-      auth_rpc.mempoolauth_auth_data_changed(1, KeyChangeBatch{})());
-
+  constexpr BlockHeight kDbTip = 4;
   std::optional<BlockHeight> callback_height;
-  auth_rpc.register_callback(
-      [&callback_height](BlockHeight height,
-                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
-        callback_height = height;
-        co_return;
-      });
+  bool registration_completed = false;
 
-  auth_rpc.mempoolauth_auth_data_changed(2, KeyChangeBatch{})();
-  EXPECT_EQ(callback_height, 2);
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
+
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [&callback_height](BlockHeight height,
+                                   KeyChangeBatch /*key_changes*/)
+                    -> x23::Async<void> {
+                  callback_height = height;
+                  co_return;
+                },
+                [&registration_completed] { registration_completed = true; }),
+            kDbTip + 2);
+  EXPECT_EQ(callback_height, std::nullopt);
+  EXPECT_FALSE(registration_completed);
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [&callback_height](BlockHeight height,
+                                   KeyChangeBatch /*key_changes*/)
+                    -> x23::Async<void> {
+                  callback_height = height;
+                  co_return;
+                },
+                [&registration_completed] { registration_completed = true; }),
+            std::nullopt);
+  EXPECT_TRUE(registration_completed);
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  EXPECT_EQ(callback_height, kDbTip + 1);
+}
+
+TEST(MempoolAuthRpc, StartupUpdatesCoalesceToHighestWatermark)
+{
+  MempoolAuthRpc auth_rpc;
+  constexpr BlockHeight kDbTip = 4;
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip - 1, KeyChangeBatch{})();
+
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip - 1,
+                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  co_return;
+                },
+                [] {}),
+            kDbTip);
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  co_return;
+                },
+                [] {}),
+            std::nullopt);
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <mutex>
 #include <string_view>
 #include <utility>
@@ -25,11 +26,27 @@ public:
 
   MempoolAuthRpc() = default;
 
-  void register_callback(auth_data_callback &&callback)
+  // A fresh scheduler has no cached transactions, so auth updates received
+  // before coordinator initialization only contribute a height watermark.
+  // Registration succeeds only when the recovered HogDB tip covers that
+  // watermark; partial component restart during an in-flight commit is not a
+  // safe state to recover by advancing mempool independently of HogDB.
+  template<typename OnRegistered>
+  std::optional<BlockHeight> register_callback(BlockHeight recovered_db_height,
+                                               auth_data_callback &&callback,
+                                               OnRegistered &&on_registered)
   {
     const std::lock_guard lock(callback_mutex_);
     CHECK(!callback_.has_value());
+    if (pending_height_ && *pending_height_ > recovered_db_height) {
+      std::optional<BlockHeight> rejected_height = pending_height_;
+      pending_height_.reset();
+      return rejected_height;
+    }
+    pending_height_.reset();
     callback_ = std::move(callback);
+    std::forward<OnRegistered>(on_registered)();
+    return std::nullopt;
   }
 
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
@@ -60,10 +77,12 @@ public:
     std::optional<auth_data_callback> callback;
     {
       const std::lock_guard lock(callback_mutex_);
-      if (!callback_.has_value()) {
-        warn("Ignoring auth-data update for height {} before mempool "
-             "coordinator initialization",
-             height);
+      if (!callback_) {
+        info("Recording auth-data watermark {} before mempool coordinator "
+             "initialization; discarding {} key changes for an empty "
+             "scheduler",
+             height, key_changes.size());
+        pending_height_ = std::max(pending_height_.value_or(height), height);
         co_return;
       }
       callback = callback_;
@@ -88,6 +107,7 @@ public:
 private:
   std::mutex callback_mutex_;
   std::optional<auth_data_callback> callback_;
+  std::optional<BlockHeight> pending_height_;
 };
 
 static_assert(is_MempoolAuth1<MempoolAuthRpc *, x23::Async>);
