@@ -18,6 +18,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/hog_indexer/status.h"
 #include "hogd/metrics/health.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"

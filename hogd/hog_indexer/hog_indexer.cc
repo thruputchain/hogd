@@ -19,6 +19,7 @@
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
+#include "types.hh"
 
 namespace hogd {
 namespace {
