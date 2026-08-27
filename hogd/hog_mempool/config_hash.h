@@ -7,14 +7,25 @@ namespace hogd {
 
 struct StorageCostModel;
 
-/// Build the consensus-critical post-block configuration preimage.
-ConfigHashPreimage
-make_config_hash_preimage(StorageCostModel const &storage_cost_model);
+inline ConfigHashPreimage
+make_config_hash_preimage(StorageCostModel const &storage_cost_model)
+{
+  return ConfigHashPreimage{
+      .storage_cost_model = storage_cost_model.to_xdr(),
+  };
+}
 
-/// Compute the configuration commitment carried by ProposalHeader.
-ConfigHash compute_config_hash(ConfigHashPreimage const &preimage);
+inline ConfigHash
+compute_config_hash(ConfigHashPreimage const &preimage)
+{
+  return sha256(preimage);
+}
 
-/// Compute the current configuration commitment from its storage-cost member.
-ConfigHash compute_config_hash(StorageCostModelXdr const &storage_cost_model);
+inline ConfigHash
+compute_config_hash(StorageCostModelXdr const &storage_cost_model)
+{
+  return compute_config_hash(
+      ConfigHashPreimage{.storage_cost_model = storage_cost_model});
+}
 
 } // namespace hogd
