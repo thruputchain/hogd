@@ -335,6 +335,8 @@ public:
   SyscallStatus<void> sha256_update(uint32_t input_index,
                                     std::span<const std::byte> input_buffer,
                                     bool input_reset);
+  SyscallStatus<void> sha256_copy(uint32_t input_src_index,
+                                  uint32_t input_dst_index);
   SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
 
   // === Bytestring syscalls ===
