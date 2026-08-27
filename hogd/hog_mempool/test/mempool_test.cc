@@ -34,6 +34,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
@@ -1286,6 +1287,27 @@ TEST(Mempool, Validate)
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
+TEST(Mempool, RejectsMismatchedConfigHash)
+{
+  MempoolTestInfra server;
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  SchedulerProposalResult nominated = propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(nominated.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal proposal = nominated.proposed_block().proposal;
+  const ProposalHeader original_header = proposal.header;
+  proposal.header.config_hash[0] ^= 1;
+  EXPECT_NE(sha256(original_header), sha256(proposal.header));
+
+  SchedulerValidationResult validated =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, std::move(proposal))();
+  EXPECT_EQ(validated.outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+}
+
 TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
 {
   MempoolTestInfra server;
@@ -2418,6 +2440,10 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
+  const ConfigHash expected_config_hash =
+      compute_config_hash(make_config_hash_preimage(cost_model));
+  EXPECT_EQ(parent.db_tip().value.proposal_header.config_hash,
+            expected_config_hash);
 
   SignedTransactionBatch ceremony_txs;
   ceremony_txs.append_range(
@@ -2470,6 +2496,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       coordinator_client.schedulercoord_commit_genesis_ceremony(request)();
   ASSERT_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
   EXPECT_EQ(result.commit().db_tip.value.proposal_header.block_height, 1);
+  EXPECT_EQ(result.commit().db_tip.value.proposal_header.config_hash,
+            expected_config_hash);
 
   const ContractAddress deployed =
       calculate_genesis_deployment_address(sha256(*fibonacci_contract),

@@ -764,12 +764,14 @@ SystemCallHandler::validate_new_invocation(
   if (!validate_invoke_flags(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  // Above the auth-token check, so a reentrant invoke reports kReentrance even
+  // when the caller also forwarded a token it does not own (#2973).
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
   return {};
 }
@@ -2194,6 +2196,15 @@ SystemCallHandler::sha256_update(uint32_t input_index,
   assert(!invocation_frame_stack_.empty());
   return invocation_frame_stack_.get_active_frame_hash_buffers().update(
       input_index, input_buffer, input_reset);
+}
+
+SyscallStatus<void>
+SystemCallHandler::sha256_copy(uint32_t input_src_index,
+                               uint32_t input_dst_index)
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
+      input_src_index, input_dst_index);
 }
 
 SyscallStatus<SHA256Hash>

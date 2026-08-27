@@ -197,11 +197,11 @@ gtest_discover_tests(contract_loader_test)
 # Contracts live in two sibling directories: integration_test_contracts (a
 # submodule) and local_test_contracts (checked into this repo directly).
 #
-# A few contracts are intentionally excluded because they cannot be lowered to
-# an RV32 artifact:
-#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro and no
-#     [[bin]] wrapper, so there is no RV32 entry point to lower.
-#   - nocontract_wallet: client-stub-only crate, not built for either target.
+# A few contracts are intentionally excluded:
+#   - calldata_raw, sha256_raw, fibonacci_raw: no #[contract] macro, so they
+#     produce no spec and nothing here loads their artifacts.
+#   - nocontract_wallet: client-stub-only crate with no [[bin]] wrapper, so
+#     there is no RV32 entry point to lower.
 add_riscv_builds(
   SPEC_CONTRACTS
     integration_test_contracts/fibonacci
@@ -233,7 +233,10 @@ add_riscv_builds(
     integration_test_contracts/view_gateway_test
     integration_test_contracts/cxs_roundtrip
     integration_test_contracts/txs_roundtrip
+    local_test_contracts/airdrop_faucet
     local_test_contracts/auth_weight_test
+    local_test_contracts/drip_faucet
+    local_test_contracts/faucet_caller
     local_test_contracts/tx_context_test
   RAW_CONTRACTS
     integration_test_contracts/hash_bug
@@ -241,6 +244,7 @@ add_riscv_builds(
 
 # Generate .x files from spec JSON type_defs for contracts that define custom types
 add_types_xdr(default_wallet)
+add_types_xdr(drip_faucet)
 add_types_xdr(genesis_root)
 add_types_xdr(itc_erc20)
 add_types_xdr(manual_revert_test)
@@ -251,6 +255,7 @@ add_types_xdr(payment_channel)
 
 # XDR .x -> .hh via x23c
 add_xdr(default_wallet_hh ./default_wallet.x)
+add_xdr(drip_faucet_hh ./drip_faucet.x)
 add_xdr(genesis_root_hh ./genesis_root.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
@@ -261,6 +266,7 @@ add_xdr(payment_channel_hh ./payment_channel.x)
 
 # Ensure XDR generation waits for spec JSONs (produced by rv32 build)
 add_dependencies(build_default_wallet_hh all_riscvs_built)
+add_dependencies(build_drip_faucet_hh all_riscvs_built)
 add_dependencies(build_genesis_root_hh all_riscvs_built)
 add_dependencies(build_itc_erc20_hh all_riscvs_built)
 add_dependencies(build_manual_revert_test_hh all_riscvs_built)
@@ -301,10 +307,14 @@ add_contract_header(nnint_output_fault_test)
 add_contract_header(output_alias_test)
 add_contract_header(calldata_wrapper)
 add_contract_header(view_gateway_test)
+add_contract_header(airdrop_faucet)
 add_contract_header(auth_weight_test)
+add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
+add_contract_header(faucet_caller)
 add_contract_header(tx_context_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
+add_dependencies(drip_faucet_header drip_faucet_hh)
 add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
 add_dependencies(payment_channel_header payment_channel_hh)

@@ -116,7 +116,8 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto rv32_context = std::make_unique<Rv32Context>();
     return std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_context.release(), true}},
             {ContractType::kNative, {native_context.get(), false}}});
   };
@@ -197,7 +198,8 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
   auto make_context = [&]() -> std::unique_ptr<RuntimeContext> {
     auto rv32_context = std::make_unique<Rv32Context>();
     return std::make_unique<MultiplexedContext>(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_context.release(), true}},
             {ContractType::kNative, {native_context.get(), false}}});
   };
@@ -328,7 +330,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
   Rv32Context rv32_context;
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kRv32, {&rv32_context, false}},
           {ContractType::kNative, {native_context.get(), false}},
       });
@@ -446,7 +448,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   Rv32Context rv32_context;
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kRv32, {&rv32_context, false}},
           {ContractType::kNative, {native_context.get(), false}},
       });
@@ -544,7 +546,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
   Rv32Context rv32_context;
 
   auto multiplexed_context = std::make_unique<MultiplexedContext>(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kRv32, {&rv32_context, false}},
           {ContractType::kNative, {native_context.get(), false}},
       });

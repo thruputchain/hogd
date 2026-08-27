@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -249,6 +250,8 @@ NativeContractTestFramework::run_genesis_initialization(
 
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration.storage_cost_model);
   auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
       genesis_configuration, genesis_value);
   if (r != DbSchedResult::DbSchedResultOK) {

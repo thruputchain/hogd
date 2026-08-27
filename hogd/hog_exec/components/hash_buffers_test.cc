@@ -288,6 +288,109 @@ TEST(HashBuffersTest, MaxSizeBufferDigestMatchesOneShot)
   EXPECT_EQ(size, kSHA256BufferMaxSize);
 }
 
+TEST(HashBuffersTest, CopyThenDivergeMatchesOneShot)
+{
+  // The fork property: a copied stream continues from the source's exact
+  // state, and the two streams are independent afterwards. The 100-byte
+  // shared prefix spans a SHA-256 block boundary so a midstate copy is
+  // actually exercised.
+  std::vector<uint8_t> prefix(100);
+  for (size_t i = 0; i < prefix.size(); i++) {
+    prefix[i] = static_cast<uint8_t>((i * 13) + 3);
+  }
+  const std::vector<uint8_t> suffix_a = {'a', 'a', 'a'};
+  const std::vector<uint8_t> suffix_b = {'b', 'b'};
+
+  std::vector<uint8_t> whole_a = prefix;
+  whole_a.insert(whole_a.end(), suffix_a.begin(), suffix_a.end());
+  std::vector<uint8_t> whole_b = prefix;
+  whole_b.insert(whole_b.end(), suffix_b.begin(), suffix_b.end());
+
+  HashBuffers buffers;
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(prefix)), true));
+  ASSERT_TRUE(buffers.copy(0, 1));
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(suffix_a)), false));
+  ASSERT_TRUE(buffers.update(1, std::as_bytes(std::span(suffix_b)), false));
+
+  size_t size = 0;
+  auto hash_a = buffers.finalize(0, &size);
+  ASSERT_TRUE(hash_a.has_value());
+  EXPECT_EQ(hash_a.value(), sha256(whole_a));
+  EXPECT_EQ(size, whole_a.size());
+
+  auto hash_b = buffers.finalize(1, &size);
+  ASSERT_TRUE(hash_b.has_value());
+  EXPECT_EQ(hash_b.value(), sha256(whole_b));
+  EXPECT_EQ(size, whole_b.size());
+}
+
+TEST(HashBuffersTest, CopyReplacesDestination)
+{
+  HashBuffers buffers;
+  const std::vector<uint8_t> src_data = {1, 2, 3};
+  const std::vector<uint8_t> dst_data = {9, 9, 9, 9};
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(src_data)), true));
+  ASSERT_TRUE(buffers.update(1, std::as_bytes(std::span(dst_data)), true));
+
+  ASSERT_TRUE(buffers.copy(0, 1));
+
+  size_t size = 0;
+  auto hash = buffers.finalize(1, &size);
+  ASSERT_TRUE(hash.has_value());
+  EXPECT_EQ(hash.value(), sha256(src_data));
+  EXPECT_EQ(size, src_data.size());
+}
+
+TEST(HashBuffersTest, CopyMissingSourceFails)
+{
+  HashBuffers buffers;
+  const std::vector<uint8_t> dst_data = {7, 7};
+  ASSERT_TRUE(buffers.update(1, std::as_bytes(std::span(dst_data)), true));
+
+  auto r = buffers.copy(0, 1);
+  ASSERT_FALSE(r.has_value());
+  ASSERT_EQ(r.error(), SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  // The failed copy left the destination untouched.
+  auto hash = buffers.finalize(1);
+  ASSERT_TRUE(hash.has_value());
+  EXPECT_EQ(hash.value(), sha256(dst_data));
+}
+
+TEST(HashBuffersTest, CopyOntoSelfIsNoOp)
+{
+  HashBuffers buffers;
+  const std::vector<uint8_t> data = {4, 5, 6};
+  ASSERT_TRUE(buffers.update(0, std::as_bytes(std::span(data)), true));
+
+  ASSERT_TRUE(buffers.copy(0, 0));
+
+  auto hash = buffers.finalize(0);
+  ASSERT_TRUE(hash.has_value());
+  EXPECT_EQ(hash.value(), sha256(data));
+}
+
+TEST(HashBuffersTest, CopyRespectsBufferCap)
+{
+  HashBuffers buffers;
+  const std::vector<uint8_t> data = {1};
+  for (uint32_t i = 0; i < kMaxSHA256Buffers; i++) {
+    ASSERT_TRUE(buffers.update(i, std::as_bytes(std::span(data)), true));
+  }
+
+  // A fresh destination would exceed the cap.
+  auto r = buffers.copy(0, kMaxSHA256Buffers);
+  ASSERT_FALSE(r.has_value());
+  ASSERT_EQ(r.error(), SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  // Copying onto an existing destination stays within the cap.
+  ASSERT_TRUE(buffers.copy(0, kMaxSHA256Buffers - 1));
+
+  // Finalizing one stream frees a slot for the copy.
+  ASSERT_TRUE(buffers.finalize(1).has_value());
+  ASSERT_TRUE(buffers.copy(0, kMaxSHA256Buffers));
+}
+
 TEST(HashBuffersTest, IndependentIndexesInterleaved)
 {
   HashBuffers buffers;

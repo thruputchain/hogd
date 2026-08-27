@@ -161,16 +161,6 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
             WrappedGasAmount{0}};
   }
 
-  Calldata calldata;
-  calldata.resize_uninitialized(input_calldata.size());
-  if (!input_calldata.empty()) {
-    assert(calldata.data() != nullptr);
-    assert(input_calldata.data() != nullptr);
-    std::memcpy(calldata.data(),
-                reinterpret_cast<const uint8_t *>(input_calldata.data()),
-                input_calldata.size());
-  }
-
   if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
@@ -193,6 +183,26 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
+  }
+
+  // Admission before the calldata is copied: a rejection reports gas 0, so
+  // copying first would be unpriced, length-proportional work a contract could
+  // repeat at will (#2973). invoke() runs the same checks again below, which is
+  // a pure query on the handler.
+  if (auto admitted = syscall_handler.validate_new_invocation(
+          input_address, input_inputs.flags, owned_auth_token_ids_vec);
+      !admitted.has_value()) {
+    return {admitted.error().code(), WrappedGasAmount{0}};
+  }
+
+  Calldata calldata;
+  calldata.resize_uninitialized(input_calldata.size());
+  if (!input_calldata.empty()) {
+    assert(calldata.data() != nullptr);
+    assert(input_calldata.data() != nullptr);
+    std::memcpy(calldata.data(),
+                reinterpret_cast<const uint8_t *>(input_calldata.data()),
+                input_calldata.size());
   }
 
   auto [invoke_res, gas_amount] =
