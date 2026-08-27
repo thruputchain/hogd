@@ -8,7 +8,6 @@ add_library(
 target_link_libraries(
   hog_mempool
   base
-  config_hash
   crypto
   exec_interface
   hogd
