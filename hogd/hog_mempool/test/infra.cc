@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -11,7 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
-#include "hogd/base/types.h"
+#include "hogd/base/test.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -33,12 +34,15 @@
 
 namespace hogd {
 
-MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
-                                   size_t mempool_tx_size_limit)
-  : mempool_coord_server_(
-        RpcServer<MempoolCoordinatorRpc>(sched_db_server_->impl(),
-                                         mempool_auth_server_->impl(),
-                                         kNetworkHash, mempool_tx_size_limit))
+MempoolTestInfra::MempoolTestInfra(const MempoolTestInfraOptions &options)
+  : owned_db_dir_(options.db_directory.has_value()
+                      ? nullptr
+                      : std::make_unique<TmpDir>()),
+    db_directory_(owned_db_dir_ ? owned_db_dir_->directory()
+                                : *options.db_directory),
+    mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
+        sched_db_server_->impl(), mempool_auth_server_->impl(), kNetworkHash,
+        options.mempool_tx_size_limit))
 {
   // Multiple tests run within the same process, so we need to clear the
   // registration and metrics at the beginning of each test.
@@ -69,7 +73,9 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   Registration::registration().publish_event_canonical_tip(
       EventCanonicalTip{.block_id = std::numeric_limits<BlockID>::max(),
                         .consensus_value = std::move(initial_value)});
-  init_contracts();
+  if (!options.recover_existing_chain) {
+    init_contracts();
+  }
 
   // Start the database RPC servers.
   // [db_executor_server_] handles RPCs from the executor.
@@ -111,9 +117,17 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
   // Now have all of the subsystems register themselves with the mempool.
   register_db_with_mempool();
   register_auth_with_mempool();
+  if (options.auth_startup_order ==
+      AuthStartupOrder::kSubscribeBeforeCoordinator) {
+    subscribe_auth_to_data_changes();
+  }
   register_coordinator_with_mempool()();
+  if (options.auth_startup_order ==
+      AuthStartupOrder::kSubscribeAfterCoordinator) {
+    subscribe_auth_to_data_changes();
+  }
 
-  if (!skip_genesis_block) {
+  if (!options.skip_genesis_block) {
     const StorageCostModel cost_model = StorageCostModel::default_cost_model();
     GenesisConfigurationBuilder builder;
     auto root_contract = load_stock_genesis_root_contract();

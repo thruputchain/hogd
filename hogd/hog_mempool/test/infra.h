@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstring>
 #include <exception>
 #include <format>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -66,6 +68,36 @@ make_account_address(uint8_t i)
   return addr;
 }
 
+// Where hog-auth's subscription to auth-data changes lands relative to
+// coordinator registration.  Production has no barrier between the two:
+// hog-auth subscribes as soon as its intro to the mempool succeeds, so a
+// coordinator that registers late -- or a hog-auth that restarts underneath a
+// running mempool -- delivers its first auth-data callback before the mempool
+// has installed one.
+enum class AuthStartupOrder {
+  kSubscribeBeforeCoordinator,
+  kSubscribeAfterCoordinator,
+};
+
+// Startup knobs for the composed node.  The defaults launch a fresh chain in a
+// private directory, which is what every single-shot test wants; the remaining
+// fields exist so a test can relaunch the components over state an earlier
+// instance committed.
+struct MempoolTestInfraOptions {
+  bool skip_genesis_block = false;
+  size_t mempool_tx_size_limit =
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit;
+  // Back the ramdb with a caller-owned directory instead of a per-instance
+  // temporary one.  The directory must outlive every instance that uses it.
+  std::optional<std::string> db_directory;
+  // Relaunch over an existing chain: skip the fresh-chain contract seeding and
+  // let the coordinator recover the committed db tip.  Callers pair this with
+  // [skip_genesis_block] and a [db_directory] a previous instance wrote.
+  bool recover_existing_chain = false;
+  AuthStartupOrder auth_startup_order =
+      AuthStartupOrder::kSubscribeBeforeCoordinator;
+};
+
 class MempoolTestInfra {
 public:
   static constexpr NetworkHash kNetworkHash{};
@@ -74,9 +106,18 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
-  MempoolTestInfra(bool skip_genesis_block = false,
+  explicit MempoolTestInfra(const MempoolTestInfraOptions &options);
+
+  MempoolTestInfra() : MempoolTestInfra(MempoolTestInfraOptions{}) {}
+
+  MempoolTestInfra(bool skip_genesis_block,
                    size_t mempool_tx_size_limit =
-                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit)
+    : MempoolTestInfra(
+          MempoolTestInfraOptions{.skip_genesis_block = skip_genesis_block,
+                                  .mempool_tx_size_limit =
+                                      mempool_tx_size_limit})
+  {}
 
   ~MempoolTestInfra()
   {
@@ -281,16 +322,16 @@ private:
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
   {
     // check the database's integrity and find the highest valid LSN.
-    DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
+    DBStatus<uint64_t> lsn = Database::check(db_directory_, kRamDbBytes);
     CHECK(lsn.has_value());
     info("database '{}' passed integrity check; current LSN is {}",
-         db_dir_.directory(), *lsn);
+         db_directory_, *lsn);
 
     // create the database, loading up to the highest valid LSN.
     // TODO(abelay): When sharding is supported, this will become a separate
     // step.
     DBStatus<std::unique_ptr<Database>> ramdb =
-        Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
+        Database::open_lsn(db_directory_, *lsn, kRamDbBytes);
     CHECK(ramdb.has_value());
 
     auto db = HogDbDAO(RAMDB(std::move(*ramdb)));
@@ -365,8 +406,12 @@ private:
     std::string sched_address =
         make_address(kAddress, db_scheduler_server_->port());
     std::string auth_address = make_address(kAddress, db_auth_server_->port());
+    // Mirror hog-devnode: a recovered shard introduces itself at the height it
+    // holds, and a fresh one at 0.
+    const BlockHeight block_height = std::max<BlockHeight>(
+        ctx_->get_tip().value.proposal_header.block_height, BlockHeight{0});
     client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
-                                .block_height = 0,
+                                .block_height = block_height,
                                 .address_for_exec = exec_address.c_str(),
                                 .address_for_sched = sched_address.c_str(),
                                 .address_for_auth = auth_address.c_str()})();
@@ -398,21 +443,33 @@ private:
     }
   }
 
+  // hog-auth's first startup step: introduce itself to the mempool.  The
+  // mempool records the peer as registered here, before the coordinator has
+  // installed the auth-data callback.
   void register_auth_with_mempool()
   {
     sched_auth_client_t client =
         create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())()
             .value();
-    AuthCard auth_card = {
+    auth_card_ = AuthCard{
         .protocol = version::kHogdProtocol(),
         .upid = {},
         .address_for_db =
             make_address(kAddress, auth_db_server_.port()).c_str(),
         .address_for_mempool =
             make_address(kAddress, auth_mempool_server_.port()).c_str()};
-    client.mempoolauth_intro_auth(auth_card)();
+    client.mempoolauth_intro_auth(auth_card_)();
     auth_server_->set_mempool_client(std::move(client));
-    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+  }
+
+  // hog-auth's second startup step: subscribe to the database's auth-data
+  // change stream.  A database that already holds a committed chain answers
+  // with its current height, which hog-auth forwards to the mempool right away
+  // as an empty synchronization callback.
+  void subscribe_auth_to_data_changes()
+  {
+    CHECK_PTR(auth_server_.get());
+    auth_server_->subscribe_to_auth_data_changes(auth_card_)();
   }
 
   void register_executor_with_mempool()
@@ -436,8 +493,11 @@ private:
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 
-  // Various backend components required by the database.
-  TmpDir db_dir_;
+  // Various backend components required by the database.  [owned_db_dir_] is
+  // engaged only when the caller did not supply a directory; a caller-owned
+  // directory outlives this instance so a relaunch can recover from it.
+  std::unique_ptr<TmpDir> owned_db_dir_;
+  std::string db_directory_;
   std::unique_ptr<RPCContext> ctx_;
 
   // These hold references to ctx_, so they should be destroyed before ctx_.
@@ -476,6 +536,9 @@ private:
   std::unique_ptr<AuthServer> auth_server_;
   RpcServer<AuthDBRpc> auth_db_server_;
   RpcServer<AuthMempoolRpc> auth_mempool_server_;
+  // Filled in by [register_auth_with_mempool]; [subscribe_auth_to_data_changes]
+  // reuses it so the two hog-auth startup steps can be sequenced apart.
+  AuthCard auth_card_;
 };
 
 } // namespace hogd

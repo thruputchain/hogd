@@ -50,6 +50,37 @@ target_link_libraries(mempool_test
 
 gtest_discover_tests(mempool_test)
 
+# Startup/restart ordering coverage lives in its own binary: a mempool that
+# aborts on a pre-ready auth callback would otherwise take the rest of
+# mempool_test down with it.
+add_executable(
+  mempool_startup_order_test
+  startup_order_test.cc
+  $<TARGET_OBJECTS:mempool_test_infra>
+)
+
+target_include_directories(mempool_startup_order_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(mempool_startup_order_test
+  hog_auth
+  hogd
+  hog_mempool
+  exec_interface
+  runtime
+  runtime_test_util
+  contract_loader
+  GTest::gtest
+)
+
+add_dependencies(mempool_startup_order_test
+  all_riscv_contracts
+)
+
+gtest_discover_tests(mempool_startup_order_test)
+
 add_executable(
   coordinator
   coordinator.cc
