@@ -125,6 +125,31 @@
 
 namespace x23 {
 
+// This is an otherwise useless return value that resumes a coroutine
+// on its destruction.  It's useful in cases where a coroutine could
+// possibly suspend itself and resume itself in another thread before
+// the coroutine function returns.
+struct CoResume {
+  constexpr CoResume() noexcept = default;
+  explicit CoResume(std::coroutine_handle<> h) noexcept : h_(h) {}
+  CoResume(CoResume &&other) noexcept : h_(std::exchange(other.h_, {})) {}
+  ~CoResume()
+  {
+    if (h_)
+      h_();
+  }
+
+  CoResume &operator=(CoResume &&other) noexcept
+  {
+    if (auto oldh = std::exchange(h_, std::exchange(other.h_, {})))
+      oldh();
+    return *this;
+  }
+
+private:
+  std::coroutine_handle<> h_;
+};
+
 // A Callback is just a std::function of 0-1 arguments, but we use a
 // distinguished type to ensure template specializations don't affect
 // std::functions in general.  Any function returning void whose final
@@ -185,12 +210,19 @@ template<> struct CoroDoReturn<void> : PromiseBase {
 
 // This type allows you to co_return from a function whose final
 // argument is a callback.
-template<typename... Args> requires is_callback_like<LastType<Args...>>
+template<typename Return, typename... Args>
+requires is_callback_like<LastType<Args...>>
 struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
   using CB = LastType<Args...>;
   using argument_type = CallbackArgType<CB>;
   using super = CoroDoReturn<argument_type>;
   using super::kReturnValue;
+  // We would like to return CoResume from get_return_object() always.
+  // This works fine in gcc, but causes an internal compiler error
+  // with clang 22.  The C++ spec is a bit ambiguous on this
+  // matter--if get_return_object() is void the coroutine function
+  // must be void, while the converse isn't explicitly specified.
+  static constexpr bool kInitialSuspend = std::same_as<Return, CoResume>;
   CB cb_;
 
   // Note the coroutine should not touch its final argument (the
@@ -203,8 +235,37 @@ struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
   {}
   CallbackPromise(const CallbackPromise &) = delete;
 
-  void get_return_object() const noexcept {}
-  std::suspend_never initial_suspend() const noexcept { return {}; }
+  // If you hit this warning, you are taking a function that takes a
+  // callback and returns void and implementing the function as a
+  // coroutine.  In such cases, you need to ensure coroutine doesn't
+  // suspend itself, then resume, return, and destroy itself in a
+  // different thread all before the coroutine ramp function has
+  // returned in the original thread.  If you can't ensure that, there
+  // will be a use-after-free error on the resumption index in the
+  // coroutine object, which is touched by the ramp function.  A safer
+  // approach is for the function taking a callback to return
+  // x23::CoResume, in which case we can resume the coroutine after
+  // the ramp function as returned.
+  template<bool B = kInitialSuspend> requires (B == kInitialSuspend && !B)
+  [[deprecated("return CoResume rather than void from coroutine callback")]]
+  static void get_return_object() noexcept
+  {}
+
+  template<bool B = kInitialSuspend> requires (B == kInitialSuspend && B)
+  CoResume get_return_object() noexcept
+  {
+    return CoResume{
+        std::coroutine_handle<CallbackPromise>::from_promise(*this)};
+  }
+
+  auto initial_suspend() const noexcept
+  {
+    if constexpr (kInitialSuspend)
+      return std::suspend_always{};
+    else
+      return std::suspend_never{};
+  }
+
   void do_return(auto &&...v) requires (sizeof...(v) == kReturnValue)
   {
     std::invoke(std::move(cb_), std::forward<decltype(v)>(v)...);
@@ -216,20 +277,20 @@ struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
 } // namespace detail
 } // namespace x23
 
-template<typename... Args>
+template<x23::is_one_of<x23::CoResume, void> R, typename... Args>
 requires x23::detail::is_callback_like<x23::LastType<Args...>>
-struct std::coroutine_traits<void, Args...> {
-  using promise_type = x23::detail::CallbackPromise<Args...>;
+struct std::coroutine_traits<R, Args...> {
+  using promise_type = x23::detail::CallbackPromise<R, Args...>;
 };
 
-template<typename... Args>
+template<x23::is_one_of<x23::CoResume, void> R, typename... Args>
 requires x23::has_location<Args...> &&
          x23::detail::is_callback_like<
              x23::TypeNum<sizeof...(Args) - 2, Args...>>
-struct std::coroutine_traits<void, Args...> {
+struct std::coroutine_traits<R, Args...> {
   using promise_type = decltype([]<std::size_t... N>(std::index_sequence<N...>)
                                     -> x23::detail::CallbackPromise<
-                                        x23::TypeNum<N, Args...>...> {
+                                        R, x23::TypeNum<N, Args...>...> {
     throw;
   }(std::make_index_sequence<sizeof...(Args) - 1>{}));
 };
@@ -515,51 +576,6 @@ struct std::coroutine_traits<x23::Suspended, Args...> {
 
 namespace x23 {
 
-// A function that returns Detached is a detached coroutine that
-// cannot be awaited.  The coroutine destroys itself upon co_return.
-//
-// initial_suspend returns suspend_always so that the ramp function
-// completes (and its parameter copies are destroyed) before the
-// coroutine body starts.  The body is started by ~Detached(), which
-// runs at the end of the full expression that created the coroutine.
-// Without this, the coroutine body starts inside the ramp function,
-// and if it suspends (co_await), another thread can resume and
-// destroy the coroutine frame while the ramp function is still
-// cleaning up parameter copies that alias the frame.
-struct Detached {
-  // NOLINTBEGIN(readability-convert-member-functions-to-static)
-  struct promise_type : PromiseBase {
-    template<typename... Args> requires has_location<Args...>
-    promise_type(Args &&...args) : PromiseBase(extract_location(args...))
-    {}
-    promise_type(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
-    Detached get_return_object() noexcept
-    {
-      return Detached{std::coroutine_handle<promise_type>::from_promise(*this)};
-    }
-    std::suspend_always initial_suspend() const noexcept { return {}; }
-    void return_void() const noexcept {}
-    void unhandled_exception() const noexcept
-    {
-      trace_unhandled_exception(this);
-    }
-    std::suspend_never final_suspend() const noexcept { return {}; }
-  };
-  // NOLINTEND(readability-convert-member-functions-to-static)
-
-  ~Detached()
-  {
-    if (handle_)
-      handle_.resume();
-  }
-  Detached(Detached &&o) noexcept : handle_(std::exchange(o.handle_, {})) {}
-
-private:
-  std::coroutine_handle<promise_type> handle_;
-  explicit Detached(std::coroutine_handle<promise_type> h) noexcept : handle_(h)
-  {}
-};
-
 // An asynchronous result.  A function returning Async<R> can be
 // implemented as a coroutine.  A coroutine with an Async<R> a can
 // "co_await a" to get the result.  A non-coroutine can invoke an
@@ -607,33 +623,15 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  //
-  // This deliberately is not itself a coroutine.  A CallbackPromise
-  // coroutine (the promise for a void function whose last argument is
-  // a callback) has a suspend_never initial_suspend, so its body runs
-  // inside the ramp function.  The body here suspends on [co_await
-  // self], and the thread that completes the Async may then resume it
-  // and -- because final_suspend is also suspend_never -- destroy the
-  // frame, all while this ramp is still writing to that same frame.
-  // TSAN catches that as a data race on the frame's suspend-point
-  // index.  Spawning a Detached instead moves the body behind a
-  // suspend_always initial_suspend: ~Detached() starts it only once
-  // the ramp has returned, so the two never overlap.
-  void operator()(detail::is_callback_of<R> auto cb SLOC_DECL)
+  CoResume operator()(detail::is_callback_of<R> auto /*cb*/
+                          SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
-    // To defer destroying callee_, move Async into the coroutine.
-    [](Async self, auto cb SLOC_DECL) -> Detached {
-      // If you see a segfault on the co_await below, it may be because you
-      // wrote a function that returns an [x23::Async<T>] and you forgot to
-      // include a return/co_return statement at the end of the function.
-      if constexpr (std::is_void_v<R>) {
-        co_await self;
-        std::move(cb)();
-      }
-      else {
-        std::move(cb)(co_await self);
-      }
-    }(std::move(*this), std::move(cb) SLOC_COMMA_VAR);
+    // To defer destroying callee_, move Async into this coroutine
+    Async self = std::move(*this);
+    // If you see a segfault on the line below, it may be because you wrote a
+    // function that returns an [x23::Async<T>] and you forgot to include a
+    // return/co_return statement at the end of the function.
+    co_return co_await self;
   }
   template<std::convertible_to<Callback<R>> CB>
   requires (!detail::is_callback_of<CB, R>)
@@ -869,6 +867,51 @@ make_async(source_location sloc = source_location::current())
   }(sloc);
   return std::pair{std::move(async), cb};
 }
+
+// A function that returns Detached is a detached coroutine that
+// cannot be awaited.  The coroutine destroys itself upon co_return.
+//
+// initial_suspend returns suspend_always so that the ramp function
+// completes (and its parameter copies are destroyed) before the
+// coroutine body starts.  The body is started by ~Detached(), which
+// runs at the end of the full expression that created the coroutine.
+// Without this, the coroutine body starts inside the ramp function,
+// and if it suspends (co_await), another thread can resume and
+// destroy the coroutine frame while the ramp function is still
+// cleaning up parameter copies that alias the frame.
+struct Detached {
+  // NOLINTBEGIN(readability-convert-member-functions-to-static)
+  struct promise_type : PromiseBase {
+    template<typename... Args> requires has_location<Args...>
+    promise_type(Args &&...args) : PromiseBase(extract_location(args...))
+    {}
+    promise_type(SLOC_DECL0) : PromiseBase(SLOC_VAR) {}
+    Detached get_return_object() noexcept
+    {
+      return Detached{std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+    std::suspend_always initial_suspend() const noexcept { return {}; }
+    void return_void() const noexcept {}
+    void unhandled_exception() const noexcept
+    {
+      trace_unhandled_exception(this);
+    }
+    std::suspend_never final_suspend() const noexcept { return {}; }
+  };
+  // NOLINTEND(readability-convert-member-functions-to-static)
+
+  ~Detached()
+  {
+    if (handle_)
+      handle_.resume();
+  }
+  Detached(Detached &&o) noexcept : handle_(std::exchange(o.handle_, {})) {}
+
+private:
+  std::coroutine_handle<promise_type> handle_;
+  explicit Detached(std::coroutine_handle<promise_type> h) noexcept : handle_(h)
+  {}
+};
 
 // Apply a function to the result of co_awaiting an awaitable.  If the
 // co_await returns void, then the function takes no arguments.
