@@ -43,6 +43,22 @@ make_dbauth_client(x23::HostPort const &hostport)
           client.error().error_code().message());
   return std::move(*client);
 }
+
+// test_ffi consumers execute contract bodies through the native mock
+// trampoline, so the contract deployed at the genesis root address never
+// runs its rv32 code -- only the deployment has to exist. A placeholder
+// blob (genesis validation requires a non-empty kRv32 contract) keeps
+// environment creation free of disk artifact loads, which a shipped
+// library cannot satisfy: it has no hogd build tree or contracts
+// directory to resolve genesis_root.rv32a from.
+std::shared_ptr<const Contract>
+make_mock_genesis_root_contract()
+{
+  static constexpr unsigned char kPlaceholder[] = "test_ffi mock genesis root";
+  auto out = std::make_shared<Contract>(ContractType::kRv32);
+  out->rv32_contract().data.append_range(kPlaceholder);
+  return out;
+}
 } // namespace
 
 DBContext::DBContext(StorageCostModelXdr const &cost_model,
@@ -75,7 +91,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  auto root_contract = load_stock_genesis_root_contract();
+  auto root_contract = make_mock_genesis_root_contract();
   GenesisConfiguration genesis_configuration{.network_hash = {},
                                              .storage_cost_model = cost_model,
                                              .root_contract = *root_contract,
