@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <condition_variable>
+#include <cstddef>
 #include <mutex>
 #include <string_view>
 #include <utility>
@@ -15,6 +17,7 @@
 #include "hogd/version.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -47,6 +50,16 @@ public:
     callback_ = std::move(callback);
     std::forward<OnRegistered>(on_registered)();
     return std::nullopt;
+  }
+
+  // Stop admitting callbacks that can touch coordinator state, then wait for
+  // callbacks admitted before the close to finish. The coordinator calls this
+  // before destroying members captured by [callback_].
+  void unregister_callback()
+  {
+    std::unique_lock lock(callback_mutex_);
+    callback_.reset();
+    callback_drained_.wait(lock, [this] { return callbacks_in_flight_ == 0; });
   }
 
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
@@ -86,7 +99,16 @@ public:
         co_return;
       }
       callback = callback_;
+      ++callbacks_in_flight_;
     }
+    x23::Defer release_callback([this] {
+      const std::lock_guard lock(callback_mutex_);
+      CHECK_GT(callbacks_in_flight_, 0);
+      --callbacks_in_flight_;
+      if (callbacks_in_flight_ == 0) {
+        callback_drained_.notify_all();
+      }
+    });
     co_await (*callback)(height, std::move(key_changes));
   }
 
@@ -106,8 +128,10 @@ public:
 
 private:
   std::mutex callback_mutex_;
+  std::condition_variable callback_drained_;
   std::optional<auth_data_callback> callback_;
   std::optional<BlockHeight> pending_height_;
+  size_t callbacks_in_flight_ = 0;
 };
 
 static_assert(is_MempoolAuth1<MempoolAuthRpc *, x23::Async>);

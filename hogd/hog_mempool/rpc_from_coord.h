@@ -90,6 +90,7 @@ public:
 
   ~MempoolCoordinatorRpc()
   {
+    disconnect_auth_callback();
     // Wait for coroutines that outlive their initiating RPC handler and still
     // touch our members -- the detached vetted-notify send and the
     // [auth_data_changed] callback (whose [auth_data_height_] broadcast tail
@@ -97,6 +98,18 @@ public:
     // state down.
     while (pending_detached_coroutines_.load(std::memory_order_acquire)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  // Close and drain the callback before the coordinator or its borrowed auth
+  // RPC is destroyed. This is normally called by our destructor; the devnode's
+  // failed-construction path calls it earlier because it closes the auth server
+  // before member destruction reaches the coordinator.
+  void disconnect_auth_callback()
+  {
+    if (auth_rpc_ != nullptr) {
+      auth_rpc_->unregister_callback();
+      auth_rpc_ = nullptr;
     }
   }
 

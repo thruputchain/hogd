@@ -175,10 +175,12 @@ private:
   // [mempool_auth_server_->impl()], so it must be declared first and would
   // otherwise be destroyed last -- after the coordinator -- letting an
   // in-flight callback race the coordinator's destructor. Hold it behind a
-  // pointer so the failed-construction cleanup can drain it (via [~RpcServer],
-  // which waits for in-flight handlers) before the coordinator is torn down.
-  // See [prepare_for_failed_construction]. (The normal ~HogDevnodeNode path
-  // instead drains via the DB subscription manager in [ctx_.reset()].)
+  // pointer so failed-construction cleanup can disconnect the coordinator's
+  // callback and close this server before member destruction reaches the
+  // coordinator. See [prepare_for_failed_construction]. (The normal
+  // ~HogDevnodeNode path instead drains DB forwards via the subscription
+  // manager in [ctx_.reset()] before the coordinator disconnects the callback
+  // during member destruction.)
   std::unique_ptr<RpcServer<MempoolAuthRpc>> mempool_auth_server_ =
       std::make_unique<RpcServer<MempoolAuthRpc>>();
   RpcServer<MempoolDbRpc> sched_db_server_;

@@ -566,6 +566,59 @@ TEST(MempoolAuthRpc, StartupUpdatesCoalesceToHighestWatermark)
             std::nullopt);
 }
 
+TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
+{
+  MempoolAuthRpc auth_rpc;
+  constexpr BlockHeight kDbTip = 4;
+  std::latch callback_started(1);
+  std::latch allow_callback_finish(1);
+  std::latch unregister_started(1);
+  std::atomic<size_t> callback_count = 0;
+
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [&](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  callback_count.fetch_add(1, std::memory_order_relaxed);
+                  callback_started.count_down();
+                  allow_callback_finish.wait();
+                  co_return;
+                },
+                [] {}),
+            std::nullopt);
+
+  std::thread callback_thread([&] {
+    auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  });
+  callback_started.wait();
+
+  std::promise<void> unregister_result;
+  std::future<void> unregistered = unregister_result.get_future();
+  std::thread unregister_thread([&] {
+    unregister_started.count_down();
+    auth_rpc.unregister_callback();
+    unregister_result.set_value();
+  });
+  unregister_started.wait();
+  EXPECT_EQ(unregistered.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+
+  allow_callback_finish.count_down();
+  callback_thread.join();
+  EXPECT_EQ(unregistered.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+  unregister_thread.join();
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
+  EXPECT_EQ(callback_count.load(std::memory_order_relaxed), 1);
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  co_return;
+                },
+                [] {}),
+            kDbTip + 2);
+}
+
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
 {
   MempoolTestInfra server;
