@@ -6,13 +6,28 @@ script = """
 
 set -x
 
+# github.com can drop an SSH connection when the fleet dials it all at once:
+# the hosts share an egress IP and hog_sched releases their jobs within
+# milliseconds of each other, so a clone dies with "Connection closed by
+# ... port 22" before the job has done any work. Retry the network steps with
+# backoff and jitter rather than losing a whole run to one dropped connection.
+git_retry() {
+    for try in 1 2 3 4 5; do
+        "$@" && return 0
+        echo "attempt $try of '$*' failed; retrying" >&2
+        sleep $(( try * 5 + RANDOM % 10 ))
+    done
+    echo "giving up on '$*' after 5 attempts" >&2
+    return 1
+}
+
 echo 'cloning hogd'
 git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
-git submodule update --init --recursive
+git_retry git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
@@ -73,13 +88,28 @@ script = """
 
 set -x
 
+# github.com can drop an SSH connection when the fleet dials it all at once:
+# the hosts share an egress IP and hog_sched releases their jobs within
+# milliseconds of each other, so a clone dies with "Connection closed by
+# ... port 22" before the job has done any work. Retry the network steps with
+# backoff and jitter rather than losing a whole run to one dropped connection.
+git_retry() {
+    for try in 1 2 3 4 5; do
+        "$@" && return 0
+        echo "attempt $try of '$*' failed; retrying" >&2
+        sleep $(( try * 5 + RANDOM % 10 ))
+    done
+    echo "giving up on '$*' after 5 attempts" >&2
+    return 1
+}
+
 echo 'cloning hogd'
 git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
-git submodule update --init --recursive
+git_retry git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 

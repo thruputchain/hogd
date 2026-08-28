@@ -29,15 +29,30 @@ esac
 export CARGO_REGISTRIES_GROUNDHOG_INDEX="sparse+https://groundhog.dev/crates/api/v1/crates/"
 export CARGO_REGISTRIES_GROUNDHOG_SOURCE="sparse+https://groundhog.dev/crates/api/v1/crates/"
 
+# github.com can drop an SSH connection when the fleet dials it all at once:
+# the hosts share an egress IP and hog_sched releases their jobs within
+# milliseconds of each other, so a clone dies with "Connection closed by
+# ... port 22" before the job has done any work. Retry the network steps with
+# backoff and jitter rather than losing a whole run to one dropped connection.
+git_retry() {
+    for try in 1 2 3 4 5; do
+        "$@" && return 0
+        echo "attempt $try of '$*' failed; retrying" >&2
+        sleep $(( try * 5 + RANDOM % 10 ))
+    done
+    echo "giving up on '$*' after 5 attempts" >&2
+    return 1
+}
+
 echo 'cloning hogd'
 git init -q .
 git remote remove origin 2>/dev/null || true
 git remote add origin "git@github.com:${GITHUB_REPO}.git"
-git fetch --depth 1 origin "$TARGET_SHA" --no-progress --quiet
+git_retry git fetch --depth 1 origin "$TARGET_SHA" --no-progress --quiet
 git checkout -f -q "$TARGET_SHA"
 git clean -ffd -e .ssh/ -e .gitconfig
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
+git_retry git submodule update --init --recursive --depth 1 --jobs 8 --quiet
 
 source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
