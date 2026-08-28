@@ -35,11 +35,12 @@ namespace fuzz = hogd::rv32::fuzz;
 
 [[noreturn]] void
 fail(const char *what, std::span<const uint8_t> code, uint64_t gas,
-     uint32_t memory_bytes)
+     uint32_t memory_bytes, uint32_t max_run_gas)
 {
   std::println(stderr, "rv32 engine divergence: {}", what);
-  std::print(stderr, "  gas_budget={} memory_bytes={} words:", gas,
-             memory_bytes);
+  std::print(stderr,
+             "  gas_budget={} memory_bytes={} max_run_gas={} words:", gas,
+             memory_bytes, max_run_gas);
   for (std::size_t i = 0; i + kInstructionBytes <= code.size();
        i += kInstructionBytes) {
     std::print(stderr, " {:08x}", load_u32_le(code, i));
@@ -65,7 +66,17 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   const auto threaded_err = fuzz::threaded_scan_error(code);
   if (canonical_err != threaded_err) {
     fail("decoder ProgramError mismatch", code, in->gas_budget,
-         in->memory_bytes);
+         in->memory_bytes, in->max_run_gas);
+  }
+
+  // The production decode gate must agree on accept/reject. Its backward
+  // lowering pass may report a different error *word* than the canonical
+  // forward scan on multi-error programs (see production_scan_error), so only
+  // the verdict is compared, never the error code.
+  const auto production_err = fuzz::production_scan_error(code);
+  if (production_err.has_value() != canonical_err.has_value()) {
+    fail("production create accept/reject mismatch", code, in->gas_budget,
+         in->memory_bytes, in->max_run_gas);
   }
   if (canonical_err.has_value()) {
     return 0;
@@ -78,11 +89,14 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   const auto program =
       std::make_shared<const Program>(std::move(*canonical_program));
 
+  // memory_bytes <= kFuzzMemCap << kMaxMemoryBytes, so with the code already
+  // decode-clean this create can only succeed; treat a reject as divergence.
   auto pre = ThreadedMachinePreInstantiation::create(
       code, /*memory=*/{}, /*memory_start=*/0,
-      /*total_memory_size=*/in->memory_bytes, /*trace=*/true);
+      /*total_memory_size=*/in->memory_bytes, /*trace=*/true, in->max_run_gas);
   if (!pre.has_value()) {
-    return 0;
+    fail("production create rejected decode-clean code", code, in->gas_budget,
+         in->memory_bytes, in->max_run_gas);
   }
 
   Machine cmachine(program, in->memory_bytes, in->gas_budget);
@@ -98,12 +112,13 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   const bool canonical_oog = cmachine.trap() == Trap::kOutOfGas;
   const bool threaded_oog = tmachine.trap() == Trap::kOutOfGas;
   if (canonical_oog != threaded_oog) {
-    fail("OOG classification mismatch", code, in->gas_budget, in->memory_bytes);
+    fail("OOG classification mismatch", code, in->gas_budget, in->memory_bytes,
+         in->max_run_gas);
   }
   if (canonical_oog || threaded_oog) {
     if (cmachine.gas_remaining() != 0 || tmachine.gas_remaining() != 0) {
       fail("OOG did not saturate gas_remaining to zero", code, in->gas_budget,
-           in->memory_bytes);
+           in->memory_bytes, in->max_run_gas);
     }
     return 0;
   }
@@ -113,19 +128,22 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   const std::string divergence =
       describe_trace_divergence(cstripped, tstripped);
   if (!divergence.empty()) {
-    fail(divergence.c_str(), code, in->gas_budget, in->memory_bytes);
+    fail(divergence.c_str(), code, in->gas_budget, in->memory_bytes,
+         in->max_run_gas);
   }
   if (cstripped.steps.size() != tstripped.steps.size()) {
-    fail("step count mismatch", code, in->gas_budget, in->memory_bytes);
+    fail("step count mismatch", code, in->gas_budget, in->memory_bytes,
+         in->max_run_gas);
   }
   for (std::size_t i = 0; i < cstripped.steps.size(); ++i) {
     if (cstripped.steps[i].state_before != tstripped.steps[i].state_before) {
-      fail("state_before mismatch", code, in->gas_budget, in->memory_bytes);
+      fail("state_before mismatch", code, in->gas_budget, in->memory_bytes,
+           in->max_run_gas);
     }
   }
   if (cmachine.gas_remaining() != tmachine.gas_remaining()) {
-    fail("final gas_remaining mismatch", code, in->gas_budget,
-         in->memory_bytes);
+    fail("final gas_remaining mismatch", code, in->gas_budget, in->memory_bytes,
+         in->max_run_gas);
   }
   return 0;
 }

@@ -9,9 +9,14 @@ nightly CI sweep runs both from the committed seed corpus
   header/digest rejection; a fixup phase assembles a well-formed artifact around
   fuzzer input to reach decode, run-gas lowering, fusion, and image staging.
 - `rv32_fuzz_engine_diff` -- canonical `Machine` vs production
-  `ThreadedMachine`. Asserts exact-`ProgramError` decoder parity, then execution
-  parity (OOG class + `gas_remaining==0` first; full trace parity only when
-  neither engine OOGs).
+  `ThreadedMachine`. Asserts exact-`ProgramError` decoder parity, accept/reject
+  parity of the production `ThreadedMachinePreInstantiation::create` gate
+  (verdict only: its backward lowering may report a different error word than
+  the canonical forward scan on multi-error programs), then execution parity
+  (OOG class + `gas_remaining==0` first; full trace parity only when neither
+  engine OOGs). A fuzzer-chosen run-gas chunk cap (biased small; see
+  `run_gas_cap_from_knob`) makes break carriers and their refund/deficit seams
+  reachable within the fuzz gas budget.
 
 ## Build
 
