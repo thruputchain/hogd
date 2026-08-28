@@ -30,6 +30,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "storage_cost.hh"
@@ -59,7 +60,9 @@ constexpr NetworkHash kTestNetworkHash{0x5a};
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, kTestNetworkHash.data());
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                      genesis_root.size());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -833,9 +836,11 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   auto serialized_model = x23::serialize(custom_model);
 
   // Create a DB seeded with the custom cost model.
-  auto db_result = create_db(serialized_model.data(),
-                             static_cast<uint32_t>(serialized_model.size()),
-                             NetworkHash{}.data());
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(serialized_model.data(),
+                static_cast<uint32_t>(serialized_model.size()),
+                NetworkHash{}.data(), genesis_root.data(), genesis_root.size());
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });
@@ -3309,6 +3314,22 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
 
 // Regression test: concurrent create_db calls from multiple threads used to
 // cause use-after-free in PerThread storage (fixed in #1327).
+// The genesis root contract is a required argument: a null pointer is
+// rejected up front, and bytes that do not deserialize to a Contract fail
+// with a structured error instead of failing genesis construction.
+TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
+{
+  auto null_res = create_db(nullptr, 0, NetworkHash{}.data(), nullptr, 0);
+  EXPECT_EQ(null_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(null_res.db, nullptr);
+
+  constexpr uint8_t kGarbage[] = {0xFF, 0xFF, 0xFF};
+  auto garbage_res =
+      create_db(nullptr, 0, NetworkHash{}.data(), kGarbage, sizeof(kGarbage));
+  EXPECT_EQ(garbage_res.ffi_error_code, kTestFFIErrorCodeDeserializeError);
+  EXPECT_EQ(garbage_res.db, nullptr);
+}
+
 TEST(TestBindingsTest, ConcurrentCreateDB)
 {
   constexpr int kThreadCount = 8;

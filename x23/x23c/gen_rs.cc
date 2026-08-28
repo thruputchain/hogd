@@ -146,8 +146,8 @@ struct GenRs {
 
     if (get_opaque_array_size(d).has_value()) {
       // type is a byte array
-      prtop("{}\n", feature_attr("serde", "serde(with = "
-                                          "\"serde_arrays::hex\")"));
+      prtop("{}", feature_attr("serde", "serde(with = "
+                                        "\"serde_arrays::hex\")"));
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -202,9 +202,14 @@ struct GenRs {
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
   {
+    string str = std::vformat(fmt.get(), std::make_format_args(args...));
+    // Emit nothing (not even indentation) for empty output, e.g. an
+    // attribute suppressed via --rust-no-feature.
+    if (str.empty())
+      return;
     if (top_.empty() || top_.back() == '\n')
       top_ += std::string(kIndentWidth * indent_, ' ');
-    top_ += std::vformat(fmt.get(), std::make_format_args(args...));
+    top_ += str;
   }
 
   auto open_scope(string close = {})
@@ -255,15 +260,19 @@ struct GenRs {
     return ret;
   }
 
+  // Returns the attribute line including its trailing newline, or the empty
+  // string when the feature is suppressed via --rust-no-feature.  Suppression
+  // must yield nothing at all: a bare newline in an attribute stack trips
+  // clippy::empty_line_after_outer_attr in the generated code.
   string feature_attr(const std::string &feature, const std::string &attr)
   {
     if (rust_features.contains(feature)) {
-      return std::format("#[{}]", attr);
+      return std::format("#[{}]\n", attr);
     }
     if (rust_no_features.contains(feature)) {
       return "";
     }
-    return std::format("#[cfg_attr(feature = \"{}\", {})]", feature, attr);
+    return std::format("#[cfg_attr(feature = \"{}\", {})]\n", feature, attr);
   }
 
   // The xdrs-feature derive list.  ConstXDRSize is always safe to derive, but
@@ -277,15 +286,18 @@ struct GenRs {
                     : "derive(ReadXDR, WriteXDR, ConstXDRSize)");
   }
 
+  // Returns value gated behind #[cfg(feature = ...)], with a trailing
+  // newline, or the empty string when the feature is suppressed via
+  // --rust-no-feature, so suppression leaves no blank line behind.
   string cfg(const std::string &feature, const std::string &value)
   {
     if (rust_features.contains(feature)) {
-      return value;
+      return value + "\n";
     }
     if (rust_no_features.contains(feature)) {
       return "";
     }
-    return std::format("#[cfg(feature = \"{}\")]\n{}", feature, value);
+    return std::format("#[cfg(feature = \"{}\")]\n{}\n", feature, value);
   }
 
   static optional<string> substring_removed(std::string_view str,
@@ -605,18 +617,18 @@ GenRs::show_type(const StructBody &s, string const &tname, bool const_write_xdr)
       }
     }
 
-    prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", xdrs_derive_attr(const_write_xdr));
-    prtop("{}\n", feature_attr("spec", "derive(XDR)"));
+    prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
+    prtop("{}", xdrs_derive_attr(const_write_xdr));
+    prtop("{}", feature_attr("spec", "derive(XDR)"));
     if (!array_size)
-      prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+      prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
     if (s.transparent) {
       prtop("#[repr(transparent)]\n");
-      prtop("{}\n", feature_attr("serde", "serde(transparent)"));
+      prtop("{}", feature_attr("serde", "serde(transparent)"));
     }
     else
       // We want this, at least optionally on some structs,
@@ -774,7 +786,7 @@ impl {0} {{
 }}
 )",
                                      *array_size, outer_id);
-        prtop("{}\n", cfg("xdrs", xdrs_read));
+        prtop("{}", cfg("xdrs", xdrs_read));
 
         auto schema_impl = std::format(
             R"(impl schemars::JsonSchema for {0} {{
@@ -793,7 +805,7 @@ impl {0} {{
 }}
 )",
             outer_id, std::stoul(*array_size) * 2);
-        prtop("{}\n", cfg("schema", schema_impl));
+        prtop("{}", cfg("schema", schema_impl));
       }
     }
   }
@@ -802,11 +814,11 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname, bool const_write_xdr)
 {
-  prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-  prtop("{}\n", feature_attr("serde", "serde(transparent)"));
-  prtop("{}\n", xdrs_derive_attr(const_write_xdr));
-  prtop("{}\n", feature_attr("spec", "derive(XDR)"));
-  prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+  prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
+  prtop("{}", feature_attr("serde", "serde(transparent)"));
+  prtop("{}", xdrs_derive_attr(const_write_xdr));
+  prtop("{}", feature_attr("spec", "derive(XDR)"));
+  prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
 #[repr(transparent)]
@@ -864,7 +876,7 @@ pub struct {}(pub i32);
     }}
 }})",
                                           tname, match_block, write_block);
-  prtop("{}\n", cfg("std", display_block));
+  prtop("{}", cfg("std", display_block));
 }
 
 void
@@ -945,10 +957,10 @@ GenRs::show_type(const UnionBody &b, string const &tname, bool const_write_xdr)
   constexpr static auto kEnumBaseType = "i32";
   {
     prtop("{}\n", kDefaultDerives);
-    prtop("{}\n", feature_attr("serde", "derive(Serialize, Deserialize)"));
-    prtop("{}\n", xdrs_derive_attr(const_write_xdr));
-    prtop("{}\n", feature_attr("spec", "derive(XDR)"));
-    prtop("{}\n", feature_attr("schema", "derive(schemars::JsonSchema)"));
+    prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
+    prtop("{}", xdrs_derive_attr(const_write_xdr));
+    prtop("{}", feature_attr("spec", "derive(XDR)"));
+    prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
     // it FFI-safe. See Rust RFC 2195:
     // https://github.com/rust-lang/rfcs/blob/master/text/2195-really-tagged-unions.md
@@ -1307,10 +1319,7 @@ use crate::*;
 use core::option::Option;
 use core::ops::{{Deref, DerefMut}};
 
-{0}
-{1}
-{2}
-
+{0}{1}{2}
 )",
                   gs.cfg("std", "use std::io::{Read, Write};"),
                   gs.cfg("xdrs", "use xdrs::*;"),
@@ -1320,9 +1329,7 @@ use core::ops::{{Deref, DerefMut}};
 
   preamble +=
       std::format(R"(
-{0}
-{1}
-)",
+{0}{1})",
                   gs.cfg("serde", "use ::serde::{{Serialize, Deserialize}};"),
                   gs.cfg("serde", "use ::serde_arrays;"));
 

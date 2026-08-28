@@ -94,6 +94,11 @@ public:
     }
     return *this;
   }
+
+  // Returns true if the value is exactly zero. Unlike get_capped(), this is
+  // exact for values outside the range of any narrower type.
+  bool is_zero() const { return highbits_ == 0 && lowbits_ == 0; }
+
   // Checks if the current value can fit within the range of the given unsigned
   // integral type. Returns true if the value can be represented in OutType
   // without overflow. Returns false if the value is negative or exceeds

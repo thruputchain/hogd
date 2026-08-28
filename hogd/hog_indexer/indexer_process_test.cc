@@ -23,6 +23,7 @@
 #include "hogd/hog_event/rpc_from_indexer.h"
 #include "hogd/hog_event/rpc_from_sched.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/status.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
 #include "pagination.hh"
@@ -94,7 +95,14 @@ query_latest_block(std::uint16_t port)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  return client->get_transactions_by_address(query)().latest_block;
+  TransactionRefPageResult result =
+      client->get_transactions_by_address(query)();
+  if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
+    throw std::runtime_error(
+        std::format("indexer page query failed: outcome {}",
+                    static_cast<int>(result.outcome())));
+  }
+  return result.page().latest_block;
 }
 
 TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
@@ -133,7 +141,9 @@ TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
   {
     auto db = IndexDB::open(indexer_path);
     ASSERT_TRUE(db.has_value()) << db.error();
-    EXPECT_EQ(db->latest_block(), 1);
+    const IndexerStatus<BlockHeight> height = db->latest_block();
+    ASSERT_TRUE(height.has_value()) << height.error();
+    EXPECT_EQ(*height, 1);
     const IndexerProgress progress = db->durable_progress();
     ASSERT_EQ(progress.state(),
               IndexerProgressState::IndexerProgressInitialized);

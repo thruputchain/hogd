@@ -2,11 +2,13 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <optional>
 
 #include "auth_rpc.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
@@ -30,7 +32,13 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash);
+  // `genesis_root_contract` is installed (without artifact verification) as
+  // the genesis root deployment; it can be any contract type genesis
+  // validation accepts, a mock contract included. Test consumers execute
+  // contract bodies through the mock trampoline, so the contract's code
+  // never runs -- only the deployment exists.
+  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash,
+            Contract const &genesis_root_contract);
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);

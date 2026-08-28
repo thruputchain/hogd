@@ -31,7 +31,9 @@ namespace hogd {
 
 TEST(TestBindingsTest, FailedCloseAfterBlockAdvancePoisonsDb)
 {
-  auto db_res = create_db(nullptr, 0, NetworkHash{}.data());
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_res = create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                          genesis_root.size());
   ASSERT_EQ(db_res.ffi_error_code, kTestFFIErrorCodeNone);
   auto *db = db_res.db;
   auto *typed_db = static_cast<DBContext *>(db);

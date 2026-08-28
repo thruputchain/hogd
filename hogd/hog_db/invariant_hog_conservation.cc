@@ -29,10 +29,13 @@ bool
 HogConservationInvariant::check()
 {
   auto r = total_supply_change_.with([](auto &t) { return t; });
-  if (r != 0) {
-    error("total_supply_change_ is not 0: {}", r);
+  if (!r.is_zero()) {
+    // get_capped() clamps at the int128 bounds, but a real conservation bug is
+    // a small imbalance, so this prints the exact value in practice.
+    error("total_supply_change_ is not 0: {}", r.get_capped<int128_t>());
+    return false;
   }
-  return r == 0;
+  return true;
 }
 
 void
@@ -93,8 +96,13 @@ HogConservationInvariant::handle_balance_change(
   int128_t before_cost =
       before.has_value() ? cost_model_.get_balance_cost() : 0;
   int128_t after_cost = after.has_value() ? cost_model_.get_balance_cost() : 0;
-  update_total_supply(after_balance - before_balance + after_cost -
-                      before_cost);
+  // Reported as two deltas rather than one folded sum: a balance plus its own
+  // locked storage cost sits exactly at INT128_MAX when one address holds the
+  // whole supply, so the fold only stays in range as long as conservation
+  // holds globally. Split, each delta is unconditionally in range and the wide
+  // accumulator holds the combination.
+  update_total_supply(after_balance - before_balance);
+  update_total_supply(after_cost - before_cost);
 }
 
 void
@@ -252,8 +260,7 @@ HogConservationInvariant::handle_replay_cache_item_change(
 void
 HogConservationInvariant::update_total_supply(int128_t change)
 {
-  [[maybe_unused]] auto r =
-      total_supply_change_.with([change](auto &t) { return t += change; });
+  total_supply_change_.with([change](auto &t) { t += change; });
 }
 
 } // namespace hogd

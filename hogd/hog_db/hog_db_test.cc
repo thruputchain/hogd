@@ -34,6 +34,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/lthash16.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
@@ -1265,6 +1266,95 @@ TEST_F(HogDbTest, ApplyFeedsDebugInvariants)
   ASSERT_TRUE(db_.apply(changeset));
 
   EXPECT_FALSE(db_.check_invariants());
+}
+
+TEST_F(HogDbTest, InvariantAccumulatorSurvivesMaxSupplyPartialSum)
+{
+  // Regression guard for a signed-integer overflow in the conservation
+  // invariant's running sum, caught by UBSan via
+  // NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance:
+  //
+  //   invariant_hog_conservation.cc:256: signed integer overflow:
+  //   0x80000000000000000000000000000001 + -12007 cannot be represented in
+  //   type '__int128'
+  //
+  // The sum runs over every HOG-denominated item change and only its final
+  // value has to be zero, but a single term can be as large as INT128_MAX:
+  // minting the whole supply debits the total-supply counter by exactly that.
+  // Once the running sum sits at -INT128_MAX, any further negative term -- a
+  // storage refund of a few thousand -- pushes it past INT128_MIN. Summing in
+  // int128 made that intermediate undefined behaviour even though the total
+  // came back to zero.
+  //
+  // Each step below is applied separately so the invariant sees them in this
+  // order (within one apply() the worker pool does not fix an order):
+  //
+  //   1. mint the whole supply     sum = nnint_cost - INT128_MAX
+  //   2. refund a bytestring       sum = nnint_cost - INT128_MAX - victim_cost
+  //                                    < INT128_MIN  <-- used to be UB
+  //   3. credit it to a whale      sum = 0
+  //
+  // A wrapping int128 accumulator still lands on zero, so this only fails
+  // outright under UBSan; the assertions below pin the arithmetic that puts
+  // step 2 out of range so the case cannot silently stop being exercised.
+  if (!is_debug_build()) {
+    GTEST_SKIP() << "debug invariants are only fed in debug builds";
+  }
+
+  auto const &cost_model = cost_model_with_balance_cost_;
+  constexpr int128_t kSupply = std::numeric_limits<int128_t>::max();
+  const int128_t nnint_cost = cost_model.get_nnint_cost();
+  const int128_t balance_cost = cost_model.get_balance_cost();
+
+  // Seeded before the invariants are enabled, so only its later deletion --
+  // the storage refund -- reaches the running sum.
+  ItemKey victim_key = make_key(kAddress + 73, 1);
+  auto victim_db_key = make_contract_data_key(victim_key);
+  const std::array<std::byte, 8> victim_value{};
+  const int128_t victim_cost =
+      cost_model.get_bytestring_cost(victim_value.size());
+  // Step 2 has to land strictly below INT128_MIN, and the whale's balance has
+  // to stay a legal non-negative int128.
+  ASSERT_GT(victim_cost, nnint_cost + 1);
+  ASSERT_LE(victim_cost, nnint_cost + balance_cost);
+  const int128_t whale_balance =
+      kSupply - (nnint_cost + balance_cost - victim_cost);
+
+  auto seed = db_.create_changeset();
+  seed.put(victim_db_key, kBytes, victim_value);
+  ASSERT_TRUE(db_.apply(seed));
+
+  db_.enable_debug_invariants(cost_model);
+
+  auto supply_db_key = make_contract_data_key(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  auto supply_bytes = int128_to_xdr_bytes(kSupply);
+  auto mint = db_.create_changeset();
+  mint.put(supply_db_key, kNNInt128, supply_bytes);
+  ASSERT_TRUE(db_.apply(mint));
+
+  auto refund = db_.create_changeset();
+  refund.remove(victim_db_key);
+  ASSERT_TRUE(db_.apply(refund));
+
+  Address whale = make_address(kAddress + 74);
+  auto whale_balance_key = make_address_key(whale, Prefix::kBalance);
+  auto whale_age_key = make_address_key(whale, Prefix::kHogAge);
+  auto balance_bytes = int128_to_xdr_bytes(whale_balance);
+  auto age_buf = x23::serialize(make_hog_age(whale, /*to_schedule=*/0,
+                                             /*already_scheduled=*/0,
+                                             /*received=*/0,
+                                             /*to_schedule_age=*/0,
+                                             /*already_scheduled_age=*/0,
+                                             /*received_age=*/0));
+  auto credit = db_.create_changeset();
+  credit.put(whale_balance_key, kNNInt128, balance_bytes);
+  // The hog age row accompanies every balance creation; without it the
+  // separate hog age invariant reports the balance as unpaired.
+  credit.put(whale_age_key, 0, age_buf);
+  ASSERT_TRUE(db_.apply(credit));
+
+  EXPECT_TRUE(db_.check_invariants());
 }
 
 TEST_F(HogDbTest, DbHashDeltaBytestringLockMatchesFullStateHash)

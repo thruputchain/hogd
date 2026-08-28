@@ -1689,10 +1689,19 @@ IndexDB::initialize_progress_from_db()
 }
 
 BlockHeight
-IndexDB::latest_block() const
+IndexDB::serve_watermark() const
 {
   const int64_t w = highest_indexed_block_.load(std::memory_order_acquire);
   return static_cast<BlockHeight>(w == kNoBlocksIndexed ? 0 : w);
+}
+
+IndexerStatus<BlockHeight>
+IndexDB::latest_block() const
+{
+  if (!is_open()) {
+    return IndexerError(IndexerErrorCode::kDBNotOpen);
+  }
+  return serve_watermark();
 }
 
 namespace {
@@ -1870,7 +1879,7 @@ IndexDB::get_events(EventQuery const &query) const
   // The serving bound for this entire query: rows above this height
   // are ingested-but-mutable (a lower gap may still be filling) and
   // must not be observed by the page or its continuation cursor.
-  BlockHeight max_serve_block = latest_block();
+  BlockHeight max_serve_block = serve_watermark();
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
@@ -2133,7 +2142,7 @@ IndexDB::get_transactions(TransactionQuery const &query) const
   }
 
   TransactionPage page;
-  BlockHeight max_serve_block = latest_block();
+  BlockHeight max_serve_block = serve_watermark();
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
@@ -2310,7 +2319,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   }
 
   TransactionRefPage page;
-  BlockHeight max_serve_block = latest_block();
+  BlockHeight max_serve_block = serve_watermark();
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 

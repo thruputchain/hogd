@@ -19,6 +19,7 @@
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
+#include "types.hh"
 
 namespace hogd {
 namespace {
@@ -39,7 +40,11 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
     panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
   }
   IndexDB &db = db_status.value();
-  Health::instance().set_current_block_height(db.latest_block())();
+  IndexerStatus<BlockHeight> startup_height = db.latest_block();
+  if (!startup_height) {
+    panic("[IndexDB::latest_block] failed with {}", startup_height.error());
+  }
+  Health::instance().set_current_block_height (*startup_height)();
 
   RecentTxFailureCache failure_cache;
   IndexerPullController pull_controller(event_server_addr, db, failure_cache);
