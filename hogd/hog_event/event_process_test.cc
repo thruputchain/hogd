@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -124,17 +125,31 @@ commit_empty_block(event_sched_client &rpc, BlockID block_id,
   return value;
 }
 
-std::uint16_t
-unused_loopback_port()
-{
-  auto bind_addr = x23::HostPort{"127.0.0.1", 0}.to_addr();
-  CHECK(bind_addr.has_value());
-  x23::UniqueFd listener = x23::stcplisten(*bind_addr);
-  CHECK(static_cast<bool>(listener));
-  const std::uint16_t port = x23::get_port(x23::local_addr(listener));
-  CHECK_NE(port, std::uint16_t{0});
-  return port;
-}
+// Bind and hold loopback listeners so the probed ports stay distinct until
+// hog-event inherits them. Closing first would let bind(port=0) reuse a
+// just-released port, or let another process steal one before exec.
+struct LoopbackPortLease {
+  std::vector<x23::UniqueFd> listeners;
+  std::vector<std::uint16_t> ports;
+
+  explicit LoopbackPortLease(std::size_t count)
+  {
+    listeners.reserve(count);
+    ports.reserve(count);
+    while (ports.size() < count) {
+      auto bind_addr = x23::HostPort{"127.0.0.1", 0}.to_addr();
+      CHECK(bind_addr.has_value());
+      x23::UniqueFd listener = x23::stcplisten(*bind_addr);
+      CHECK(static_cast<bool>(listener));
+      const std::uint16_t port = x23::get_port(x23::local_addr(listener));
+      CHECK_NE(port, std::uint16_t{0});
+      ports.push_back(port);
+      listeners.push_back(std::move(listener));
+    }
+  }
+
+  void release() { listeners.clear(); }
+};
 
 std::vector<std::string>
 event_args(const std::string &mempool_addr, const std::string &work_dir,
@@ -171,10 +186,12 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   // EventCard advertises these listen addresses, so restart must reuse them.
   // Use concrete ports on the first start so the existing listener
   // SO_REUSEADDR path applies; port 0 skips that flag.
-  const std::uint16_t event_exec_port = unused_loopback_port();
-  const std::uint16_t event_indexer_port = unused_loopback_port();
-  const std::uint16_t event_mempool_port = unused_loopback_port();
-  const std::uint16_t event_metrics_port = unused_loopback_port();
+  LoopbackPortLease leased(4);
+  const std::uint16_t event_exec_port = leased.ports[0];
+  const std::uint16_t event_indexer_port = leased.ports[1];
+  const std::uint16_t event_mempool_port = leased.ports[2];
+  const std::uint16_t event_metrics_port = leased.ports[3];
+  leased.release();
   ConsensusValue block_one;
   {
     DaemonProcess event = DaemonProcess::start(
