@@ -235,24 +235,44 @@ StorageSnapshotCache::load_db_tip()
   co_return expected;
 }
 
-SystemStatus<uint32_t>
+x23::MaybeAsync<SystemStatus<uint32_t>>
 StorageSnapshotCache::try_get_max_sha256_buffers()
 {
-  auto tip = try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
+  auto *tip = db_tip_.load();
+  if (tip != nullptr) {
+    return SystemStatus<uint32_t>{tip->network_config.max_sha256_buffers};
   }
-  return tip.value()->network_config.max_sha256_buffers;
+  return load_max_sha256_buffers();
 }
 
-SystemStatus<uint32_t>
+x23::Async<SystemStatus<uint32_t>>
+StorageSnapshotCache::load_max_sha256_buffers()
+{
+  auto tip = co_await load_db_tip();
+  if (!tip.has_value()) {
+    co_return tip.error();
+  }
+  co_return tip.value()->network_config.max_sha256_buffers;
+}
+
+x23::MaybeAsync<SystemStatus<uint32_t>>
 StorageSnapshotCache::try_get_max_cross_invoke_depth()
 {
-  auto tip = try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
+  auto *tip = db_tip_.load();
+  if (tip != nullptr) {
+    return SystemStatus<uint32_t>{tip->network_config.max_cross_invoke_depth};
   }
-  return tip.value()->network_config.max_cross_invoke_depth;
+  return load_max_cross_invoke_depth();
+}
+
+x23::Async<SystemStatus<uint32_t>>
+StorageSnapshotCache::load_max_cross_invoke_depth()
+{
+  auto tip = co_await load_db_tip();
+  if (!tip.has_value()) {
+    co_return tip.error();
+  }
+  co_return tip.value()->network_config.max_cross_invoke_depth;
 }
 
 void

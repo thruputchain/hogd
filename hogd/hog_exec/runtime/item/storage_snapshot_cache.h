@@ -78,8 +78,8 @@ public:
   // Consensus-critical execution parameters the chain runs under. Served off
   // the same lock-free tip cache as the block height: the first read of the
   // block fetches the tip, every later one is an atomic load.
-  SystemStatus<uint32_t> try_get_max_sha256_buffers();
-  SystemStatus<uint32_t> try_get_max_cross_invoke_depth();
+  x23::MaybeAsync<SystemStatus<uint32_t>> try_get_max_sha256_buffers();
+  x23::MaybeAsync<SystemStatus<uint32_t>> try_get_max_cross_invoke_depth();
 
   ~StorageSnapshotCache();
 
@@ -117,6 +117,8 @@ private:
   x23::Async<SystemStatus<const SnapshotStorageItem *>>
   load_snapshot_item(AddressAndKey addrkey);
   x23::Async<SystemStatus<const DbTip *>> load_db_tip();
+  x23::Async<SystemStatus<uint32_t>> load_max_sha256_buffers();
+  x23::Async<SystemStatus<uint32_t>> load_max_cross_invoke_depth();
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.

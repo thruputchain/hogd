@@ -55,7 +55,13 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
         .calldata = Calldata{},
     };
 
-    auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {});
+    auto parent_max_buffers =
+        co_await snapshot_cache.try_get_max_sha256_buffers();
+    if (!parent_max_buffers.has_value()) {
+      co_return ExpectedViewResult{TransactionViewStatus::InternalError};
+    }
+    auto r = syscall_handler.start_frame(parent_frame_invocation, 0, {},
+                                         *parent_max_buffers);
     if (!r.has_value()) {
       co_return ExpectedViewResult{TransactionViewStatus::InternalError};
     }

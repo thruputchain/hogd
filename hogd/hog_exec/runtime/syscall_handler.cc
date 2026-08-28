@@ -819,12 +819,12 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // TryInvoke cap produces, rather than as a system error: every node reads
   // the same limit from the same tip, so the rejection is deterministic and
   // the block still commits.
-  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
+  auto max_depth = co_await snapshot_cache_.try_get_max_cross_invoke_depth();
   if (!max_depth.has_value()) {
-    return {max_depth.error(), 0};
+    co_return invoke_result_t{max_depth.error(), 0};
   }
   if (invocation_frame_stack_.size() >= *max_depth) {
-    return {InvocationFrameStatusCode::Fault, 0};
+    co_return invoke_result_t{InvocationFrameStatusCode::Fault, 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
@@ -889,8 +889,12 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // protected body runs, so a copy could throw std::bad_alloc across that
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
-  auto start_status =
-      start_frame(std::move(invocation), flags, owned_auth_token_ids);
+  auto max_buffers = co_await snapshot_cache_.try_get_max_sha256_buffers();
+  if (!max_buffers.has_value()) {
+    co_return invoke_result_t{max_buffers.error(), 0};
+  }
+  auto start_status = start_frame(std::move(invocation), flags,
+                                  owned_auth_token_ids, *max_buffers);
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and
@@ -934,9 +938,9 @@ SystemCallHandler::invoke(ContractAddress const &address,
 }
 
 SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-SystemCallHandler::start_frame(
-    Invocation invocation, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids) noexcept
+SystemCallHandler::start_frame(Invocation invocation, InvokeFlagSet flags,
+                               std::span<uint32_t const> owned_auth_token_ids,
+                               uint32_t max_sha256_buffers) noexcept
 {
   assert(!last_frame_finished_);
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
@@ -979,14 +983,10 @@ SystemCallHandler::start_frame(
     try {
       // The frame's hash-buffer limit is fixed at admission, so a syscall
       // enforcing it has no tip read left to fail on.
-      auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
-      if (!max_buffers.has_value()) {
-        return std::unexpected(max_buffers.error());
-      }
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
                                                  flags, owned_auth_token_ids,
-                                                 *max_buffers);
+                                                 max_sha256_buffers);
     } catch (std::exception const &e) {
       try {
         error("unrecoverable: frame admission threw: {}", e.what());

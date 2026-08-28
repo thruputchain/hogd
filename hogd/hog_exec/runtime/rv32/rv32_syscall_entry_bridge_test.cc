@@ -153,7 +153,8 @@ protected:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
+        /*max_sha256_buffers=*/8);
     return std::move(stashed).value();
   }
 
