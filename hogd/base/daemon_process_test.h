@@ -1,15 +1,19 @@
 #pragma once
 
-#include <poll.h>
 #include <sys/wait.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -74,10 +78,9 @@ public:
   }
 
   DaemonProcess(DaemonProcess &&other) noexcept
-    : pid_(other.pid_), log_fd_(other.log_fd_), log_(std::move(other.log_))
+    : pid_(other.pid_), logs_(std::move(other.logs_))
   {
     other.pid_ = -1;
-    other.log_fd_ = -1;
   }
 
   DaemonProcess &operator=(DaemonProcess &&other) noexcept
@@ -85,10 +88,8 @@ public:
     if (this != &other) {
       reset();
       pid_ = other.pid_;
-      log_fd_ = other.log_fd_;
-      log_ = std::move(other.log_);
+      logs_ = std::move(other.logs_);
       other.pid_ = -1;
-      other.log_fd_ = -1;
     }
     return *this;
   }
@@ -102,34 +103,46 @@ public:
       std::string_view needle,
       std::chrono::milliseconds timeout = kDefaultStartupTimeout)
   {
+    if (!logs_) {
+      throw std::runtime_error("process log reader is not running");
+    }
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (log_.find(needle) == std::string::npos) {
-      if (exited()) {
+    std::unique_lock lock(logs_->mu);
+    while (logs_->text.find(needle) == std::string::npos) {
+      if (!logs_->error.empty()) {
+        throw std::runtime_error(logs_->error);
+      }
+      if (logs_->eof) {
         throw std::runtime_error(
             std::format("process exited before matching '{}': {}", needle,
-                        log_));
+                        logs_->text));
       }
-      if (std::chrono::steady_clock::now() >= deadline) {
+      if (logs_->cv.wait_until(lock, deadline) == std::cv_status::timeout) {
+        if (logs_->text.find(needle) != std::string::npos) {
+          return;
+        }
         throw std::runtime_error(
-            std::format("timed out waiting for '{}': {}", needle, log_));
+            std::format("timed out waiting for '{}': {}", needle, logs_->text));
       }
-      read_available(deadline);
     }
   }
 
   std::uint16_t require_port(std::string_view key) const
   {
+    if (!logs_) {
+      throw std::runtime_error("process log reader is not running");
+    }
+    std::lock_guard lock(logs_->mu);
     const std::string marker = std::format("PORT {}=", key);
-    const std::size_t pos = log_.find(marker);
+    const std::size_t pos = logs_->text.find(marker);
     if (pos == std::string::npos) {
       throw std::runtime_error(
-          std::format("missing {} in process log: {}", marker, log_));
+          std::format("missing {} in process log: {}", marker, logs_->text));
     }
     const std::size_t start = pos + marker.size();
-    const std::size_t end = log_.find_first_not_of("0123456789", start);
-    const std::string digits =
-        log_.substr(start,
-                    (end == std::string::npos ? log_.size() : end) - start);
+    const std::size_t end = logs_->text.find_first_not_of("0123456789", start);
+    const std::string digits = logs_->text.substr(
+        start, (end == std::string::npos ? logs_->text.size() : end) - start);
     const std::uint64_t port = std::stoull(digits);
     if (port == 0 || port > 65535) {
       throw std::runtime_error(std::format("invalid port in {}", marker));
@@ -157,10 +170,29 @@ public:
     return WTERMSIG(*status);
   }
 
-  const std::string &log() const { return log_; }
-
 private:
   static constexpr std::size_t kMaxLogBytes = 256 * 1024;
+
+  struct LogState {
+    int fd = -1;
+    std::mutex mu;
+    std::condition_variable cv;
+    std::string text;
+    std::string error;
+    bool eof = false;
+    std::thread reader;
+
+    ~LogState()
+    {
+      if (reader.joinable()) {
+        reader.join();
+      }
+      if (fd >= 0) {
+        close(fd);
+        fd = -1;
+      }
+    }
+  };
 
   static std::string errno_message(std::string_view operation, int err)
   {
@@ -168,7 +200,44 @@ private:
                        std::generic_category().message(err));
   }
 
-  DaemonProcess(pid_t pid, int log_fd) : pid_(pid), log_fd_(log_fd) {}
+  static void run_reader(LogState *state)
+  {
+    char buffer[1024];
+    for (;;) {
+      const ssize_t count = read(state->fd, buffer, sizeof(buffer));
+      if (count < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        std::lock_guard lock(state->mu);
+        state->error = errno_message("read", errno);
+        state->eof = true;
+        state->cv.notify_all();
+        return;
+      }
+      std::lock_guard lock(state->mu);
+      if (count == 0) {
+        state->eof = true;
+        state->cv.notify_all();
+        return;
+      }
+      const auto room = kMaxLogBytes > state->text.size()
+                            ? kMaxLogBytes - state->text.size()
+                            : 0;
+      if (room > 0) {
+        state->text.append(buffer,
+                           std::min(static_cast<std::size_t>(count), room));
+      }
+      state->cv.notify_all();
+    }
+  }
+
+  DaemonProcess(pid_t pid, int log_fd)
+    : pid_(pid), logs_(std::make_unique<LogState>())
+  {
+    logs_->fd = log_fd;
+    logs_->reader = std::thread(&DaemonProcess::run_reader, logs_.get());
+  }
 
   void reset()
   {
@@ -179,28 +248,7 @@ private:
       }
       pid_ = -1;
     }
-    if (log_fd_ >= 0) {
-      close(log_fd_);
-      log_fd_ = -1;
-    }
-  }
-
-  bool exited()
-  {
-    if (pid_ <= 0) {
-      return true;
-    }
-    int status = 0;
-    const pid_t result = waitpid(pid_, &status, WNOHANG);
-    if (result == pid_) {
-      pid_ = -1;
-      drain();
-      return true;
-    }
-    if (result < 0 && errno != EINTR) {
-      throw std::runtime_error(errno_message("waitpid", errno));
-    }
-    return false;
+    logs_.reset();
   }
 
   std::optional<int> wait_for_exit(std::chrono::milliseconds timeout)
@@ -211,7 +259,9 @@ private:
       const pid_t result = waitpid(pid_, &status, WNOHANG);
       if (result == pid_) {
         pid_ = -1;
-        drain();
+        if (logs_ && logs_->reader.joinable()) {
+          logs_->reader.join();
+        }
         return status;
       }
       if (result < 0) {
@@ -227,73 +277,8 @@ private:
     }
   }
 
-  void drain()
-  {
-    if (log_fd_ < 0) {
-      return;
-    }
-    char buffer[1024];
-    for (;;) {
-      const ssize_t count = read(log_fd_, buffer, sizeof(buffer));
-      if (count > 0) {
-        append_log(buffer, static_cast<std::size_t>(count));
-        continue;
-      }
-      break;
-    }
-  }
-
-  void read_available(std::chrono::steady_clock::time_point deadline)
-  {
-    if (log_fd_ < 0) {
-      return;
-    }
-    const auto now = std::chrono::steady_clock::now();
-    if (now >= deadline) {
-      return;
-    }
-    const auto remaining =
-        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    pollfd poll_fd{.fd = log_fd_, .events = POLLIN, .revents = 0};
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    const int ready = poll(&poll_fd, 1, static_cast<int>(remaining.count()));
-    if (ready < 0) {
-      if (errno == EINTR) {
-        return;
-      }
-      throw std::runtime_error(errno_message("poll", errno));
-    }
-    if (ready == 0) {
-      return;
-    }
-    char buffer[1024];
-    const ssize_t count = read(log_fd_, buffer, sizeof(buffer));
-    if (count > 0) {
-      append_log(buffer, static_cast<std::size_t>(count));
-      return;
-    }
-    if (count == 0) {
-      close(log_fd_);
-      log_fd_ = -1;
-      return;
-    }
-    if (errno != EINTR) {
-      throw std::runtime_error(errno_message("read", errno));
-    }
-  }
-
-  void append_log(const char *buffer, std::size_t count)
-  {
-    log_.append(buffer, count);
-    if (log_.size() > kMaxLogBytes) {
-      throw std::runtime_error("process log exceeded limit");
-    }
-  }
-
   pid_t pid_ = -1;
-  int log_fd_ = -1;
-  std::string log_;
+  std::unique_ptr<LogState> logs_;
 };
 
 } // namespace hogd
