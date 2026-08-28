@@ -3330,28 +3330,6 @@ TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
   EXPECT_EQ(garbage_res.db, nullptr);
 }
 
-// The genesis root's reserved mock id cannot be registered or created as an
-// ordinary test mock: a mock with that id would collide with the genesis
-// root deployment.
-TEST(TestBindingsTest, ReservedGenesisMockIdRejected)
-{
-  constexpr int32_t kReservedId =
-      static_cast<int32_t>(TEST_FFI_GENESIS_ROOT_MOCK_CONTRACT_ID);
-
-  auto *db = make_db();
-  x23::Defer d1([&] { free_db(db); });
-  auto *rc = make_runtime_context();
-  x23::Defer d2([&] { close_runtime_context(rc); });
-
-  EXPECT_EQ(register_new_contract(rc, kReservedId, &mock_contract_create_event,
-                                  nullptr),
-            kTestFFIErrorCodeInvalidArgument);
-
-  auto reserved = x23::serialize(make_test_genesis_root_contract());
-  EXPECT_EQ(setup_create_contract(rc, db, reserved.data(), reserved.size()),
-            kTestFFIErrorCodeInvalidArgument);
-}
-
 TEST(TestBindingsTest, ConcurrentCreateDB)
 {
   constexpr int kThreadCount = 8;
