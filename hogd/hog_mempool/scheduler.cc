@@ -645,8 +645,26 @@ Scheduler::process_transfers_helper(const Delta &delta,
   uint128_t received_hogs = from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
   const BlockHeight received_age = averages->average_ages[kHogAgeGroupReceived];
   if (num_received > 0) {
+    // The transfer payload comes from a DB-facing RPC peer and is not
+    // otherwise validated. Reject a credit that would push the account's
+    // HOG-age groups past a representable aggregate total. Otherwise the
+    // groups can stay individually representable while their exact sum
+    // exceeds [UINT128_MAX], which later wraps the unchecked availability sum
+    // in the negative branch below and trips its fatal [CHECK_LE]. This keeps
+    // the invariant enforced by [hog_age_groups_have_valid_total()].
+    const auto received_delta = static_cast<uint128_t>(num_received);
+    if (uint128_add_would_overflow(received_hogs, received_delta)) {
+      warn("dropping HOG transfer credit that would overflow the received "
+           "group");
+      return;
+    }
     new_averages.num_hogs[kHogAgeGroupReceived] =
-        to_xdr(received_hogs + num_received);
+        to_xdr(received_hogs + received_delta);
+    if (!hog_age_groups_have_valid_total(new_averages)) {
+      warn("dropping HOG transfer credit that would overflow the aggregate "
+           "HOG-age total");
+      return;
+    }
     // See comment above for [compute_average_age()].
     //
     // Note that [compute_average_age()] will never divide by 0 because we

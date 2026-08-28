@@ -531,6 +531,49 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
 }
 
+TEST(Scheduler, ProcessTransfersDropsCreditThatOverflowsAggregateTotal)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  constexpr auto kGas = static_cast<uint128_t>(5'000'000'000);
+  const auto kMax =
+      static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
+
+  // Seed the account so the three groups are each individually representable
+  // and their exact sum (2 * kMax) still fits in a uint128_t.
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, kGas);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0, kMax);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, kMax - kGas);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  auto process_delta = [&](int128_t delta, BlockHeight block) {
+    HogsTransferred transfer;
+    transfer.block = block;
+    transfer.deltas.push_back(
+        Delta{.address = account, .hog_delta = to_xdr(delta)});
+    scheduler->process_transfers(transfer)();
+  };
+
+  // A credit that keeps the received group representable but pushes the exact
+  // aggregate over UINT128_MAX must be dropped rather than corrupting state.
+  process_delta(static_cast<int128_t>(kGas), /*block=*/1);
+  {
+    const auto [age, lock] = scheduler->get_cached_hog_age(account);
+    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), kMax - kGas);
+  }
+
+  // A subsequent debit that the account can actually cover must succeed
+  // instead of wrapping the availability sum and tripping the fatal check.
+  process_delta(-static_cast<int128_t>(kGas), /*block=*/2);
+  {
+    const auto [age, lock] = scheduler->get_cached_hog_age(account);
+    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), kMax - (2 * kGas));
+    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), kMax);
+    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
+  }
+}
+
 TEST(Scheduler, CycleAccountWhenGasInsufficient)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
