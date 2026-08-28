@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <limits>
 #include <memory>
+#include <new>
 #include <span>
 #include <tuple>
 #include <utility>
@@ -615,24 +617,22 @@ template<typename T> struct SlackAllocator {
   constexpr SlackAllocator(const SlackAllocator<U> &) noexcept
   {}
 
-  struct AllocationResult {
-    T *ptr;
-    std::size_t count;
-  };
-
   [[nodiscard]] T *allocate(std::size_t n)
   {
-    return std::allocator<T>{}.allocate(n);
+    if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
+      throw std::bad_array_new_length{};
+    return static_cast<T *>(
+        ::operator new(n * sizeof(T), std::align_val_t{alignof(T)}));
   }
-  // [allocator.requirements]: allocate_at_least may hand back more elements
-  // than requested, and the caller must pass the returned count to deallocate.
-  [[nodiscard]] AllocationResult allocate_at_least(std::size_t n)
+  // [allocator.requirements]: deallocate may receive any count between the
+  // allocate_at_least request and the returned count, inclusive.
+  [[nodiscard]] std::allocation_result<T *> allocate_at_least(std::size_t n)
   {
     return {.ptr = allocate(n + 1), .count = n + 1};
   }
-  void deallocate(T *p, std::size_t n) noexcept
+  void deallocate(T *p, std::size_t) noexcept
   {
-    std::allocator<T>{}.deallocate(p, n);
+    ::operator delete(p, std::align_val_t{alignof(T)});
   }
 
   template<typename U>
