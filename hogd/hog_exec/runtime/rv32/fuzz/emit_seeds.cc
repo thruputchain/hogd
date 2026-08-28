@@ -32,13 +32,23 @@ write_file(const std::filesystem::path &path, std::span<const uint8_t> bytes)
 }
 
 // Engine-diff seed layout must match carve_engine_diff_input:
-// [u64 gas][u32 memory_bytes][code bytes].
+// [u64 gas][u32 memory_bytes][u64 method_id][u64 host_seed][u32 start_knob]
+// [u32 img_len_knob][image bytes][code bytes]. With memory_bytes ==
+// kFuzzMemCap and start_knob <= kFuzzMemCap - image.size(), the carve maps
+// start_knob/img_len_knob through unchanged, so the knobs here are the
+// literal memory_start / image length.
 std::vector<uint8_t>
-engine_diff_seed(const std::vector<uint32_t> &words)
+engine_diff_seed(const std::vector<uint32_t> &words, uint64_t host_seed,
+                 std::span<const uint8_t> image = {}, uint32_t image_start = 0)
 {
   std::vector<uint8_t> seed;
   test_artifact::append_u64(seed, kFuzzGasCap);
   test_artifact::append_u32(seed, kFuzzMemCap);
+  test_artifact::append_u64(seed, /*method_id=*/host_seed);
+  test_artifact::append_u64(seed, host_seed);
+  test_artifact::append_u32(seed, image_start);
+  test_artifact::append_u32(seed, static_cast<uint32_t>(image.size()));
+  seed.insert(seed.end(), image.begin(), image.end());
   const std::vector<uint8_t> code = test_program::code_from_words(words);
   seed.insert(seed.end(), code.begin(), code.end());
   return seed;
@@ -75,12 +85,19 @@ try {
       valid.begin() + static_cast<std::ptrdiff_t>(kArtifactHeaderBytes / 2));
   write_file(artifact_dir / "truncated_header.bin", truncated);
 
-  // Engine-diff seeds: a few fusion-heavy programs from the existing generator.
+  // Engine-diff seeds: a few fusion-heavy programs from the existing
+  // generator, plus one carrying a seeded initial-memory image at a nonzero
+  // start so the image-staging arm of the carve is represented in the corpus.
   for (uint64_t seed = 0; seed < 4; ++seed) {
     const std::vector<uint8_t> bytes =
-        engine_diff_seed(test_corpus::generate_engine_only_program(seed));
+        engine_diff_seed(test_corpus::generate_engine_only_program(seed), seed);
     write_file(engine_dir / ("engine_" + std::to_string(seed) + ".bin"), bytes);
   }
+  const std::vector<uint8_t> image = {0x78, 0x56, 0x34, 0x12};
+  const std::vector<uint8_t> imaged =
+      engine_diff_seed(test_corpus::generate_engine_only_program(0),
+                       /*host_seed=*/5, image, /*image_start=*/8);
+  write_file(engine_dir / "engine_image.bin", imaged);
 
   std::cerr << "wrote seeds under " << root << "\n";
   return 0;
