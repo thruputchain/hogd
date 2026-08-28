@@ -4090,6 +4090,54 @@ TEST(HogDevnode, DataDirReplaysTransactionWhoseBlockNeverCommitted)
   }
 }
 
+// A recovered chain whose outbox holds no committed record for the tip, but
+// does hold a validly prepared current-epoch origin at tip + 1.
+// reconcile_outbox_tip() accepts that state (see
+// EventRpcTest.ReconciliationAcceptsPreparedCurrentEpochOrigin), so the
+// missing-canonical-tip check in
+// HogDevnodeNode::validate_event_outbox_against_recovered_tip is what rejects
+// it -- this is the one place that error is reachable.
+TEST(HogDevnode, DataDirRejectsPreparedOriginWithoutCanonicalTipRecord)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir, 0);
+
+  const std::filesystem::path outbox_dir =
+      data_dir / "events" / "indexer-outbox";
+  ConsensusValue tip_value;
+  {
+    HogDbDAO db = open_persistent_hog_db(data_dir);
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value()) << tip.error();
+    ASSERT_EQ(tip->value.proposal_header.block_height, 1);
+    tip_value = tip->value;
+  }
+
+  // Drop the committed record for the tip and re-prepare the current epoch at
+  // tip + 1, exactly the shape reconcile accepts.
+  ASSERT_TRUE(std::filesystem::remove(
+      outbox_dir / IndexerOutboxStore::committed_filename(1)));
+  ASSERT_TRUE(std::filesystem::remove(
+      outbox_dir / IndexerOutboxStore::current_epoch_origin_filename()));
+  // Also drop the tip's events file: while it is present reconcile tries to
+  // promote the height instead, and fails earlier.
+  ASSERT_TRUE(std::filesystem::remove(EventBlockContext::final_events_filename(
+      (data_dir / "events").string(), tip_value.proposal_header.events_hash)));
+  {
+    auto store = IndexerOutboxStore::open(outbox_dir.string());
+    ASSERT_TRUE(store.has_value()) << store.error();
+    ASSERT_TRUE(store->initialize_current_epoch_origin(2, sha256(tip_value))()
+                    .has_value());
+  }
+
+  expect_startup_failure(
+      {"--data-dir", data_dir.string(), "--dev-accounts", "0",
+       "--dev-account-seed", "groundhog-dev-accounts", "--dev-account-tokens",
+       "1000000000"},
+      "recovered event outbox is missing canonical HogDB tip height 1");
+}
+
 } // namespace
 
 } // namespace hogd

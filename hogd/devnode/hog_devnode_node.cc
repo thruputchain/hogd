@@ -786,17 +786,17 @@ HogDevnodeNode::reconcile_event_outbox_with_recovered_tip()
 }
 
 void
-// Defence in depth behind [reconcile_event_outbox_with_recovered_tip], which
-// the constructor always runs first. That ordering is required, not
-// incidental: reconcile promotes an unpromoted height from its durable events
-// file, so running this read-only check ahead of it would reject the very
-// states reconcile exists to repair.
+// Runs after [reconcile_event_outbox_with_recovered_tip], and that ordering is
+// required rather than incidental: reconcile promotes an unpromoted height
+// from its durable events file, so running this read-only check ahead of it
+// would reject the very states reconcile exists to repair.
 //
-// The consequence is that three of the throws below cannot be reached through
-// the devnode path -- reconcile_outbox_tip() rejects each of those states
-// first, with its own (less specific) message. They are kept as a backstop
-// against a future reconcile regression; see #3640 before spending time
-// trying to cover them.
+// Reconcile therefore rejects most malformed outboxes first, with its own
+// (less specific) message, which makes some of the checks below hard to reach
+// -- see the individual notes. Not all of them, though: the
+// missing-canonical-tip check is the only thing that catches an outbox with no
+// committed record for the tip but a validly prepared next-epoch origin, a
+// state reconcile deliberately accepts.
 HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
 {
   const DbTip tip = ctx_->get_tip();
@@ -813,9 +813,10 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
     // called only after finalization, so this expected crash window is safe.
     return;
   }
-  // Shadowed: reconcile passes max_allowed_height = tip + 1, so an outbox
+  // Hard to reach: reconcile passes max_allowed_height = tip + 1, so an outbox
   // further ahead than that already failed as "committed indexer outbox
-  // record at height N exceeds canonical height M".
+  // record at height N exceeds canonical height M"
+  // (DataDirRejectsOutboxTwoBlocksAheadOfHogDb asserts reconcile's wording).
   if (*latest && (*latest)->block_height > tip_height) {
     throw std::runtime_error(std::format(
         "recovered event outbox latest height {} is ahead of HogDB tip {}",
@@ -832,16 +833,21 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
     return;
   }
 
-  // Shadowed: an outbox behind the tip already failed reconcile as "current
-  // outbox epoch ends at N, behind canonical tip M".
+  // Reachable, and the only check that covers it: reconcile accepts an outbox
+  // with no committed records at all when the current epoch origin is validly
+  // prepared at tip + 1 (EventRpcTest.ReconciliationAcceptsPreparedCurrent-
+  // EpochOrigin), which leaves [latest] empty here. An outbox merely *behind*
+  // the tip is the shadowed case -- reconcile rejects that as "current outbox
+  // epoch ends at N, behind canonical tip M".
+  // See DataDirRejectsPreparedOriginWithoutCanonicalTipRecord.
   if (!*latest || (*latest)->block_height != tip_height) {
     throw std::runtime_error(std::format(
         "recovered event outbox is missing canonical HogDB tip height {}",
         tip_height));
   }
-  // Shadowed: a matching height with a mismatched hash already failed
-  // reconcile as "committed outbox tip does not match the canonical scheduler
-  // tip".
+  // Hard to reach: where a committed record for the tip height does exist,
+  // reconcile has already compared its hash and failed as "committed outbox
+  // tip does not match the canonical scheduler tip".
   if ((*latest)->consensus_hash != sha256(tip.value)) {
     throw std::runtime_error(
         "recovered event outbox latest consensus does not match HogDB tip");
