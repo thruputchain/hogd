@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -125,32 +124,6 @@ commit_empty_block(event_sched_client &rpc, BlockID block_id,
   return value;
 }
 
-// Bind and hold loopback listeners so the probed ports stay distinct until
-// hog-event inherits them. Closing first would let bind(port=0) reuse a
-// just-released port, or let another process steal one before exec.
-struct LoopbackPortLease {
-  std::vector<x23::UniqueFd> listeners;
-  std::vector<std::uint16_t> ports;
-
-  explicit LoopbackPortLease(std::size_t count)
-  {
-    listeners.reserve(count);
-    ports.reserve(count);
-    while (ports.size() < count) {
-      auto bind_addr = x23::HostPort{"127.0.0.1", 0}.to_addr();
-      CHECK(bind_addr.has_value());
-      x23::UniqueFd listener = x23::stcplisten(*bind_addr);
-      CHECK(static_cast<bool>(listener));
-      const std::uint16_t port = x23::get_port(x23::local_addr(listener));
-      CHECK_NE(port, std::uint16_t{0});
-      ports.push_back(port);
-      listeners.push_back(std::move(listener));
-    }
-  }
-
-  void release() { listeners.clear(); }
-};
-
 std::vector<std::string>
 event_args(const std::string &mempool_addr, const std::string &work_dir,
            std::uint16_t exec_port, std::uint16_t indexer_port,
@@ -183,22 +156,24 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
       std::string(x23::HostPort{"127.0.0.1", mempool_listen_port}.show());
 
   TmpDir work_dir;
-  // EventCard advertises these listen addresses, so restart must reuse them.
-  // Use concrete ports on the first start so the existing listener
-  // SO_REUSEADDR path applies; port 0 skips that flag.
-  LoopbackPortLease leased(4);
-  const std::uint16_t event_exec_port = leased.ports[0];
-  const std::uint16_t event_indexer_port = leased.ports[1];
-  const std::uint16_t event_mempool_port = leased.ports[2];
-  const std::uint16_t event_metrics_port = leased.ports[3];
-  leased.release();
+  // First start binds port 0 (hog-event owns the listeners; no probe race).
+  // EventCard advertises those addresses, so restart must reuse them. Passing
+  // the logged non-zero ports uses the existing SO_REUSEADDR path; a second
+  // port-0 start would skip it and fail to rebind.
   ConsensusValue block_one;
+  std::uint16_t event_exec_port = 0;
+  std::uint16_t event_indexer_port = 0;
+  std::uint16_t event_mempool_port = 0;
+  std::uint16_t event_metrics_port = 0;
   {
     DaemonProcess event = DaemonProcess::start(
         HOG_EVENT_BINARY,
-        event_args(mempool_addr, work_dir.directory(), event_exec_port,
-                   event_indexer_port, event_mempool_port, event_metrics_port));
+        event_args(mempool_addr, work_dir.directory(), 0, 0, 0, 0));
     event.wait_until_log_contains("event initialization complete.");
+    event_exec_port = event.require_port("event.exec");
+    event_indexer_port = event.require_port("event.indexer");
+    event_mempool_port = event.require_port("event.mempool");
+    event_metrics_port = event.require_port("event.metrics");
 
     event_sched_client sched = connect_event_sched(event_mempool_port);
     block_one = commit_empty_block(sched, 11, 1, sha256(genesis));
