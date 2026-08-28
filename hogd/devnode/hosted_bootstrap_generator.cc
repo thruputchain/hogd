@@ -41,6 +41,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "types.hh"
 #include "x23/serialize.h"

@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <cstdint>
 
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_mempool/config_hash.h"

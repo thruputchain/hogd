@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <utility>
 
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"

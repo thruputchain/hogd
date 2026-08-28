@@ -1,7 +1,6 @@
 #include "hogd/hog_exec/components/hash_buffers.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <span>
 #include <utility>
 
