@@ -29,6 +29,7 @@ add_xdr(
   ../../protocol/invoke_args.x
   ../../protocol/loadgen.x
   ../../protocol/network.x
+  ../../protocol/network_config.x
   ../../protocol/pagination.x
   ../../protocol/parallel.x
   ../../protocol/port.x

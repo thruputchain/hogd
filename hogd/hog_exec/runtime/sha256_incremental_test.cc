@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -12,6 +13,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -22,6 +24,7 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -224,6 +227,87 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
       SignedTransaction{
           .tx = Transaction{.invocation =
                                 Invocation{.invoked_address = kParentAddress,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+}
+
+// A chain that configures kConfigParamMaxSHA256Buffers away from its default
+// must actually execute under that value: the parameter travels from
+// GenesisConfiguration through the DbTip to the syscall handler, and a break
+// anywhere on that path would leave the compiled-in default in force.
+class Sha256ConfiguredBufferLimitTest : public ::testing::Test,
+                                        public NativeContractTestFramework {
+public:
+  static constexpr uint32_t kConfiguredMaxBuffers = 2;
+
+  Sha256ConfiguredBufferLimitTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kHogDb, true, std::nullopt, genesis_network_config())
+  {}
+
+private:
+  static NetworkConfig genesis_network_config()
+  {
+    NetworkConfig config = stock_network_config();
+    config.max_sha256_buffers = kConfiguredMaxBuffers;
+    return config;
+  }
+};
+
+TEST_F(Sha256ConfiguredBufferLimitTest, GenesisValueBoundsOpenBuffers)
+{
+  NativeContractBuilder builder;
+  constexpr static ContractAddress kAddress =
+      NativeContractTestFramework::make_contract_address(0);
+  constexpr static int32_t kContractId = 0;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        const std::array<uint8_t, 1> chunk = {0};
+
+        // The configured number of buffers opens; the stock value of 8 would
+        // let this run well past kConfiguredMaxBuffers.
+        for (uint32_t i = 0; i < kConfiguredMaxBuffers; i++) {
+          auto opened = ctx.syscall<SyscallNo::kSHA256Update>(
+              i, std::as_bytes(std::span(chunk)), true);
+          if (!opened.has_value() ||
+              opened.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        auto beyond = ctx.syscall<SyscallNo::kSHA256Update>(
+            kConfiguredMaxBuffers, std::as_bytes(std::span(chunk)), true);
+        if (!beyond.has_value() ||
+            beyond.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kContractId, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(kContractId);
+  write_contract(contract_xdr);
+  write_deployment(kAddress, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = kAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
                                            .gas_limit = UINT64_MAX,

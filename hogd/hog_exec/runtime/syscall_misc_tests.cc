@@ -983,7 +983,8 @@ TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
       NativeContractTestFramework::make_deployed_contract_hash(contract));
   run_genesis_initialization(builder.build(NetworkHash{},
                                            *get_default_cost_model(),
-                                           *load_stock_genesis_root_contract()),
+                                           *load_stock_genesis_root_contract(),
+                                           stock_network_config()),
                              BlockExecutionMode::kBlockExecutionModeProposal);
   write_contract(contract);
 

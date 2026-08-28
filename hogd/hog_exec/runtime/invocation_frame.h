@@ -45,7 +45,8 @@ public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
                   std::span<uint32_t const> owned_auth_token_ids,
-                  uint32_t inherited_try_invoke_depth);
+                  uint32_t inherited_try_invoke_depth,
+                  uint32_t max_sha256_buffers);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -314,7 +315,8 @@ public:
   [[nodiscard]] SystemStatus<void>
   start_frame(ContractAddress const &address, Calldata &&calldata,
               InvokeFlagSet flags,
-              std::span<uint32_t const> owned_auth_token_ids);
+              std::span<uint32_t const> owned_auth_token_ids,
+              uint32_t max_sha256_buffers);
   // Returns a pair of the InvokeResult and a bool indicating whether the frame
   // was manually reverted.
   // If try_invoke_conflict_out is non-null and this frame is a proposal-mode

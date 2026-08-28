@@ -210,7 +210,8 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
   co_return LoadgenSuccessResult{
       .genesis_configuration =
-          builder.build(config_.network_hash, cost_model, *root_contract),
+          builder.build(config_.network_hash, cost_model, *root_contract,
+                        stock_network_config()),
       .genesis_ceremony_txs = std::move(genesis_ceremony_txs),
       .initialization_txs = std::move(initialization_txs),
   };

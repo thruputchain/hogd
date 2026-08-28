@@ -258,7 +258,8 @@ public:
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true,
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
-          std::nullopt)
+          std::nullopt,
+      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
     : db_wrapper_(make_db_wrapper(test_db))
   {
     bool logging_enabled = log || do_logging_env();
@@ -266,7 +267,7 @@ public:
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
-    initialize(mode, empty_genesis, genesis_cost_model);
+    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config);
     if (logging_enabled) {
       HogexecMetrics::launch_log_worker();
     }
@@ -566,6 +567,7 @@ public:
     root.rv32_contract().data.push_back(0);
     return GenesisConfiguration{
         .storage_cost_model = get_default_cost_model()->to_xdr(),
+        .network_config = stock_network_config(),
         .root_contract = std::move(root),
         .default_wallet = native_default_wallet_hash(),
     };
@@ -708,9 +710,11 @@ private:
   void open_event_block(BlockID block_id);
   void close_event_block(BlockID block_id);
 
-  void initialize(BlockExecutionMode mode, bool empty_genesis,
-                  std::optional<StorageCostModelXdr> const &genesis_cost_model =
-                      std::nullopt)
+  void initialize(
+      BlockExecutionMode mode, bool empty_genesis,
+      std::optional<StorageCostModelXdr> const &genesis_cost_model =
+          std::nullopt,
+      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
   {
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
@@ -737,13 +741,15 @@ private:
       GenesisConfiguration genesis_configuration{
           .storage_cost_model =
               genesis_cost_model.value_or(get_default_cost_model()->to_xdr()),
+          .network_config =
+              genesis_network_config.value_or(stock_network_config()),
           .root_contract = *root_contract,
           .default_wallet = native_default_wallet_hash(),
       };
       ConsensusValue genesis_value{};
       genesis_value.proposal_header.block_height = 0;
       genesis_value.proposal_header.config_hash =
-          compute_config_hash(genesis_configuration.storage_cost_model);
+          compute_config_hash(genesis_configuration);
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (r != DbSchedResult::DbSchedResultOK) {
