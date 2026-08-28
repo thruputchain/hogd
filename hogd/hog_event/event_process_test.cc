@@ -138,6 +138,30 @@ event_args(const std::string &mempool_addr, const std::string &work_dir,
           "--metrics-port",  std::to_string(metrics_port)};
 }
 
+x23::UniqueFd
+listen_loopback(std::uint16_t port)
+{
+  CHECK_NE(port, std::uint16_t{0});
+  auto bind_addr = x23::HostPort{"127.0.0.1", port}.to_addr();
+  CHECK(bind_addr.has_value());
+  x23::UniqueFd listener = x23::stcplisten(*bind_addr);
+  CHECK(static_cast<bool>(listener));
+  return listener;
+}
+
+std::vector<x23::UniqueFd>
+hold_loopback_ports(std::uint16_t exec_port, std::uint16_t indexer_port,
+                    std::uint16_t mempool_port, std::uint16_t metrics_port)
+{
+  std::vector<x23::UniqueFd> holders;
+  holders.reserve(4);
+  holders.push_back(listen_loopback(exec_port));
+  holders.push_back(listen_loopback(indexer_port));
+  holders.push_back(listen_loopback(mempool_port));
+  holders.push_back(listen_loopback(metrics_port));
+  return holders;
+}
+
 TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
 {
   Registration &registration = Registration::registration();
@@ -165,6 +189,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   std::uint16_t event_indexer_port = 0;
   std::uint16_t event_mempool_port = 0;
   std::uint16_t event_metrics_port = 0;
+  std::vector<x23::UniqueFd> restart_ports;
   {
     DaemonProcess event =
         DaemonProcess::start(HOG_EVENT_BINARY,
@@ -176,18 +201,25 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
     event_mempool_port = event.require_port("event.mempool");
     event_metrics_port = event.require_port("event.metrics");
 
-    event_sched_client sched = connect_event_sched(event_mempool_port);
-    block_one = commit_empty_block(sched, 11, 1, sha256(genesis));
-    event_indexer_client indexer = connect_event_indexer(event_indexer_port);
-    EventIndexerPullResult pulled =
-        indexer.event_indexer_pull_next(uninitialized_pull())();
-    ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
-    EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, block_one);
+    {
+      event_sched_client sched = connect_event_sched(event_mempool_port);
+      block_one = commit_empty_block(sched, 11, 1, sha256(genesis));
+      event_indexer_client indexer = connect_event_indexer(event_indexer_port);
+      EventIndexerPullResult pulled =
+          indexer.event_indexer_pull_next(uninitialized_pull())();
+      ASSERT_EQ(pulled.outcome(),
+                EventIndexerPullOutcome::EventIndexerPullBlock);
+      EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, block_one);
+    }
 
     registration.publish_event_canonical_tip(
         EventCanonicalTip{.block_id = 11, .consensus_value = block_one});
 
     EXPECT_EQ(event.kill_unclean(), SIGKILL);
+    // EventCard requires the same listen ports. Hold them with SO_REUSEADDR
+    // until the restart exec so a parallel test cannot steal them.
+    restart_ports = hold_loopback_ports(event_exec_port, event_indexer_port,
+                                        event_mempool_port, event_metrics_port);
   }
 
   {
@@ -199,6 +231,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
     EXPECT_EQ(committed->consensus_value, block_one);
   }
 
+  restart_ports.clear();
   DaemonProcess restarted =
       DaemonProcess::start(HOG_EVENT_BINARY,
                            event_args(mempool_addr, work_dir.directory(),
