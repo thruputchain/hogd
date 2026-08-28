@@ -182,8 +182,9 @@ GCC_TSAN_CMAKE_FLAGS=(-x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "
 rm -rf build/gcc_tsan
 
 # Debug only for now. The clang job above spends most of the schedule's
-# 3600s budget on its two trees, and both jobs share that budget; add a
-# Release tree here once a few runs have shown what this one costs.
+# budget on its two trees, and both jobs share that budget; add a Release
+# tree here once a few runs have shown what this one costs. The budget is
+# --timeout-sec in .github/workflows/tsan.yml; keep the two in step.
 echo 'build gcc tsan'
 ./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug -j 64 "${GCC_TSAN_CMAKE_FLAGS[@]}"
 
