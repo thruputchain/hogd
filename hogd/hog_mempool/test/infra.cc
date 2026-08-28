@@ -119,7 +119,8 @@ MempoolTestInfra::MempoolTestInfra(bool skip_genesis_block,
     auto root_contract = load_stock_genesis_root_contract();
     CHECK_EQ(
         mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
-            builder.build(kNetworkHash, cost_model, *root_contract))(),
+            builder.build(kNetworkHash, cost_model, *root_contract,
+                          stock_network_config()))(),
         DbSchedResult::DbSchedResultOK);
     register_event_with_mempool();
     register_executor_with_mempool();

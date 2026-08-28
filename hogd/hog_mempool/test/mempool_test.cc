@@ -35,6 +35,7 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
@@ -55,6 +56,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -500,6 +502,122 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
 
   coordinator.schedulercoord_shutdown()();
+}
+
+TEST(MempoolAuthRpc, StartupWatermarkMustNotExceedRecoveredDbTip)
+{
+  MempoolAuthRpc auth_rpc;
+  constexpr BlockHeight kDbTip = 4;
+  std::optional<BlockHeight> callback_height;
+  bool registration_completed = false;
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
+
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [&callback_height](BlockHeight height,
+                                   KeyChangeBatch /*key_changes*/)
+                    -> x23::Async<void> {
+                  callback_height = height;
+                  co_return;
+                },
+                [&registration_completed] { registration_completed = true; }),
+            kDbTip + 2);
+  EXPECT_EQ(callback_height, std::nullopt);
+  EXPECT_FALSE(registration_completed);
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [&callback_height](BlockHeight height,
+                                   KeyChangeBatch /*key_changes*/)
+                    -> x23::Async<void> {
+                  callback_height = height;
+                  co_return;
+                },
+                [&registration_completed] { registration_completed = true; }),
+            std::nullopt);
+  EXPECT_TRUE(registration_completed);
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  EXPECT_EQ(callback_height, kDbTip + 1);
+}
+
+TEST(MempoolAuthRpc, StartupUpdatesCoalesceToHighestWatermark)
+{
+  MempoolAuthRpc auth_rpc;
+  constexpr BlockHeight kDbTip = 4;
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip - 1, KeyChangeBatch{})();
+
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip - 1,
+                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  co_return;
+                },
+                [] {}),
+            kDbTip);
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  co_return;
+                },
+                [] {}),
+            std::nullopt);
+}
+
+TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
+{
+  MempoolAuthRpc auth_rpc;
+  constexpr BlockHeight kDbTip = 4;
+  std::latch callback_started(1);
+  std::latch allow_callback_finish(1);
+  std::latch unregister_started(1);
+  std::atomic<size_t> callback_count = 0;
+
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [&](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  callback_count.fetch_add(1, std::memory_order_relaxed);
+                  callback_started.count_down();
+                  allow_callback_finish.wait();
+                  co_return;
+                },
+                [] {}),
+            std::nullopt);
+
+  std::thread callback_thread([&] {
+    auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  });
+  callback_started.wait();
+
+  std::promise<void> unregister_result;
+  std::future<void> unregistered = unregister_result.get_future();
+  std::thread unregister_thread([&] {
+    unregister_started.count_down();
+    auth_rpc.unregister_callback();
+    unregister_result.set_value();
+  });
+  unregister_started.wait();
+  EXPECT_EQ(unregistered.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+
+  allow_callback_finish.count_down();
+  callback_thread.join();
+  EXPECT_EQ(unregistered.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+  unregister_thread.join();
+
+  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
+  EXPECT_EQ(callback_count.load(std::memory_order_relaxed), 1);
+  EXPECT_EQ(auth_rpc.register_callback(
+                kDbTip,
+                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+                  co_return;
+                },
+                [] {}),
+            kDbTip + 2);
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
@@ -2201,7 +2319,8 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis_configuration =
       builder.build(MempoolTestInfra::kNetworkHash,
-                    StorageCostModel::default_cost_model(), *root_contract);
+                    StorageCostModel::default_cost_model(), *root_contract,
+                    stock_network_config());
 
   constexpr size_t kWarmupReads = 100;
   std::atomic<bool> load_done = false;
@@ -2263,7 +2382,7 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 builder.build(MempoolTestInfra::kNetworkHash,
                               StorageCostModel::default_cost_model(),
-                              *root_contract))(),
+                              *root_contract, stock_network_config()))(),
             DbSchedResult::DbSchedResultOK);
 
   HttpServer health_server;
@@ -2380,7 +2499,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
 
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis =
-      builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract);
+      builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract,
+                    stock_network_config());
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
@@ -2401,8 +2521,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
-  const ConfigHash expected_config_hash =
-      compute_config_hash(make_config_hash_preimage(cost_model));
+  const ConfigHash expected_config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model, stock_network_config()));
   EXPECT_EQ(parent.db_tip().value.proposal_header.config_hash,
             expected_config_hash);
 
@@ -2491,7 +2611,7 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 builder.build(MempoolTestInfra::kNetworkHash,
                               StorageCostModel::default_cost_model(),
-                              *root_contract))(),
+                              *root_contract, stock_network_config()))(),
             DbSchedResult::DbSchedResultOK);
   server.register_runtime_after_genesis();
 

@@ -43,7 +43,7 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
 
   auto it = streams_.find(index);
   if (it == streams_.end()) {
-    if (streams_.size() >= kMaxSHA256Buffers) {
+    if (streams_.size() >= max_buffers_) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
@@ -69,7 +69,7 @@ HashBuffers::copy(uint32_t src_index, uint32_t dst_index)
   }
   auto dst = streams_.find(dst_index);
   if (dst == streams_.end()) {
-    if (streams_.size() >= kMaxSHA256Buffers) {
+    if (streams_.size() >= max_buffers_) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }

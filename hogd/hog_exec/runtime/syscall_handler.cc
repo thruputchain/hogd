@@ -800,6 +800,24 @@ SystemCallHandler::invoke(ContractAddress const &address,
     return {admitted.error(), 0};
   }
 
+  // A chain bounds how many invocation frames one transaction may have open at
+  // once. Every open frame holds a live contract runtime, so without this a
+  // recursive call chain grows until the executor cannot hold it -- and unlike
+  // the TryInvoke cap, which HogDb's savepoint stack bounds independently, a
+  // plain invoke had nothing stopping it.
+  //
+  // Report exceeding it as a faulted child frame, the same outcome the
+  // TryInvoke cap produces, rather than as a system error: every node reads
+  // the same limit from the same tip, so the rejection is deterministic and
+  // the block still commits.
+  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
+  if (!max_depth.has_value()) {
+    return {max_depth.error(), 0};
+  }
+  if (invocation_frame_stack_.size() >= *max_depth) {
+    return {InvocationFrameStatusCode::Fault, 0};
+  }
+
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
   // inserts a fresh (possibly negative) entry; that unordered_map insert can
   // throw std::bad_alloc under memory pressure. invoke() is reached from the
@@ -948,9 +966,16 @@ SystemCallHandler::start_frame(
   // here rather than terminating through the noexcept boundary.
   auto admitted = [&]() -> SystemStatus<void> {
     try {
+      // The frame's hash-buffer limit is fixed at admission, so a syscall
+      // enforcing it has no tip read left to fail on.
+      auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
+      if (!max_buffers.has_value()) {
+        return std::unexpected(max_buffers.error());
+      }
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids);
+                                                 flags, owned_auth_token_ids,
+                                                 *max_buffers);
     } catch (std::exception const &e) {
       try {
         error("unrecoverable: frame admission threw: {}", e.what());

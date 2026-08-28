@@ -25,7 +25,8 @@ DbSchedRpc::dbsched_commit_snapshot(BlockID id, ConsensusValue value)
   if (block_manager_->commit_block(id)) {
     DbBlockResult result(DbSchedResult::DbSchedResultOK);
     result.block().config_hash_preimage =
-        make_config_hash_preimage(*block_manager_->get_cost_model());
+        make_config_hash_preimage(*block_manager_->get_cost_model(),
+                                  block_manager_->get_network_config());
     co_return result;
   }
   DbBlockResult result(DbSchedResult::DbSchedResultError);
@@ -43,7 +44,8 @@ DbSchedRpc::dbsched_close_snapshot(BlockID id)
   blk->close_block();
   DbBlockResult result(DbSchedResult::DbSchedResultOK);
   result.block().config_hash_preimage =
-      make_config_hash_preimage(*block_manager_->get_cost_model());
+      make_config_hash_preimage(*block_manager_->get_cost_model(),
+                                block_manager_->get_network_config());
   // TODO(geoff): Set block_hash if available
   // result.block_hash = ...; // Set block_hash if available
   co_return result;
@@ -67,7 +69,7 @@ DbSchedRpc::dbsched_load_genesis_configuration(
       value.proposal_header.network_hash !=
           genesis_configuration.network_hash ||
       value.proposal_header.config_hash !=
-          compute_config_hash(genesis_configuration.storage_cost_model)) {
+          compute_config_hash(genesis_configuration)) {
     co_return DbSchedResult::DbSchedResultError;
   }
   if (block_manager_->initialize_genesis_configuration(genesis_configuration)) {

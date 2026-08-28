@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -50,7 +51,8 @@ public:
   // invocations in the height-1 ceremony.
   GenesisConfiguration build(NetworkHash const &network_hash,
                              StorageCostModel const &cost_model,
-                             Contract const &root_contract) const;
+                             Contract const &root_contract,
+                             NetworkConfig const &network_config) const;
 
   // Build the stock distributor root's single height-1 invocation. The
   // transaction creates and funds all economic state and deploys every entry.
@@ -93,6 +95,11 @@ calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
                                      SHA256Hash const &nonce);
 
 DeployedContractHash native_default_wallet_hash();
+
+// The execution parameters this repository's dev and test chains run under.
+// The protocol sets no value for any of them, so a real chain passes its own
+// to build() the same way it picks its own root contract.
+NetworkConfig stock_network_config();
 
 // Visit only the records required to execute the height-1 root ceremony.
 // Economic state (supply, balances, and replay metadata) is created lazily by

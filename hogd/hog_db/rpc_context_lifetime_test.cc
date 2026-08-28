@@ -15,6 +15,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/status.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/block_tx.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -47,6 +48,7 @@ make_context()
 {
   auto ctx = std::make_unique<RPCContext>(make_dao(), nullptr);
   ctx->initialize_cost_model(StorageCostModel::default_cost_model());
+  ctx->set_network_config(stock_network_config());
   return ctx;
 }
 

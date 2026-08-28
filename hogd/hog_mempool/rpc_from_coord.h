@@ -2,11 +2,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -90,6 +92,7 @@ public:
 
   ~MempoolCoordinatorRpc()
   {
+    disconnect_auth_callback();
     // Wait for coroutines that outlive their initiating RPC handler and still
     // touch our members -- the detached vetted-notify send and the
     // [auth_data_changed] callback (whose [auth_data_height_] broadcast tail
@@ -97,6 +100,18 @@ public:
     // state down.
     while (pending_detached_coroutines_.load(std::memory_order_acquire)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  // Close and drain the callback before the coordinator or its borrowed auth
+  // RPC is destroyed. This is normally called by our destructor; the devnode's
+  // failed-construction path calls it earlier because it closes the auth server
+  // before member destruction reaches the coordinator.
+  void disconnect_auth_callback()
+  {
+    if (auth_rpc_ != nullptr) {
+      auth_rpc_->unregister_callback();
+      auth_rpc_ = nullptr;
     }
   }
 
@@ -114,7 +129,7 @@ public:
       co_return;
     }
     // Both waits suspend rather than block a pool worker; see [Registration].
-    while (!initialized_.load(std::memory_order_acquire)) {
+    while (!initialized_waiters_.load()) {
       co_await initialized_waiters_.wait(false);
     }
     std::ignore = co_await MempoolEventRpc::wait_for_registration();
@@ -171,7 +186,12 @@ public:
     CHECK(!ready());
 
     Registration::registration().register_coordinator(card);
-    co_await finish_init();
+    try {
+      co_await finish_init();
+    } catch (...) {
+      num_coordinators_registered_.store(0, std::memory_order_relaxed);
+      throw;
+    }
     CHECK(initialized_.load(std::memory_order_acquire));
 
     co_return CoordinatorRegistrationOutcome::CoordinatorRegistrationOK;
@@ -251,7 +271,7 @@ public:
       genesis_value.proposal_header.block_height = 0;
       genesis_value.proposal_header.network_hash = network_hash_;
       genesis_value.proposal_header.config_hash =
-          compute_config_hash(genesis_configuration.storage_cost_model);
+          compute_config_hash(genesis_configuration);
       ret = co_await db_sched_client_->dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (ret != DbSchedResult::DbSchedResultOK) {
@@ -499,16 +519,25 @@ private:
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
-    co_await db_rpc_->register_scheduler(scheduler_);
-    auth_rpc_->register_callback(
-        [this](BlockHeight height, KeyChangeBatch key_changes) {
-          return auth_data_changed(height, std::move(key_changes));
-        });
-
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
-
-    initialized_.store(true, std::memory_order_release);
+    co_await db_rpc_->register_scheduler(scheduler_);
+    const BlockHeight recovered_db_height =
+        last_committed_block_.value.proposal_header.block_height;
+    std::optional<BlockHeight> rejected_auth_height =
+        auth_rpc_->register_callback(
+            recovered_db_height,
+            [this](BlockHeight height, KeyChangeBatch key_changes) {
+              return auth_data_changed(height, std::move(key_changes));
+            },
+            [this] { initialized_.store(true, std::memory_order_release); });
+    if (rejected_auth_height) {
+      co_await db_rpc_->reset_scheduler();
+      throw std::runtime_error(std::format(
+          "auth startup watermark {} is ahead of recovered database height "
+          "{}; partial restart during an in-flight commit is unsupported",
+          *rejected_auth_height, recovered_db_height));
+    }
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }

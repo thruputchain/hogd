@@ -338,7 +338,8 @@ CommonBenchState::run_genesis_configuration(
           cost_model);
   run_genesis_configuration(
       genesis_configuration_builder.build(NetworkHash{}, cost_model,
-                                          *root_contract),
+                                          *root_contract,
+                                          stock_network_config()),
       InitializationBlock{ceremony_txs.begin(), ceremony_txs.end()}, {});
 }
 
@@ -353,7 +354,7 @@ CommonBenchState::run_genesis_configuration(
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     genesis_value.proposal_header.config_hash =
-        compute_config_hash(genesis_configuration.storage_cost_model);
+        compute_config_hash(genesis_configuration);
     auto r =
         coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                           genesis_value);
@@ -402,7 +403,7 @@ CommonBenchState::run_genesis_configuration(
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
   genesis_value.proposal_header.config_hash =
-      compute_config_hash(genesis_configuration.storage_cost_model);
+      compute_config_hash(genesis_configuration);
   auto r =
       coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                         genesis_value);

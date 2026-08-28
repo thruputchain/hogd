@@ -90,8 +90,12 @@ public:
               .storage_long_hash = {},
               .value = value,
               // No genesis runs against this server; serve the production
-              // native wallet so root-fallback behavior matches a real chain.
-              .default_wallet = native_default_wallet_hash()};
+              // native wallet so root-fallback behavior matches a real chain,
+              // and this build's stock execution parameters. A
+              // default-constructed NetworkConfig would cap the cross-invoke
+              // depth at zero and fault every invoke.
+              .default_wallet = native_default_wallet_hash(),
+              .network_config = stock_network_config()};
     return out;
   }
 

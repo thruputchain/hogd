@@ -11,6 +11,7 @@
 #include "genesis.hh"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "rpc_types.hh"
 
 // Data structures to manage a possibly-forking tree of blocks.
@@ -66,6 +67,12 @@ public:
     return *default_wallet_;
   }
 
+  NetworkConfig const &get_network_config() const
+  {
+    assert(network_config_.has_value());
+    return *network_config_;
+  }
+
 private:
   // One block.
   // Does not own a reference to children.
@@ -110,6 +117,9 @@ private:
 
   std::optional<const StorageCostModel> cost_model_;
   std::optional<DeployedContractHash> default_wallet_;
+  // The chain's execution parameters: handed to the executor in the DbTip and
+  // committed to through the config hash preimage.
+  std::optional<NetworkConfig> network_config_;
 
   // remove the block, and all of its children
   // returns the block_data_ for each block that was removed;
