@@ -681,8 +681,19 @@ Scheduler::process_transfers_helper(const Delta &delta,
         from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
     uint128_t to_schedule_hogs =
         from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
-    CHECK_LE(num_received_abs,
-             to_schedule_hogs + already_scheduled_hogs + received_hogs);
+    // The credit branch above keeps new rows within a representable aggregate
+    // total, but a row persisted by older code (before that guard existed) can
+    // still sum to more than UINT128_MAX. Only compute the availability sum
+    // when it does not overflow; when it does, the aggregate necessarily
+    // exceeds any int128 debit amount, so availability is guaranteed and the
+    // deduction below is unaffected. This avoids wrapping the sum below
+    // [num_received_abs] and tripping the fatal check on such rows.
+    if (!uint128_add_would_overflow(to_schedule_hogs, already_scheduled_hogs) &&
+        !uint128_add_would_overflow(to_schedule_hogs + already_scheduled_hogs,
+                                    received_hogs)) {
+      CHECK_LE(num_received_abs,
+               to_schedule_hogs + already_scheduled_hogs + received_hogs);
+    }
 
     uint128_t to_deduct = std::min(num_received_abs, received_hogs);
     num_received_abs -= to_deduct;

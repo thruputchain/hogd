@@ -574,6 +574,38 @@ TEST(Scheduler, ProcessTransfersDropsCreditThatOverflowsAggregateTotal)
   }
 }
 
+TEST(Scheduler, ProcessTransfersDebitsRowWithAlreadyOverflowedAggregate)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  constexpr auto kGas = static_cast<uint128_t>(5'000'000'000);
+  const auto kMax =
+      static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
+
+  // Simulate a row persisted by older code whose groups are each
+  // representable but whose exact aggregate already exceeds UINT128_MAX
+  // (2 * kMax + kGas). A representable debit against it must not wrap the
+  // availability sum and abort.
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, kMax);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0, kMax);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, kGas);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  HogsTransferred transfer;
+  transfer.block = 1;
+  transfer.deltas.push_back(
+      Delta{.address = account,
+            .hog_delta = to_xdr(-static_cast<int128_t>(kGas))});
+  scheduler->process_transfers(transfer)();
+
+  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+            static_cast<uint128_t>(0));
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), kMax);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kMax);
+}
+
 TEST(Scheduler, CycleAccountWhenGasInsufficient)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
