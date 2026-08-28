@@ -168,8 +168,8 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   {
     DaemonProcess event =
         DaemonProcess::start(HOG_EVENT_BINARY,
-                             event_args(mempool_addr, work_dir.directory(),
-                                        0, 0, 0, 0));
+                             event_args(mempool_addr, work_dir.directory(), 0,
+                                        0, 0, 0));
     event.wait_until_log_contains("event initialization complete.");
     event_exec_port = event.require_port("event.exec");
     event_indexer_port = event.require_port("event.indexer");
