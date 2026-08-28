@@ -8,8 +8,19 @@ set -x
 
 git init -q .
 git remote remove origin 2>/dev/null || true
+# Retry the network-facing git steps: github.com drops SSH sessions when the
+# hog fleet clones in lockstep. See "Cloning on the hog hosts" in README-ci.md.
+hog_git_retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    "$@" && return 0
+    echo "hog_git_retry: [$*] failed (attempt ${attempt}); retrying" >&2
+    sleep $(( attempt * 5 + $$ % 7 ))
+  done
+  "$@"
+}
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+hog_git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout -f -q {{ .git_commit }} -- scripts/ci/warm_ccache_hog_sched_job.sh
 set +x
 CARGO_REGISTRIES_GROUNDHOG_TOKEN="{{ .cargo_registry_token }}" \

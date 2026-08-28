@@ -3,6 +3,36 @@
 - Core dumps are saved to `../core_dumps`
 	- On the hogN machines: this is `$WORK_DIR/hogd/core_dumps`.  Usually `$WORK_DIR=/home/hogci/actions-runner/_work`, although on `hog11` this is `/home/hogci/general_runner/_work`
 
+# Cloning on the hog hosts
+
+Every job in `scripts/schedules/*.toml` starts by cloning `hogd` onto each hog
+host it holds a lock for. All of those hosts run their `git fetch` in the same
+instant, and `hog_sched` releases queued jobs in a batch, so a backlog draining
+means several jobs' worth of hosts open SSH sessions to `github.com` within a
+few seconds of each other. GitHub caps concurrent SSH sessions and drops the
+excess:
+
+```
+Connection closed by 140.82.116.3 port 22
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+```
+
+That is a transient rejection, not an auth failure -- the hosts that get
+through are using the same deploy key -- but it exits 128, which kills the
+whole run before a single line is built. Which hosts get dropped varies from
+run to run, so a failure like this is *not* evidence that a particular machine
+is unhealthy.
+
+The clone preamble therefore routes its network-facing git steps (`git fetch`
+and `git submodule update`, the latter fanning out to every submodule) through
+a `hog_git_retry` helper: five retries with linear backoff, offset by `$$ % 7`
+so hosts that were dropped together do not retry in lockstep. A dropped
+connection costs seconds instead of the run. Keep new clone preambles going
+through `hog_git_retry` for the same reason.
+
 # CI runner setup instructions
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
 - Log in as the `hogci` user before completing the remaining steps in this file. You should add you SSH public key to `~hogci/.ssh/authorized_keys` and then ssh in as `hogci`.

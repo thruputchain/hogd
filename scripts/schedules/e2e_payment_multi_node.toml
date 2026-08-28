@@ -9,10 +9,21 @@ set -x
 echo 'cloning hogd'
 git config --global advice.detachedHead false
 git init -q .
+# Retry the network-facing git steps: github.com drops SSH sessions when the
+# hog fleet clones in lockstep. See "Cloning on the hog hosts" in README-ci.md.
+hog_git_retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    "$@" && return 0
+    echo "hog_git_retry: [$*] failed (attempt ${attempt}); retrying" >&2
+    sleep $(( attempt * 5 + $$ % 7 ))
+  done
+  "$@"
+}
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+hog_git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
-git submodule update --init --recursive
+hog_git_retry git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
@@ -83,10 +94,21 @@ set -x
 echo 'cloning hogd'
 git config --global advice.detachedHead false
 git init -q .
+# Retry the network-facing git steps: github.com drops SSH sessions when the
+# hog fleet clones in lockstep. See "Cloning on the hog hosts" in README-ci.md.
+hog_git_retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    "$@" && return 0
+    echo "hog_git_retry: [$*] failed (attempt ${attempt}); retrying" >&2
+    sleep $(( attempt * 5 + $$ % 7 ))
+  done
+  "$@"
+}
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+hog_git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
-git submodule update --init --recursive
+hog_git_retry git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
