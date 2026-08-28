@@ -25,6 +25,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h" // entrypoint_from_method_id
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -37,7 +38,9 @@ namespace hogd {
 inline void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, NetworkHash{}.data());
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db = create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                      genesis_root.size());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }

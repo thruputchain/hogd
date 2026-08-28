@@ -334,11 +334,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("invalid genesis height, network hash, or config hash");
     co_return DbSchedResult::DbSchedResultError;
   }
-  if (!valid_genesis_configuration(genesis_configuration)) {
-    error("genesis root contract must be a non-empty RV32 artifact");
-    co_return DbSchedResult::DbSchedResultError;
-  }
-
   ctx_.set_default_wallet(genesis_configuration.default_wallet);
   ctx_.initialize_cost_model(
       StorageCostModel(genesis_configuration.storage_cost_model));
