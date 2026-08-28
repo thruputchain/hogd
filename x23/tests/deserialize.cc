@@ -617,6 +617,16 @@ template<typename T> struct SlackAllocator {
   constexpr SlackAllocator(const SlackAllocator<U> &) noexcept
   {}
 
+#if defined(__cpp_lib_allocate_at_least)
+  using AllocationResult = std::allocation_result<T *>;
+#else
+  // GCC 15 lacks P0401R6, but Vec only requires these two result members.
+  struct AllocationResult {
+    T *ptr;
+    std::size_t count;
+  };
+#endif
+
   [[nodiscard]] T *allocate(std::size_t n)
   {
     if (n > std::numeric_limits<std::size_t>::max() / sizeof(T))
@@ -626,7 +636,7 @@ template<typename T> struct SlackAllocator {
   }
   // [allocator.requirements]: deallocate may receive any count between the
   // allocate_at_least request and the returned count, inclusive.
-  [[nodiscard]] std::allocation_result<T *> allocate_at_least(std::size_t n)
+  [[nodiscard]] AllocationResult allocate_at_least(std::size_t n)
   {
     return {.ptr = allocate(n + 1), .count = n + 1};
   }
