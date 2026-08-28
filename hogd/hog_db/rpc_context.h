@@ -30,6 +30,7 @@
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
@@ -120,6 +121,14 @@ public:
     cost_model_.emplace(cost_model);
   }
 
+  // Install the chain's execution parameters into the tip. Called at genesis
+  // load, before the genesis commit; update_dbtip preserves the field, so the
+  // commit's write_dbtip persists it.
+  void set_network_config(NetworkConfig const &network_config)
+  {
+    tip_.with([&](DbTip &tip) { tip.network_config = network_config; });
+  }
+
   // Install the chain-configured default wallet into the tip. Called at
   // genesis load, before the genesis commit; update_dbtip preserves the
   // field, so the commit's write_dbtip persists it.
@@ -159,6 +168,9 @@ public:
   // the blocktx is garbage collected.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid, InvokeTX *itx);
 
+  // Advance the committed tip. Carries the chain-configuration fields
+  // (default_wallet, network_config) forward by mutating the tip in place, so
+  // a commit that does not change them leaves them in force.
   HogDbStatus<void> update_dbtip(BlockTXID bid, ConsensusValue value,
                                  const StorageLongHash &db_hash);
 

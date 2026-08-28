@@ -67,10 +67,11 @@ protected:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     GenesisConfiguration genesis_configuration{
+        .network_config = stock_network_config(),
         .root_contract = *load_stock_genesis_root_contract(),
         .default_wallet = native_default_wallet_hash()};
     genesis_value.proposal_header.config_hash =
-        compute_config_hash(genesis_configuration.storage_cost_model);
+        compute_config_hash(genesis_configuration);
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
@@ -797,12 +798,13 @@ TEST(RpcGenesisTest, RejectsMismatchedConfigHash)
       x23::HostPort{"localhost", db_wrapper.coord_port()}, false);
 
   GenesisConfiguration genesis_configuration{
+      .network_config = stock_network_config(),
       .root_contract = *load_stock_genesis_root_contract(),
       .default_wallet = native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
   genesis_value.proposal_header.config_hash =
-      compute_config_hash(genesis_configuration.storage_cost_model);
+      compute_config_hash(genesis_configuration);
   genesis_value.proposal_header.config_hash[0] ^= 1;
 
   EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,

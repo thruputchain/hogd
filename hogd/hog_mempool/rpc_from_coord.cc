@@ -1507,14 +1507,15 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .proposal_txs_hash =
                            finish_nodes.proposal_txs_hash.get(),
                        .upgrades = {}};
-  // default_wallet comes from the committed parent tip: the cache's db_tip
-  // only ever receives storage/event hashes from the scheduler's close
-  // result, never the wallet field.
+  // default_wallet and network_config come from the committed parent tip: the
+  // cache's db_tip only ever receives storage/event hashes from the
+  // scheduler's close result, never the chain-configuration fields.
   nominated_block_cache_.db_tip = DbTip{
       .id = nominated_block_cache_.proposal_result.proposed_block().block_id,
       .storage_long_hash = nominated_block_cache_.db_tip.storage_long_hash,
       .value = std::move(value),
-      .default_wallet = last_committed_block_.default_wallet};
+      .default_wallet = last_committed_block_.default_wallet,
+      .network_config = last_committed_block_.network_config};
   info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
@@ -1731,6 +1732,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
         .storage_long_hash = db_close.block().storage_long_hash,
         .value = value,
         .default_wallet = last_committed_block_.default_wallet,
+        .network_config = last_committed_block_.network_config,
     };
     // These transactions intentionally never entered Scheduler::tx_cache_.
     // The ordinary commit path uses tx_hashes only to evict nominated mempool
@@ -2434,13 +2436,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                              .proposal_header = proposal.header,
                              .proposal_txs_hash = proposal_txs_hash_node.get(),
                              .upgrades = {}};
-        // default_wallet comes from the committed parent tip (see the
-        // nomination-path comment).
+        // default_wallet and network_config come from the committed parent
+        // tip (see the nomination-path comment).
         cache.db_tip =
             DbTip{.id = validation_block_id,
                   .storage_long_hash = cache.db_tip.storage_long_hash,
                   .value = std::move(value),
-                  .default_wallet = last_committed_block_.default_wallet};
+                  .default_wallet = last_committed_block_.default_wallet,
+                  .network_config = last_committed_block_.network_config};
         co_await set_result(SchedulerValidationOutcome::SchedulerValidationOK);
         result.block().block_id = cache.db_tip.id;
         result.block().signed_transactions = {};

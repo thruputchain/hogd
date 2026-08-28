@@ -2279,7 +2279,8 @@ TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis_configuration =
       builder.build(MempoolTestInfra::kNetworkHash,
-                    StorageCostModel::default_cost_model(), *root_contract);
+                    StorageCostModel::default_cost_model(), *root_contract,
+                    stock_network_config());
 
   constexpr size_t kWarmupReads = 100;
   std::atomic<bool> load_done = false;
@@ -2341,7 +2342,7 @@ TEST(Mempool, RuntimeReadinessWaitsForEventAndAllExecutors)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 builder.build(MempoolTestInfra::kNetworkHash,
                               StorageCostModel::default_cost_model(),
-                              *root_contract))(),
+                              *root_contract, stock_network_config()))(),
             DbSchedResult::DbSchedResultOK);
 
   HttpServer health_server;
@@ -2419,7 +2420,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
 
   auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis =
-      builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract);
+      builder.build(MempoolTestInfra::kNetworkHash, cost_model, *root_contract,
+                    stock_network_config());
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 std::move(genesis))(),
             DbSchedResult::DbSchedResultOK);
@@ -2440,8 +2442,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(parent.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
   ASSERT_EQ(parent.db_tip().value.proposal_header.block_height, 0);
-  const ConfigHash expected_config_hash =
-      compute_config_hash(make_config_hash_preimage(cost_model));
+  const ConfigHash expected_config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model, stock_network_config()));
   EXPECT_EQ(parent.db_tip().value.proposal_header.config_hash,
             expected_config_hash);
 
@@ -2530,7 +2532,7 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 builder.build(MempoolTestInfra::kNetworkHash,
                               StorageCostModel::default_cost_model(),
-                              *root_contract))(),
+                              *root_contract, stock_network_config()))(),
             DbSchedResult::DbSchedResultOK);
   server.register_runtime_after_genesis();
 
