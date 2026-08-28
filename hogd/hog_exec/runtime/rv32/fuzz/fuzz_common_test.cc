@@ -95,11 +95,61 @@ TEST(Rv32FuzzDecoderParity, AgreeOverEngineCorpus)
   }
 }
 
+TEST(Rv32FuzzDecoderParity, ProductionGateAgreesOnAcceptRejectOverCorpus)
+{
+  // The scan helpers above are harness-local; production runs
+  // ThreadedMachinePreInstantiation::create. Its accept/reject verdict must
+  // track the canonical decoder on every input the harness can carve.
+  for (uint64_t seed = 0; seed < 32; ++seed) {
+    const std::vector<uint32_t> words =
+        test_corpus::generate_engine_only_program(seed);
+    const std::vector<uint8_t> code = test_program::code_from_words(words);
+    EXPECT_EQ(production_scan_error(code).has_value(),
+              canonical_scan_error(code).has_value())
+        << "seed " << seed;
+  }
+}
+
+TEST(Rv32FuzzDecoderParity, ProductionGateMatchesErrorOnSingleBadWord)
+{
+  // With exactly one invalid word there is no ordering ambiguity, so the
+  // production gate must report the same error code as the canonical decoder.
+  const std::vector<uint32_t> singles = {
+      0x00000000U, // compressed
+      0x0000000bU, // unknown opcode (custom-0)
+      0x30200073U, // SYSTEM, not ecall/ebreak/unimp
+  };
+  for (const uint32_t word : singles) {
+    const std::vector<uint8_t> code = test_program::code_from_words(
+        {test_program::addi(1, 0, 5), word, test_program::addi(2, 0, 6)});
+    const auto canonical = canonical_scan_error(code);
+    ASSERT_TRUE(canonical.has_value()) << std::hex << word;
+    EXPECT_EQ(production_scan_error(code), canonical) << std::hex << word;
+  }
+}
+
+TEST(Rv32FuzzDecoderParity, ProductionGateRejectsMultiErrorProgram)
+{
+  // Two invalid words of different kinds. The canonical decoder scans forward
+  // and reports the first (kUnsupportedInstruction); create()'s backward
+  // lowering reports the last (kUnsupportedSystemInstruction). Both errors
+  // collapse into the same deterministic deploy rejection, so only the
+  // accept/reject verdict is pinned -- deliberately NOT the error code.
+  const std::vector<uint8_t> code =
+      test_program::code_from_words({0xffffffffU, 0x00200073U});
+  const auto canonical = canonical_scan_error(code);
+  ASSERT_TRUE(canonical.has_value());
+  EXPECT_EQ(canonical, ProgramError::kUnsupportedInstruction);
+  EXPECT_TRUE(production_scan_error(code).has_value());
+}
+
 TEST(Rv32FuzzCarveEngineDiff, ClampsGasAndMemAndForcesWordAlignedCode)
 {
   std::vector<uint8_t> data(8, 0xFF); // gas u64 = all ones
   const std::array<uint8_t, 4> mem = {0xFF, 0xFF, 0xFF, 0xFF};
   data.insert(data.end(), mem.begin(), mem.end()); // mem u32 = all ones
+  const std::array<uint8_t, 4> knob = {0, 0, 0, 0};
+  data.insert(data.end(), knob.begin(), knob.end()); // run-gas-cap knob
   // 6 trailing bytes -> exactly one 4-byte word of code (last 2 dropped).
   for (int i = 0; i < 6; ++i) {
     data.push_back(static_cast<uint8_t>(0x13 + i));
@@ -116,9 +166,32 @@ TEST(Rv32FuzzCarveEngineDiff, ClampsGasAndMemAndForcesWordAlignedCode)
 
 TEST(Rv32FuzzCarveEngineDiff, ReturnsNulloptWhenNoFullCodeWord)
 {
-  std::vector<uint8_t> data(8 + 4, 0); // gas + mem headers, zero code bytes
-  data.push_back(0x13);                // 1 stray byte, < one word
+  std::vector<uint8_t> data(8 + 4 + 4, 0); // gas + mem + cap-knob headers
+  data.push_back(0x13);                    // 1 stray byte, < one word
   EXPECT_FALSE(carve_engine_diff_input(data).has_value());
+}
+
+TEST(Rv32FuzzCarveEngineDiff, RunGasCapKnobBiasesSmallAndKeepsProductionCap)
+{
+  // Knob 0 (also what any too-short input reads) keeps the production cap;
+  // every mapped cap stays within [kFuzzMinRunGasCap, kMaxRunGas].
+  EXPECT_EQ(run_gas_cap_from_knob(0), kMaxRunGas);
+  EXPECT_EQ(run_gas_cap_from_knob(4), kMaxRunGas); // any knob % 4 == 0
+  EXPECT_EQ(run_gas_cap_from_knob(1), kFuzzMinRunGasCap);
+  for (uint32_t knob = 0; knob < 512; ++knob) {
+    const uint32_t cap = run_gas_cap_from_knob(knob);
+    EXPECT_GE(cap, kFuzzMinRunGasCap) << "knob " << knob;
+    EXPECT_LE(cap, kMaxRunGas) << "knob " << knob;
+  }
+  // The knob is the third header field: [u64 gas][u32 mem][u32 knob][code].
+  std::vector<uint8_t> data(8 + 4, 0);
+  const std::array<uint8_t, 4> knob_one = {1, 0, 0, 0};
+  data.insert(data.end(), knob_one.begin(), knob_one.end());
+  data.insert(data.end(), {0x13, 0x00, 0x00, 0x00}); // one code word
+  const auto in = carve_engine_diff_input(data);
+  ASSERT_TRUE(in.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(in->max_run_gas, kFuzzMinRunGasCap);
 }
 
 TEST(Rv32FuzzCarveArtifact, ForcesNonEmptyCodeAndClampsMemoryToRemaining)

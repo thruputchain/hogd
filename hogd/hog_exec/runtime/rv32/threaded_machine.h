@@ -116,10 +116,18 @@ public:
   // memory_start) and [memory_start+memory.size(), total_memory_size).
   // `total_memory_size` is the machine's full memory size and must be <=
   // kMaxMemoryBytes; memory_start + memory.size() must be <= total_memory_size.
+  // `max_run_gas` is the chunk cap the lowering splits runs at; production
+  // always uses the default kMaxRunGas. Tests and the engine-diff fuzzer pass
+  // smaller caps so break carriers (and their refund/deficit seams) appear in
+  // short programs instead of requiring >kMaxRunGas of straight-line gas. It
+  // is clamped to [kDivInstructionGas, kMaxRunGas]: the floor keeps a valid
+  // split for every single instruction, the ceiling keeps gas_to_run within
+  // its uint16 field and the deficit overdraft bound.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-         uint32_t memory_start, uint32_t total_memory_size, bool trace);
+         uint32_t memory_start, uint32_t total_memory_size, bool trace,
+         uint32_t max_run_gas = kMaxRunGas);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -1856,8 +1864,12 @@ inline std::expected<ThreadedMachinePreInstantiation, ProgramError>
 ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
                                         uint32_t memory_start,
-                                        uint32_t total_memory_size, bool trace)
+                                        uint32_t total_memory_size, bool trace,
+                                        uint32_t max_run_gas)
 {
+  max_run_gas = std::clamp<uint32_t>(max_run_gas,
+                                     static_cast<uint32_t>(kDivInstructionGas),
+                                     kMaxRunGas);
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
     return std::unexpected(program.error());
@@ -1919,20 +1931,20 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // kMaxRunGas, so a valid split always exists and no program is rejected for
     // run gas.
     const auto self_gas = static_cast<uint32_t>(d.gas);
-    assert(self_gas <= kMaxRunGas &&
+    assert(self_gas <= max_run_gas &&
            "a single instruction's gas must fit within one run chunk");
     bool is_break_here = false;
     uint32_t run_gas = self_gas;
     if (!is_barrier(d.op) && i + 1 < n) {
       const uint32_t candidate = self_gas + exec[i + 1].gas_to_run;
-      if (candidate <= kMaxRunGas) {
+      if (candidate <= max_run_gas) {
         run_gas = candidate;
       }
       else {
         is_break_here = true; // break carrier; run_gas stays self_gas
       }
     }
-    assert(run_gas <= kMaxRunGas);
+    assert(run_gas <= max_run_gas);
     slot.gas_to_run = static_cast<uint16_t>(run_gas);
 
     slot.handler = pick_handler(d.op, trace, is_break_here);
