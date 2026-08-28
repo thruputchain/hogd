@@ -86,13 +86,6 @@ native_default_wallet_hash()
       HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
 }
 
-bool
-valid_genesis_configuration(GenesisConfiguration const &config)
-{
-  return config.root_contract.contract_type() == ContractType::kRv32 &&
-         !config.root_contract.rv32_contract().data.empty();
-}
-
 void
 visit_genesis_execution_prerequisites(
     GenesisConfiguration const &config,
@@ -102,8 +95,6 @@ visit_genesis_execution_prerequisites(
     std::function<void(ContractAddress const &, AddressAuthData const &)> const
         &visit_auth_data)
 {
-  CHECK(valid_genesis_configuration(config));
-
   auto root = std::make_shared<Contract>(config.root_contract);
   visit_contract(root);
   visit_deployment(kGenesisRootContractAddress,
