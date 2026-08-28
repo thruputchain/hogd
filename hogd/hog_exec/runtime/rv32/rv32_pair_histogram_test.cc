@@ -406,7 +406,7 @@ public:
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override
+                   SystemCallHandler *syscall_handler) const override
   {
     const ContractBlob *blob = nullptr;
     if (deployed_contract.entry != nullptr) {

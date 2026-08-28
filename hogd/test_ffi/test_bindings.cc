@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "address_auth.hh"
@@ -24,6 +25,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -39,6 +41,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -238,7 +241,11 @@ enable_syscall_logging(int32_t level) noexcept
 CreateDBResult
 make_new_db(const uint8_t *serialized_cost_model,
             uint32_t serialized_cost_model_len,
-            const uint8_t *serialized_network_hash) noexcept
+            const uint8_t *serialized_network_hash,
+            const uint8_t *serialized_genesis_root_contract,
+            uint32_t serialized_genesis_root_contract_len,
+            const uint8_t *serialized_network_config,
+            uint32_t serialized_network_config_len) noexcept
 {
   // First-use init can fail (allocation failure); return a structured error
   // rather than letting it cross this noexcept boundary (issue #2575).
@@ -255,6 +262,20 @@ make_new_db(const uint8_t *serialized_cost_model,
     std::memcpy(network_hash.data(), serialized_network_hash,
                 network_hash.size());
 
+    if (serialized_genesis_root_contract == nullptr) {
+      return {.db = nullptr, .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+    }
+    Contract genesis_root_contract;
+    try {
+      x23::deserialize(&genesis_root_contract,
+                       x23::BufView{serialized_genesis_root_contract,
+                                    serialized_genesis_root_contract_len});
+    } catch (x23::XdrException const &e) {
+      log_error("error deserializing genesis root contract: {}", e);
+      return {.db = nullptr,
+              .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+    }
+
     StorageCostModelXdr cost_model_xdr =
         StorageCostModel::default_cost_model().to_xdr();
     if (serialized_cost_model != nullptr) {
@@ -268,7 +289,21 @@ make_new_db(const uint8_t *serialized_cost_model,
                 .ffi_error_code = kTestFFIErrorCodeDeserializeError};
       }
     }
-    auto *db = new DBContext(cost_model_xdr, network_hash);
+    NetworkConfig network_config = stock_network_config();
+    if (serialized_network_config != nullptr) {
+      try {
+        x23::deserialize(&network_config,
+                         x23::BufView{serialized_network_config,
+                                      serialized_network_config_len});
+      } catch (x23::XdrException const &e) {
+        log_error("error deserializing network config: {}", e);
+        return {.db = nullptr,
+                .ffi_error_code = kTestFFIErrorCodeDeserializeError};
+      }
+    }
+
+    auto *db = new DBContext(cost_model_xdr, network_hash,
+                             genesis_root_contract, network_config);
     return {.db = db, .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error creating db context: {}", e);
@@ -302,6 +337,34 @@ get_cost_model(void *db) noexcept
     return {.data = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
   } catch (std::exception const &e) {
     log_error("error serializing cost model: {}", e);
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+}
+
+GetNetworkConfigResult
+get_network_config(void *db) noexcept
+{
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!db_context) {
+    return {.data = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+
+  try {
+    // Reading the tip and serializing both allocate; keep them inside the
+    // catch boundary so a std::bad_alloc becomes a structured FFI error
+    // instead of crossing this noexcept helper (issue #2513).
+    auto serialized = x23::serialize(db_context->get_network_config());
+
+    auto buffer = make_new_data_buffer(serialized.size());
+    if (!buffer.has_value()) {
+      return {.data = kNullBuffer, .ffi_error_code = buffer.error()};
+    }
+    std::memcpy(buffer.value().data, serialized.data(), serialized.size());
+    return {.data = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error serializing network config: {}", e);
     return {.data = kNullBuffer,
             .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
   }
@@ -1317,23 +1380,42 @@ extern "C" {
 CreateDBResult
 create_db(const uint8_t *serialized_cost_model,
           uint32_t serialized_cost_model_len,
-          const uint8_t *serialized_network_hash)
+          const uint8_t *serialized_network_hash,
+          const uint8_t *serialized_genesis_root_contract,
+          uint32_t serialized_genesis_root_contract_len,
+          const uint8_t *serialized_network_config,
+          uint32_t serialized_network_config_len)
 {
   hogd::do_ffi_trace(
       "FFI (start): create_db(serialized_cost_model={}, "
-      "serialized_cost_model_len={}, serialized_network_hash={})",
+      "serialized_cost_model_len={}, serialized_network_hash={}, "
+      "serialized_genesis_root_contract={}, "
+      "serialized_genesis_root_contract_len={}, "
+      "serialized_network_config={}, serialized_network_config_len={})",
       static_cast<const void *>(serialized_cost_model),
       serialized_cost_model_len,
-      static_cast<const void *>(serialized_network_hash));
-  auto result =
-      hogd::make_new_db(serialized_cost_model, serialized_cost_model_len,
-                        serialized_network_hash);
+      static_cast<const void *>(serialized_network_hash),
+      static_cast<const void *>(serialized_genesis_root_contract),
+      serialized_genesis_root_contract_len,
+      static_cast<const void *>(serialized_network_config),
+      serialized_network_config_len);
+  auto result = hogd::make_new_db(
+      serialized_cost_model, serialized_cost_model_len, serialized_network_hash,
+      serialized_genesis_root_contract, serialized_genesis_root_contract_len,
+      serialized_network_config, serialized_network_config_len);
   hogd::do_ffi_trace(
       "FFI (end): create_db(serialized_cost_model={}, "
-      "serialized_cost_model_len={}, serialized_network_hash={}) -> {}",
+      "serialized_cost_model_len={}, serialized_network_hash={}, "
+      "serialized_genesis_root_contract={}, "
+      "serialized_genesis_root_contract_len={}, "
+      "serialized_network_config={}, serialized_network_config_len={}) -> {}",
       static_cast<const void *>(serialized_cost_model),
       serialized_cost_model_len,
-      static_cast<const void *>(serialized_network_hash), result);
+      static_cast<const void *>(serialized_network_hash),
+      static_cast<const void *>(serialized_genesis_root_contract),
+      serialized_genesis_root_contract_len,
+      static_cast<const void *>(serialized_network_config),
+      serialized_network_config_len, result);
   return result;
 }
 
@@ -1343,6 +1425,19 @@ get_cost_model(void *db)
   hogd::do_ffi_trace("FFI (start): get_cost_model(db={})", db);
   auto result = hogd::get_cost_model(db);
   hogd::do_ffi_trace("FFI (end): get_cost_model(db={}) -> {}", db, result);
+  return result;
+}
+
+GetNetworkConfigResult
+get_network_config(void *db)
+{
+  hogd::do_ffi_trace("FFI (start): get_network_config(db={})", db);
+  auto result = hogd::get_network_config(db);
+  hogd::do_ffi_trace("FFI (end): get_network_config(db={}) -> "
+                     "ffi_error_code={}, data={}, len={}",
+                     db, static_cast<int>(result.ffi_error_code),
+                     static_cast<const void *>(result.data.data),
+                     result.data.len);
   return result;
 }
 

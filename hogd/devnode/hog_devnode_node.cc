@@ -47,6 +47,7 @@
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
@@ -700,22 +701,12 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
 {
   try {
     indexer_pull_controller_.reset();
-    // [mempool_auth_server_] invokes [MempoolCoordinatorRpc::auth_data_changed]
-    // (which broadcasts on the coordinator's [auth_data_height_]) via the
-    // registered callback, and is destroyed after [mempool_coord_server_].
-    // Unlike ~HogDevnodeNode, this cleanup does not reset [ctx_], so the DB's
-    // auth-change subscription manager does not drain in-flight forwards for
-    // us. Drain the auth server directly -- [~RpcServer] waits for in-flight
-    // handlers -- before the member destructors that run after we rethrow tear
-    // down the coordinator, so no new [auth_data_changed] is delivered past
-    // this point. Note this is necessary but not sufficient: the tail of an
-    // in-flight [auth_data_changed] (the [auth_data_height_] broadcast) runs on
-    // a thread-pool worker after the handler has already been resumed/failed,
-    // so ~RpcServer's drain does not cover it. The coordinator itself closes
-    // that gap by counting [auth_data_changed] in its [pending_detached_-
-    // coroutines_], which ~MempoolCoordinatorRpc waits on. Safe even when
-    // construction failed early: [mempool_auth_server_] is created by its
-    // member initializer.
+    // This cleanup closes the auth server before member destruction reaches
+    // the coordinator. First stop callback admission and drain callbacks that
+    // already captured coordinator state; this also clears the coordinator's
+    // borrowed auth pointer before the server is destroyed. This is also safe
+    // when construction failed before a callback was registered.
+    mempool_coord_server_.impl()->disconnect_auth_callback();
     mempool_auth_server_.reset();
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure
@@ -831,7 +822,12 @@ HogDevnodeNode::reconcile_indexer_with_recovered_tip()
 
   const DbTip tip = ctx_->get_tip();
   const BlockHeight tip_height = tip.value.proposal_header.block_height;
-  const BlockHeight indexed_height = indexer_db_->latest_block();
+  IndexerStatus<BlockHeight> indexed_height_status =
+      indexer_db_->latest_block();
+  if (!indexed_height_status) {
+    throw std::runtime_error("failed to read indexer watermark");
+  }
+  const BlockHeight indexed_height = *indexed_height_status;
   auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
   if (!latest) {
     throw std::runtime_error(
@@ -1105,6 +1101,17 @@ HogDevnodeNode::init_db_backend(
     }
     ctx_->initialize_cost_model(*cost_model);
     recovered_existing_chain_ = true;
+    // Hog ages are scheduler-visible state derived from committed balances,
+    // and nothing republishes them for blocks that committed before this
+    // process started. hog-db's own main does this at startup; a composed
+    // devnode has to as well, or every account reads zero hogs available and
+    // the scheduler discards every transaction it is handed.
+    HogDbStatus<void> reconciled = reconcile_startup_hog_ages(ctx_->get_db());
+    if (!reconciled.has_value()) {
+      throw std::runtime_error(
+          std::format("failed to reconcile startup hog ages: {}",
+                      reconciled.error()));
+    }
     info("recovered hog-devnode database at committed height {}",
          ctx_->get_tip().value.proposal_header.block_height);
   }

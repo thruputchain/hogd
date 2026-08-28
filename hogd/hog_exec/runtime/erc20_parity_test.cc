@@ -589,7 +589,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
@@ -752,7 +753,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
@@ -867,7 +869,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
@@ -1027,7 +1030,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
@@ -1168,7 +1172,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
@@ -1262,7 +1267,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });
@@ -1423,7 +1429,8 @@ protected:
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
     MultiplexedContext ctx(
-        std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+        std::unordered_map<ContractType,
+                           std::pair<RuntimeContext const *, bool>>{
             {ContractType::kRv32, {rv32_ctx.release(), true}},
             {ContractType::kNative, {native_ctx.release(), true}},
         });

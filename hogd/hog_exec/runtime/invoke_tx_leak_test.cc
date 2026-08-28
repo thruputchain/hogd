@@ -52,7 +52,7 @@ public:
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
-                   SystemCallHandler * /*unused*/) override
+                   SystemCallHandler * /*unused*/) const override
   {
     co_return nullptr;
   }
@@ -109,7 +109,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 

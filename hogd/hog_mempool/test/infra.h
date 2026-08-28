@@ -23,6 +23,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -242,6 +243,8 @@ public:
     return *event_sched_server_->impl();
   }
 
+  TestEventAggregator &event_aggregator() { return event_server_; }
+
   void register_runtime_after_genesis()
   {
     register_event_with_mempool();
@@ -301,6 +304,9 @@ private:
         .base_contract_deployment_cost = 12000,
         .contract_deployment_cost_per_byte = 10,
     }));
+    // Placeholder parameters for tests that never load genesis; a genesis
+    // load installs the real ones over these.
+    ctx_->set_network_config(stock_network_config());
   }
 
   HogDbDAO &get_db()

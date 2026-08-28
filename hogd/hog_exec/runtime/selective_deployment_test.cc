@@ -71,7 +71,7 @@ public:
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
-                   SystemCallHandler * /*unused*/) override
+                   SystemCallHandler * /*unused*/) const override
   {
     co_return nullptr;
   }
@@ -131,7 +131,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -323,7 +323,7 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
   NativeContext native_context(std::move(contract_map));
   Rv32Context rv32_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&rv32_context, false}}});
 
@@ -397,7 +397,7 @@ TEST_P(SelectiveDeploymentTest,
   NativeContext native_context(std::move(contract_map));
   Rv32Context rv32_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&rv32_context, false}}});
 
@@ -540,7 +540,7 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
   NativeContext native_context(std::move(contract_map));
   Rv32Context rv32_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&rv32_context, false}}});
 
@@ -584,7 +584,7 @@ TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
   NativeContext native_context({});
   Rv32Context rv32_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&rv32_context, false}}});
 
@@ -645,7 +645,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -743,7 +743,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -914,7 +914,7 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -1078,7 +1078,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -1200,7 +1200,7 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -1275,7 +1275,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 
@@ -1337,7 +1337,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   NativeContext native_context(std::move(contract_map));
   NoopRv32Context noop_context;
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
           {ContractType::kNative, {&native_context, false}},
           {ContractType::kRv32, {&noop_context, false}}});
 

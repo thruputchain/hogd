@@ -14,10 +14,15 @@ namespace hogd {
 
 class HashBuffers {
 public:
+  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers, read off the
+  // db tip when the owning frame starts. It is fixed for the frame's life.
+  explicit HashBuffers(uint32_t max_buffers) : max_buffers_(max_buffers) {}
+
   SyscallStatus<SHA256Hash> finalize(uint32_t index,
                                      size_t *output_size = nullptr);
   SyscallStatus<void> update(uint32_t index, std::span<const std::byte> data,
                              bool reset);
+  SyscallStatus<void> copy(uint32_t src_index, uint32_t dst_index);
 
 private:
   // One incremental hash in progress: a streaming SHA-256 midstate plus the
@@ -36,5 +41,7 @@ private:
                                              std::span<const std::byte> data);
 
   std::unordered_map<uint32_t, Stream> streams_;
+
+  const uint32_t max_buffers_;
 };
 } // namespace hogd

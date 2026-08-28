@@ -140,6 +140,17 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
                 require_field(require_field(*genesis, "storage_cost_model"),
                               "bytestring_cost_per_byte")),
             "10");
+  // The genesis artifact has to carry the execution parameters too: a
+  // consumer that rebuilds the configuration without them would compute a
+  // different config hash and fail genesis load.
+  const json::Value &network_config = require_field(*genesis, "network_config");
+  EXPECT_FALSE(
+      require_string(require_field(network_config, "max_sha256_buffers"))
+          .empty());
+  EXPECT_FALSE(
+      require_string(require_field(network_config, "max_cross_invoke_depth"))
+          .empty());
+
   const json::Value &default_wallet = require_field(*genesis, "default_wallet");
   // Genesis-JSON hashes are unprefixed hex (see contract_hash above);
   // hex_string prepends 0x.

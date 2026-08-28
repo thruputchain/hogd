@@ -21,6 +21,8 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_mempool/config_hash.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
@@ -41,10 +43,13 @@ make_dbauth_client(x23::HostPort const &hostport)
           client.error().error_code().message());
   return std::move(*client);
 }
+
 } // namespace
 
 DBContext::DBContext(StorageCostModelXdr const &cost_model,
-                     NetworkHash network_hash)
+                     NetworkHash network_hash,
+                     Contract const &genesis_root_contract,
+                     NetworkConfig const &network_config)
   : db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
@@ -73,14 +78,17 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  auto root_contract = load_stock_genesis_root_contract();
   GenesisConfiguration genesis_configuration{.network_hash = {},
                                              .storage_cost_model = cost_model,
-                                             .root_contract = *root_contract,
+                                             .network_config = network_config,
+                                             .root_contract =
+                                                 genesis_root_contract,
                                              .default_wallet =
                                                  native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration);
   auto res =
       db_sched_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                           genesis_value);

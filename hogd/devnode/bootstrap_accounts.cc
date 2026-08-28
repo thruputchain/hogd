@@ -92,7 +92,8 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
   return BootstrapAccountArtifact{
       .genesis_configuration =
           builder.build(network_hash, cost_model,
-                        *load_stock_genesis_root_contract()),
+                        *load_stock_genesis_root_contract(),
+                        stock_network_config()),
       .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
   };

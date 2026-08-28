@@ -32,13 +32,15 @@ write_file(const std::filesystem::path &path, std::span<const uint8_t> bytes)
 }
 
 // Engine-diff seed layout must match carve_engine_diff_input:
-// [u64 gas][u32 memory_bytes][code bytes].
+// [u64 gas][u32 memory_bytes][u32 run-gas-cap knob][code bytes]. Knob 0 maps
+// to the production kMaxRunGas cap (see run_gas_cap_from_knob).
 std::vector<uint8_t>
-engine_diff_seed(const std::vector<uint32_t> &words)
+engine_diff_seed(const std::vector<uint32_t> &words, uint32_t run_cap_knob = 0)
 {
   std::vector<uint8_t> seed;
   test_artifact::append_u64(seed, kFuzzGasCap);
   test_artifact::append_u32(seed, kFuzzMemCap);
+  test_artifact::append_u32(seed, run_cap_knob);
   const std::vector<uint8_t> code = test_program::code_from_words(words);
   seed.insert(seed.end(), code.begin(), code.end());
   return seed;
@@ -81,6 +83,16 @@ try {
         engine_diff_seed(test_corpus::generate_engine_only_program(seed));
     write_file(engine_dir / ("engine_" + std::to_string(seed) + ".bin"), bytes);
   }
+
+  // Break-carrier seed: knob 1 maps to the smallest run-gas cap
+  // (kFuzzMinRunGasCap = one div), so this straight line of divs lowers with a
+  // carrier at nearly every slot, putting the chunk-split refund and deficit
+  // seams in the fuzzer's starting coverage; at the production cap they are
+  // unreachable within kFuzzGasCap.
+  std::vector<uint32_t> carrier_words(48, test_program::op(3, 1, 2, 4, 0x01));
+  carrier_words.push_back(0x00000073U); // ecall
+  write_file(engine_dir / "engine_carrier.bin",
+             engine_diff_seed(carrier_words, /*run_cap_knob=*/1));
 
   std::cerr << "wrote seeds under " << root << "\n";
   return 0;

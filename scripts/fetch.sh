@@ -9,15 +9,15 @@ cd "${ROOT_DIR}/hogd/rust" && cargo fetch
 
 set -ex
 
-# The 0.9.0 tools depend on crates with rust-version 1.96, which is newer than
+# The 0.10.x tools depend on crates with rust-version 1.96, which is newer than
 # the default toolchain on some CI images -- install with a pinned toolchain.
 TOOL_RUST=1.96.0
 rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
 echo "Installing groundhog-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.9.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.10.2
 
 echo "Installing groundhog-rv32-lower..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://groundhog.dev/crates/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.9.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.10.2

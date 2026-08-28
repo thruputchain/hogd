@@ -12,7 +12,7 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.9.0"
+EXPECTED_VERSION="groundhog 0.10.2"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
 if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
     echo "error: expected '${EXPECTED_VERSION}', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2
@@ -53,12 +53,12 @@ INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
 # the groundhog project, so run from this script's directory regardless of the
 # caller's working directory. Pass remaining args through to cargo.
 cd "${SCRIPT_DIR}"
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --target rv32 --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@")
+OUTPUT=$(groundhog build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@")
 
 # Parse output paths from JSON
 RV32_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.rv32')
 METADATA_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.metadata')
-SPEC_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.spec_json')
+SPEC_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.specJson')
 
 if [ -z "${RV32_PATH}" ] || [ "${RV32_PATH}" = "null" ]; then
     echo "error: groundhog build failed for ${TARGET_NAME}" >&2

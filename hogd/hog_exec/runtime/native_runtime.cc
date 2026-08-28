@@ -91,7 +91,7 @@ NativeContract::invoke_impl(function_t const &fn,
 
 x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 NativeContext::make_new_runtime(DeployedContract const &deployed_contract,
-                                SystemCallHandler *syscall_handler)
+                                SystemCallHandler *syscall_handler) const
 {
   DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type != ContractType::kNative) {
@@ -133,7 +133,7 @@ NativeContext::make_new_runtime(DeployedContract const &deployed_contract,
   co_return std::make_unique<NativeRuntime>(*it->second, syscall_handler);
 }
 
-NativeRuntime::NativeRuntime(NativeContract &contract,
+NativeRuntime::NativeRuntime(NativeContract const &contract,
                              SystemCallHandler *syscall_handler)
   : Runtime(syscall_handler), contract_(contract)
 {}

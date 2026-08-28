@@ -768,12 +768,14 @@ SystemCallHandler::validate_new_invocation(
   if (!validate_invoke_flags(flags)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  // Above the auth-token check, so a reentrant invoke reports kReentrance even
+  // when the caller also forwarded a token it does not own (#2973).
+  if (invocation_frame_stack_.has_active_frame_for(address)) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+  }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
   }
   return {};
 }
@@ -805,6 +807,24 @@ SystemCallHandler::invoke(ContractAddress const &address,
           validate_new_invocation(address, flags, owned_auth_token_ids);
       !admitted.has_value()) {
     co_return invoke_result_t{admitted.error(), 0};
+  }
+
+  // A chain bounds how many invocation frames one transaction may have open at
+  // once. Every open frame holds a live contract runtime, so without this a
+  // recursive call chain grows until the executor cannot hold it -- and unlike
+  // the TryInvoke cap, which HogDb's savepoint stack bounds independently, a
+  // plain invoke had nothing stopping it.
+  //
+  // Report exceeding it as a faulted child frame, the same outcome the
+  // TryInvoke cap produces, rather than as a system error: every node reads
+  // the same limit from the same tip, so the rejection is deterministic and
+  // the block still commits.
+  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
+  if (!max_depth.has_value()) {
+    return {max_depth.error(), 0};
+  }
+  if (invocation_frame_stack_.size() >= *max_depth) {
+    return {InvocationFrameStatusCode::Fault, 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
@@ -957,9 +977,16 @@ SystemCallHandler::start_frame(
   // here rather than terminating through the noexcept boundary.
   auto admitted = [&]() -> SystemStatus<void> {
     try {
+      // The frame's hash-buffer limit is fixed at admission, so a syscall
+      // enforcing it has no tip read left to fail on.
+      auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
+      if (!max_buffers.has_value()) {
+        return std::unexpected(max_buffers.error());
+      }
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids);
+                                                 flags, owned_auth_token_ids,
+                                                 *max_buffers);
     } catch (std::exception const &e) {
       try {
         error("unrecoverable: frame admission threw: {}", e.what());
@@ -2271,6 +2298,15 @@ SystemCallHandler::sha256_update(uint32_t input_index,
   assert(!invocation_frame_stack_.empty());
   return invocation_frame_stack_.get_active_frame_hash_buffers().update(
       input_index, input_buffer, input_reset);
+}
+
+SyscallStatus<void>
+SystemCallHandler::sha256_copy(uint32_t input_src_index,
+                               uint32_t input_dst_index)
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
+      input_src_index, input_dst_index);
 }
 
 SyscallStatus<SHA256Hash>

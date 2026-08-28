@@ -37,7 +37,7 @@ public:
 
   x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override;
+                   SystemCallHandler *syscall_handler) const override;
 
 private:
   std::unordered_map<int32_t, RuntimeContractImage> contracts_;

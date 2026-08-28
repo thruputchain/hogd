@@ -74,10 +74,11 @@
 //   but cannot itself be co_awaited.  This is useful for completing
 //   work in the background.
 //
-// * Any function returning void whose final argument is a
-//   Callback-like type (meaning Callback<T> or any other movable type
-//   for which callback_traits has been specialized) can be a
-//   co_routine if it returns via "co_return t" for some t of type T.
+// * Any function returning void or (preferably) CoResume whose final
+//   argument is a Callback-like type (meaning Callback<T> or any
+//   other movable type for which callback_traits has been
+//   specialized) can be a co_routine if it returns via "co_return t"
+//   for some t of type T.
 //
 // * If a coroutine's return_value function expects type
 //   std::expected<T, E> and the coroutine has an object r of type
@@ -124,6 +125,31 @@
 #include <x23/utility.h>
 
 namespace x23 {
+
+// This is an otherwise useless return value that resumes a coroutine
+// on its destruction.  It's useful in cases where a coroutine could
+// possibly suspend itself and resume itself in another thread before
+// the coroutine function returns.
+struct CoResume {
+  constexpr CoResume() noexcept = default;
+  explicit CoResume(std::coroutine_handle<> h) noexcept : h_(h) {}
+  CoResume(CoResume &&other) noexcept : h_(std::exchange(other.h_, {})) {}
+  ~CoResume()
+  {
+    if (h_)
+      h_();
+  }
+
+  CoResume &operator=(CoResume &&other) noexcept
+  {
+    if (auto oldh = std::exchange(h_, std::exchange(other.h_, {})))
+      oldh();
+    return *this;
+  }
+
+private:
+  std::coroutine_handle<> h_;
+};
 
 // A Callback is just a std::function of 0-1 arguments, but we use a
 // distinguished type to ensure template specializations don't affect
@@ -185,12 +211,19 @@ template<> struct CoroDoReturn<void> : PromiseBase {
 
 // This type allows you to co_return from a function whose final
 // argument is a callback.
-template<typename... Args> requires is_callback_like<LastType<Args...>>
+template<typename Return, typename... Args>
+requires is_callback_like<LastType<Args...>>
 struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
   using CB = LastType<Args...>;
   using argument_type = CallbackArgType<CB>;
   using super = CoroDoReturn<argument_type>;
   using super::kReturnValue;
+  // We would like to return CoResume from get_return_object() always.
+  // This works fine in gcc, but causes an internal compiler error
+  // with clang 22.  The C++ spec is a bit ambiguous on this
+  // matter--if get_return_object() is void the coroutine function
+  // must be void, while the converse isn't explicitly specified.
+  static constexpr bool kInitialSuspend = std::same_as<Return, CoResume>;
   CB cb_;
 
   // Note the coroutine should not touch its final argument (the
@@ -203,8 +236,37 @@ struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
   {}
   CallbackPromise(const CallbackPromise &) = delete;
 
-  void get_return_object() const noexcept {}
-  std::suspend_never initial_suspend() const noexcept { return {}; }
+  // If you hit this warning, you are taking a function that takes a
+  // callback and returns void and implementing the function as a
+  // coroutine.  In such cases, you need to ensure coroutine doesn't
+  // suspend itself, then resume, return, and destroy itself in a
+  // different thread all before the coroutine ramp function has
+  // returned in the original thread.  If you can't ensure that, there
+  // will be a use-after-free error on the resumption index in the
+  // coroutine object, which is touched by the ramp function.  A safer
+  // approach is for the function taking a callback to return
+  // x23::CoResume, in which case we can resume the coroutine after
+  // the ramp function as returned.
+  template<bool B = kInitialSuspend> requires (B == kInitialSuspend && !B)
+  [[deprecated("return CoResume rather than void from coroutine callback")]]
+  static void get_return_object() noexcept
+  {}
+
+  template<bool B = kInitialSuspend> requires (B == kInitialSuspend && B)
+  CoResume get_return_object() noexcept
+  {
+    return CoResume{
+        std::coroutine_handle<CallbackPromise>::from_promise(*this)};
+  }
+
+  auto initial_suspend() const noexcept
+  {
+    if constexpr (kInitialSuspend)
+      return std::suspend_always{};
+    else
+      return std::suspend_never{};
+  }
+
   void do_return(auto &&...v) requires (sizeof...(v) == kReturnValue)
   {
     std::invoke(std::move(cb_), std::forward<decltype(v)>(v)...);
@@ -216,20 +278,20 @@ struct CallbackPromise : CoroDoReturn<CallbackArgType<LastType<Args...>>> {
 } // namespace detail
 } // namespace x23
 
-template<typename... Args>
+template<x23::is_one_of<x23::CoResume, void> R, typename... Args>
 requires x23::detail::is_callback_like<x23::LastType<Args...>>
-struct std::coroutine_traits<void, Args...> {
-  using promise_type = x23::detail::CallbackPromise<Args...>;
+struct std::coroutine_traits<R, Args...> {
+  using promise_type = x23::detail::CallbackPromise<R, Args...>;
 };
 
-template<typename... Args>
+template<x23::is_one_of<x23::CoResume, void> R, typename... Args>
 requires x23::has_location<Args...> &&
          x23::detail::is_callback_like<
              x23::TypeNum<sizeof...(Args) - 2, Args...>>
-struct std::coroutine_traits<void, Args...> {
+struct std::coroutine_traits<R, Args...> {
   using promise_type = decltype([]<std::size_t... N>(std::index_sequence<N...>)
                                     -> x23::detail::CallbackPromise<
-                                        x23::TypeNum<N, Args...>...> {
+                                        R, x23::TypeNum<N, Args...>...> {
     throw;
   }(std::make_index_sequence<sizeof...(Args) - 1>{}));
 };
@@ -562,8 +624,8 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto /*cb*/
-                      SLOC_DECL) // NOLINT(misc-unused-parameters)
+  CoResume operator()(detail::is_callback_of<R> auto /*cb*/
+                          SLOC_DECL) // NOLINT(misc-unused-parameters)
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
@@ -718,9 +780,15 @@ struct MaybeAsync : void_variant<Awaitable, T> {
   decltype(auto) operator()(Args &&...args)
       noexcept(noexcept((*asyncp())(std::declval<Args>()...)))
   {
+    using async_result = decltype((*asyncp())(std::declval<Args>()...));
+
     if (has_value()) {
       if constexpr (sizeof...(Args) == 0)
         return xval();
+      else if constexpr (std::same_as<async_result, CoResume>) {
+        compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
+        return CoResume{};
+      }
       else
         return compose(std::forward<Args>(args)..., &MaybeAsync::xval, this);
     }

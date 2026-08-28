@@ -33,6 +33,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/shared.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
@@ -337,7 +338,8 @@ CommonBenchState::run_genesis_configuration(
           cost_model);
   run_genesis_configuration(
       genesis_configuration_builder.build(NetworkHash{}, cost_model,
-                                          *root_contract),
+                                          *root_contract,
+                                          stock_network_config()),
       InitializationBlock{ceremony_txs.begin(), ceremony_txs.end()}, {});
 }
 
@@ -351,6 +353,8 @@ CommonBenchState::run_genesis_configuration(
   {
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
+    genesis_value.proposal_header.config_hash =
+        compute_config_hash(genesis_configuration);
     auto r =
         coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                           genesis_value);
@@ -401,6 +405,8 @@ CommonBenchState::run_genesis_configuration(
   assert(block_number_ == 0);
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration);
   auto r =
       coord_client_->dbsched_load_genesis_configuration(genesis_configuration,
                                                         genesis_value);

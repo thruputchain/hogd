@@ -2,11 +2,13 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <optional>
 
 #include "auth_rpc.hh"
+#include "contract.hh"
 #include "db_sched.hh"
 #include "event.hh"
 #include "hogd/base/log.h"
@@ -17,6 +19,7 @@
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
@@ -31,7 +34,18 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash);
+  // `genesis_root_contract` is installed (without artifact verification) as
+  // the genesis root deployment; it can be any contract type genesis
+  // validation accepts, a mock contract included. Test consumers execute
+  // contract bodies through the mock trampoline, so the contract's code
+  // never runs -- only the deployment exists.
+  //
+  // `network_config` is the chain's execution parameters; the protocol sets
+  // no value for any of them, so a caller that does not care can pass
+  // stock_network_config().
+  DBContext(StorageCostModelXdr const &cost_model, NetworkHash network_hash,
+            Contract const &genesis_root_contract,
+            NetworkConfig const &network_config);
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
@@ -100,6 +114,15 @@ public:
   }
 
   auto &get_base_db() { return hog_db_wrapper_; }
+
+  // The execution parameters in force, read back off the committed tip -- the
+  // same place the executor reads them from.
+  NetworkConfig get_network_config()
+  {
+    auto dbtip = get_base_db().get_db().read_dbtip();
+    CHECK(dbtip.has_value());
+    return dbtip->network_config;
+  }
 
   std::optional<WireStorageItem>
   get_snapshot_item(AddressAndKey const &addrkey);

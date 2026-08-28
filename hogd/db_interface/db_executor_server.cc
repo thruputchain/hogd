@@ -261,7 +261,8 @@ DbExecutorRpc::get_db_tip(BlockID block_id)
   out.db_tip() = DbTip{.id = block_manager_->committed_tip_id(),
                        .storage_long_hash = {},
                        .value = value,
-                       .default_wallet = block_manager_->get_default_wallet()};
+                       .default_wallet = block_manager_->get_default_wallet(),
+                       .network_config = block_manager_->get_network_config()};
   return out;
 }
 

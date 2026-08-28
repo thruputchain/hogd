@@ -38,7 +38,10 @@ members = [
     "integration_test_contracts/tuple_return",
     "integration_test_contracts/txs_roundtrip",
     "integration_test_contracts/view_gateway_test",
+    "local_test_contracts/airdrop_faucet",
     "local_test_contracts/auth_weight_test",
+    "local_test_contracts/drip_faucet",
+    "local_test_contracts/faucet_caller",
     "local_test_contracts/tx_context_test",
 ]
 
@@ -59,10 +62,10 @@ sdk = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 groundhog-rv32-runtime = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 # default features include std, which cannot build for the on-chain targets
 groundhog-domain-separator = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git", default-features = false }
-groundhog-xdr = { registry = "groundhog", version = "0.20", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.20" }
-xdrs = { registry = "groundhog", version = "0.8.1", features = ["int128", "heapless"] }
-sha2 = { version = "0.10.8", default-features = false }
+groundhog-xdr = { registry = "groundhog", version = "0.24.0", features = ["xdrs", "syscalls"] }
+groundhog-syscall = { registry = "groundhog", version = "0.24.0" }
+xdrs = { registry = "groundhog", version = "0.8.2", features = ["int128", "heapless"] }
+sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }

@@ -36,3 +36,20 @@ directories.
 - `auth_weight_test` — auth-configuration syscalls from a guest frame:
   WriteAddressRequiredWeight (happy path + read-only-frame rejection) and
   GetAuthClaim. Driven by `hogd/hog_exec/runtime/auth_weight_tests.cc`.
+- `airdrop_faucet` — a genesis ROOT contract for testnet-style chains: mints
+  any requested amount to the caller (the native token's mint is gated on the
+  genesis-root address). Its first claim also funds the token contract's own
+  storage rows and its own, the faucet analog of the stock ceremony's
+  token_funding and root_funding mints; an exclusive set on a marker key makes
+  that bootstrap one-time, since a guard on a commutative balance would let
+  concurrent first claims each mint the funding.
+  Driven by `hogd/hog_exec/runtime/faucet_scenario_test.cc`.
+- `drip_faucet` — a rate-limited genesis ROOT contract: at most 100 native
+  tokens per 5-block window, globally, tracked with a CapacityConstraint so
+  concurrent same-window claims compose and only aggregate overdraws are
+  rejected (at block packing). Driven by
+  `hogd/hog_exec/runtime/faucet_scenario_test.cc`.
+- `faucet_caller` — a contract-shaped faucet user for the bootstrap-loop
+  scenario: deployed through the default wallet by an airdrop-funded pubkey
+  account, then claims from the faucet for itself. Driven by
+  `hogd/hog_exec/runtime/faucet_scenario_test.cc`.

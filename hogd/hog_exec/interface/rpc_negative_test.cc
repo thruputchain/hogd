@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
@@ -65,8 +66,11 @@ protected:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     GenesisConfiguration genesis_configuration{
+        .network_config = stock_network_config(),
         .root_contract = *load_stock_genesis_root_contract(),
         .default_wallet = native_default_wallet_hash()};
+    genesis_value.proposal_header.config_hash =
+        compute_config_hash(genesis_configuration);
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);
@@ -780,6 +784,27 @@ TEST(RpcGenesisTest, RejectsNonGenesisHeight)
   genesis_value.proposal_header.block_height = -1;
   GenesisConfiguration genesis_configuration{.default_wallet =
                                                  native_default_wallet_hash()};
+
+  EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,
+                                                         genesis_value),
+            DbSchedResult::DbSchedResultError);
+}
+
+TEST(RpcGenesisTest, RejectsMismatchedConfigHash)
+{
+  HogdbWrapper db_wrapper;
+  auto db_client = make_srpc_multiclient<DbSched1>(
+      x23::HostPort{"localhost", db_wrapper.coord_port()}, false);
+
+  GenesisConfiguration genesis_configuration{
+      .network_config = stock_network_config(),
+      .root_contract = *load_stock_genesis_root_contract(),
+      .default_wallet = native_default_wallet_hash()};
+  ConsensusValue genesis_value{};
+  genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.config_hash =
+      compute_config_hash(genesis_configuration);
+  genesis_value.proposal_header.config_hash[0] ^= 1;
 
   EXPECT_EQ(db_client.dbsched_load_genesis_configuration(genesis_configuration,
                                                          genesis_value),

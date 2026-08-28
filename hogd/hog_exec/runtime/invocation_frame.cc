@@ -39,9 +39,11 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags,
                                  size_t event_count,
                                  std::span<uint32_t const> owned_auth_token_ids,
-                                 uint32_t inherited_try_invoke_depth)
-  : address_(address), calldata_(std::forward<Calldata>(calldata)),
-    flags_(flags), event_count_(event_count),
+                                 uint32_t inherited_try_invoke_depth,
+                                 uint32_t max_sha256_buffers)
+  : hash_buffers_(max_sha256_buffers), address_(address),
+    calldata_(std::forward<Calldata>(calldata)), flags_(flags),
+    event_count_(event_count),
     total_try_invoke_depth_(inherited_try_invoke_depth),
     owned_auth_token_ids_(owned_auth_token_ids.begin(),
                           owned_auth_token_ids.end())
@@ -261,7 +263,7 @@ InvocationFrame::collect_storage_deltas(
 SystemStatus<void>
 InvocationFrameStack::start_frame(
     ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
-    std::span<uint32_t const> owned_auth_token_ids)
+    std::span<uint32_t const> owned_auth_token_ids, uint32_t max_sha256_buffers)
 {
   assert(frame_stack_.empty() || check_auth_tokens_owned(owned_auth_token_ids));
 
@@ -281,7 +283,8 @@ InvocationFrameStack::start_frame(
   // guarantee: on throw the stack is unchanged.
   try {
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
-                              event_count, owned_auth_token_ids, parent_depth);
+                              event_count, owned_auth_token_ids, parent_depth,
+                              max_sha256_buffers);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }

@@ -39,7 +39,7 @@ public:
 
   x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,
-                   SystemCallHandler *syscall_handler) override;
+                   SystemCallHandler *syscall_handler) const override;
 
   InvokeErrorCode verify_contract(Contract const &contract) const override
   {

@@ -72,7 +72,7 @@ MockRuntime::invoke_off_pool(MethodID method_id)
 
 x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
 MockRuntimeContext::make_new_runtime(DeployedContract const &deployed_contract,
-                                     SystemCallHandler *syscall_handler)
+                                     SystemCallHandler *syscall_handler) const
 {
   DeployedContractHash const &deployed_contract_hash = deployed_contract.hash;
   if (deployed_contract_hash.contract_type == ContractType::kMockTest) {

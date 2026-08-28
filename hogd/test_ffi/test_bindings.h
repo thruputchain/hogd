@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 23
+#define TEST_FFI_VERSION_MINOR 26
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -143,6 +143,11 @@ struct GetCostModelResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
+struct GetNetworkConfigResult {
+  struct FFIDataBuffer data;
+  enum TestFFIErrorCode ffi_error_code;
+};
+
 struct FFISerializedAddressAndKey {
   const uint8_t *data;
   uint32_t len;
@@ -154,12 +159,31 @@ struct GetSnapshotStorageItemResult {
   enum TestFFIErrorCode ffi_error_code;
 };
 
+// serialized_genesis_root_contract is an XDR-serialized Contract of any
+// deployable type, installed (without artifact verification) as the genesis
+// root deployment; it must be non-null and deserialize. Consumers execute
+// contract bodies through the mock trampoline, so the contract's code never
+// runs -- callers that never invoke real genesis code can pass a mock
+// contract.
+//
+// serialized_cost_model and serialized_network_config are optional: pass null
+// for either and genesis takes this build's stock values. Supply one to run
+// the chain under different parameters -- serialized_network_config is an
+// XDR-serialized NetworkConfig, and it changes the genesis config hash, so a
+// caller cannot mix a config in here with a hash computed elsewhere.
 struct CreateDBResult create_db(const uint8_t *serialized_cost_model,
                                 uint32_t serialized_cost_model_len,
-                                const uint8_t *serialized_network_hash);
+                                const uint8_t *serialized_network_hash,
+                                const uint8_t *serialized_genesis_root_contract,
+                                uint32_t serialized_genesis_root_contract_len,
+                                const uint8_t *serialized_network_config,
+                                uint32_t serialized_network_config_len);
 enum TestFFIErrorCode free_db(void *ptr);
 
 struct GetCostModelResult get_cost_model(void *db);
+// The execution parameters the chain is running under, read off the committed
+// tip. Serialized NetworkConfig; free with free_ffi_data_buffer().
+struct GetNetworkConfigResult get_network_config(void *db);
 struct GetSnapshotStorageItemResult
 get_snapshot_storage_item(void *db, struct FFISerializedAddressAndKey addrkey);
 

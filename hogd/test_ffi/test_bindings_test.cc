@@ -25,6 +25,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -32,8 +33,10 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -62,7 +65,9 @@ constexpr NetworkHash kTestNetworkHash{0x5a};
 void *
 make_db()
 {
-  auto db = create_db(nullptr, 0, kTestNetworkHash.data());
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                      genesis_root.size(), nullptr, 0);
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }
@@ -836,9 +841,11 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   auto serialized_model = x23::serialize(custom_model);
 
   // Create a DB seeded with the custom cost model.
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto db_result = create_db(serialized_model.data(),
                              static_cast<uint32_t>(serialized_model.size()),
-                             NetworkHash{}.data());
+                             NetworkHash{}.data(), genesis_root.data(),
+                             genesis_root.size(), nullptr, 0);
   ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(db_result.db, nullptr);
   x23::Defer d([&] { free_db(db_result.db); });
@@ -856,6 +863,80 @@ TEST(TestBindingsTest, CostModelRoundtrip)
                    x23::BufView{cost_result.data.data, cost_result.data.len});
 
   EXPECT_EQ(custom_model, roundtripped);
+}
+
+// The network config is optional in the same way the cost model is: absent
+// means this build's stock values, supplied means genesis runs under exactly
+// what was handed in. Reading it back off the committed tip is what the
+// executor does, so a roundtrip here covers the whole path.
+TEST(TestBindingsTest, NetworkConfigRoundtrip)
+{
+  NetworkConfig custom_config = stock_network_config();
+  custom_config.max_sha256_buffers += 1;
+  custom_config.max_cross_invoke_depth += 1;
+  ASSERT_NE(custom_config, stock_network_config());
+
+  auto serialized_config = x23::serialize(custom_config);
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), serialized_config.data(),
+                static_cast<uint32_t>(serialized_config.size()));
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(db_result.db, nullptr);
+  x23::Defer d([&] { free_db(db_result.db); });
+
+  auto config_result = get_network_config(db_result.db);
+  ASSERT_EQ(config_result.ffi_error_code, kTestFFIErrorCodeNone);
+  ASSERT_NE(config_result.data.data, nullptr);
+  x23::Defer d2([&] { free_ffi_data_buffer(config_result.data); });
+
+  NetworkConfig roundtripped;
+  x23::deserialize(&roundtripped, x23::BufView{config_result.data.data,
+                                               config_result.data.len});
+  EXPECT_EQ(custom_config, roundtripped);
+}
+
+// Omitting the config is what every existing caller does, so the stock values
+// have to survive that path unchanged.
+TEST(TestBindingsTest, NetworkConfigDefaultsToStockWhenAbsent)
+{
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), nullptr, 0);
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d([&] { free_db(db_result.db); });
+
+  auto config_result = get_network_config(db_result.db);
+  ASSERT_EQ(config_result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer d2([&] { free_ffi_data_buffer(config_result.data); });
+
+  NetworkConfig roundtripped;
+  x23::deserialize(&roundtripped, x23::BufView{config_result.data.data,
+                                               config_result.data.len});
+  EXPECT_EQ(roundtripped, stock_network_config());
+}
+
+// A config that does not deserialize is rejected the way a bad cost model is,
+// rather than silently falling back to the stock values.
+TEST(TestBindingsTest, NetworkConfigGarbageIsRejected)
+{
+  constexpr uint8_t kGarbage[] = {0xFF, 0xFF, 0xFF};
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), kGarbage, sizeof(kGarbage));
+  EXPECT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeDeserializeError);
+  EXPECT_EQ(db_result.db, nullptr);
+}
+
+// get_network_config guards its handle like every other db accessor.
+TEST(TestBindingsTest, NetworkConfigNullDbRejected)
+{
+  auto result = get_network_config(nullptr);
+  EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(result.data.data, nullptr);
 }
 
 namespace {
@@ -3522,6 +3603,23 @@ TEST(TestBindingsTest, MockFrameTryCommitAfterFinish)
 
 // Regression test: concurrent create_db calls from multiple threads used to
 // cause use-after-free in PerThread storage (fixed in #1327).
+// The genesis root contract is a required argument: a null pointer is
+// rejected up front, and bytes that do not deserialize to a Contract fail
+// with a structured error instead of failing genesis construction.
+TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
+{
+  auto null_res =
+      create_db(nullptr, 0, NetworkHash{}.data(), nullptr, 0, nullptr, 0);
+  EXPECT_EQ(null_res.ffi_error_code, kTestFFIErrorCodeInvalidPointer);
+  EXPECT_EQ(null_res.db, nullptr);
+
+  constexpr uint8_t kGarbage[] = {0xFF, 0xFF, 0xFF};
+  auto garbage_res = create_db(nullptr, 0, NetworkHash{}.data(), kGarbage,
+                               sizeof(kGarbage), nullptr, 0);
+  EXPECT_EQ(garbage_res.ffi_error_code, kTestFFIErrorCodeDeserializeError);
+  EXPECT_EQ(garbage_res.db, nullptr);
+}
+
 TEST(TestBindingsTest, ConcurrentCreateDB)
 {
   constexpr int kThreadCount = 8;

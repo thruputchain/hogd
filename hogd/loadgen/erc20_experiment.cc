@@ -180,7 +180,8 @@ ERC20ExperimentState::generate_experiment()
       builder.make_genesis_ceremony_transactions(cost_model));
   LoadgenSuccessResult result;
   result.genesis_configuration =
-      builder.build(config_.network_hash, cost_model, *root_contract);
+      builder.build(config_.network_hash, cost_model, *root_contract,
+                    stock_network_config());
   result.genesis_ceremony_txs = std::move(genesis_ceremony_txs);
   result.initialization_txs = std::move(initialization_txs);
   co_return result;

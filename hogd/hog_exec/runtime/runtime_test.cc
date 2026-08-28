@@ -19,7 +19,8 @@ namespace hogd {
 TEST(MultiplexedContextTest, UnregisteredTypeAtInvokeIsUnrecoverable)
 {
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{});
+      std::unordered_map<ContractType,
+                         std::pair<RuntimeContext const *, bool>>{});
 
   DeployedContract deployed(DeployedContractHash{
       .hash = SHA256Hash{},
@@ -34,7 +35,8 @@ TEST(MultiplexedContextTest, UnregisteredTypeAtInvokeIsUnrecoverable)
 TEST(MultiplexedContextTest, UnregisteredTypeVerifyIsDeterministic)
 {
   MultiplexedContext context(
-      std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{});
+      std::unordered_map<ContractType,
+                         std::pair<RuntimeContext const *, bool>>{});
 
   EXPECT_EQ(context.verify_contract(Contract(ContractType::kMockTest)),
             InvokeErrorCode::Deterministic);

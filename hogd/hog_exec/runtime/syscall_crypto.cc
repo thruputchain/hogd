@@ -53,6 +53,18 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
+                         uint32_t input_dst_index)
+{
+  auto r = handler.sha256_copy(input_src_index, input_dst_index);
+  if (!r.has_value()) {
+    return {r.error().code(), WrappedGasAmount{0}};
+  }
+
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
                              SHA256Hash &output_output)
 {

@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/version.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
@@ -54,8 +55,11 @@ public:
     ConsensusValue genesis_value{};
     genesis_value.proposal_header.block_height = 0;
     GenesisConfiguration genesis_configuration{
+        .network_config = stock_network_config(),
         .root_contract = *load_stock_genesis_root_contract(),
         .default_wallet = native_default_wallet_hash()};
+    genesis_value.proposal_header.config_hash =
+        compute_config_hash(genesis_configuration);
     auto db_res =
         db_client_.dbsched_load_genesis_configuration(genesis_configuration,
                                                       genesis_value);

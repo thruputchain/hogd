@@ -41,6 +41,7 @@
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "parallel.hh"
@@ -1220,6 +1221,8 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
           cache.db_tip.value.proposal_header.storage_hash =
               result.block().storage_hash;
           cache.db_tip.storage_long_hash = result.block().storage_long_hash;
+          cache.db_tip.value.proposal_header.config_hash =
+              compute_config_hash(result.block().config_hash_preimage);
         }
         {
           EventBlockResult result = close_event.get();
@@ -1230,6 +1233,7 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         proposal.header = ProposalHeader{
             .ext = {},
             .network_hash = network_hash_,
+            .config_hash = cache.db_tip.value.proposal_header.config_hash,
             .proposer = context.proposer,
             .block_timepoint = context.block_timepoint,
             .block_height = db_tip.value.proposal_header.block_height + 1,
@@ -1499,14 +1503,15 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                        .proposal_txs_hash =
                            finish_nodes.proposal_txs_hash.get(),
                        .upgrades = {}};
-  // default_wallet comes from the committed parent tip: the cache's db_tip
-  // only ever receives storage/event hashes from the scheduler's close
-  // result, never the wallet field.
+  // default_wallet and network_config come from the committed parent tip: the
+  // cache's db_tip only ever receives storage/event hashes from the
+  // scheduler's close result, never the chain-configuration fields.
   nominated_block_cache_.db_tip = DbTip{
       .id = nominated_block_cache_.proposal_result.proposed_block().block_id,
       .storage_long_hash = nominated_block_cache_.db_tip.storage_long_hash,
       .value = std::move(value),
-      .default_wallet = last_committed_block_.default_wallet};
+      .default_wallet = last_committed_block_.default_wallet,
+      .network_config = last_committed_block_.network_config};
   info("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
@@ -1699,6 +1704,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     proposed.proposal.header = ProposalHeader{
         .ext = {},
         .network_hash = network_hash_,
+        .config_hash =
+            compute_config_hash(db_close.block().config_hash_preimage),
         .proposer = request.context.proposer,
         .block_timepoint = request.context.block_timepoint,
         .block_height = 1,
@@ -1721,6 +1728,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
         .storage_long_hash = db_close.block().storage_long_hash,
         .value = value,
         .default_wallet = last_committed_block_.default_wallet,
+        .network_config = last_committed_block_.network_config,
     };
     // These transactions intentionally never entered Scheduler::tx_cache_.
     // The ordinary commit path uses tx_hashes only to evict nominated mempool
@@ -2383,11 +2391,15 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
           cache.db_tip.value.proposal_header.storage_hash =
               db_result.block().storage_hash;
           cache.db_tip.storage_long_hash = db_result.block().storage_long_hash;
+          cache.db_tip.value.proposal_header.config_hash =
+              compute_config_hash(db_result.block().config_hash_preimage);
         }
 
         if (txset_hash_node.get() != proposal.header.txs_hash ||
             cache.db_tip.value.proposal_header.storage_hash !=
                 proposal.header.storage_hash ||
+            cache.db_tip.value.proposal_header.config_hash !=
+                proposal.header.config_hash ||
             cache.db_tip.value.proposal_header.events_hash !=
                 proposal.header.events_hash) {
           // The event block and DB snapshot were closed above, but a hash
@@ -2415,13 +2427,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                              .proposal_header = proposal.header,
                              .proposal_txs_hash = proposal_txs_hash_node.get(),
                              .upgrades = {}};
-        // default_wallet comes from the committed parent tip (see the
-        // nomination-path comment).
+        // default_wallet and network_config come from the committed parent
+        // tip (see the nomination-path comment).
         cache.db_tip =
             DbTip{.id = validation_block_id,
                   .storage_long_hash = cache.db_tip.storage_long_hash,
                   .value = std::move(value),
-                  .default_wallet = last_committed_block_.default_wallet};
+                  .default_wallet = last_committed_block_.default_wallet,
+                  .network_config = last_committed_block_.network_config};
         co_await set_result(SchedulerValidationOutcome::SchedulerValidationOK);
         result.block().block_id = cache.db_tip.id;
         result.block().signed_transactions = {};

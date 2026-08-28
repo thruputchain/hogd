@@ -19,7 +19,6 @@
 #include "contract.hh"
 #include "event.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -157,7 +156,8 @@ protected:
       native_context = std::make_unique<NativeContext>(std::move(map));
       auto rv32_context = std::make_unique<Rv32Context>();
       context = std::make_unique<MultiplexedContext>(
-          std::unordered_map<ContractType, std::pair<RuntimeContext *, bool>>{
+          std::unordered_map<ContractType,
+                             std::pair<RuntimeContext const *, bool>>{
               {ContractType::kRv32, {rv32_context.release(), true}},
               {ContractType::kNative, {native_context.get(), false}}});
     }
@@ -1506,18 +1506,34 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   EXPECT_TRUE(close_res.has_value());
 }
 
-TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
+// The committed tip's own block id is not a readable snapshot: a tip read
+// against it would have to return the block itself as its own parent, so
+// HogDbExecutorRpc::get_db_tip reports it as kRPCBadBlockID, which
+// DatabaseProxy maps to SystemErrorCode::Abandon -- the same answer a viewing
+// snapshot that went stale gets, and the one the gateway responds to by
+// rotating to a fresh viewing snapshot (ViewGatewayRpc::run_view_with_retries).
+//
+// The executor used to read the tip lazily, so this surfaced only once the
+// body called a tip-backed syscall, and the status the caller saw was whatever
+// the body chose to return for a failed syscall -- InternalError, for this
+// test's body, which is what this test asserted while it was named
+// SelfTipBlockIdCausesInternalError. invoke() now reads the tip at admission to
+// enforce kConfigParamMaxCrossInvokeDepth, so the runtime's own classification
+// reaches the caller unlaundered and the body never runs at all. Both halves
+// are pinned below; the body still maps a failed syscall to Unrecoverable, so
+// entering it would show up as InternalError rather than as Abandoned.
+TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
 {
-  if constexpr (is_debug_build()) {
-    GTEST_SKIP() << "Debug build hits assert in HogDb before DatabaseProxy "
-                    "can observe the error";
-  }
-
   static constexpr ContractAddress kNativeAddr =
       NativeContractTestFramework::make_contract_address(11);
 
+  bool body_entered = false;
+
   NativeViewSetup setup(
-      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+      0,
+      [&body_entered](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        body_entered = true;
         BlockHeight height = -1;
         auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!r.has_value()) {
@@ -1550,7 +1566,10 @@ TEST_F(ViewTest, SelfTipBlockIdCausesInternalError)
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();
 
-  EXPECT_EQ(result.status(), TransactionViewStatus::InternalError);
+  EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
+  EXPECT_FALSE(body_entered)
+      << "an unreadable snapshot must be refused at invoke admission, before "
+         "any contract code runs";
 }
 
 TEST_F(ViewTest, OpenViewingSnapshotReturnsValidBlockId)
