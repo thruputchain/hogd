@@ -96,10 +96,11 @@ HogConservationInvariant::handle_balance_change(
   int128_t before_cost =
       before.has_value() ? cost_model_.get_balance_cost() : 0;
   int128_t after_cost = after.has_value() ? cost_model_.get_balance_cost() : 0;
-  // Reported as two deltas rather than one sum: a balance and its locked
-  // storage cost can together reach INT128_MAX, so adding them in int128 would
-  // overflow. Each delta is individually in range, and the accumulator is wide
-  // enough to hold the combination.
+  // Reported as two deltas rather than one folded sum: a balance plus its own
+  // locked storage cost sits exactly at INT128_MAX when one address holds the
+  // whole supply, so the fold only stays in range as long as conservation
+  // holds globally. Split, each delta is unconditionally in range and the wide
+  // accumulator holds the combination.
   update_total_supply(after_balance - before_balance);
   update_total_supply(after_cost - before_cost);
 }

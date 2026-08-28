@@ -1268,48 +1268,91 @@ TEST_F(HogDbTest, ApplyFeedsDebugInvariants)
   EXPECT_FALSE(db_.check_invariants());
 }
 
-TEST_F(HogDbTest, InvariantsBalanceAtMaxSupplyDoesNotOverflowAccumulator)
+TEST_F(HogDbTest, InvariantAccumulatorSurvivesMaxSupplyPartialSum)
 {
   // Regression guard for a signed-integer overflow in the conservation
-  // invariant's running sum (caught by UBSan via
-  // NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance).
+  // invariant's running sum, caught by UBSan via
+  // NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance:
   //
-  // The sum is over every HOG-denominated item change in the block, and only
-  // its final value has to be zero. Individual terms can be as large as
-  // INT128_MAX -- minting the entire supply credits a balance by INT128_MAX and
-  // debits the total-supply counter by the same amount -- so the partial sum
-  // leaves int128 range as soon as the two arrive in the order that puts the
-  // debit first. Accumulating in int128 was undefined behaviour there.
+  //   invariant_hog_conservation.cc:256: signed integer overflow:
+  //   0x80000000000000000000000000000001 + -12007 cannot be represented in
+  //   type '__int128'
   //
-  // We stage exactly that: a whale balance plus the offsetting total-supply
-  // counter at INT128_MAX, balanced so the sum is zero. The invariant must
-  // reach that zero without overflowing on the way.
+  // The sum runs over every HOG-denominated item change and only its final
+  // value has to be zero, but a single term can be as large as INT128_MAX:
+  // minting the whole supply debits the total-supply counter by exactly that.
+  // Once the running sum sits at -INT128_MAX, any further negative term -- a
+  // storage refund of a few thousand -- pushes it past INT128_MIN. Summing in
+  // int128 made that intermediate undefined behaviour even though the total
+  // came back to zero.
+  //
+  // Each step below is applied separately so the invariant sees them in this
+  // order (within one apply() the worker pool does not fix an order):
+  //
+  //   1. mint the whole supply     sum = nnint_cost - INT128_MAX
+  //   2. refund a bytestring       sum = nnint_cost - INT128_MAX - victim_cost
+  //                                    < INT128_MIN  <-- used to be UB
+  //   3. credit it to a whale      sum = 0
+  //
+  // A wrapping int128 accumulator still lands on zero, so this only fails
+  // outright under UBSan; the assertions below pin the arithmetic that puts
+  // step 2 out of range so the case cannot silently stop being exercised.
   if (!is_debug_build()) {
     GTEST_SKIP() << "debug invariants are only fed in debug builds";
   }
 
-  db_.enable_debug_invariants(cost_model_with_balance_cost_);
+  auto const &cost_model = cost_model_with_balance_cost_;
+  constexpr int128_t kSupply = std::numeric_limits<int128_t>::max();
+  const int128_t nnint_cost = cost_model.get_nnint_cost();
+  const int128_t balance_cost = cost_model.get_balance_cost();
 
-  constexpr int128_t kMaxSupply = std::numeric_limits<int128_t>::max();
-  const int128_t balance_cost =
-      cost_model_with_balance_cost_.get_balance_cost();
-  const int128_t nnint_cost = cost_model_with_balance_cost_.get_nnint_cost();
-  // The whale holds everything the two new rows have not locked as storage.
-  const int128_t whale_balance = kMaxSupply - balance_cost - nnint_cost;
+  // Seeded before the invariants are enabled, so only its later deletion --
+  // the storage refund -- reaches the running sum.
+  ItemKey victim_key = make_key(kAddress + 73, 1);
+  auto victim_db_key = make_contract_data_key(victim_key);
+  const std::array<std::byte, 8> victim_value{};
+  const int128_t victim_cost =
+      cost_model.get_bytestring_cost(victim_value.size());
+  // Step 2 has to land strictly below INT128_MIN, and the whale's balance has
+  // to stay a legal non-negative int128.
+  ASSERT_GT(victim_cost, nnint_cost + 1);
+  ASSERT_LE(victim_cost, nnint_cost + balance_cost);
+  const int128_t whale_balance =
+      kSupply - (nnint_cost + balance_cost - victim_cost);
 
-  Address whale = make_address(kAddress + 72);
-  auto balance_key = make_address_key(whale, Prefix::kBalance);
-  auto balance_bytes = int128_to_xdr_bytes(whale_balance);
-  auto supply_key = make_contract_data_key(
+  auto seed = db_.create_changeset();
+  seed.put(victim_db_key, kBytes, victim_value);
+  ASSERT_TRUE(db_.apply(seed));
+
+  db_.enable_debug_invariants(cost_model);
+
+  auto supply_db_key = make_contract_data_key(
       ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
-  auto supply_bytes = int128_to_xdr_bytes(kMaxSupply);
+  auto supply_bytes = int128_to_xdr_bytes(kSupply);
+  auto mint = db_.create_changeset();
+  mint.put(supply_db_key, kNNInt128, supply_bytes);
+  ASSERT_TRUE(db_.apply(mint));
 
-  auto changeset = db_.create_changeset();
-  changeset.put(std::as_bytes(std::span(balance_key)), kNNInt128,
-                std::as_bytes(std::span(balance_bytes)));
-  changeset.put(std::span<const std::byte>(supply_key), kNNInt128,
-                std::as_bytes(std::span(supply_bytes)));
-  ASSERT_TRUE(db_.apply(changeset));
+  auto refund = db_.create_changeset();
+  refund.remove(victim_db_key);
+  ASSERT_TRUE(db_.apply(refund));
+
+  Address whale = make_address(kAddress + 74);
+  auto whale_balance_key = make_address_key(whale, Prefix::kBalance);
+  auto whale_age_key = make_address_key(whale, Prefix::kHogAge);
+  auto balance_bytes = int128_to_xdr_bytes(whale_balance);
+  auto age_buf = x23::serialize(make_hog_age(whale, /*to_schedule=*/0,
+                                             /*already_scheduled=*/0,
+                                             /*received=*/0,
+                                             /*to_schedule_age=*/0,
+                                             /*already_scheduled_age=*/0,
+                                             /*received_age=*/0));
+  auto credit = db_.create_changeset();
+  credit.put(whale_balance_key, kNNInt128, balance_bytes);
+  // The hog age row accompanies every balance creation; without it the
+  // separate hog age invariant reports the balance as unpaired.
+  credit.put(whale_age_key, 0, age_buf);
+  ASSERT_TRUE(db_.apply(credit));
 
   EXPECT_TRUE(db_.check_invariants());
 }
