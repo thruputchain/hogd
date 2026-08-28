@@ -2447,7 +2447,7 @@ TEST(Mempool, RuntimeStaysUnreadyWhenExecutorNeverRegisters)
   ASSERT_EQ(server.mempool_coord_rpc().schedcoord_load_genesis_configuration(
                 builder.build(MempoolTestInfra::kNetworkHash,
                               StorageCostModel::default_cost_model(),
-                              *root_contract))(),
+                              *root_contract, stock_network_config()))(),
             DbSchedResult::DbSchedResultOK);
 
   HttpServer health_server;
