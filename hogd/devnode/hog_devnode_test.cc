@@ -24,6 +24,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -682,7 +683,9 @@ public:
   HogDevnodeProcess(HogDevnodeProcess &&other) noexcept
     : pid_(other.pid_), stdout_fd_(other.stdout_fd_),
       stderr_fd_(other.stderr_fd_),
-      stdout_buffer_(std::move(other.stdout_buffer_))
+      stdout_buffer_(std::move(other.stdout_buffer_)),
+      stderr_sink_(std::move(other.stderr_sink_)),
+      stderr_reader_(std::move(other.stderr_reader_))
   {
     other.pid_ = -1;
     other.stdout_fd_ = -1;
@@ -699,6 +702,9 @@ public:
       int status = 0;
       while (waitpid(pid_, &status, 0) < 0 && errno == EINTR) {
       }
+    }
+    if (stderr_reader_.joinable()) {
+      stderr_reader_.join();
     }
     close_if_open(stdout_fd_);
     close_if_open(stderr_fd_);
@@ -767,18 +773,49 @@ public:
 
   std::string read_remaining_stderr()
   {
-    if (stderr_fd_ < 0) {
+    // Joining only terminates once the child is reaped; before that (the
+    // readiness-failure path) snapshot whatever has arrived.
+    if (pid_ <= 0 && stderr_reader_.joinable()) {
+      stderr_reader_.join();
+      close_if_open(stderr_fd_);
+    }
+    if (!stderr_sink_) {
       return {};
     }
-    std::string output = read_to_end(stderr_fd_);
-    close_if_open(stderr_fd_);
-    return output;
+    const std::lock_guard<std::mutex> lock(stderr_sink_->mutex);
+    return std::move(stderr_sink_->data);
   }
 
 private:
+  // Shared with the drain thread so this object stays movable.
+  struct StderrSink {
+    std::mutex mutex;
+    std::string data;
+  };
+
   HogDevnodeProcess(int pid, int stdout_fd, int stderr_fd)
-    : pid_(pid), stdout_fd_(stdout_fd), stderr_fd_(stderr_fd)
-  {}
+    : pid_(pid), stdout_fd_(stdout_fd), stderr_fd_(stderr_fd),
+      stderr_sink_(std::make_shared<StderrSink>())
+  {
+    // Drain continuously: hog-devnode logs several KiB per block, and a full
+    // pipe blocks its write(2) inside ConsoleLogger with the logger's mutex
+    // held, which wedges the whole node.
+    stderr_reader_ = std::thread([fd = stderr_fd_, sink = stderr_sink_] {
+      std::array<char, 4096> buffer{};
+      for (;;) {
+        auto count = read(fd, buffer.data(), buffer.size());
+        if (count > 0) {
+          const std::lock_guard<std::mutex> lock(sink->mutex);
+          sink->data.append(buffer.data(), static_cast<std::size_t>(count));
+          continue;
+        }
+        if (count < 0 && errno == EINTR) {
+          continue;
+        }
+        return;
+      }
+    });
+  }
 
   std::string read_stdout_line(std::chrono::milliseconds timeout)
   {
@@ -860,6 +897,8 @@ private:
   int stdout_fd_;
   int stderr_fd_;
   std::string stdout_buffer_;
+  std::shared_ptr<StderrSink> stderr_sink_;
+  std::thread stderr_reader_;
 };
 
 void
@@ -4090,13 +4129,9 @@ TEST(HogDevnode, DataDirReplaysTransactionWhoseBlockNeverCommitted)
   }
 }
 
-// A recovered chain whose outbox holds no committed record for the tip, but
-// does hold a validly prepared current-epoch origin at tip + 1.
-// reconcile_outbox_tip() accepts that state (see
-// EventRpcTest.ReconciliationAcceptsPreparedCurrentEpochOrigin), so the
-// missing-canonical-tip check in
-// HogDevnodeNode::validate_event_outbox_against_recovered_tip is what rejects
-// it -- this is the one place that error is reachable.
+// reconcile_outbox_tip() accepts a prepared origin at tip + 1 with no
+// committed records (EventRpcTest.ReconciliationAcceptsPreparedCurrentEpoch-
+// Origin), so validate_event_outbox_against_recovered_tip is what rejects it.
 TEST(HogDevnode, DataDirRejectsPreparedOriginWithoutCanonicalTipRecord)
 {
   std::filesystem::path data_dir = make_test_data_dir();
@@ -4114,14 +4149,11 @@ TEST(HogDevnode, DataDirRejectsPreparedOriginWithoutCanonicalTipRecord)
     tip_value = tip->value;
   }
 
-  // Drop the committed record for the tip and re-prepare the current epoch at
-  // tip + 1, exactly the shape reconcile accepts.
   ASSERT_TRUE(std::filesystem::remove(
       outbox_dir / IndexerOutboxStore::committed_filename(1)));
   ASSERT_TRUE(std::filesystem::remove(
       outbox_dir / IndexerOutboxStore::current_epoch_origin_filename()));
-  // Also drop the tip's events file: while it is present reconcile tries to
-  // promote the height instead, and fails earlier.
+  // Without this reconcile promotes the height instead and fails earlier.
   ASSERT_TRUE(std::filesystem::remove(EventBlockContext::final_events_filename(
       (data_dir / "events").string(), tip_value.proposal_header.events_hash)));
   {

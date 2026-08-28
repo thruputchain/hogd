@@ -400,10 +400,6 @@ require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
     fail("--dev-account-tokens", std::to_string(persisted.user_storage_tokens),
          std::to_string(requested.user_storage_tokens));
   }
-  // Unreachable while one profile resolves: hog_devnode.cc rejects anything
-  // but the default during argument parsing. Live once a second profile
-  // exists. (An unknown profile in the metadata file is a separate, live
-  // path, rejected in parse_data_dir_metadata.)
   if (persisted.dev_wallet_profile != requested.dev_wallet_profile) {
     fail("--dev-wallet-profile", persisted.dev_wallet_profile,
          requested.dev_wallet_profile);
@@ -784,11 +780,6 @@ HogDevnodeNode::reconcile_event_outbox_with_recovered_tip()
 }
 
 void
-// Must run after [reconcile_event_outbox_with_recovered_tip]: reconcile
-// promotes an unpromoted height from its events file, so checking first would
-// reject states reconcile exists to repair. Reconcile therefore rejects most
-// malformed outboxes with its own message before these checks see them -- but
-// not all of them; see the notes below.
 HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
 {
   const DbTip tip = ctx_->get_tip();
@@ -805,8 +796,6 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
     // called only after finalization, so this expected crash window is safe.
     return;
   }
-  // Hard to reach: reconcile caps at tip + 1, so anything further ahead fails
-  // there first (DataDirRejectsOutboxTwoBlocksAheadOfHogDb).
   if (*latest && (*latest)->block_height > tip_height) {
     throw std::runtime_error(std::format(
         "recovered event outbox latest height {} is ahead of HogDB tip {}",
@@ -823,18 +812,11 @@ HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
     return;
   }
 
-  // Reachable, and the only check for it: reconcile accepts an outbox with no
-  // committed records when the current epoch origin is prepared at tip + 1
-  // (EventRpcTest.ReconciliationAcceptsPreparedCurrentEpochOrigin), leaving
-  // [latest] empty. See DataDirRejectsPreparedOriginWithoutCanonicalTipRecord.
-  // An outbox merely behind the tip is rejected by reconcile instead.
   if (!*latest || (*latest)->block_height != tip_height) {
     throw std::runtime_error(std::format(
         "recovered event outbox is missing canonical HogDB tip height {}",
         tip_height));
   }
-  // Hard to reach: where a record for the tip height exists, reconcile has
-  // already compared its hash.
   if ((*latest)->consensus_hash != sha256(tip.value)) {
     throw std::runtime_error(
         "recovered event outbox latest consensus does not match HogDB tip");
