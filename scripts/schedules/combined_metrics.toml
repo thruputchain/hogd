@@ -10,9 +10,27 @@ echo 'cloning hogd'
 git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+
+# Every host in this schedule clones at the same instant, and a run that has
+# been waiting on the hosts starts the moment the run ahead of it releases
+# them, so a push burst puts dozens of ssh connections on github at once.
+# Github sheds that load by closing the connection ("Connection closed by
+# 140.82.116.3 port 22"), which fails the fetch with exit 128 and takes the
+# whole run down before a single benchmark has started. Retry the two steps
+# that talk to github, so a shed connection costs seconds and not the run.
+git_retry() {
+    for attempt in 1 2 3 4; do
+        "$@" && return 0
+        echo "git network step failed (attempt ${attempt} of 5), retrying" >&2
+        # Jitter: the hosts shed together would otherwise retry together.
+        sleep $(( attempt * 15 + ${RANDOM:-0} % 15 ))
+    done
+    "$@"
+}
+
+git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
-git submodule update --init --recursive
+git_retry git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
@@ -51,8 +69,17 @@ after = """
 
 if [ "${HOG_SCRIPT_EXIT:-}" != "0" ]; then
 
-    echo 'saving core dumps and associated binaries'
-    ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+    # A failure early enough to precede the checkout leaves no worktree, so the
+    # script is not there to run. Exiting 127 out of the after-script would put
+    # "after-script failed" at the very end of the job log, where it displaces
+    # the failure that actually matters: github serves only a tail, and the
+    # auto-filed issue quotes it.
+    if [ -x ./scripts/save_core_dumps.sh ]; then
+        echo 'saving core dumps and associated binaries'
+        ./scripts/save_core_dumps.sh ${HOG_DUMP_DIR}/core_dumps
+    else
+        echo 'no worktree here, so no core dumps to save'
+    fi
 
 fi
 
@@ -87,9 +114,22 @@ echo 'cloning hogd'
 git config --global advice.detachedHead false
 git init -q .
 git remote add origin git@github.com:{{ .github_repo }}.git
-git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+
+# See the bench-server job above: this clone races the same github connection
+# limit, at the same instant, and dies the same way without the retry.
+git_retry() {
+    for attempt in 1 2 3 4; do
+        "$@" && return 0
+        echo "git network step failed (attempt ${attempt} of 5), retrying" >&2
+        # Jitter: the hosts shed together would otherwise retry together.
+        sleep $(( attempt * 15 + ${RANDOM:-0} % 15 ))
+    done
+    "$@"
+}
+
+git_retry git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
 git checkout {{ .git_commit }}
-git submodule update --init --recursive
+git_retry git submodule update --init --recursive
 
 source ./scripts/ci/prepare_env.sh
 
