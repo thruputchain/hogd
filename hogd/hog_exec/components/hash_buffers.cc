@@ -29,8 +29,7 @@ HashBuffers::finalize(uint32_t index, size_t *output_size)
 }
 
 SyscallStatus<void>
-HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset,
-                    uint32_t max_buffers)
+HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset)
 {
   if (!reset) {
     return update_existing_stream(index, data);
@@ -44,7 +43,7 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset,
 
   auto it = streams_.find(index);
   if (it == streams_.end()) {
-    if (streams_.size() >= max_buffers) {
+    if (streams_.size() >= max_buffers_) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
@@ -59,7 +58,7 @@ HashBuffers::update(uint32_t index, std::span<const std::byte> data, bool reset,
 }
 
 SyscallStatus<void>
-HashBuffers::copy(uint32_t src_index, uint32_t dst_index, uint32_t max_buffers)
+HashBuffers::copy(uint32_t src_index, uint32_t dst_index)
 {
   auto src = streams_.find(src_index);
   if (src == streams_.end()) {
@@ -70,7 +69,7 @@ HashBuffers::copy(uint32_t src_index, uint32_t dst_index, uint32_t max_buffers)
   }
   auto dst = streams_.find(dst_index);
   if (dst == streams_.end()) {
-    if (streams_.size() >= max_buffers) {
+    if (streams_.size() >= max_buffers_) {
       return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }

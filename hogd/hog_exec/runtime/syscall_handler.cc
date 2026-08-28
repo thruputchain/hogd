@@ -966,9 +966,16 @@ SystemCallHandler::start_frame(
   // here rather than terminating through the noexcept boundary.
   auto admitted = [&]() -> SystemStatus<void> {
     try {
+      // The frame's hash-buffer limit is fixed at admission, so a syscall
+      // enforcing it has no tip read left to fail on.
+      auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
+      if (!max_buffers.has_value()) {
+        return std::unexpected(max_buffers.error());
+      }
       return invocation_frame_stack_.start_frame(invocation.invoked_address,
                                                  std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids);
+                                                 flags, owned_auth_token_ids,
+                                                 *max_buffers);
     } catch (std::exception const &e) {
       try {
         error("unrecoverable: frame admission threw: {}", e.what());
@@ -2206,31 +2213,23 @@ SystemCallHandler::get_auth_claim() const
 
 // == Hash buffer syscalls ==
 
-SystemStatus<SyscallStatus<void>>
+SyscallStatus<void>
 SystemCallHandler::sha256_update(uint32_t input_index,
                                  std::span<const std::byte> input_buffer,
                                  bool input_reset)
 {
   assert(!invocation_frame_stack_.empty());
-  auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
-  if (!max_buffers.has_value()) {
-    return std::unexpected(max_buffers.error());
-  }
   return invocation_frame_stack_.get_active_frame_hash_buffers().update(
-      input_index, input_buffer, input_reset, *max_buffers);
+      input_index, input_buffer, input_reset);
 }
 
-SystemStatus<SyscallStatus<void>>
+SyscallStatus<void>
 SystemCallHandler::sha256_copy(uint32_t input_src_index,
                                uint32_t input_dst_index)
 {
   assert(!invocation_frame_stack_.empty());
-  auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
-  if (!max_buffers.has_value()) {
-    return std::unexpected(max_buffers.error());
-  }
   return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
-      input_src_index, input_dst_index, *max_buffers);
+      input_src_index, input_dst_index);
 }
 
 SyscallStatus<SHA256Hash>

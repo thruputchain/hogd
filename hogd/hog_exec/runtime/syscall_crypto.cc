@@ -46,10 +46,7 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
 {
   auto r = handler.sha256_update(input_index, input_buffer, input_reset);
   if (!r.has_value()) {
-    return {r.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  if (!r->has_value()) {
-    return {r->error().code(), WrappedGasAmount{0}};
+    return {r.error().code(), WrappedGasAmount{0}};
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
@@ -61,10 +58,7 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
 {
   auto r = handler.sha256_copy(input_src_index, input_dst_index);
   if (!r.has_value()) {
-    return {r.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  if (!r->has_value()) {
-    return {r->error().code(), WrappedGasAmount{0}};
+    return {r.error().code(), WrappedGasAmount{0}};
   }
 
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
