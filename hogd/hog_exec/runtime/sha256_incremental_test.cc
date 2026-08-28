@@ -21,7 +21,6 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
-#include "hogd/network_config/config_upgrade.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "network_config.hh"
@@ -256,9 +255,9 @@ public:
 private:
   static NetworkConfig genesis_network_config()
   {
-    ConfigUpgrade upgrade(ConfigParamID::kConfigParamMaxSHA256Buffers);
-    upgrade.max_sha256_buffers() = kConfiguredMaxBuffers;
-    return apply_config_upgrade(stock_network_config(), upgrade);
+    NetworkConfig config = stock_network_config();
+    config.max_sha256_buffers = kConfiguredMaxBuffers;
+    return config;
   }
 };
 
@@ -273,8 +272,8 @@ TEST_F(Sha256ConfiguredBufferLimitTest, GenesisValueBoundsOpenBuffers)
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         const std::array<uint8_t, 1> chunk = {0};
 
-        // The configured number of buffers opens; the default of 8 would let
-        // this run well past kConfiguredMaxBuffers.
+        // The configured number of buffers opens; the stock value of 8 would
+        // let this run well past kConfiguredMaxBuffers.
         for (uint32_t i = 0; i < kConfiguredMaxBuffers; i++) {
           auto opened = ctx.syscall<SyscallNo::kSHA256Update>(
               i, std::as_bytes(std::span(chunk)), true);

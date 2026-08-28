@@ -173,11 +173,10 @@ InvocationFrame::try_acquire_frame_locks(
   // caller (SystemCallHandler::try_commit_transaction) ignores those counters,
   // since the root frame is discarded immediately after commit.
   //
-  // The deterministic TryInvoke depth cap (kMaxSavepointDepth) is NOT
-  // enforced here; it is enforced exclusively by
-  // InvocationFrameStack::finish_frame's depth-cap arm before this is called
-  // for a child TryInvoke frame. The child cap reserves one slot for the root
-  // commit's subtransaction push.
+  // The deterministic TryInvoke depth cap (kMaxSavepointDepth) is NOT enforced
+  // here; it is enforced exclusively by InvocationFrameStack::finish_frame's
+  // depth-cap arm before this is called for a child TryInvoke frame. The child
+  // cap reserves one slot for the root commit's subtransaction push.
 
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());

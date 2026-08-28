@@ -806,15 +806,15 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // the TryInvoke cap, which HogDb's savepoint stack bounds independently, a
   // plain invoke had nothing stopping it.
   //
-  // Report it as a faulted child frame, the same outcome the TryInvoke cap
-  // produces, rather than as a system error: every node reads the same limit
-  // from the same tip, so the rejection is deterministic and the block still
-  // commits.
-  if (auto config = load_network_config(); !config) {
-    return {config.error(), 0};
+  // Report exceeding it as a faulted child frame, the same outcome the
+  // TryInvoke cap produces, rather than as a system error: every node reads
+  // the same limit from the same tip, so the rejection is deterministic and
+  // the block still commits.
+  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
+  if (!max_depth.has_value()) {
+    return {max_depth.error(), 0};
   }
-  if (invocation_frame_stack_.size() >=
-      network_config().max_cross_invoke_depth) {
+  if (invocation_frame_stack_.size() >= *max_depth) {
     return {InvocationFrameStatusCode::Fault, 0};
   }
 
@@ -928,12 +928,6 @@ SystemCallHandler::start_frame(
     std::span<uint32_t const> owned_auth_token_ids) noexcept
 {
   assert(!last_frame_finished_);
-  // Resolve the block's execution parameters before admitting any frame, so
-  // the hash-buffer limit reads a value that is already known good and cannot
-  // fail mid-syscall.
-  if (auto config = load_network_config(); !config) {
-    return std::unexpected(config.error());
-  }
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_);
@@ -2212,24 +2206,31 @@ SystemCallHandler::get_auth_claim() const
 
 // == Hash buffer syscalls ==
 
-SyscallStatus<void>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::sha256_update(uint32_t input_index,
                                  std::span<const std::byte> input_buffer,
                                  bool input_reset)
 {
   assert(!invocation_frame_stack_.empty());
+  auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
+  if (!max_buffers.has_value()) {
+    return std::unexpected(max_buffers.error());
+  }
   return invocation_frame_stack_.get_active_frame_hash_buffers().update(
-      input_index, input_buffer, input_reset,
-      network_config().max_sha256_buffers);
+      input_index, input_buffer, input_reset, *max_buffers);
 }
 
-SyscallStatus<void>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::sha256_copy(uint32_t input_src_index,
                                uint32_t input_dst_index)
 {
   assert(!invocation_frame_stack_.empty());
+  auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
+  if (!max_buffers.has_value()) {
+    return std::unexpected(max_buffers.error());
+  }
   return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
-      input_src_index, input_dst_index, network_config().max_sha256_buffers);
+      input_src_index, input_dst_index, *max_buffers);
 }
 
 SyscallStatus<SHA256Hash>
@@ -2243,33 +2244,6 @@ SystemCallHandler::sha256_finalize(uint32_t input_index)
     stats->sha256_total_bytes_processed += output_size;
   }
   return r;
-}
-
-// == Network configuration ==
-
-SystemStatus<void>
-SystemCallHandler::load_network_config()
-{
-  if (network_config_.has_value()) {
-    return {};
-  }
-  // Caching the tip allocates, and both callers are reached from noexcept
-  // syscall bodies, so translate a failure here rather than letting it unwind
-  // across those boundaries and terminate the executor.
-  try {
-    auto tip = snapshot_cache_.try_get_db_tip();
-    if (!tip.has_value()) {
-      return std::unexpected(tip.error());
-    }
-    network_config_.emplace(tip.value()->network_config);
-    return {};
-  } catch (std::exception const &e) {
-    report_dropped_log(e.what());
-    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
-  } catch (...) {
-    report_dropped_log("unknown exception");
-    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
-  }
 }
 
 // == Block statistics syscalls ==

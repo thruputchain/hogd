@@ -8,7 +8,6 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "hogd/network_config/config_upgrade.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "rpc_types.hh"
@@ -181,11 +180,8 @@ make_genesis(NetworkConfig network_config)
 TEST(BlockManagerTest, GenesisInstallsItsOwnNetworkConfig)
 {
   constexpr uint32_t kConfiguredDepth = 64;
-  ConfigUpgrade upgrade(ConfigParamID::kConfigParamMaxCrossInvokeDepth);
-  upgrade.max_cross_invoke_depth() = kConfiguredDepth;
-
-  const NetworkConfig configured =
-      apply_config_upgrade(stock_network_config(), upgrade);
+  NetworkConfig configured = stock_network_config();
+  configured.max_cross_invoke_depth = kConfiguredDepth;
   ASSERT_NE(configured.max_cross_invoke_depth,
             stock_network_config().max_cross_invoke_depth);
 
@@ -193,11 +189,6 @@ TEST(BlockManagerTest, GenesisInstallsItsOwnNetworkConfig)
   BlockManager m(0, &db);
   ASSERT_TRUE(m.initialize_genesis_configuration(make_genesis(configured)));
 
-  EXPECT_EQ(m.get_network_config().max_cross_invoke_depth, kConfiguredDepth);
-  // The parameters genesis did not name keep their values, so the executor
-  // sees exactly the configuration the chain committed to.
-  EXPECT_EQ(m.get_network_config().max_sha256_buffers,
-            stock_network_config().max_sha256_buffers);
   EXPECT_EQ(m.get_network_config(), configured);
 }
 

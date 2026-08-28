@@ -32,7 +32,6 @@
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/transaction_stats.h"
 #include "invoke_flag.hh"
-#include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -333,11 +332,13 @@ public:
   }
 
   // === Crypto syscalls ===
-  SyscallStatus<void> sha256_update(uint32_t input_index,
-                                    std::span<const std::byte> input_buffer,
-                                    bool input_reset);
-  SyscallStatus<void> sha256_copy(uint32_t input_src_index,
-                                  uint32_t input_dst_index);
+  // update and copy read the chain's hash-buffer limit off the db tip, so
+  // they can fail on the system channel where finalize cannot.
+  SystemStatus<SyscallStatus<void>>
+  sha256_update(uint32_t input_index, std::span<const std::byte> input_buffer,
+                bool input_reset);
+  SystemStatus<SyscallStatus<void>> sha256_copy(uint32_t input_src_index,
+                                                uint32_t input_dst_index);
   SyscallStatus<SHA256Hash> sha256_finalize(uint32_t input_index);
 
   // === Bytestring syscalls ===
@@ -397,18 +398,6 @@ public:
   // == Block statistics syscalls ==
   // These are based on reading the db tip.
   SystemStatus<BlockHeight> get_block_height() const;
-
-  // == Network configuration ==
-
-  // The consensus-critical execution parameters this block runs under, read
-  // from the db tip. Valid once a frame has been started: start_frame()
-  // resolves them before admitting the first frame, so the syscall paths that
-  // enforce them have no tip read left to fail on.
-  NetworkConfig const &network_config() const
-  {
-    assert(network_config_.has_value());
-    return *network_config_;
-  }
 
   // == General access methods ==
   //
@@ -482,15 +471,7 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
-  // Resolved from the db tip on the first start_frame() and memoized: the
-  // parameters are fixed for the whole block, and a syscall has no channel to
-  // report a tip-read failure on.
-  std::optional<NetworkConfig> network_config_;
-
   inline static bool debug_force_commit_abort_{false};
-
-  // Resolve and memoize the block's execution parameters. Idempotent.
-  SystemStatus<void> load_network_config();
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.

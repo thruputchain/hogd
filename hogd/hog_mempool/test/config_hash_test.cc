@@ -5,32 +5,12 @@
 
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_mempool/config_hash.h"
-#include "hogd/network_config/config_upgrade.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "storage_cost.hh"
 #include "types.hh"
 
 namespace hogd {
-
-namespace {
-
-ConfigUpgrade
-upgrade_of(ConfigParamID id, uint32_t value)
-{
-  ConfigUpgrade upgrade(id);
-  switch (id) {
-  case ConfigParamID::kConfigParamMaxSHA256Buffers:
-    upgrade.max_sha256_buffers() = value;
-    break;
-  case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
-    upgrade.max_cross_invoke_depth() = value;
-    break;
-  }
-  return upgrade;
-}
-
-} // namespace
 
 TEST(ConfigHashTest, CommitsToXdrPreimage)
 {
@@ -74,16 +54,10 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   const ConfigHash original = compute_config_hash(
       make_config_hash_preimage(model, stock_network_config()));
 
-  const std::array<NetworkConfig, 2> variants = {
-      apply_config_upgrade(
-          stock_network_config(),
-          upgrade_of(ConfigParamID::kConfigParamMaxSHA256Buffers,
-                     stock_network_config().max_sha256_buffers + 1)),
-      apply_config_upgrade(
-          stock_network_config(),
-          upgrade_of(ConfigParamID::kConfigParamMaxCrossInvokeDepth,
-                     stock_network_config().max_cross_invoke_depth + 1)),
-  };
+  std::array<NetworkConfig, 2> variants;
+  variants.fill(stock_network_config());
+  variants[0].max_sha256_buffers++;
+  variants[1].max_cross_invoke_depth++;
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(make_config_hash_preimage(model, variant)),
               original);

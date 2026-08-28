@@ -30,7 +30,7 @@ private:
   // byte count absorbed since the last reset. The state is constant-size
   // regardless of how many bytes were fed, so copying a stream (a planned
   // fork operation for keypath derivation) is constant-time. The byte count
-  // enforces kSHA256BufferMaxSize -- contract-observable, so it outlives the
+  // enforces kSHA256BufferMaxSize — contract-observable, so it outlives the
   // representation that needed it — and feeds finalize's size report into
   // transaction stats.
   struct Stream {

@@ -26,7 +26,6 @@ target_link_libraries(
   ramdb
   runtime
   storage_cost
-  network_config
 )
 add_dependencies(
   hog_devnode
@@ -78,7 +77,6 @@ target_link_libraries(
   genesis
   hog_devnode
   storage_cost
-  network_config
   GTest::gtest
 )
 add_dependencies(

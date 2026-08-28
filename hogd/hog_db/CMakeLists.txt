@@ -47,7 +47,6 @@ target_link_libraries(
   metrics
   genesis
   storage_cost
-  network_config
 )
 
 # Build the backend database (hog_db) executable

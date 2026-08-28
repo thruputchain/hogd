@@ -281,9 +281,6 @@ private:
 inline int
 InvokeTX::create_savepoint()
 {
-  // The per-chain cap is kConfigParamMaxTxCallDepth, enforced by
-  // try_push_new_subtransaction before it gets here. This guards the bound no
-  // configuration may exceed, so it stays a genuine invariant.
   CHECK(tx_depth_ < kMaxSavepointDepth);
   return ++tx_depth_;
 }

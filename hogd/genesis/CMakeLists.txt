@@ -13,7 +13,6 @@ target_link_libraries(genesis
   base
   crypto
   storage_item
-  network_config
   protocol
   contract_loader
   components
