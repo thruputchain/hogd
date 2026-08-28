@@ -30,6 +30,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "storage_cost.hh"
@@ -56,21 +57,10 @@ namespace {
 // fail to verify against a database built here.
 constexpr NetworkHash kTestNetworkHash{0x5a};
 
-// Serialized mock contract installed as the genesis root: these tests drive
-// contract bodies through the mock trampoline, so the genesis root's code
-// never runs and any deployable contract satisfies create_db.
-auto
-genesis_root_contract_bytes()
-{
-  Contract contract(ContractType::kMockTest);
-  contract.mock_contract_id() = 0;
-  return x23::serialize(contract);
-}
-
 void *
 make_db()
 {
-  auto genesis_root = genesis_root_contract_bytes();
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto db = create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
                       genesis_root.size());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
@@ -846,7 +836,7 @@ TEST(TestBindingsTest, CostModelRoundtrip)
   auto serialized_model = x23::serialize(custom_model);
 
   // Create a DB seeded with the custom cost model.
-  auto genesis_root = genesis_root_contract_bytes();
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto db_result =
       create_db(serialized_model.data(),
                 static_cast<uint32_t>(serialized_model.size()),
@@ -3338,6 +3328,28 @@ TEST(TestBindingsTest, CreateDBRejectsMissingGenesisRoot)
       create_db(nullptr, 0, NetworkHash{}.data(), kGarbage, sizeof(kGarbage));
   EXPECT_EQ(garbage_res.ffi_error_code, kTestFFIErrorCodeDeserializeError);
   EXPECT_EQ(garbage_res.db, nullptr);
+}
+
+// The genesis root's reserved mock id cannot be registered or created as an
+// ordinary test mock: a mock with that id would collide with the genesis
+// root deployment.
+TEST(TestBindingsTest, ReservedGenesisMockIdRejected)
+{
+  constexpr int32_t kReservedId =
+      static_cast<int32_t>(TEST_FFI_GENESIS_ROOT_MOCK_CONTRACT_ID);
+
+  auto *db = make_db();
+  x23::Defer d1([&] { free_db(db); });
+  auto *rc = make_runtime_context();
+  x23::Defer d2([&] { close_runtime_context(rc); });
+
+  EXPECT_EQ(register_new_contract(rc, kReservedId, &mock_contract_create_event,
+                                  nullptr),
+            kTestFFIErrorCodeInvalidArgument);
+
+  auto reserved = x23::serialize(make_test_genesis_root_contract());
+  EXPECT_EQ(setup_create_contract(rc, db, reserved.data(), reserved.size()),
+            kTestFFIErrorCodeInvalidArgument);
 }
 
 TEST(TestBindingsTest, ConcurrentCreateDB)

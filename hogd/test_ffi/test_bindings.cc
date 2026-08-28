@@ -471,6 +471,13 @@ register_new_contract(void *context, int32_t mock_contract_id,
   if (context == nullptr || entry_point == nullptr)
     return kTestFFIErrorCodeInvalidPointer;
 
+  // The reserved id belongs to the genesis root installed by create_db; a
+  // registered mock with that id would collide with its deployment.
+  if (mock_contract_id ==
+      static_cast<int32_t>(TEST_FFI_GENESIS_ROOT_MOCK_CONTRACT_ID)) {
+    return kTestFFIErrorCodeInvalidArgument;
+  }
+
   auto *c = static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
   if (!c)
     return kTestFFIErrorCodeInvalidPointer;
@@ -1032,6 +1039,13 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     // input. Catch it so it doesn't cross the noexcept FFI boundary (#2490).
     log_error("unrecoverable: error deserializing contract: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
+  }
+
+  // The reserved id belongs to the genesis root installed by create_db.
+  if (contract.contract_type() == ContractType::kMockTest &&
+      contract.mock_contract_id() ==
+          static_cast<int32_t>(TEST_FFI_GENESIS_ROOT_MOCK_CONTRACT_ID)) {
+    return kTestFFIErrorCodeInvalidArgument;
   }
 
   try {

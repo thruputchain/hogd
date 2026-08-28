@@ -12,6 +12,12 @@ extern "C" {
 #define TEST_FFI_VERSION_MINOR 25
 #define TEST_FFI_VERSION_PATCH 0
 
+// Mock contract id reserved for the genesis root installed by create_db.
+// SDKs often default mock ids from zero, so the reserved id sits at the top
+// of the range; register_new_contract and setup_create_contract reject it to
+// keep test mocks from colliding with the genesis root deployment.
+#define TEST_FFI_GENESIS_ROOT_MOCK_CONTRACT_ID 0xFFFFFFFF
+
 // THREADING CONTRACT
 // ==================
 // The DB itself is thread-safe from a memory-safety standpoint: you may open

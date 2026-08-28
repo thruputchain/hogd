@@ -25,6 +25,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h" // entrypoint_from_method_id
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "hogd/test_ffi/test_genesis_root_contract.h"
 #include "invoke_flag.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -34,21 +35,10 @@
 
 namespace hogd {
 
-// Serialized mock contract installed as the genesis root: these tests drive
-// contract bodies through the mock trampoline, so the genesis root's code
-// never runs and any deployable contract satisfies create_db.
-inline auto
-test_genesis_root_contract_bytes()
-{
-  Contract contract(ContractType::kMockTest);
-  contract.mock_contract_id() = 0;
-  return x23::serialize(contract);
-}
-
 inline void *
 make_db()
 {
-  auto genesis_root = test_genesis_root_contract_bytes();
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto db = create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
                       genesis_root.size());
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
