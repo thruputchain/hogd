@@ -3383,7 +3383,8 @@ poll_indexer_latest_block(auto &reader, BlockHeight expected)
     query.order = IterationOrder::IterationOrderAscending;
     query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
     const BlockHeight latest =
-        reader.get_transactions_by_address(query)().latest_block;
+        page_or_empty(reader.get_transactions_by_address(query)())
+            .latest_block;
     if (latest == expected || std::chrono::steady_clock::now() >= deadline) {
       return latest;
     }
