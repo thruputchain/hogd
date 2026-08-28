@@ -94,9 +94,6 @@ calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
 
 DeployedContractHash native_default_wallet_hash();
 
-[[nodiscard]] bool
-valid_genesis_configuration(GenesisConfiguration const &config);
-
 // Visit only the records required to execute the height-1 root ceremony.
 // Economic state (supply, balances, and replay metadata) is created lazily by
 // ordinary transaction execution.

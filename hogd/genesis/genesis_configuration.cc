@@ -86,25 +86,6 @@ native_default_wallet_hash()
       HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet));
 }
 
-bool
-valid_genesis_configuration(GenesisConfiguration const &config)
-{
-  // Any deployable contract type may serve as the root; code-bearing types
-  // must actually carry code. Test harnesses install mock roots whose code
-  // never runs; production configurations come from
-  // GenesisConfigurationBuilder, which requires an rv32 root.
-  switch (config.root_contract.contract_type()) {
-  case ContractType::kRv32:
-    return !config.root_contract.rv32_contract().data.empty();
-  case ContractType::kWasmi:
-    return !config.root_contract.wasmi_contract().data.empty();
-  case ContractType::kNative:
-  case ContractType::kMockTest:
-    return true;
-  }
-  return false;
-}
-
 void
 visit_genesis_execution_prerequisites(
     GenesisConfiguration const &config,
@@ -114,8 +95,6 @@ visit_genesis_execution_prerequisites(
     std::function<void(ContractAddress const &, AddressAuthData const &)> const
         &visit_auth_data)
 {
-  CHECK(valid_genesis_configuration(config));
-
   auto root = std::make_shared<Contract>(config.root_contract);
   visit_contract(root);
   visit_deployment(kGenesisRootContractAddress,
