@@ -34,6 +34,7 @@
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/lthash16.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
@@ -1265,6 +1266,52 @@ TEST_F(HogDbTest, ApplyFeedsDebugInvariants)
   ASSERT_TRUE(db_.apply(changeset));
 
   EXPECT_FALSE(db_.check_invariants());
+}
+
+TEST_F(HogDbTest, InvariantsBalanceAtMaxSupplyDoesNotOverflowAccumulator)
+{
+  // Regression guard for a signed-integer overflow in the conservation
+  // invariant's running sum (caught by UBSan via
+  // NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance).
+  //
+  // The sum is over every HOG-denominated item change in the block, and only
+  // its final value has to be zero. Individual terms can be as large as
+  // INT128_MAX -- minting the entire supply credits a balance by INT128_MAX and
+  // debits the total-supply counter by the same amount -- so the partial sum
+  // leaves int128 range as soon as the two arrive in the order that puts the
+  // debit first. Accumulating in int128 was undefined behaviour there.
+  //
+  // We stage exactly that: a whale balance plus the offsetting total-supply
+  // counter at INT128_MAX, balanced so the sum is zero. The invariant must
+  // reach that zero without overflowing on the way.
+  if (!is_debug_build()) {
+    GTEST_SKIP() << "debug invariants are only fed in debug builds";
+  }
+
+  db_.enable_debug_invariants(cost_model_with_balance_cost_);
+
+  constexpr int128_t kMaxSupply = std::numeric_limits<int128_t>::max();
+  const int128_t balance_cost =
+      cost_model_with_balance_cost_.get_balance_cost();
+  const int128_t nnint_cost = cost_model_with_balance_cost_.get_nnint_cost();
+  // The whale holds everything the two new rows have not locked as storage.
+  const int128_t whale_balance = kMaxSupply - balance_cost - nnint_cost;
+
+  Address whale = make_address(kAddress + 72);
+  auto balance_key = make_address_key(whale, Prefix::kBalance);
+  auto balance_bytes = int128_to_xdr_bytes(whale_balance);
+  auto supply_key = make_contract_data_key(
+      ItemKey(kNativeTokenContractAddress, kNativeTokenTotalSupplyKey));
+  auto supply_bytes = int128_to_xdr_bytes(kMaxSupply);
+
+  auto changeset = db_.create_changeset();
+  changeset.put(std::as_bytes(std::span(balance_key)), kNNInt128,
+                std::as_bytes(std::span(balance_bytes)));
+  changeset.put(std::span<const std::byte>(supply_key), kNNInt128,
+                std::as_bytes(std::span(supply_bytes)));
+  ASSERT_TRUE(db_.apply(changeset));
+
+  EXPECT_TRUE(db_.check_invariants());
 }
 
 TEST_F(HogDbTest, DbHashDeltaBytestringLockMatchesFullStateHash)

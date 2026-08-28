@@ -4,6 +4,7 @@
 #include <span>
 
 #include "hogd/base/types.h"
+#include "hogd/base/wide_integral.h"
 #include "hogd/hog_db/invariant.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
@@ -38,7 +39,13 @@ private:
 
   void update_total_supply(int128_t change);
 
-  x23::MVar<int128_t> total_supply_change_{0};
+  // Running sum of every HOG-denominated item change in the block. Only the
+  // final value has to be zero: partial sums legitimately leave int128 range
+  // whenever a single item moves an amount near INT128_MAX (minting the whole
+  // supply credits a balance by INT128_MAX and debits the total-supply counter
+  // by the same, and the two arrive as separate changes), so the accumulator is
+  // 256 bits wide to keep those intermediates from overflowing.
+  x23::MVar<WideIntegral<int128_t>> total_supply_change_{0};
   StorageCostModel cost_model_;
 };
 

@@ -135,4 +135,35 @@ TEST(WideIntegralTest, LargeTypeConversions)
   EXPECT_EQ(a.get_capped<uint128_t>(),
             uint128_t{std::numeric_limits<int64_t>::max()} + 1'000'101);
 }
+
+TEST(WideIntegralTest, IsZero)
+{
+  hogd::WideIntegral<int128_t> a(0);
+  EXPECT_TRUE(a.is_zero());
+
+  a += 1;
+  EXPECT_FALSE(a.is_zero());
+  a -= 1;
+  EXPECT_TRUE(a.is_zero());
+
+  // A round trip that leaves int128 range in the middle still lands exactly on
+  // zero -- this is what the HOG conservation invariant relies on.
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  a -= kMax;
+  EXPECT_FALSE(a.is_zero());
+  a -= kMax;
+  EXPECT_FALSE(a.is_zero());
+  EXPECT_FALSE(a.is_in_range<int128_t>());
+  a += kMax;
+  a += kMax;
+  EXPECT_TRUE(a.is_zero());
+
+  // -2^128 has all of its low bits clear, so is_zero() has to look at the high
+  // half too.
+  a -= kMax;
+  a -= kMax;
+  a -= 2;
+  EXPECT_FALSE(a.is_zero());
+  EXPECT_EQ(a.get_capped<int128_t>(), std::numeric_limits<int128_t>::min());
+}
 } // namespace hogd
