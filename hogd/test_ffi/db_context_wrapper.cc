@@ -48,7 +48,8 @@ make_dbauth_client(x23::HostPort const &hostport)
 
 DBContext::DBContext(StorageCostModelXdr const &cost_model,
                      NetworkHash network_hash,
-                     Contract const &genesis_root_contract)
+                     Contract const &genesis_root_contract,
+                     NetworkConfig const &network_config)
   : db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
@@ -77,12 +78,13 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  GenesisConfiguration genesis_configuration{
-      .network_hash = {},
-      .storage_cost_model = cost_model,
-      .network_config = stock_network_config(),
-      .root_contract = genesis_root_contract,
-      .default_wallet = native_default_wallet_hash()};
+  GenesisConfiguration genesis_configuration{.network_hash = {},
+                                             .storage_cost_model = cost_model,
+                                             .network_config = network_config,
+                                             .root_contract =
+                                                 genesis_root_contract,
+                                             .default_wallet =
+                                                 native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
   genesis_value.proposal_header.config_hash =
