@@ -22,6 +22,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/rpc_context.h"
@@ -129,6 +130,7 @@ protected:
     ASSERT_TRUE(dao.write_address_balance(addr_, int128_t{1'000'000'000}));
     ctx_ = std::make_unique<RPCContext>(std::move(dao), nullptr);
     ctx_->initialize_cost_model(StorageCostModel::default_cost_model());
+    ctx_->set_network_config(stock_network_config());
     ASSERT_TRUE(
         ctx_->open_block_tx(BlockID{1},
                             BlockExecutionMode::kBlockExecutionModeProposal));

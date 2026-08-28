@@ -506,7 +506,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
         ConsensusValue genesis_value{};
         genesis_value.proposal_header.block_height = 0;
         genesis_value.proposal_header.config_hash =
-            compute_config_hash(genesis_configuration.storage_cost_model);
+            compute_config_hash(genesis_configuration);
         auto res = db_sched_client.dbsched_load_genesis_configuration(
             genesis_configuration, genesis_value);
         if (res != DbSchedResult::DbSchedResultOK) {

@@ -179,6 +179,14 @@ write_storage_cost_model_xdr(json::Writer &w, StorageCostModelXdr const &model)
   w.field("balance_cost", uint64_string(model.balance_cost));
 }
 
+void
+write_network_config(json::Writer &w, NetworkConfig const &config)
+{
+  w.field("max_sha256_buffers", uint64_string(config.max_sha256_buffers));
+  w.field("max_cross_invoke_depth",
+          uint64_string(config.max_cross_invoke_depth));
+}
+
 std::string
 build_genesis_json(GenesisConfiguration const &genesis)
 {
@@ -187,6 +195,9 @@ build_genesis_json(GenesisConfiguration const &genesis)
     w.field("network_hash", xdr_hex(genesis.network_hash));
     w.object_field("storage_cost_model", [&](json::Writer &w) {
       write_storage_cost_model_xdr(w, genesis.storage_cost_model);
+    });
+    w.object_field("network_config", [&](json::Writer &w) {
+      write_network_config(w, genesis.network_config);
     });
     w.object_field("root_contract", [&](json::Writer &w) {
       w.field("contract_type",
@@ -474,7 +485,8 @@ build_hosted_bootstrap_artifact(HostedBootstrapGeneratorConfig const &config)
   HostedBootstrapArtifact artifact{
       .genesis_configuration =
           builder.build(config.network_hash, cost_model,
-                        *load_stock_genesis_root_contract()),
+                        *load_stock_genesis_root_contract(),
+                        stock_network_config()),
       .initialization_txs = std::move(*initialization_txs),
       .accounts = std::move(accounts),
       .faucet = std::move(faucet),

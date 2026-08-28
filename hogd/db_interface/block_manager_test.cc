@@ -3,10 +3,14 @@
 #include <memory>
 
 #include "contract.hh"
+#include "genesis.hh"
 #include "hogd/db_interface/block_manager.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/init.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/network_config/config_upgrade.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 
@@ -150,6 +154,51 @@ TEST(BlockManagerTest, AccessingSnapshotData)
 
   EXPECT_TRUE(m.get_block_data(3)->get_snapshot_view()->get_snapshot_deployment(
       ContractAddress{}));
+}
+
+namespace {
+
+// A genesis carrying `network_config`, otherwise the smallest configuration
+// the prerequisite loader accepts.
+GenesisConfiguration
+make_genesis(NetworkConfig network_config)
+{
+  Contract root(ContractType::kRv32);
+  root.rv32_contract().data.push_back(0);
+  return GenesisConfiguration{
+      .storage_cost_model = StorageCostModel::default_cost_model().to_xdr(),
+      .network_config = std::move(network_config),
+      .root_contract = std::move(root),
+      .default_wallet = native_default_wallet_hash(),
+  };
+}
+
+} // namespace
+
+// Genesis decides the chain's execution parameters, so what it carries is what
+// the manager hands to the executor -- not whatever this build's stock values
+// happen to be.
+TEST(BlockManagerTest, GenesisInstallsItsOwnNetworkConfig)
+{
+  constexpr uint32_t kConfiguredDepth = 64;
+  ConfigUpgrade upgrade(ConfigParamID::kConfigParamMaxCrossInvokeDepth);
+  upgrade.max_cross_invoke_depth() = kConfiguredDepth;
+
+  const NetworkConfig configured =
+      apply_config_upgrade(stock_network_config(), upgrade);
+  ASSERT_NE(configured.max_cross_invoke_depth,
+            stock_network_config().max_cross_invoke_depth);
+
+  InMemoryDatabase db;
+  BlockManager m(0, &db);
+  ASSERT_TRUE(m.initialize_genesis_configuration(make_genesis(configured)));
+
+  EXPECT_EQ(m.get_network_config().max_cross_invoke_depth, kConfiguredDepth);
+  // The parameters genesis did not name keep their values, so the executor
+  // sees exactly the configuration the chain committed to.
+  EXPECT_EQ(m.get_network_config().max_sha256_buffers,
+            stock_network_config().max_sha256_buffers);
+  EXPECT_EQ(m.get_network_config(), configured);
 }
 
 } // namespace hogd

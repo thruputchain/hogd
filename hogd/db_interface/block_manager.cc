@@ -213,9 +213,11 @@ BlockManager::initialize_genesis_configuration(
   if (initialized_genesis_) {
     return false;
   }
+
   initialized_genesis_ = true;
 
   default_wallet_.emplace(config.default_wallet);
+  network_config_.emplace(config.network_config);
 
   cost_model_.emplace(config.storage_cost_model);
 

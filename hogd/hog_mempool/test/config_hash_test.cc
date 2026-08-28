@@ -1,26 +1,52 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdint>
 
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_mempool/config_hash.h"
+#include "hogd/network_config/config_upgrade.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "storage_cost.hh"
 #include "types.hh"
 
 namespace hogd {
 
+namespace {
+
+ConfigUpgrade
+upgrade_of(ConfigParamID id, uint32_t value)
+{
+  ConfigUpgrade upgrade(id);
+  switch (id) {
+  case ConfigParamID::kConfigParamMaxSHA256Buffers:
+    upgrade.max_sha256_buffers() = value;
+    break;
+  case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
+    upgrade.max_cross_invoke_depth() = value;
+    break;
+  }
+  return upgrade;
+}
+
+} // namespace
+
 TEST(ConfigHashTest, CommitsToXdrPreimage)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();
+  const NetworkConfig network_config = stock_network_config();
   const ConfigHash expected{
-      0x5a, 0x4a, 0x14, 0xaf, 0xcc, 0x2f, 0xb0, 0xb7, 0xfb, 0x83, 0xc7,
-      0xb4, 0xfc, 0xa2, 0x82, 0x3c, 0x06, 0x8b, 0x92, 0xa2, 0xce, 0x70,
-      0x5f, 0x91, 0x56, 0x8a, 0xa8, 0x63, 0xe7, 0x1f, 0x1c, 0x21,
+      0x77, 0x22, 0xe0, 0x07, 0xb7, 0x38, 0xb5, 0xec, 0x0a, 0x56, 0x2f,
+      0x1c, 0x9c, 0xaf, 0x59, 0x78, 0xfe, 0x0e, 0xb9, 0x35, 0xb9, 0xcb,
+      0x70, 0x05, 0x56, 0xd6, 0x89, 0x2d, 0xde, 0x37, 0x48, 0xdc,
   };
-  EXPECT_EQ(compute_config_hash(make_config_hash_preimage(model)), expected);
+  EXPECT_EQ(compute_config_hash(
+                make_config_hash_preimage(model, network_config)),
+            expected);
 
   const ConfigHash original =
-      compute_config_hash(make_config_hash_preimage(model));
+      compute_config_hash(make_config_hash_preimage(model, network_config));
   StorageCostModelXdr xdr = model.to_xdr();
   std::array<StorageCostModelXdr, 8> variants;
   variants.fill(xdr);
@@ -34,7 +60,32 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   variants[7].balance_cost++;
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
-                  make_config_hash_preimage(StorageCostModel(variant))),
+                  make_config_hash_preimage(StorageCostModel(variant),
+                                            network_config)),
+              original);
+  }
+}
+
+// Every configurable parameter has to move the hash, or a chain could change
+// its execution rules without the header recording that it had.
+TEST(ConfigHashTest, CommitsToEveryConfigParam)
+{
+  const StorageCostModel model = StorageCostModel::default_cost_model();
+  const ConfigHash original = compute_config_hash(
+      make_config_hash_preimage(model, stock_network_config()));
+
+  const std::array<NetworkConfig, 2> variants = {
+      apply_config_upgrade(
+          stock_network_config(),
+          upgrade_of(ConfigParamID::kConfigParamMaxSHA256Buffers,
+                     stock_network_config().max_sha256_buffers + 1)),
+      apply_config_upgrade(
+          stock_network_config(),
+          upgrade_of(ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                     stock_network_config().max_cross_invoke_depth + 1)),
+  };
+  for (auto const &variant : variants) {
+    EXPECT_NE(compute_config_hash(make_config_hash_preimage(model, variant)),
               original);
   }
 }

@@ -800,6 +800,24 @@ SystemCallHandler::invoke(ContractAddress const &address,
     return {admitted.error(), 0};
   }
 
+  // A chain bounds how many invocation frames one transaction may have open at
+  // once. Every open frame holds a live contract runtime, so without this a
+  // recursive call chain grows until the executor cannot hold it -- and unlike
+  // the TryInvoke cap, which HogDb's savepoint stack bounds independently, a
+  // plain invoke had nothing stopping it.
+  //
+  // Report it as a faulted child frame, the same outcome the TryInvoke cap
+  // produces, rather than as a system error: every node reads the same limit
+  // from the same tip, so the rejection is deterministic and the block still
+  // commits.
+  if (auto config = load_network_config(); !config) {
+    return {config.error(), 0};
+  }
+  if (invocation_frame_stack_.size() >=
+      network_config().max_cross_invoke_depth) {
+    return {InvocationFrameStatusCode::Fault, 0};
+  }
+
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,
   // inserts a fresh (possibly negative) entry; that unordered_map insert can
   // throw std::bad_alloc under memory pressure. invoke() is reached from the
@@ -910,6 +928,12 @@ SystemCallHandler::start_frame(
     std::span<uint32_t const> owned_auth_token_ids) noexcept
 {
   assert(!last_frame_finished_);
+  // Resolve the block's execution parameters before admitting any frame, so
+  // the hash-buffer limit reads a value that is already known good and cannot
+  // fail mid-syscall.
+  if (auto config = load_network_config(); !config) {
+    return std::unexpected(config.error());
+  }
   std::unique_ptr<InvocationFrameTrace> stashed_parent_trace = nullptr;
   if (invocation_frame_trace_ && !invocation_frame_stack_.empty()) {
     stashed_parent_trace = std::move(invocation_frame_trace_);
@@ -2195,7 +2219,8 @@ SystemCallHandler::sha256_update(uint32_t input_index,
 {
   assert(!invocation_frame_stack_.empty());
   return invocation_frame_stack_.get_active_frame_hash_buffers().update(
-      input_index, input_buffer, input_reset);
+      input_index, input_buffer, input_reset,
+      network_config().max_sha256_buffers);
 }
 
 SyscallStatus<void>
@@ -2204,7 +2229,7 @@ SystemCallHandler::sha256_copy(uint32_t input_src_index,
 {
   assert(!invocation_frame_stack_.empty());
   return invocation_frame_stack_.get_active_frame_hash_buffers().copy(
-      input_src_index, input_dst_index);
+      input_src_index, input_dst_index, network_config().max_sha256_buffers);
 }
 
 SyscallStatus<SHA256Hash>
@@ -2218,6 +2243,33 @@ SystemCallHandler::sha256_finalize(uint32_t input_index)
     stats->sha256_total_bytes_processed += output_size;
   }
   return r;
+}
+
+// == Network configuration ==
+
+SystemStatus<void>
+SystemCallHandler::load_network_config()
+{
+  if (network_config_.has_value()) {
+    return {};
+  }
+  // Caching the tip allocates, and both callers are reached from noexcept
+  // syscall bodies, so translate a failure here rather than letting it unwind
+  // across those boundaries and terminate the executor.
+  try {
+    auto tip = snapshot_cache_.try_get_db_tip();
+    if (!tip.has_value()) {
+      return std::unexpected(tip.error());
+    }
+    network_config_.emplace(tip.value()->network_config);
+    return {};
+  } catch (std::exception const &e) {
+    report_dropped_log(e.what());
+    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
+  } catch (...) {
+    report_dropped_log("unknown exception");
+    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
+  }
 }
 
 // == Block statistics syscalls ==

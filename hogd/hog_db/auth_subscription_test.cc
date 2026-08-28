@@ -30,6 +30,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
 #include "hogd/hog_db/background_commit_worker.h"
 #include "hogd/hog_db/block_tx.h"
@@ -133,6 +134,7 @@ protected:
     ctx_opt_.emplace(std::move(db_), nullptr);
     RPCContext &ctx = *ctx_opt_;
     ctx.initialize_cost_model(kTestCostModel);
+    ctx.set_network_config(stock_network_config());
     ASSERT_EQ(ctx.get_height_threadsafe(), kAcceptedHeight);
 
     ASSERT_TRUE(

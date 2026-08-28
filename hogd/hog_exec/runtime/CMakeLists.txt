@@ -56,6 +56,16 @@ add_library(runtime STATIC
   $<TARGET_OBJECTS:rv32_runtime_objects>
   $<TARGET_OBJECTS:item_objects>
 )
+
+# item_objects/storage_snapshot_cache.cc decodes the tip's NetworkConfig, so
+# every consumer of runtime needs the symbols. Declared here rather than on
+# each binary: runtime otherwise links nothing of its own and propagates
+# nothing.
+target_link_libraries(
+  runtime
+  network_config
+)
+
 add_library(runtime_test_lib
   native_contract_test_framework.cc
 )

@@ -20,6 +20,7 @@ target_link_libraries(
   hogd
   storage_item
   storage_cost
+  network_config
   mock_db
   genesis
 )

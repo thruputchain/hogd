@@ -155,8 +155,8 @@ protected:
                           StorageCostModel const &cost_model)
   {
     GenesisConfigurationBuilder builder;
-    run_genesis_initialization(builder.build(NetworkHash{}, cost_model,
-                                             *faucet),
+    run_genesis_initialization(builder.build(NetworkHash{}, cost_model, *faucet,
+                                             stock_network_config()),
                                BlockExecutionMode::kBlockExecutionModeProposal);
   }
 

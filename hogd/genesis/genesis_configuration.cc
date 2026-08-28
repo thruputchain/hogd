@@ -27,6 +27,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
 #include "precompiles.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -124,16 +125,32 @@ load_stock_genesis_root_contract()
   return contract;
 }
 
+NetworkConfig
+stock_network_config()
+{
+  // Values this repository's dev and test chains run under. They are a choice,
+  // not a protocol default: nothing inherits them, and a real chain passes its
+  // own to build().
+  return NetworkConfig{
+      .ext = ExtensionPoint(0),
+      .max_sha256_buffers = 8,
+      .max_cross_invoke_depth = 256,
+  };
+}
+
 GenesisConfiguration
 GenesisConfigurationBuilder::build(NetworkHash const &network_hash,
                                    StorageCostModel const &cost_model,
-                                   Contract const &root_contract) const
+                                   Contract const &root_contract,
+                                   NetworkConfig const &network_config) const
 {
   CHECK_EQ(root_contract.contract_type(), ContractType::kRv32);
   CHECK(!root_contract.rv32_contract().data.empty());
+
   return GenesisConfiguration{
       .network_hash = network_hash,
       .storage_cost_model = cost_model.to_xdr(),
+      .network_config = network_config,
       .root_contract = root_contract,
       .default_wallet =
           default_wallet_override_.value_or(native_default_wallet_hash()),
