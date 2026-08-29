@@ -56,13 +56,15 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // We intentionally discard its returned cost and compute our own tight
     // cost that accounts for consumes immediately, since there is no
     // concurrency concern under an exclusive lock.
-    auto inner_opt = after->to_retrocausal_queue();
-    CHECK(inner_opt.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    auto &inner = *inner_opt;
+    // Read the change in place rather than via to_retrocausal_queue(), which
+    // would deep-copy the entire typed cumulative delta (nested QueueEntry
+    // buffers and payloads) into an optional just to validate it. Mirrors the
+    // is_deploy_contract() branch above.
+    auto const *inner = after->get_inner<RetrocausalQueueIt>();
+    CHECK_PTR(inner);
 
     RetrocausalQueueLock lock;
-    auto cost = lock.try_atomic_change_lock(nullptr, &inner, ctx);
+    auto cost = lock.try_atomic_change_lock(nullptr, inner, ctx);
     if (!cost) {
       return cost;
     }
@@ -70,10 +72,10 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // Under exclusive lock there is no concurrency, so every
     // current-block consumed entry must have been added by this same TX.
     // Verify identity: each consumed entry exists in added_entries.
-    if (inner.delta().consume &&
-        !inner.delta().consume->current_block_consumed.empty()) {
-      auto const &consumed = inner.delta().consume->current_block_consumed;
-      auto const &added = inner.delta().insert.added_entries;
+    if (inner->delta().consume &&
+        !inner->delta().consume->current_block_consumed.empty()) {
+      auto const &consumed = inner->delta().consume->current_block_consumed;
+      auto const &added = inner->delta().insert.added_entries;
 
       std::multiset<QueueEntry> added_set(added.begin(), added.end());
       for (auto const &entry : consumed) {
@@ -92,10 +94,10 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     CHECK(meta.has_value());
 
     uint64_t live = (*meta)->live_entries;
-    uint64_t added = inner.delta().insert.added_entries.size();
-    uint64_t consumed = inner.consumed_past_entries_;
-    if (inner.delta().consume) {
-      consumed += inner.delta().consume->current_block_consumed.size();
+    uint64_t added = inner->delta().insert.added_entries.size();
+    uint64_t consumed = inner->consumed_past_entries_;
+    if (inner->delta().consume) {
+      consumed += inner->delta().consume->current_block_consumed.size();
     }
 
     if (consumed > live + added) {
