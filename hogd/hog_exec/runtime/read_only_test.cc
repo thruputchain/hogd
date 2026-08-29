@@ -644,24 +644,38 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   ASSERT_TRUE(res.is_root_success());
 }
 
-// Regression test for issue #3699: a native-token balance read must be priced
-// for the cold storage lookup it performs. get_balance_of loads a
-// previously-unseen address through the snapshot cache (a cold DB read) and
-// retains a snapshot-cache entry plus a parent-frame item view keyed by that
-// address; an RV32/WASM caller's own reads are bounded by its VM instruction
-// gas, but a native precompile has no such metering, so the per-call charge is
-// the only bound on how many distinct cold reads a caller can drive. Verify the
-// charge is the storage-read cost, not the old flat one gas, so the work is
-// bounded in proportion to the gas the caller pays.
-TEST_P(ReadOnlyTest, NativeTokenBalanceReadChargesStorageReadGas)
+// Regression test for issue #3699: every externally reachable native-token
+// cold read must be priced for the cold snapshot lookup it performs. Such a
+// read of a previously-unseen key does a cold DB read and retains a
+// snapshot-cache entry plus a parent-frame item view keyed by that
+// address/pair; an RV32/WASM caller's own reads are bounded by its VM
+// instruction gas, but a native precompile has no such metering, so the
+// per-read charge is the only bound on how many distinct cold reads a caller
+// can drive. This drives the three charge shapes -- a balance read
+// (get_balance_of), an allowance read (allowance), and transfer_from's
+// conditional two reads (allowance + owner balance) -- and checks each is
+// priced, so a later omitted or duplicated charge on any of these
+// consensus-sensitive paths is caught.
+TEST_P(ReadOnlyTest, NativeTokenColdReadsArePriced)
 {
-  // get_balance_of charges the one-gas base op plus one
-  // kNativeTokenStorageReadGasCost for its balance read (see
-  // precompile_native_token.cc). Pinned deliberately: update on a gas-schedule
-  // change.
-  constexpr uint64_t kExpectedBalanceReadGas = 1 + 1000;
+  // Each entrypoint charges a one-gas base op; each cold read then adds one
+  // kNativeTokenStorageReadGasCost (see precompile_native_token.cc). Pinned
+  // deliberately: update on a gas-schedule change.
+  constexpr uint64_t kBaseOp = 1;
+  constexpr uint64_t kReadCost = 1000;
+  // Order matches the caller's invoke sequence below.
+  constexpr uint64_t kExpected[] = {
+      kBaseOp + kReadCost,             // get_balance_of: 1 balance read
+      kBaseOp + kReadCost,             // allowance:      1 allowance read
+      kBaseOp + kReadCost + kReadCost, // transfer_from:  allowance + balance
+  };
+  constexpr size_t kNumReads = sizeof(kExpected) / sizeof(kExpected[0]);
 
   constexpr ContractAddress kObserverAddr = make_contract_address(12);
+  constexpr ContractAddress kAllowOwner = make_contract_address(13);
+  constexpr ContractAddress kAllowSpender = make_contract_address(14);
+  constexpr ContractAddress kTfOwner = make_contract_address(15);
+  constexpr ContractAddress kReceiver = make_contract_address(16);
   setup_grant_storage_token(kObserverAddr, 12345);
 
   constexpr int32_t kCallerNativeId = 100;
@@ -670,18 +684,24 @@ TEST_P(ReadOnlyTest, NativeTokenBalanceReadChargesStorageReadGas)
   auto native_token_client =
       ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
 
-  // The caller's single action is one get_balance_of of an address it has not
-  // touched before, so the traced Invoke's gas delta is exactly what the child
-  // read consumed.
+  // All three targets are addresses/pairs the caller has not touched before, so
+  // each traced Invoke's gas delta is exactly what the child read consumed. A
+  // zero-amount transfer_from with owner != spender (the caller) succeeds while
+  // still performing both the allowance and the owner-balance cold read.
+  auto ok = [](auto const &r) {
+    return r.has_value() && r.value().has_value() &&
+           r.value().value().has_value() && r.value().value().value().is_ok();
+  };
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res =
-            native_token_client.invoke_opt<u8"get_balance_of">(ctx,
-                                                               kObserverAddr);
-        if (!res.has_value() || !res.value().has_value() ||
-            !res.value().value().has_value() ||
-            !res.value().value().value().is_ok()) {
+        if (!ok(native_token_client.invoke_opt<u8"get_balance_of">(
+                ctx, kObserverAddr)) ||
+            !ok(native_token_client.invoke_opt<u8"allowance">(ctx, kAllowOwner,
+                                                              kAllowSpender)) ||
+            !ok(native_token_client.invoke_opt<u8"transfer_from">(
+                ctx, kTfOwner, kReceiver,
+                std::make_tuple(uint64_t{0}, uint64_t{0})))) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
         return {};
@@ -727,18 +747,20 @@ TEST_P(ReadOnlyTest, NativeTokenBalanceReadChargesStorageReadGas)
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
 
-  // The parent is charged exactly the gas the child (get_balance_of) consumed,
-  // so the Invoke of the native-token precompile carries the read's cost.
-  bool found_invoke = false;
+  // The parent is charged exactly the gas each child consumed, so each Invoke
+  // of the native-token precompile carries that call's read cost. The invokes
+  // appear in the order issued above.
+  size_t idx = 0;
   for (auto const &call : trace->system_calls) {
     if (call.body.syscall_number() == SyscallNo::kInvoke &&
         call.body.invoke().inputs.address == kNativeTokenContractAddress) {
+      ASSERT_LT(idx, kNumReads);
       EXPECT_EQ(call.gas_remaining_at_start - call.gas_remaining_at_end,
-                kExpectedBalanceReadGas);
-      found_invoke = true;
+                kExpected[idx]);
+      ++idx;
     }
   }
-  EXPECT_TRUE(found_invoke);
+  EXPECT_EQ(idx, kNumReads);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
