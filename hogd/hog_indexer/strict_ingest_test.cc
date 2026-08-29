@@ -612,6 +612,36 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
   EXPECT_EQ(*reopened->latest_block(), 2);
 }
 
+TEST_F(StrictIndexerTest, RecoveredShortTxValueYieldsInternalError)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(4674, 0x46);
+  const TransactionHash tx_hash = sha256(body.signed_tx.tx);
+  IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+
+  db_.reset();
+  // Truncate the persisted tx_index value below the BlockHeight prefix that
+  // parse_tx_value requires. Recovery validates metadata only, so the DB
+  // reopens; the direct lookup must report a nonfatal internal error rather
+  // than tripping parse_tx_value's fatal length check.
+  overwrite_column_family(
+      path_, IndexerKeyFormat::kTxIndexColumnFamily,
+      std::string_view(reinterpret_cast<const char *>(tx_hash.data()),
+                       tx_hash.size()),
+      std::string(1, '\x01'));
+
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+  auto record = reopened->get_tx_record(tx_hash);
+  ASSERT_FALSE(record.has_value());
+  EXPECT_EQ(record.error().code(), IndexerErrorCode::kInternal);
+}
+
 TEST_F(StrictIndexerTest, LegacyWatermarkWithStrictMetadataResidueFailsClosed)
 {
   db_.reset();
