@@ -1,0 +1,44 @@
+# RV32 gas calibration reference.
+#
+# Regenerate with:
+#   scripts/rv32_gas_calibrate.sh --out /tmp/gas.json
+#   scripts/rv32_gas_report.py /tmp/gas.json --emit-reference \
+#     > hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt
+#
+# Checked by scripts/rv32_gas_check.sh. Costs are multiples of the
+# baseline instruction measured in the same run, not nanoseconds, so
+# the file is portable across hosts. Only cells at or above
+# 1.5x baseline are guarded: cheaper ones do not
+# reproduce tightly enough to gate on.
+#
+# The tolerance is loose on purpose: this is a "something is
+# wildly out of whack" alarm, not a performance budget. A guarded
+# cell has to double relative to the baseline before it fires.
+#
+# Regenerating this file to make a failure go away hides exactly
+# what it is for.
+
+engine_fingerprint 71e9993b420be26b
+tolerance 1.0
+
+# guard <op> <context> <cost relative to baseline> <current gas>
+guard BEQ independent/taken 2.579 1
+guard BGE independent/taken 2.581 1
+guard BGEU independent/taken 2.572 1
+guard BLT independent/taken 2.591 1
+guard BLTU independent/taken 2.620 1
+guard BNE independent/taken 2.590 1
+guard DIV chain/large 5.476 8
+guard DIVU chain/large 5.164 8
+guard LW independent/chase_64k 5.912 1
+guard MUL chain 1.623 3
+guard MULH chain 2.010 3
+guard MULHSU chain 1.997 3
+guard MULHU chain 1.934 3
+guard REM chain/large 6.775 8
+guard REMU chain/large 6.368 8
+
+# Worst-over-best ns/gas across the validation workloads: how
+# much real capacity the current schedule gives away. Rising
+# means pricing got less even.
+workload_spread 5.787
