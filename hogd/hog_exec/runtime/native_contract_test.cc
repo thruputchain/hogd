@@ -317,7 +317,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
         // The middle contract pays its own dispatch base plus the three child
         // invokes (each base + consumed amount): base + 3*base + (100+200+150).
-        if (g != 4 * kNativeContractBaseGas + (100 + 200 + 150)) {
+        if (g != (4 * kNativeContractBaseGas) + (100 + 200 + 150)) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -364,7 +364,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   ASSERT_TRUE(res.result_);
   // Five native dispatches run (entry, middle, and the three consumer calls),
   // each paying the flat base, plus the 100+200+150 the consumer consumes.
-  ASSERT_EQ(res.gas_consumed_, 5 * kNativeContractBaseGas + (100 + 200 + 150));
+  ASSERT_EQ(res.gas_consumed_,
+            (5 * kNativeContractBaseGas) + (100 + 200 + 150));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
@@ -465,7 +466,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   ASSERT_TRUE(res.result_);
   // entry's own dispatch base, plus the two child invokes: the first consumes
   // base + 255, the second is capped at its base + 255 limit on OutOfGas.
-  ASSERT_EQ(res.gas_consumed_, 3 * kNativeContractBaseGas + (255 + 255));
+  ASSERT_EQ(res.gas_consumed_, (3 * kNativeContractBaseGas) + (255 + 255));
 }
 
 // Regression test for issue #3677: a native call that rejects its caller after
