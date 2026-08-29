@@ -806,16 +806,25 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // the TryInvoke cap, which HogDb's savepoint stack bounds independently, a
   // plain invoke had nothing stopping it.
   //
-  // Report exceeding it as a faulted child frame, the same outcome the
-  // TryInvoke cap produces, rather than as a system error: every node reads
-  // the same limit from the same tip, so the rejection is deterministic and
-  // the block still commits.
+  // Report it as a syscall error, like every other rejection that happens
+  // before a child frame is created: the caller's outputs stay untouched and
+  // the call is a complete no-op, which is what CopyableInvokeOutputs
+  // documents a nonzero error code to mean. Reporting a faulted child frame
+  // instead would be indistinguishable from a callee that ran and trapped.
+  //
+  // A syscall error is as deterministic as that frame status was -- every node
+  // reads the same limit from the same tip, and the block still commits -- so
+  // this is not the system error that ends block execution. (The TryInvoke cap
+  // does report Fault, but it fires in InvocationFrameStack::finish_frame,
+  // after its child frame has actually run.)
   auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
   if (!max_depth.has_value()) {
     return {max_depth.error(), 0};
   }
   if (invocation_frame_stack_.size() >= *max_depth) {
-    return {InvocationFrameStatusCode::Fault, 0};
+    return {SyscallError{
+                SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded},
+            0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,

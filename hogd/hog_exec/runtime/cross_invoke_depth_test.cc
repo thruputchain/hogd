@@ -67,16 +67,58 @@ invoke_expecting(ContractAddress const &next,
   };
 }
 
+// An entrypoint that invokes `next` and requires the cross-invoke bound to
+// refuse it.
+//
+// The refusal arrives on the syscall's own error channel, which is what
+// separates it from a callee that ran and trapped -- that reports
+// kSyscallErrorCodeNone with frame_status Fault. Refusing before a frame is
+// created also makes the call a complete no-op, so the outputs seeded below
+// must come back exactly as they went in. They are seeded with values the
+// syscall could never write on this path: a refusal writes nothing, and
+// admitting the call would write Return or Fault, never Abort.
+NativeContract::function_t
+invoke_expecting_depth_refusal(ContractAddress const &next)
+{
+  return [next](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    CopyableInvokeOutputs outputs{
+        .return_buffer_len = UINT32_MAX,
+        .returned_auth_token_len = UINT32_MAX,
+        .frame_status = InvocationFrameStatusCode::Abort,
+    };
+    CopyableInvokeInputs inputs{
+        .entrypoint_id = 0,
+        .gas_limit = UINT64_MAX,
+        .flags = std::to_underlying(InvokeFlag::None),
+    };
+    auto r =
+        ctx.syscall<SyscallNo::kInvoke>(next, std::span<const std::byte>{},
+                                        std::span<uint32_t>{}, inputs, outputs);
+    if (!r.has_value() ||
+        r.value() != SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded) {
+      ADD_FAILURE() << "invoke past the bound did not report "
+                       "kSyscallErrorCodeInvokeDepthExceeded";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    if (outputs.return_buffer_len != UINT32_MAX ||
+        outputs.returned_auth_token_len != UINT32_MAX ||
+        outputs.frame_status != InvocationFrameStatusCode::Abort) {
+      ADD_FAILURE() << "a refused invoke wrote to the caller's outputs";
+      return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    return {};
+  };
+}
+
 // An entrypoint on a contract the bound must keep unreachable. Deployed and
 // named as an invoke target so the refusal is observed at the call, but
 // running its body is the failure these tests look for.
 //
-// It returns successfully so that running it is distinguishable from being
-// refused: a refused invoke reports Fault, and so would a body that failed, so
-// a body that faulted would leave the caller's status assertion passing for the
-// wrong reason. Returning success makes the caller observe Return instead, and
-// the deepest frame of a chain reach the root as a success -- either way the
-// assertion fails on its own, without relying on the ADD_FAILURE below.
+// It returns successfully so that entering it is caught by the caller's own
+// assertion and not only by the ADD_FAILURE below: a body that faulted would
+// leave the deepest frame of a chain reaching the root as a failure, which is
+// also what a broken bound produces, whereas returning success makes the two
+// outcomes differ.
 NativeContract::function_t
 unreachable_entrypoint()
 {
@@ -163,15 +205,16 @@ TEST_F(CrossInvokeDepthTest, GenesisValueBoundsOpenFrames)
     else {
       // Contract i runs with i + 1 frames open (the root frame plus one per
       // contract entered), so contract kMaxCrossInvokeDepth - 1 is the first
-      // whose invoke would exceed the limit. Exceeding it is reported as a
-      // faulted child frame, so the caller keeps running and the transaction
-      // still commits.
+      // whose invoke the bound refuses. The refusal is a syscall error the
+      // caller can handle, so it keeps running and the transaction still
+      // commits.
       const bool expect_refused =
           i == static_cast<int32_t>(kMaxCrossInvokeDepth) - 1;
-      fns.emplace(0, invoke_expecting(make_contract_address(i + 1),
-                                      expect_refused
-                                          ? InvocationFrameStatusCode::Fault
-                                          : InvocationFrameStatusCode::Return));
+      fns.emplace(0, expect_refused
+                         ? invoke_expecting_depth_refusal(
+                               make_contract_address(i + 1))
+                         : invoke_expecting(make_contract_address(i + 1),
+                                            InvocationFrameStatusCode::Return));
     }
     contract_map.emplace(i, std::make_unique<NativeContract>(std::move(fns)));
   }
@@ -199,9 +242,10 @@ TEST_F(CrossInvokeDepthZeroTest, RootInvocationIsRefused)
 
   auto res = handler.root_invoke();
 
-  // No frame is admitted, so there is no caller left to absorb the refusal as
-  // a faulted child: it surfaces as a deterministic failure of the whole
-  // transaction.
+  // No frame is admitted, and there is no caller frame to receive the syscall
+  // error, so the refusal surfaces as a deterministic failure of the whole
+  // transaction. handle_root_host_fn_status maps every pre-frame rejection
+  // that way, so this is unchanged by the refusal carrying its own code.
   ASSERT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
@@ -213,8 +257,8 @@ TEST_F(CrossInvokeDepthOneTest, RootInvocationRunsWithNoCrossInvokes)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> caller_fns;
-  caller_fns.emplace(0, invoke_expecting(make_contract_address(1),
-                                         InvocationFrameStatusCode::Fault));
+  caller_fns.emplace(0,
+                     invoke_expecting_depth_refusal(make_contract_address(1)));
   contract_map.emplace(0,
                        std::make_unique<NativeContract>(std::move(caller_fns)));
 
@@ -229,9 +273,9 @@ TEST_F(CrossInvokeDepthOneTest, RootInvocationRunsWithNoCrossInvokes)
 
   auto res = handler.root_invoke();
 
-  // The root frame fits under the bound and the refusal it sees is a faulted
-  // child frame, so it runs to completion and the transaction succeeds -- the
-  // callee simply never runs.
+  // The root frame fits under the bound, and the refusal it sees is a syscall
+  // error rather than a failed frame, so it runs to completion and the
+  // transaction succeeds -- the callee simply never runs.
   ASSERT_TRUE(res.result_);
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Return);
