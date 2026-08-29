@@ -2817,6 +2817,52 @@ TEST_F(EventRpcTest, CloseDoesNotMakeEventsPullableBeforeCommit)
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
 }
 
+// Event exits before close returns: only a process-local temp file exists.
+// Restart must not invent a committed record or an event-root acknowledgement.
+TEST_F(EventRpcTest, CrashBeforeCloseLeavesNothingPullableAfterRestart)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  }
+
+  constexpr BlockID kUnclosedBlockId = 91;
+  ProposedTransaction stale_body = make_body(91);
+  x23::Buf stale;
+  x23::serialize_to(&stale, make_event(stale_body, 91));
+  x23::serialize_to(&stale, stale_body);
+  std::ofstream leftover(
+      EventBlockContext::temp_events_filename(temp_dir(), kUnclosedBlockId),
+      std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(leftover.write(reinterpret_cast<const char *>(stale.data()),
+                             static_cast<std::streamsize>(stale.size())));
+  leftover.close();
+  ASSERT_TRUE(std::filesystem::exists(
+      EventBlockContext::temp_events_filename(temp_dir(), kUnclosedBlockId)));
+
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(0, genesis)().has_value());
+  EXPECT_EQ(restarted.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_FALSE(restarted.indexer_outbox_store().has_committed(1).value());
+
+  EventMempoolRpc rpc(restarted);
+  constexpr BlockID kNextBlockId = 92;
+  ASSERT_EQ(rpc.eventsched_open_block(kNextBlockId)(), RPCError::kRPCNone);
+  EventBlockResult closed = rpc.eventsched_close_block(kNextBlockId, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  value.prev_hash = sha256(genesis);
+  EXPECT_EQ(rpc.eventsched_commit_block(kNextBlockId, value)(),
+            RPCError::kRPCNone);
+  EventIndexerPullResult pulled = restarted.pull_indexer_next(pull_request())();
+  ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, value);
+}
+
 TEST_F(EventRpcTest, RecoveryPicksCanonicalEventsFileAmongCompetingBlocks)
 {
   // Two blocks close at the same height with different nondeterministic data,

@@ -38,6 +38,7 @@
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/metrics/health.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "indexer.hh"
@@ -603,6 +604,8 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   options.rpc_timeout = std::chrono::seconds(1);
   IndexerPullController controller(event_addr, *db, failures, options);
   controller.wait_until_caught_up();
+  EXPECT_NE(Health::instance().dump_to_string()().find("\"status\":\"ok\""),
+            std::string::npos);
 
   event_server.reset();
   ASSERT_TRUE(wait_for_condition(
@@ -611,6 +614,13 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
             std::chrono::milliseconds(0));
       },
       std::chrono::seconds(5)));
+  ASSERT_TRUE(wait_for_condition(
+      [&] {
+        return Health::instance().dump_to_string()().find(
+                   "\"status\":\"error\"") != std::string::npos;
+      },
+      std::chrono::seconds(5)))
+      << Health::instance().dump_to_string()();
   ConsensusValue block_two = commit_block(event, 2, 2, sha256(block_one));
   event_server = std::make_unique<EventIndexerServer>(event);
   event_server->start_accepting(std::move(replacement_listener));
@@ -622,6 +632,8 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().last_consensus_hash, sha256(block_two));
   EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
+  EXPECT_NE(Health::instance().dump_to_string()().find("\"status\":\"ok\""),
+            std::string::npos);
 }
 
 TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)
