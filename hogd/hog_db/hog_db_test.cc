@@ -496,6 +496,24 @@ TEST_F(HogDbTest, ItemLockCacheData)
   EXPECT_EQ(0xABCD'EF01'2345'6789, rsize->second.get_cached_nnint128_base());
 }
 
+// A contract-data row recovered from disk can carry application type kNNInt128
+// with a value length other than sizeof(int128_xdr): the generic RAMDB header
+// validation does not enforce hogdb's per-type invariants. Pricing such a
+// corrupt row must surface a recoverable error rather than fatally checking (or
+// reading past) the malformed buffer.
+TEST_F(HogDbTest, MalformedNNIntPricingReturnsTypeMismatch)
+{
+  ItemKey ikey = make_key(kAddress, kAddress);
+  auto db_key = make_contract_data_key(ikey);
+  std::array<std::byte, 1> malformed_value{std::byte{0x2a}};
+  ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(db_key)), kNNInt128,
+                                  malformed_value));
+
+  auto priced = db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
+  ASSERT_FALSE(priced.has_value());
+  EXPECT_EQ(priced.error(), HogDbCode::kTypeMismatch);
+}
+
 TEST_F(HogDbTest, ItemLockCacheDataBalance)
 {
   ItemKey ikey = make_address_balance_item_key(make_address(kAddress));

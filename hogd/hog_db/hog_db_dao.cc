@@ -640,7 +640,16 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
     switch (item.value().type) {
     case kNNInt128:
     {
-      CHECK(item.value().value.size() == sizeof(int128_xdr));
+      // Recovered on-disk state is untrusted: SafeItemHeader validates only the
+      // generic RAMDB shape, not hogdb's per-type value length. A kNNInt128 row
+      // whose value length does not match the fixed XDR encoding is corrupt, so
+      // surface a recoverable error rather than building a fixed-size span over
+      // a malformed buffer (as read_nnint128/read_address_balance already do).
+      if (item.value().value.size() != sizeof(int128_xdr)) [[unlikely]] {
+        error("recovered NNInt128 item has wrong value length: key={} size={}",
+              key, item.value().value.size());
+        return HogDbError(HogDbCode::kTypeMismatch);
+      }
       auto encoded = std::span<const std::byte, sizeof(int128_xdr)>(
           item.value().value.data(), sizeof(int128_xdr));
       int128_t out = int128_from_xdr_bytes(encoded);
