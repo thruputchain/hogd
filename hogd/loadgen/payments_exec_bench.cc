@@ -83,7 +83,8 @@ public:
       if (!extend_result.has_value()) {
         throw std::runtime_error("failed to extend erc20 experiment");
       }
-      parallel_batch_to_t(extend_result.value().work_txs, work_txs_)();
+      parallel_batch_to_t(extend_result.value().work_txs, work_txs_,
+                          kNoBatchSizeLimit)();
       if (work_txs_.empty()) {
         throw std::runtime_error("no work transactions generated");
       }

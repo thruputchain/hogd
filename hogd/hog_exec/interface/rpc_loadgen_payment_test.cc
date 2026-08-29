@@ -146,7 +146,7 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
   SignedTransactionBatch txs;
-  parallel_batch_to_t(ext_result.success().work_txs, txs)();
+  parallel_batch_to_t(ext_result.success().work_txs, txs, kNoBatchSizeLimit)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose each transaction
@@ -211,7 +211,7 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
   SignedTransactionBatch txs;
-  parallel_batch_to_t(ext_result.success().work_txs, txs)();
+  parallel_batch_to_t(ext_result.success().work_txs, txs, kNoBatchSizeLimit)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Propose the batch (signatures included; the executor uses .tx).
