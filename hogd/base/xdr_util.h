@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <span>
 #include <type_traits>
@@ -359,12 +360,51 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
       co_return;
     }(chunk, i, segment_offset, parallel, xdrs, objs));
   }
-  // This is just an educated guess, but hopefully it lowers/eliminates the
-  // resize overhead of the vector.
-  parallel.xdr.reserve(parallel.xdr.size() + (objs.size() * sizeof(T) * 3));
   for (size_t i = 0; i < chunks.size(); i++) {
     co_await handles[i];
-    parallel.xdr += xdrs[i];
+  }
+
+  // Each chunk's bytes land at a fixed offset in [parallel.xdr], so once every
+  // chunk's size is known the copies are independent of one another. Compute
+  // the offsets, size the destination exactly once, then fan the copies back
+  // out across the pool.
+  //
+  // This used to be a serial [parallel.xdr += xdrs[i]] per chunk, run after
+  // every worker had already finished: for a 1M-element batch of ~250-byte
+  // transactions that is a ~250MB single-threaded concatenation sitting on the
+  // critical path. The bytes written are unchanged - the destination is still
+  // the in-order concatenation of the per-chunk buffers - so the resulting
+  // [ParallelBatch] is byte-for-byte identical to what this produced before.
+  const size_t base_offset = parallel.xdr.size();
+  std::vector<size_t> offsets;
+  offsets.reserve(chunks.size() + 1);
+  offsets.push_back(base_offset);
+  for (size_t i = 0; i < chunks.size(); i++) {
+    offsets.push_back(offsets.back() + xdrs[i].size());
+  }
+  // Sized exactly rather than over-reserved: the previous [sizeof(T) * 3]
+  // guess is both unnecessary now that the real total is known, and unreliable
+  // for types whose serialized form is larger than the in-memory struct (e.g.
+  // anything holding its payload behind a pointer).
+  parallel.xdr.resize_uninitialized(offsets.back());
+
+  x23::Vec<x23::Async<void>> copies;
+  copies.reserve(chunks.size());
+  for (size_t i = 0; i < chunks.size(); i++) {
+    copies.push_back([](size_t i, size_t offset, ParallelBatch &parallel,
+                        x23::Vec<x23::XdrVec<std::uint8_t>> &xdrs) noexcept
+                         -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+
+      if (xdrs[i].size() > 0) {
+        std::memcpy(parallel.xdr.data() + offset, xdrs[i].data(),
+                    xdrs[i].size());
+      }
+      co_return;
+    }(i, offsets[i], parallel, xdrs));
+  }
+  for (size_t i = 0; i < copies.size(); i++) {
+    co_await copies[i];
   }
   co_return;
 }
