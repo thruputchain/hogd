@@ -2125,9 +2125,9 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
         // The coordinator RPC runs with [kBulkRpcMaxMessageSize], so a peer
-        // can claim far more transactions than a block holds, and
-        // [prepare_and_validate_chunk] would fan every one out across the
-        // executors before the block failed on missing txs.
+        // can claim far more transactions than a block holds.  Each claimed
+        // hash costs an allocation and a [find_tx] lookup before anything
+        // rejects it, and any that resolve go on to the executors.
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                 tx_nominations, kMaxBlockSize);
