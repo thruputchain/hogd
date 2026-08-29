@@ -127,9 +127,20 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
         .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
   }
 
-  auto *item = item_locks_.insert_or_get(key, [&] {
-    return get_snapshot_cost_and_cache_data(key);
-  });
+  auto *item = item_locks_.get(key);
+  if (item == nullptr) {
+    // Construct the lock from a resolved snapshot rather than the failing
+    // lambda: ItemLock's lambda constructor panics on any error, so admitting
+    // a lock for a malformed recovered row (e.g. kTypeMismatch from the NNInt
+    // length check) would terminate the node. Surface the recoverable error
+    // here instead; InvokeTX::request_change() rolls the first-touch admission
+    // back cleanly.
+    auto snapshot = get_snapshot_cost_and_cache_data(key);
+    if (!snapshot) {
+      return snapshot.error();
+    }
+    item = item_locks_.insert_or_get(key, *snapshot);
+  }
 
   assert(item != nullptr);
 

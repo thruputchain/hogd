@@ -500,7 +500,8 @@ TEST_F(HogDbTest, ItemLockCacheData)
 // with a value length other than sizeof(int128_xdr): the generic RAMDB header
 // validation does not enforce hogdb's per-type invariants. Pricing such a
 // corrupt row must surface a recoverable error rather than fatally checking (or
-// reading past) the malformed buffer.
+// reading past) the malformed buffer, and that error must reach the caller
+// instead of terminating the node during storage admission.
 TEST_F(HogDbTest, MalformedNNIntPricingReturnsTypeMismatch)
 {
   ItemKey ikey = make_key(kAddress, kAddress);
@@ -509,9 +510,25 @@ TEST_F(HogDbTest, MalformedNNIntPricingReturnsTypeMismatch)
   ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(db_key)), kNNInt128,
                                   malformed_value));
 
+  // The snapshot-pricing getter surfaces the corruption as a recoverable error.
   auto priced = db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
   ASSERT_FALSE(priced.has_value());
   EXPECT_EQ(priced.error(), HogDbCode::kTypeMismatch);
+
+  // A normal storage write to the same key reaches BlockTX::lock() on first
+  // touch. The recoverable error must propagate out of request_bytes rather
+  // than terminate the process while constructing the item lock.
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal);
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX invoke_tx(block_tx);
+
+  std::byte valid_byte{0x7f};
+  auto r = invoke_tx.request_bytes(ikey, std::span(&valid_byte, 1),
+                                   std::to_underlying(StorageDeltaFlags::None));
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error(), HogDbCode::kTypeMismatch);
 }
 
 TEST_F(HogDbTest, ItemLockCacheDataBalance)
