@@ -418,10 +418,14 @@ free_db(DBContext *ptr) noexcept
 
   // Syscall handlers borrow the DB (and its snapshot/proxies) by reference, so
   // freeing it while a handler is still open would dangle those references on a
-  // later close/invoke. Reject the free instead of crashing (issue #2433). The
-  // exclusive lifecycle transition also refuses handler admission for the rest
-  // of the teardown, so a handler cannot be admitted between this check and the
-  // delete below (issue #3049).
+  // later close/invoke. Reject the free instead of crashing (issue #2433).
+  // Taking the exclusive lifecycle transition also makes the free and an
+  // advance mutually exclusive, and refuses handler admission for the rest of
+  // the teardown (issue #3049). It cannot do more than that: this call destroys
+  // the DBContext, so a caller that has already entered another entry point on
+  // this handle has nothing left to be rejected against. Sequencing free_db()
+  // after every other call on the handle stays the caller's job -- see the
+  // threading contract in test_bindings.h.
   DBContext::LifecycleTransition teardown(*ptr);
   if (!teardown.held()) {
     best_effort_log([] {
