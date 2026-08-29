@@ -239,7 +239,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r1_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g1 != 100) {
+        // Each child invoke pays the flat native-dispatch base on top of what
+        // the consumer method itself consumes.
+        if (g1 != kNativeContractBaseGas + 100) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -262,7 +264,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r2_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g2 != 200) {
+        if (g2 != kNativeContractBaseGas + 200) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -285,7 +287,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r3_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g3 != 150) {
+        if (g3 != kNativeContractBaseGas + 150) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -313,7 +315,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!invoke_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g != 100 + 200 + 150) {
+        // The middle contract pays its own dispatch base plus the three child
+        // invokes (each base + consumed amount): base + 3*base + (100+200+150).
+        if (g != 4 * kNativeContractBaseGas + (100 + 200 + 150)) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -358,14 +362,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
+  // Five native dispatches run (entry, middle, and the three consumer calls),
+  // each paying the flat base, plus the 100+200+150 the consumer consumes.
+  ASSERT_EQ(res.gas_consumed_, 5 * kNativeContractBaseGas + (100 + 200 + 150));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
-  // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
-  // a child that consumes 255 gas, while gas_limit 255 is converted to
-  // OutOfGas/DeterministicWasm and still charges the full child limit.
+  // Verifies boundary gas accounting for native invokes. Each native dispatch
+  // pays kNativeContractBaseGas on top of the amount the body consumes, so a
+  // child that consumes 255 needs a limit of base + 256 to run and base + 255
+  // to be converted to OutOfGas (which still charges the full child limit).
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
@@ -386,7 +393,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
-            .gas_limit = 256,
+            .gas_limit = kNativeContractBaseGas + 256,
             .flags = std::to_underlying(InvokeFlag::None),
         };
         auto invoke_status =
@@ -400,7 +407,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
         CopyableInvokeInputs inputs2{
             .entrypoint_id = 0,
-            .gas_limit = 255,
+            .gas_limit = kNativeContractBaseGas + 255,
             .flags = std::to_underlying(InvokeFlag::None),
         };
         CopyableInvokeOutputs outputs2{};
@@ -456,7 +463,122 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 510);
+  // entry's own dispatch base, plus the two child invokes: the first consumes
+  // base + 255, the second is capped at its base + 255 limit on OutOfGas.
+  ASSERT_EQ(res.gas_consumed_, 3 * kNativeContractBaseGas + (255 + 255));
+}
+
+// Regression test for issue #3677: a native call that rejects its caller after
+// consuming a single gas unit (like the native-token burn's denied path) is
+// still charged the flat dispatch base. The caller can no longer pay ~1 gas
+// per denied call, and a grant too small to cover dispatch is out of gas
+// rather than a cheap, well-formed rejection it could replay at will.
+TEST_F(NativeContractTest, NativeDispatchChargesBaseGasForDeniedCalls)
+{
+  constexpr static ContractAddress kAddressDenier = test_contract_address(0);
+  constexpr static ContractAddress kAddressDriver = test_contract_address(1);
+  constexpr size_t kInvocationCount = 3;
+
+  // Mirrors the denied burn: charge one gas unit, then reject before any
+  // further work.
+  NativeContractBuilder builder_denier;
+  builder_denier.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+        if (!ctx.consume_gas(1)) {
+          return InvokeError{InvokeErrorCode::OutOfGas};
+        }
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+
+  NativeContractBuilder builder_driver;
+  builder_driver.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<int32_t> {
+        // A grant that comfortably covers dispatch: each denied call costs the
+        // dispatch base plus the one unit the denier consumes, repeatedly.
+        for (size_t i = 0; i < kInvocationCount; ++i) {
+          auto const gas_before = ctx.gas_remaining();
+          CopyableInvokeInputs inputs{
+              .entrypoint_id = 0,
+              .gas_limit = kNativeContractBaseGas + 8,
+              .flags = std::to_underlying(InvokeFlag::None),
+          };
+          CopyableInvokeOutputs outputs{};
+          auto r = ctx.syscall<SyscallNo::kInvoke>(kAddressDenier,
+                                                   std::span<const std::byte>{},
+                                                   std::span<uint32_t>{},
+                                                   inputs, outputs);
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              outputs.frame_status != InvocationFrameStatusCode::Fault) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (gas_before - ctx.gas_remaining() != kNativeContractBaseGas + 1) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        // A grant too small to cover dispatch is out of gas before the body
+        // runs: it charges the whole grant and never reaches the cheap reject.
+        auto const gas_before = ctx.gas_remaining();
+        CopyableInvokeInputs starved{
+            .entrypoint_id = 0,
+            .gas_limit = kNativeContractBaseGas - 1,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        CopyableInvokeOutputs starved_outputs{};
+        auto starved_r =
+            ctx.syscall<SyscallNo::kInvoke>(kAddressDenier,
+                                            std::span<const std::byte>{},
+                                            std::span<uint32_t>{}, starved,
+                                            starved_outputs);
+        if (!starved_r.has_value() ||
+            starved_r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            starved_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (gas_before - ctx.gas_remaining() != kNativeContractBaseGas - 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        return 0;
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder_denier.build());
+  contract_map.emplace(1, builder_driver.build());
+
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  ContractAddress const deployment_addrs[] = {kAddressDenier, kAddressDriver};
+  for (int32_t i = 0; i < 2; ++i) {
+    Contract contract(ContractType::kNative);
+    contract.native_contract_id() =
+        static_cast<HogexecPrecompiledNativeContracts>(i);
+    snapshot_server_->impl()->setup_create_contract(contract);
+    snapshot_server_->impl()->setup_create_deployment(
+        deployment_addrs[i],
+        DeployedContractHash{.hash = sha256(contract),
+                             .contract_size = 0,
+                             .contract_type = contract.contract_type()});
+  }
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = kAddressDriver,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {},
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
 }
 
 // NativeContract::invoke error-precedence lattice at exact gas exhaustion

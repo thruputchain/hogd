@@ -39,6 +39,12 @@ NativeContract::invoke(Runtime::MethodID method,
   if (fn == nullptr)
     return {InvokeError{InvokeErrorCode::Deterministic}, 0};
   NativeSyscallContext ctx(syscall_handler, gas_limit);
+  // Charge the flat native-dispatch base before running the body. A call that
+  // cannot even afford dispatch is out of gas and the body never runs; see
+  // kNativeContractBaseGas for why native calls need a base charge (#3677).
+  if (!ctx.consume_gas(kNativeContractBaseGas)) {
+    return {InvokeError{InvokeErrorCode::OutOfGas}, ctx.total_gas_consumed()};
+  }
   auto status = (*fn)(ctx);
 
   GasAmount gas_consumed = ctx.total_gas_consumed();

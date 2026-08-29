@@ -20,6 +20,20 @@ struct Contract;
 class SystemCallHandler;
 class NativeRuntime;
 
+// Flat gas charged once per native-contract invocation, before the method body
+// runs. Native contracts have no per-instruction meter of their own (see the
+// note on NativeContract below), so without this the framework work every
+// native call performs -- dispatch, calldata decode, frame setup/finish, and
+// error serialization -- is billed only for whatever little the method body
+// happens to consume_gas(). That let a denied native-token burn pay a single
+// gas unit for the whole rejected-call path and be replayed cheaply (issue
+// #3677). Charging a base up front prices native execution on the same footing
+// as an equivalent guest-VM call. The magnitude is a placeholder pending gas
+// calibration (matching the existing TODOs on native-contract gas costs); it
+// is intentionally not part of kSyscallGasCostSchedule and so does not affect
+// the pinned RV32 gas-schedule digest.
+constexpr static GasAmount kNativeContractBaseGas = 100;
+
 // One native contract.  Can be invoked with a method id and calldata,
 // just like a regular contract.
 //
