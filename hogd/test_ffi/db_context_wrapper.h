@@ -82,19 +82,87 @@ public:
 
   BlockID get_current_block_id() const { return current_block_id_; }
 
-  // Test FFI handler lifetime tracking. A SyscallHandlerContext borrows this
+  // Test FFI lifecycle admission control. A SyscallHandlerContext borrows this
   // DBContext, along with the snapshot cache and DB/event proxies derived from
   // it, by reference. Freeing the DB or advancing it to a new block while a
   // handler is still open would dangle those references, so the test FFI layer
-  // rejects those operations while open_handler_count_ > 0 (issues #2433,
-  // #2436).
-  void register_open_handler() { ++open_handler_count_; }
+  // rejects those operations while a handler is open (issues #2433, #2436).
+  //
+  // The two sides are mutually exclusive, not merely counted: a plain "are
+  // there handlers?" load only supports check-then-act, so a handler opening
+  // between a lifecycle operation's zero check and its replacement of borrowed
+  // state was admitted against state the operation then destroyed (issue
+  // #3049). lifecycle_state_ is a small state machine that linearizes the two:
+  // a lifecycle transition is admitted only from a state with no open handlers
+  // and no other transition in flight, and while one is in flight handler
+  // admission is refused.
+
+  // Registers a handler's borrow of this DBContext. Returns false when a
+  // lifecycle transition is in flight; the caller must not borrow DB state in
+  // that case. Must be paired with unregister_open_handler().
+  [[nodiscard]] bool try_register_open_handler()
+  {
+    auto state = lifecycle_state_.load(std::memory_order_relaxed);
+    do {
+      if (state & kLifecycleTransitionBit) {
+        return false;
+      }
+    } while (
+        !lifecycle_state_.compare_exchange_weak(state, state + 1,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_relaxed));
+    return true;
+  }
+
   void unregister_open_handler()
   {
-    assert(open_handler_count_ > 0);
-    --open_handler_count_;
+    [[maybe_unused]] auto prev =
+        lifecycle_state_.fetch_sub(1, std::memory_order_release);
+    // A transition cannot start while a handler is open, so it cannot be in
+    // flight here and the subtraction cannot touch the transition bit.
+    assert((prev & kLifecycleTransitionBit) == 0);
+    assert((prev & kOpenHandlerCountMask) > 0);
   }
-  bool has_open_handlers() const { return open_handler_count_ > 0; }
+
+  bool has_open_handlers() const
+  {
+    return (lifecycle_state_.load(std::memory_order_acquire) &
+            kOpenHandlerCountMask) > 0;
+  }
+
+  // Exclusive DB lifecycle transition (advance_new_block(), free_db()): while
+  // one is held, handler admission is refused, so state the transition
+  // replaces or destroys cannot acquire new borrowers. held() reports whether
+  // the transition was admitted -- it is refused while any handler is open or
+  // another transition is in flight.
+  class LifecycleTransition {
+  public:
+    explicit LifecycleTransition(DBContext &db)
+      : db_(&db), held_(db.try_begin_lifecycle_transition())
+    {}
+    ~LifecycleTransition()
+    {
+      if (held_) {
+        db_->end_lifecycle_transition();
+      }
+    }
+
+    LifecycleTransition(LifecycleTransition const &) = delete;
+    LifecycleTransition &operator=(LifecycleTransition const &) = delete;
+    LifecycleTransition(LifecycleTransition &&) = delete;
+    LifecycleTransition &operator=(LifecycleTransition &&) = delete;
+
+    bool held() const { return held_; }
+
+    // Drop the transition without ending it, for a caller that destroys the
+    // DBContext under it (free_db()): there is no object left to release it
+    // on.
+    void release_without_ending() { held_ = false; }
+
+  private:
+    DBContext *db_;
+    bool held_;
+  };
 
   // Poison the DB's lifecycle. Set when a handler close failed to confirm
   // closure of its HogDb transaction (issue #2596): the open-handler guard has
@@ -102,7 +170,7 @@ public:
   // still hold a BlockTX open, so advancing the block could drive the scheduler
   // over orphaned transaction state. Once poisoned, advance_new_block() refuses
   // to run; free_db() (full teardown) stays the only safe lifecycle operation.
-  // One-way and atomic to match open_handler_count_.
+  // One-way and atomic to match lifecycle_state_.
   void poison_lifecycle() { lifecycle_poisoned_.store(true); }
   bool is_lifecycle_poisoned() const { return lifecycle_poisoned_.load(); }
 
@@ -140,6 +208,22 @@ public:
 private:
   TransactionID allocate_txid() { return current_tx_id_.fetch_add(1); }
 
+  // Admitted only from the idle state: no handler open, no other transition in
+  // flight. See LifecycleTransition, which is how callers take one.
+  [[nodiscard]] bool try_begin_lifecycle_transition()
+  {
+    std::uint32_t idle = 0;
+    return lifecycle_state_.compare_exchange_strong(idle,
+                                                    kLifecycleTransitionBit,
+                                                    std::memory_order_acq_rel,
+                                                    std::memory_order_relaxed);
+  }
+
+  void end_lifecycle_transition()
+  {
+    lifecycle_state_.store(0, std::memory_order_release);
+  }
+
   using db_sched_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
@@ -160,10 +244,17 @@ private:
   std::unique_ptr<EventServerProxy> event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;
-  // Number of SyscallHandlerContexts currently borrowing this DBContext.
-  // Atomic to match current_tx_id_ and stay race-free if handlers are created
-  // or closed from different threads on the same DBContext.
-  std::atomic<int> open_handler_count_ = 0;
+
+  // Lifecycle admission state: the number of SyscallHandlerContexts currently
+  // borrowing this DBContext in the low bits, plus a flag for an in-flight
+  // exclusive lifecycle transition in the high bit. Kept in one word so
+  // admitting a handler and admitting a transition are a single compare and
+  // exchange each, and neither can be admitted against a stale observation of
+  // the other. See try_register_open_handler() and LifecycleTransition.
+  static constexpr std::uint32_t kLifecycleTransitionBit = 1U << 31;
+  static constexpr std::uint32_t kOpenHandlerCountMask =
+      ~kLifecycleTransitionBit;
+  std::atomic<std::uint32_t> lifecycle_state_ = 0;
   // See poison_lifecycle().
   std::atomic<bool> lifecycle_poisoned_ = false;
 };

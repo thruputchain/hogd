@@ -38,7 +38,7 @@ thread_local std::vector<SyscallHandlerContext *>
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
-  : identifier_(db.allocate_identifier()), db_(db), open_handler_guard_(db),
+  : db_(db), open_handler_guard_(db), identifier_(db.allocate_identifier()),
     runtime_context_owner_(std::move(context)),
     handler_(*this, stx.tx, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
@@ -49,7 +49,7 @@ SyscallHandlerContext::SyscallHandlerContext(
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, DBContext &db,
     AuthClaim const &auth_claim, SHA256Hash const &source_tx_hash)
-  : identifier_(db.allocate_identifier()), db_(db), open_handler_guard_(db),
+  : db_(db), open_handler_guard_(db), identifier_(db.allocate_identifier()),
     runtime_context_owner_(std::move(context)),
     handler_(*this, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
