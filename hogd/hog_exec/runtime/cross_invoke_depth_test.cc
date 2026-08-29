@@ -7,6 +7,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
