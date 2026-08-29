@@ -418,6 +418,55 @@ TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
       "CHECK FAILED");
 }
 
+// Regression test for issue #3695: ReplayCacheMetadata persists the total live
+// nonce count as a signed hyper, but replay-cache storage-cost pricing takes a
+// size_t and multiplies it by a recovered coefficient in signed int128_t. A
+// CRC-valid recovered row with a negative size used to convert to a
+// near-SIZE_MAX size_t and overflow that product on the first replay-cache
+// lock. Admission bounds every legitimate count, so a negative (or over-cap)
+// size is corrupt on-disk state; loading the metadata now fail-stops before
+// any cost arithmetic, mirroring the retrocausal-queue guard above.
+TEST(RecoveryTests, RecoveredNegativeReplayCacheSizeDiesOnLoad)
+{
+  if constexpr (!is_debug_build()) {
+    // The "CHECK FAILED" panic message this death test matches is only
+    // produced in debug builds (x23::panic is std::unreachable() under
+    // NDEBUG).
+    GTEST_SKIP();
+  }
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+
+  ASSERT_TRUE(dir.has_value());
+
+  Address address = ContractAddress{7};
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kDefaultHeapSize, 0);
+    ASSERT_TRUE(db);
+    auto dao = HogDbDAO(RAMDB(std::move(*db)));
+
+    ReplayCacheMetadata metadata{};
+    metadata.size = -1;
+    ASSERT_TRUE(
+        dao.write_address_replay_cache_meta(address, metadata).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  EXPECT_DEATH(
+      {
+        DBStatus<std::unique_ptr<Database>> db =
+            Database::open(dir->get_path(), kDefaultHeapSize, 0);
+        ASSERT_TRUE(db);
+        auto dao = HogDbDAO(RAMDB(std::move(*db)));
+        auto recovered = dao.read_address_replay_cache_meta(address);
+        (void)recovered;
+      },
+      "CHECK FAILED");
+}
+
 TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();

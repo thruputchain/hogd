@@ -53,6 +53,15 @@ static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
 constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
+// Structural upper bound on ReplayCacheMetadata.size (the total live nonce
+// count). Replay-cache admission (ReplayCacheLock) permits at most
+// kReplayCacheHeightsMaxLen distinct unexpired heights, each holding at most
+// kReplayCacheNoncesMaxLen nonces, so no legitimately persisted total can
+// exceed their product. Guards recovered metadata before it feeds signed
+// cost arithmetic (see read_address_replay_cache_meta).
+constexpr int64_t kReplayCacheSizeHardCap =
+    static_cast<int64_t>(kReplayCacheHeightsMaxLen) * kReplayCacheNoncesMaxLen;
+
 } // namespace
 
 StorageLongHash
@@ -181,6 +190,15 @@ HogDbDAO::read_address_replay_cache_meta(Address const &addr)
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
+  // size is a nonce cardinality persisted as a signed hyper, but replay-cache
+  // storage-cost pricing takes a size_t and multiplies it by a recovered
+  // coefficient in signed int128_t. A negative recovered size would convert
+  // to a near-SIZE_MAX size_t and overflow that product; an over-cap size is
+  // likewise impossible under admission. Either is corrupt on-disk state;
+  // fail-stop rather than feed it to signed cost arithmetic (issue #3695,
+  // mirroring the retrocausal-queue guard from #2917).
+  CHECK_GE(meta.size, 0);
+  CHECK_LE(meta.size, kReplayCacheSizeHardCap);
   return meta;
 }
 
