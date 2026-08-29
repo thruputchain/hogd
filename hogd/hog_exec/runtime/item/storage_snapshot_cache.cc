@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
