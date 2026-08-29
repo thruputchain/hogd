@@ -255,6 +255,31 @@ TEST(uiobuf, SimpleAppend)
   }
 }
 
+TEST(uiobuf, CoalesceAdvancesStorageIovnum)
+{
+  x23::Buf first{std::uint8_t{0x11}};
+  x23::Buf second{std::uint8_t{0x22}};
+  x23::BufVec v;
+  v.append(first);
+
+  // Reproduce the bookkeeping state in which a reused Storage coalesces
+  // with a newer iovec.  Construct it explicitly so the test does not
+  // depend on the allocator placing two allocations next to each other.
+  auto &back = v.storage_.back();
+  v.data_.emplace_back(iovec{
+      .iov_base = back.bytes_.data() + back.bytes_.size(),
+      .iov_len = 0,
+  });
+  v.append(second);
+
+  ASSERT_EQ(v.to_vec().size(), std::size_t{2});
+  v.trim(first.size());
+
+  // Consuming the old iovec must not release Storage backing the newer one.
+  ASSERT_EQ(v.storage_.size(), std::size_t{1});
+  EXPECT_TRUE(buf_eq(second, v.to_vec()));
+}
+
 TEST(uiobuf, Swap)
 {
   x23::Buf flat;
