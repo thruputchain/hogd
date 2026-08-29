@@ -540,6 +540,30 @@ TEST_F(NativeContractTest, NativeDispatchChargesBaseGasForDeniedCalls)
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
+        // An unknown method id has still exercised native dispatch, so it too
+        // pays the base charge rather than being a free way to hammer dispatch.
+        auto const gas_before_unknown = ctx.gas_remaining();
+        CopyableInvokeInputs unknown{
+            .entrypoint_id = 987654321,
+            .gas_limit = kNativeContractBaseGas + 8,
+            .flags = std::to_underlying(InvokeFlag::None),
+        };
+        CopyableInvokeOutputs unknown_outputs{};
+        auto unknown_r =
+            ctx.syscall<SyscallNo::kInvoke>(kAddressDenier,
+                                            std::span<const std::byte>{},
+                                            std::span<uint32_t>{}, unknown,
+                                            unknown_outputs);
+        if (!unknown_r.has_value() ||
+            unknown_r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            unknown_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (gas_before_unknown - ctx.gas_remaining() !=
+            kNativeContractBaseGas) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
         return 0;
       });
 
