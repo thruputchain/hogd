@@ -266,7 +266,10 @@ struct BufVec {
     while (n > 0) {
       auto &v = data_.front();
       if (n < v.iov_len) {
-        v.iov_base = static_cast<std::byte *>(v.iov_base) + n;
+        // Same issue as append--avoid pointer arithmetic that could
+        // in rare cases span multiple array allocations.
+        v.iov_base = reinterpret_cast<void *>(
+            reinterpret_cast<uintptr_t>(v.iov_base) + n);
         v.iov_len -= n;
         break;
       }
