@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <type_traits>
@@ -14,6 +15,7 @@
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
@@ -24,6 +26,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -706,6 +709,39 @@ TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
   TransactionRefPageResult block_refs =
       block_explorer_->get_transactions_by_block(block_query)();
   EXPECT_EQ(block_refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
+}
+
+// Regression for #3702: the block-explorer pagination cursor is a
+// server-authored blob capped at cursor::kMaxCursorBytes.  Bounding
+// PaginationCursor in the wire schema (protocol/pagination.x) makes XDR
+// deserialization reject an oversized cursor from its length prefix --
+// before an owning buffer is resized and the payload copied -- instead
+// of materializing the full attacker-supplied cursor and only then
+// rejecting it in cursor::decode.
+TEST(IndexerCursorBounds, OversizedCursorRejectedBeforeMaterialization)
+{
+  // A cursor at the cap round-trips.
+  PaginationCursor at_cap;
+  at_cap.resize(cursor::kMaxCursorBytes, 0x41);
+  auto at_cap_wire = x23::serialize(at_cap);
+  PaginationCursor round_tripped;
+  x23::deserialize(&round_tripped, x23::BufViewEnd(at_cap_wire));
+  EXPECT_EQ(round_tripped.size(), cursor::kMaxCursorBytes);
+
+  // A length one byte over the cap is rejected from the four-byte length
+  // prefix alone: this wire carries no payload, so the rejection cannot
+  // depend on materializing the declared bytes.
+  auto oversized_len =
+      x23::serialize(static_cast<std::uint32_t>(cursor::kMaxCursorBytes + 1));
+  PaginationCursor rejected;
+  EXPECT_THROW(x23::deserialize(&rejected, x23::BufViewEnd(oversized_len)),
+               x23::XdrBadInput);
+
+  // The bound is carried by the request argument types that reach the
+  // indexer handlers, not just a standalone cursor.
+  EXPECT_EQ(TransactionQuery{}.cursor.max_size(), cursor::kMaxCursorBytes);
+  EXPECT_EQ(AddressTransactionQuery{}.cursor.max_size(),
+            cursor::kMaxCursorBytes);
 }
 
 } // namespace hogd
