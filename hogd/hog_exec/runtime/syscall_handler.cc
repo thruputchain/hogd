@@ -756,24 +756,47 @@ SystemCallHandler::get_msg_sender() const
                    SyscallErrorCode::kSyscallErrorCodeIsRootTransaction};
 }
 
-SyscallStatus<void>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::validate_new_invocation(
     ContractAddress const &address, InvokeFlagSet flags,
     std::span<uint32_t const> owned_auth_token_ids) const
 {
   if (!validate_invoke_flags(flags)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallStatus<void>{std::unexpected(
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
   }
-  // Above the auth-token check, so a reentrant invoke reports kReentrance even
-  // when the caller also forwarded a token it does not own (#2973).
+  // Reentrance and the depth bound are both conditions of the calling frame,
+  // and both sit above the auth-token check so that either is reported even
+  // when the caller also forwarded a token it does not own (#2973 established
+  // that for reentrance).
+  //
+  // Reentrance first: it says the call can never succeed anywhere in this
+  // chain, where the depth bound says only that this frame is too deep and a
+  // shallower one would admit the same call.
   if (invocation_frame_stack_.has_active_frame_for(address)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance};
+    return SyscallStatus<void>{std::unexpected(
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeReentrance})};
+  }
+  // A chain bounds how many invocation frames one transaction may have open at
+  // once. Every open frame holds a live contract runtime, so without this a
+  // recursive call chain grows until the executor cannot hold it.
+  //
+  // Reading the bound off the tip can fail, and that is a system error ending
+  // block execution -- not something the caller is told about.
+  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
+  if (!max_depth.has_value()) {
+    return max_depth.error();
+  }
+  if (invocation_frame_stack_.size() >= *max_depth) {
+    return SyscallStatus<void>{std::unexpected(
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }
   if (!invocation_frame_stack_.empty() &&
       !invocation_frame_stack_.check_auth_tokens_owned(owned_auth_token_ids)) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallStatus<void>{std::unexpected(
+        SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput})};
   }
-  return {};
+  return SyscallStatus<void>{};
 }
 
 std::pair<SystemStatus<SyscallStatus<InvocationFrameStatusCode>>, GasAmount>
@@ -794,37 +817,18 @@ SystemCallHandler::invoke(ContractAddress const &address,
 
   // Rejected before a child frame is created, so this is a complete no-op:
   // nothing is mutated, and the caller leaves its output state untouched.
-  if (auto admitted =
-          validate_new_invocation(address, flags, owned_auth_token_ids);
-      !admitted.has_value()) {
-    return {admitted.error(), 0};
-  }
-
-  // A chain bounds how many invocation frames one transaction may have open at
-  // once. Every open frame holds a live contract runtime, so without this a
-  // recursive call chain grows until the executor cannot hold it -- and unlike
-  // the TryInvoke cap, which HogDb's savepoint stack bounds independently, a
-  // plain invoke had nothing stopping it.
-  //
-  // Report it as a syscall error, like every other rejection that happens
-  // before a child frame is created: the caller's outputs stay untouched and
-  // the call is a complete no-op, which is what CopyableInvokeOutputs
-  // documents a nonzero error code to mean. Reporting a faulted child frame
-  // instead would be indistinguishable from a callee that ran and trapped.
-  //
-  // A syscall error is as deterministic as that frame status was -- every node
-  // reads the same limit from the same tip, and the block still commits -- so
-  // this is not the system error that ends block execution. (The TryInvoke cap
+  // Every one of these -- the depth bound included -- is reported as a syscall
+  // error, which is what CopyableInvokeOutputs documents a nonzero error code
+  // to mean. Reporting a faulted child frame instead would be
+  // indistinguishable from a callee that ran and trapped. (The TryInvoke cap
   // does report Fault, but it fires in InvocationFrameStack::finish_frame,
   // after its child frame has actually run.)
-  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
-  if (!max_depth.has_value()) {
-    return {max_depth.error(), 0};
+  auto admitted = validate_new_invocation(address, flags, owned_auth_token_ids);
+  if (!admitted.has_value()) {
+    return {admitted.error(), 0};
   }
-  if (invocation_frame_stack_.size() >= *max_depth) {
-    return {SyscallError{
-                SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded},
-            0};
+  if (!admitted->has_value()) {
+    return {admitted->error(), 0};
   }
 
   // resolve_runtime() reads the block-scoped deployment cache and, on a miss,

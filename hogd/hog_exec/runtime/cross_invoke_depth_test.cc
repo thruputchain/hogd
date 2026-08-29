@@ -327,7 +327,9 @@ TEST_F(CrossInvokeDepthOneTest, RootInvocationRunsWithNoCrossInvokes)
 // auth-token span: it is a check on the raw byte span, and the native syscall
 // entry takes a typed span<uint32_t> that cannot express it.
 
-// Reentrance is checked in validate_new_invocation, ahead of the depth guard.
+// Reentrance and the depth bound are both conditions of the calling frame, and
+// reentrance is checked first: it says the call can never succeed anywhere in
+// this chain, where the bound says only that a shallower frame would admit it.
 TEST_F(CrossInvokeDepthOneTest, ReentranceBeatsDepth)
 {
   run_probe(1,
@@ -336,15 +338,16 @@ TEST_F(CrossInvokeDepthOneTest, ReentranceBeatsDepth)
                 {}, SyscallErrorCode::kSyscallErrorCodeReentrance));
 }
 
-// Auth-token ownership is checked in validate_new_invocation, ahead of the
-// depth guard. The target is a different contract so reentrance does not win
+// The other side of that grouping: the depth bound outranks auth-token
+// ownership, which is a question about the request rather than about the frame
+// making it. The target is a different contract so reentrance does not win
 // first.
-TEST_F(CrossInvokeDepthOneTest, UnownedAuthTokenBeatsDepth)
+TEST_F(CrossInvokeDepthOneTest, DepthBeatsUnownedAuthToken)
 {
   run_probe(2, invoke_expecting_rejection(
                    make_contract_address(1),
                    std::to_underlying(InvokeFlag::None), {0xDEAD},
-                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+                   SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded));
 }
 
 // Duplicate ids are rejected by syscall_Invoke_inner before the handler is
