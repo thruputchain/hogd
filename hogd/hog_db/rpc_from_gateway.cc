@@ -145,8 +145,7 @@ read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
 DbGatewayIntroOutcome
 HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 {
-  if (std::string_view(protocol) !=
-      std::string_view(version::kHogdProtocol())) {
+  if (protocol != version::kHogdProtocol()) {
     return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
   }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;

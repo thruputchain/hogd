@@ -32,6 +32,7 @@
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "parallel.hh"
@@ -855,7 +856,7 @@ TEST_F(IndexerOutboxTest, ExactExistingCommittedRetryFsyncsDirectory)
 TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
 {
   IndexerOutboxOrigin origin{
-      .protocol = "hogp/archive_a",
+      .protocol = protocol_from_text("hogp/archive_a"),
       .epoch_sequence = 0x0102030405060708,
       .first_height = 123456789,
   };
@@ -972,8 +973,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   EXPECT_EQ(current_origin->origin.first_height, 7);
   EXPECT_EQ(current_origin->origin.first_prev_hash,
             committed.consensus_value.prev_hash);
-  EXPECT_EQ(std::string_view(current_origin->origin.protocol),
-            version::kHogdProtocol());
+  EXPECT_EQ(current_origin->origin.protocol, version::kHogdProtocol());
   EXPECT_TRUE(store
                   .initialize_current_epoch_origin(
                       7, committed.consensus_value.prev_hash)()
@@ -1093,7 +1093,7 @@ TEST_F(IndexerOutboxTest, StableEnvelopeReservedSlotPreservesGolden)
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
       .epoch_sequence = 0x0102030405060708,
       .block_height = 123456789,
-      .protocol = "hogp/archive_a",
+      .protocol = protocol_from_text("hogp/archive_a"),
       .payload_byte_length = 0x1112131415161718,
   };
   header.record_identity.kind(IndexerOutboxRecordKind::IndexerOutboxCommitted);
@@ -1316,7 +1316,7 @@ TEST_F(IndexerOutboxTest, ProtocolMismatchPrecedesPayloadDecode)
   ASSERT_TRUE(store.publish_candidate(candidate)().has_value());
   const std::string filename = IndexerOutboxStore::candidate_filename(47);
   TestOutboxFile envelope = read_envelope(dir_, filename);
-  envelope.protocol = "hogp/different";
+  envelope.protocol = protocol_from_text("hogp/different");
   set_envelope_payload(envelope, x23::Buf{0, 0, 0, 0});
   write_envelope(dir_, filename, envelope);
 
@@ -1334,7 +1334,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderProtocolPayloadOpaque)
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(15);
   TestOutboxFile envelope = read_envelope(dir_, filename);
-  envelope.protocol = "hogp/archival";
+  envelope.protocol = protocol_from_text("hogp/archival");
   set_envelope_payload(envelope, x23::Buf{0xff, 0xff, 0xff, 0xff});
   write_envelope(dir_, filename, envelope);
 
@@ -1342,7 +1342,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderProtocolPayloadOpaque)
   ASSERT_TRUE(records.has_value()) << records.error();
   ASSERT_EQ(records->size(), 1);
   EXPECT_EQ(records->front().block_height, 15);
-  EXPECT_EQ(records->front().protocol, "hogp/archival");
+  EXPECT_EQ(records->front().protocol, protocol_from_text("hogp/archival"));
   EXPECT_FALSE(store.load_committed(15)().has_value());
 }
 
@@ -1355,7 +1355,7 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   TestOutboxFile origin =
       read_envelope(dir_, IndexerOutboxStore::current_epoch_origin_filename());
-  origin.protocol = "hogp/archival";
+  origin.protocol = protocol_from_text("hogp/archival");
   set_envelope_payload(origin, x23::Buf{0xff, 0xff, 0xff, 0xff});
   write_envelope(dir_,
                  IndexerOutboxStore::epoch_origin_filename("hogp/archival"),
@@ -1364,8 +1364,9 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
   auto origins = store.enumerate_epoch_origins_raw();
   ASSERT_TRUE(origins.has_value()) << origins.error();
   ASSERT_EQ(origins->size(), 2);
-  auto archival = std::ranges::find(*origins, "hogp/archival",
-                                    &IndexerOutboxEpochOriginInfo::protocol);
+  auto archival =
+      std::ranges::find(*origins, protocol_from_text("hogp/archival"),
+                        &IndexerOutboxEpochOriginInfo::protocol);
   ASSERT_NE(archival, origins->end());
   EXPECT_EQ(archival->first_height, 15);
   EXPECT_EQ(archival->first_prev_hash, committed.consensus_value.prev_hash);
@@ -1384,7 +1385,7 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   ASSERT_TRUE(store.publish_committed(committed)().has_value());
   const std::string filename = IndexerOutboxStore::committed_filename(151);
   TestOutboxFile record = read_envelope(dir_, filename);
-  record.protocol = "hogp/archival";
+  record.protocol = protocol_from_text("hogp/archival");
   constexpr uint64_t kSparsePayloadBytes = 512ULL * 1024 * 1024;
   static_assert(kSparsePayloadBytes < kMaxIndexerOutboxPayloadBytes);
   write_sparse_record(dir_, filename, std::move(record), kSparsePayloadBytes);
@@ -1393,7 +1394,7 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   ASSERT_TRUE(records.has_value()) << records.error();
   ASSERT_EQ(records->size(), 1UL);
   EXPECT_EQ(records->front().block_height, 151);
-  EXPECT_EQ(records->front().protocol, "hogp/archival");
+  EXPECT_EQ(records->front().protocol, protocol_from_text("hogp/archival"));
 }
 
 TEST_F(IndexerOutboxTest,

@@ -139,7 +139,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
     w.field("chainState",
             node.recovered_existing_chain() ? "recovered" : "fresh");
     w.field("networkHash", format_network_hash(network_hash));
-    w.field("protocol", version::kHogdProtocol());
+    w.field("protocol", version::kHogdProtocolText());
     w.object_field("producer", [&](json::Writer &w) {
       w.field("binary", "hog-devnode");
       w.field("version", version::kHogdVersion);

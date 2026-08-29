@@ -938,7 +938,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
             "00000000000000000000000000000000000000000000000000000000000000aa");
     w.field("profile", "local-dev");
     if (include_protocol) {
-      w.field("protocol", version::kHogdProtocol());
+      w.field("protocol", version::kHogdProtocolText());
     }
     w.object_field("devWallet", [&](json::Writer &w) {
       w.field("profile", "hog-devnode-default");

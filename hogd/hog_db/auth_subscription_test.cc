@@ -46,6 +46,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -635,17 +636,16 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
                .address_for_mempool = ""};
 
   AuthCard wrong_protocol_card =
-      AuthCard{.protocol = "wrong/000000000000",
+      AuthCard{.protocol = protocol_from_text("wrong/000000000000"),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
 
-  std::string nul_suffixed(version::kHogdProtocol());
+  std::string nul_suffixed(version::kHogdProtocolText());
   nul_suffixed.push_back('\0');
   nul_suffixed += "suffix";
   AuthCard nul_protocol_card =
-      AuthCard{.protocol =
-                   ProtocolCommit(nul_suffixed.data(), nul_suffixed.size()),
+      AuthCard{.protocol = protocol_from_text(nul_suffixed),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};

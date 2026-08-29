@@ -30,8 +30,7 @@ public:
 
   x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
-    if (std::string_view(card.protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    if (card.protocol != version::kHogdProtocol()) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
     }
     std::optional<BlockHeight> last_published =

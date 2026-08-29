@@ -28,6 +28,7 @@
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "network.hh"
 #include "pagination.hh"
@@ -57,7 +58,7 @@ make_origin(std::string_view protocol = "hogp/test",
             uint64_t epoch_sequence = 0)
 {
   return IndexerOutboxOrigin{
-      .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+      .protocol = protocol_from_text(protocol),
       .epoch_sequence = epoch_sequence,
       .first_height = first_height,
       .first_prev_hash = first_prev_hash,

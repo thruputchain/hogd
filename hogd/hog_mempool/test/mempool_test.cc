@@ -48,6 +48,7 @@
 #include "hogd/metrics/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -350,7 +351,7 @@ TEST(Mempool, EventPrepareRejectsMismatchedProtocol)
   value.proposal_header.block_height = 7;
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 70, .consensus_value = value});
-  EventCard card{.protocol = "hogp/not-this-binary",
+  EventCard card{.protocol = protocol_from_text("hogp/not-this-binary"),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
   EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(card).outcome(),

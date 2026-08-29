@@ -41,6 +41,7 @@
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "proposal.hh"
@@ -175,7 +176,7 @@ rewrite_outbox_protocol(std::string_view directory, std::string_view filename,
   x23::deserialize(&header_size, x23::BufView(bytes->data(), size_t{4}));
   IndexerOutboxRecordHeader header;
   x23::deserialize(&header, x23::BufView(bytes->data() + 4, header_size));
-  header.protocol = ProtocolCommit(protocol.data(), protocol.size());
+  header.protocol = protocol_from_text(protocol);
   x23::Buf header_bytes = x23::serialize(header);
   x23::Buf rewritten =
       x23::serialize(static_cast<uint32_t>(header_bytes.size()));
@@ -296,7 +297,7 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
       .epoch_sequence = epoch_sequence,
       .origin =
           IndexerOutboxOrigin{
-              .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+              .protocol = protocol_from_text(protocol),
               .epoch_sequence = epoch_sequence,
               .first_height = first_height,
               .first_prev_hash = first_prev_hash,
@@ -307,7 +308,7 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
       .epoch_sequence = epoch_sequence,
       .block_height = first_height,
-      .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+      .protocol = protocol_from_text(protocol),
       .payload_byte_length = payload.size(),
       .payload_digest = sha256(x23::BufView(payload)),
       .prev_hash = std::move(first_prev_hash),
@@ -474,7 +475,7 @@ TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
       .last_consensus_hash = sha256(genesis),
   };
   IndexerProgress unknown = boundary;
-  unknown.initialized().origin.protocol = "hogp/unknown";
+  unknown.initialized().origin.protocol = protocol_from_text("hogp/unknown");
   EXPECT_EQ(ctx.pull_indexer_next(pull_request(unknown))().outcome(),
             EventIndexerPullOutcome::EventIndexerPullProgressConflict);
 
@@ -688,7 +689,7 @@ TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
   progress.initialized() = {
       .origin =
           IndexerOutboxOrigin{
-              .protocol = "hogp/archival",
+              .protocol = protocol_from_text("hogp/archival"),
               .epoch_sequence = 0,
               .first_height = 20,
               .first_prev_hash = archival.consensus_value.prev_hash,
@@ -742,8 +743,8 @@ TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
   EventIndexerPullResult first = current.pull_indexer_next(pull_request())();
   ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
       << std::string_view(first.diagnostic());
-  EXPECT_EQ(std::string_view(first.pulled_block().origin.protocol),
-            "hogp/archival");
+  EXPECT_EQ(first.pulled_block().origin.protocol,
+            protocol_from_text("hogp/archival"));
   EXPECT_EQ(first.pulled_block().block.payload.consensus_value,
             archival.consensus_value);
 
@@ -753,8 +754,7 @@ TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
             EventIndexerPullOutcome::EventIndexerPullCaughtUp)
       << std::string_view(transitioned.diagnostic());
   EXPECT_EQ(transitioned.origin().epoch_sequence, 1UL);
-  EXPECT_EQ(std::string_view(transitioned.origin().protocol),
-            version::kHogdProtocol());
+  EXPECT_EQ(transitioned.origin().protocol, version::kHogdProtocol());
 }
 
 TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
@@ -774,7 +774,7 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
   EventIndexerPullResult epoch_a = current.pull_indexer_next(pull_request())();
   ASSERT_EQ(epoch_a.outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
-  EXPECT_EQ(std::string_view(epoch_a.origin().protocol), "hogp/a");
+  EXPECT_EQ(epoch_a.origin().protocol, protocol_from_text("hogp/a"));
 
   const auto boundary_progress = [&](const IndexerOutboxOrigin &origin) {
     IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
@@ -790,14 +790,14 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
   ASSERT_EQ(epoch_b.outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp)
       << std::string_view(epoch_b.diagnostic());
-  EXPECT_EQ(std::string_view(epoch_b.origin().protocol), "hogp/b");
+  EXPECT_EQ(epoch_b.origin().protocol, protocol_from_text("hogp/b"));
 
   EventIndexerPullResult first_block = current.pull_indexer_next(
       pull_request(boundary_progress(epoch_b.origin())))();
   ASSERT_EQ(first_block.outcome(),
             EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(first_block.pulled_block().origin.epoch_sequence, 2UL);
-  EXPECT_EQ(std::string_view(first_block.pulled_block().origin.protocol),
+  EXPECT_EQ(first_block.pulled_block().origin.protocol,
             version::kHogdProtocol());
   EXPECT_EQ(first_block.pulled_block().block.payload.consensus_value, block);
 }
@@ -1852,7 +1852,7 @@ TEST_F(EventRpcTest, GenesisReconciliationContinuesEmptyArchivalOrigin)
   auto origins = restarted.indexer_outbox_store().enumerate_epoch_origins_raw();
   ASSERT_TRUE(origins.has_value()) << origins.error();
   ASSERT_EQ(origins->size(), 2UL);
-  EXPECT_EQ(origins->front().protocol, "hogp/competing");
+  EXPECT_EQ(origins->front().protocol, protocol_from_text("hogp/competing"));
 }
 
 TEST_F(EventRpcTest,
@@ -1885,7 +1885,7 @@ TEST_F(EventRpcTest,
     EXPECT_FALSE(origin->has_value());
 
     EventCard mismatched = card;
-    mismatched.protocol = "hogp/not-this-binary";
+    mismatched.protocol = protocol_from_text("hogp/not-this-binary");
     EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(mismatched).outcome(),
               EventPrepareOutcome::EventPrepareError);
 
@@ -2231,9 +2231,9 @@ TEST_F(EventRpcTest,
       reconciled.indexer_outbox_store().enumerate_committed_records_raw();
   ASSERT_TRUE(records.has_value()) << records.error();
   ASSERT_EQ(records->size(), 3UL);
-  EXPECT_EQ((*records)[0].protocol, "hogp/archival_a");
-  EXPECT_EQ((*records)[1].protocol, "hogp/archival_a");
-  EXPECT_EQ((*records)[2].protocol, std::string(version::kHogdProtocol()));
+  EXPECT_EQ((*records)[0].protocol, protocol_from_text("hogp/archival_a"));
+  EXPECT_EQ((*records)[1].protocol, protocol_from_text("hogp/archival_a"));
+  EXPECT_EQ((*records)[2].protocol, version::kHogdProtocol());
 }
 
 TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)

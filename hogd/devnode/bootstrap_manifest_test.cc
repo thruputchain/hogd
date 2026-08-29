@@ -65,7 +65,7 @@ struct ManifestBuilder {
   std::string profile = "local-dev";
 
   bool include_protocol = true;
-  std::string protocol = std::string(version::kHogdProtocol());
+  std::string protocol = std::string(version::kHogdProtocolText());
 
   bool include_dev_wallet = true;
   std::string dev_wallet_profile = "hog-devnode-default";

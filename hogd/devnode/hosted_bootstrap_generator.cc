@@ -237,7 +237,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
     w.field("schemaVersion", std::int64_t{1});
     w.field("kind", "hog-hosted-bootstrap");
     w.field("networkHash", format_network_hash(config.network_hash));
-    w.field("protocol", version::kHogdProtocol());
+    w.field("protocol", version::kHogdProtocolText());
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.field("devWalletProfile", config.bootstrap_config.dev_wallet_profile);
       w.field("devAccounts",

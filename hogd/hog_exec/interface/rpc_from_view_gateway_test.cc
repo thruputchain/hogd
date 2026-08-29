@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -305,9 +306,9 @@ TEST_F(ViewGatewayRefreshTest, IntroMismatchAndViewAfterShutdown)
   ViewGatewayRpc gateway(db_addr, "localhost", framework_.get_event_exec_port(),
                          1);
 
-  EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{"not-a-protocol"}),
+  EXPECT_EQ(gateway.viewgateway_intro(protocol_from_text("not-a-protocol")),
             ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol);
-  EXPECT_EQ(gateway.viewgateway_intro(ProtocolCommit{version::kHogdProtocol()}),
+  EXPECT_EQ(gateway.viewgateway_intro(version::kHogdProtocol()),
             ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
 
   ViewGatewayResult before = gateway.viewgateway_view(make_read_query())();

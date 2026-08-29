@@ -66,8 +66,7 @@ public:
   {
     info("got {}, expected {}", card.protocol.c_str(),
          version::kHogdProtocol());
-    if (std::string_view(card.protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    if (card.protocol != version::kHogdProtocol()) {
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 
