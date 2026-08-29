@@ -35,7 +35,7 @@ namespace {
 // A transaction against `addr` whose replay nonce is unique per attempt, so
 // repeated attempts in one test are not rejected as replays.
 SignedTransaction
-make_stx(ContractAddress const &addr, std::int64_t nonce)
+make_stx(ContractAddress const &addr, std::uint64_t nonce)
 {
   return SignedTransaction{
       .tx = {.invocation =
@@ -142,9 +142,9 @@ TEST(TestBindingsTest, ConcurrentAdvanceAndOpenNeverShareTornState)
                                                 1'000'000),
             kTestFFIErrorCodeNone);
 
-  constexpr int kAttempts = 40;
+  constexpr std::uint64_t kAttempts = 40;
 
-  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+  for (std::uint64_t attempt = 0; attempt < kAttempts; ++attempt) {
     auto stx = make_stx(deployment_addr, attempt);
     auto serialized_stx = x23::serialize(stx);
     FFISerializedSignedTransaction ffi_stx{.data = serialized_stx.data(),
