@@ -938,7 +938,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
             "00000000000000000000000000000000000000000000000000000000000000aa");
     w.field("profile", "local-dev");
     if (include_protocol) {
-      w.field("protocol", version::kHogdProtocolText());
+      w.field("protocol", version::kHogdProtocol());
     }
     w.object_field("devWallet", [&](json::Writer &w) {
       w.field("profile", "hog-devnode-default");
@@ -1233,7 +1233,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(readiness.manifest_hash,
             hex_string(hash_string(read_file(readiness.manifest_path))));
   EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
-            version::kHogdProtocol());
+            version::kHogdProtocolCommit());
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
@@ -2057,7 +2057,7 @@ TEST(HogDevnode, GatewayEndpointAnswersIntroAndGetItems)
                                             /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(client.dbgateway_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(client.dbgateway_intro(version::kHogdProtocolCommit())(),
               DbGatewayIntroOutcome::DbGatewayIntroSuccess);
 
     // Empty DB: any address returns per-item kRPCNotFound; outer batch
@@ -2088,7 +2088,7 @@ TEST(HogDevnode, ViewGatewayEndpointAnswersIntro)
                                               /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocolCommit())(),
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
   }
 
@@ -2114,7 +2114,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
                                               /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(client.viewgateway_intro(version::kHogdProtocolCommit())(),
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
 
     using wallet_meta = ContractTraitMeta<dev_wallet::DevWallet>;
@@ -2160,7 +2160,8 @@ TEST(HogDevnode, IndexerEndpointServesBlockExplorer)
                                                        /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(client.indexer_block_explorer_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(client.indexer_block_explorer_intro(
+                  version::kHogdProtocolCommit())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
     SHA256Hash tx_hash{};
@@ -2195,7 +2196,8 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
                                                        /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(reader.indexer_block_explorer_intro(
+                  version::kHogdProtocolCommit())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
     AddressTransactionQuery startup_query{};
@@ -3229,7 +3231,8 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransaction)
                                                        /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(reader.indexer_block_explorer_intro(
+                  version::kHogdProtocolCommit())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
     auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
@@ -3333,7 +3336,8 @@ TEST(HogDevnode, BootstrapAccountPrefundsThenCreatesInitializedDevWallet)
                                                        /*retry=*/true)()
                       .value();
 
-    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+    EXPECT_EQ(reader.indexer_block_explorer_intro(
+                  version::kHogdProtocolCommit())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
     auto wait_for_transaction_info = [&reader](const TransactionHash &tx_hash) {
       const auto deadline =

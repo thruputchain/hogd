@@ -43,7 +43,7 @@ public:
   static x23::Async<SchedGatewayIntroOutcome>
   schedgateway_intro(ProtocolCommit protocol)
   {
-    if (protocol != version::kHogdProtocol()) {
+    if (protocol != version::kHogdProtocolCommit()) {
       co_return SchedGatewayIntroOutcome::SchedGatewayIntroMismatchedProtocol;
     }
     co_return SchedGatewayIntroOutcome::SchedGatewayIntroSuccess;

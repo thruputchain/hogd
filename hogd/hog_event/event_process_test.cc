@@ -69,7 +69,7 @@ make_consensus_value(BlockHeight height, SHA256Hash event_root)
 EventIndexerPullRequest
 uninitialized_pull()
 {
-  return {.protocol = version::kHogdProtocol(),
+  return {.protocol = version::kHogdProtocolCommit(),
           .progress = IndexerProgress(
               IndexerProgressState::IndexerProgressUninitialized)};
 }
@@ -248,7 +248,8 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   event_sched_client sched = connect_event_sched(event_mempool_port);
   ConsensusValue block_two =
       commit_empty_block(sched, 12, 2, sha256(block_one));
-  EventIndexerPullRequest next_request{.protocol = version::kHogdProtocol(),
+  EventIndexerPullRequest next_request{.protocol =
+                                           version::kHogdProtocolCommit(),
                                        .progress =
                                            progress_at(first.pulled_block())};
   EventIndexerPullResult second =

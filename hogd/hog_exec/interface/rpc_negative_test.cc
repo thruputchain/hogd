@@ -106,7 +106,7 @@ protected:
       exec_port = db_wrapper_.exec_port();
     }
     return ShardCard{
-        .protocol = hogd::version::kHogdProtocol(),
+        .protocol = hogd::version::kHogdProtocolCommit(),
         .upid = {},
         .block_height = 0,
         .address_for_exec = std::format("localhost:{}", exec_port).c_str(),

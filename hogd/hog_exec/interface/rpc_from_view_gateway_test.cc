@@ -308,7 +308,7 @@ TEST_F(ViewGatewayRefreshTest, IntroMismatchAndViewAfterShutdown)
 
   EXPECT_EQ(gateway.viewgateway_intro(protocol_from_text("not-a-protocol")),
             ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol);
-  EXPECT_EQ(gateway.viewgateway_intro(version::kHogdProtocol()),
+  EXPECT_EQ(gateway.viewgateway_intro(version::kHogdProtocolCommit()),
             ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
 
   ViewGatewayResult before = gateway.viewgateway_view(make_read_query())();

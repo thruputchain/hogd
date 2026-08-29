@@ -195,7 +195,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
         format_advertised_address(bind_ip, actual_mempool_port);
     const std::string auth_address =
         format_advertised_address(bind_ip, actual_auth_port);
-    ShardCard card{.protocol = version::kHogdProtocol(),
+    ShardCard card{.protocol = version::kHogdProtocolCommit(),
                    .upid = {},
                    .block_height = 0,
                    .address_for_exec = exec_address.c_str(),

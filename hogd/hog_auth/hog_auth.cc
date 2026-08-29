@@ -76,7 +76,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   const std::string auth_mempool_address =
       format_advertised_address(bind_ip, actual_mempool_port);
 
-  AuthCard auth_card{.protocol = version::kHogdProtocol(),
+  AuthCard auth_card{.protocol = version::kHogdProtocolCommit(),
                      .upid = {},
                      .address_for_db = auth_db_address.c_str(),
                      .address_for_mempool = auth_mempool_address.c_str()};

@@ -30,7 +30,7 @@ MempoolExecutorClient::register_with_coordinator(
     const sockaddr_storage &coordinator_sockaddr)
 {
   auto client = connect_to_coordinator(coordinator_sockaddr);
-  const ExecCard card = {.protocol = version::kHogdProtocol(),
+  const ExecCard card = {.protocol = version::kHogdProtocolCommit(),
                          .upid = {},
                          .address = self_hostport.show()};
   return client.schedexec_intro_exec(card);

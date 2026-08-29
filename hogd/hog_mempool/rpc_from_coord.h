@@ -168,8 +168,8 @@ public:
   schedulercoord_intro_coord(CoordCard card)
   {
     info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocol());
-    if (card.protocol != version::kHogdProtocol()) {
+         version::kHogdProtocolCommit());
+    if (card.protocol != version::kHogdProtocolCommit()) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }

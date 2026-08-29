@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 extern "C" {
@@ -63,26 +64,37 @@ protocol_token()
   return kToken;
 }
 
-} // namespace detail
-
-/// The token peers exchange to check they are running the same protocol
-/// revision. This is the wire form: `ProtocolCommit` is a fixed-width array,
-/// so the value always occupies exactly [kHogdProtocolLen] bytes.
-inline std::array<std::uint8_t, kHogdProtocolLen>
-kHogdProtocol()
+/// The same bytes as a NUL-terminated C string, so the text accessor can hand
+/// out a `const char *` exactly as it always has.
+inline const char *
+protocol_cstr()
 {
-  return detail::protocol_token();
+  static const std::string kText = [] {
+    const std::array<std::uint8_t, kHogdProtocolLen> &token = protocol_token();
+    return std::string(reinterpret_cast<const char *>(token.data()),
+                       token.size());
+  }();
+  return kText.c_str();
 }
 
-/// The same bytes as printable text, for runtime manifests, log lines, and
-/// indexer outbox filenames. The view refers to storage that outlives any
-/// caller.
-inline std::string_view
-kHogdProtocolText()
+} // namespace detail
+
+/// The protocol token as printable text, for runtime manifests, log lines,
+/// and indexer outbox filenames. NUL-terminated and valid for the life of the
+/// process.
+inline const char *
+kHogdProtocol()
 {
-  const std::array<std::uint8_t, kHogdProtocolLen> &token =
-      detail::protocol_token();
-  return {reinterpret_cast<const char *>(token.data()), token.size()};
+  return detail::protocol_cstr();
+}
+
+/// The same token in the fixed-width form the wire carries. `ProtocolCommit`
+/// is an array, so this always occupies exactly [kHogdProtocolLen] bytes and
+/// costs no allocation to send or compare.
+inline std::array<std::uint8_t, kHogdProtocolLen>
+kHogdProtocolCommit()
+{
+  return detail::protocol_token();
 }
 
 constexpr const char *kHogdCmake = cmake_repro;

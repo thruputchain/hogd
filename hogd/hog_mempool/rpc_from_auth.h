@@ -65,8 +65,8 @@ public:
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
     info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocol());
-    if (card.protocol != version::kHogdProtocol()) {
+         version::kHogdProtocolCommit());
+    if (card.protocol != version::kHogdProtocolCommit()) {
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 

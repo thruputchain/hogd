@@ -435,7 +435,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   const BlockHeight tip_height = consensus_value.proposal_header.block_height;
   const ConsensusValueHash tip_hash =
       tip_height == -1 ? ConsensusValueHash{} : sha256(consensus_value);
-  const ProtocolCommit current_protocol = version::kHogdProtocol();
+  const ProtocolCommit current_protocol = version::kHogdProtocolCommit();
   const BlockHeight max_allowed_height =
       tip_height == INT64_MAX ? INT64_MAX : tip_height + 1;
 
@@ -710,7 +710,7 @@ x23::Async<EventIndexerPullResult>
 EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
 {
   using enum EventIndexerPullOutcome;
-  if (request.protocol != version::kHogdProtocol()) {
+  if (request.protocol != version::kHogdProtocolCommit()) {
     co_return pull_failure(EventIndexerPullMismatchedProtocol,
                            "event/indexer protocol mismatch");
   }

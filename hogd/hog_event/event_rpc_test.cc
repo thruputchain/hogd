@@ -332,7 +332,7 @@ EventIndexerPullRequest
 pull_request(IndexerProgress progress = IndexerProgress(
                  IndexerProgressState::IndexerProgressUninitialized))
 {
-  return {.protocol = version::kHogdProtocol(),
+  return {.protocol = version::kHogdProtocolCommit(),
           .progress = std::move(progress)};
 }
 
@@ -754,7 +754,7 @@ TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
             EventIndexerPullOutcome::EventIndexerPullCaughtUp)
       << std::string_view(transitioned.diagnostic());
   EXPECT_EQ(transitioned.origin().epoch_sequence, 1UL);
-  EXPECT_EQ(transitioned.origin().protocol, version::kHogdProtocol());
+  EXPECT_EQ(transitioned.origin().protocol, version::kHogdProtocolCommit());
 }
 
 TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
@@ -798,7 +798,7 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
             EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(first_block.pulled_block().origin.epoch_sequence, 2UL);
   EXPECT_EQ(first_block.pulled_block().origin.protocol,
-            version::kHogdProtocol());
+            version::kHogdProtocolCommit());
   EXPECT_EQ(first_block.pulled_block().block.payload.consensus_value, block);
 }
 
@@ -1861,7 +1861,7 @@ TEST_F(EventRpcTest,
   Registration &registration = Registration::registration();
   registration.clear();
   x23::Defer cleanup([&registration] { registration.clear(); });
-  EventCard card{.protocol = version::kHogdProtocol(),
+  EventCard card{.protocol = version::kHogdProtocolCommit(),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
   ConsensusValue pregenesis{};
@@ -1929,7 +1929,7 @@ TEST_F(EventRpcTest,
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = kBlockOne, .consensus_value = block_one});
   EventRPCContext restarted(temp_dir());
-  EventCard replacement{.protocol = version::kHogdProtocol(),
+  EventCard replacement{.protocol = version::kHogdProtocolCommit(),
                         .address_for_exec = "127.0.0.1:3",
                         .address_for_sched = "127.0.0.1:4"};
   EventPrepareResult prepared =
@@ -1958,7 +1958,7 @@ TEST_F(EventRpcTest, GenesisRestartReconcilesBeforeEventActivation)
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
 
-  EventCard first{.protocol = version::kHogdProtocol(),
+  EventCard first{.protocol = version::kHogdProtocolCommit(),
                   .address_for_exec = "127.0.0.1:1",
                   .address_for_sched = "127.0.0.1:2"};
   EventPrepareResult prepared =
@@ -1978,7 +1978,7 @@ TEST_F(EventRpcTest, GenesisRestartReconcilesBeforeEventActivation)
   registration.clear();
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
-  EventCard replacement{.protocol = version::kHogdProtocol(),
+  EventCard replacement{.protocol = version::kHogdProtocolCommit(),
                         .address_for_exec = "127.0.0.1:3",
                         .address_for_sched = "127.0.0.1:4"};
   prepared = MempoolEventRpc::schedevent_prepare_event(replacement);
@@ -2003,7 +2003,7 @@ TEST_F(EventRpcTest, ChangedStartupTipReconcilesAgainBeforeActivation)
   genesis.proposal_header.block_height = 0;
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
-  EventCard card{.protocol = version::kHogdProtocol(),
+  EventCard card{.protocol = version::kHogdProtocolCommit(),
                  .address_for_exec = "127.0.0.1:1",
                  .address_for_sched = "127.0.0.1:2"};
   EventPrepareResult prepared = MempoolEventRpc::schedevent_prepare_event(card);
@@ -2054,7 +2054,7 @@ TEST_F(EventRpcTest, GenesisRegistrationRestartCommitsAndReconcilesHeightOne)
   genesis.proposal_header.block_height = 0;
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
-  EventCard first{.protocol = version::kHogdProtocol(),
+  EventCard first{.protocol = version::kHogdProtocolCommit(),
                   .address_for_exec = "127.0.0.1:1",
                   .address_for_sched = "127.0.0.1:2"};
   EventPrepareResult prepared =
@@ -2074,7 +2074,7 @@ TEST_F(EventRpcTest, GenesisRegistrationRestartCommitsAndReconcilesHeightOne)
   registration.clear();
   registration.publish_event_canonical_tip(
       EventCanonicalTip{.block_id = 0, .consensus_value = genesis});
-  EventCard replacement{.protocol = version::kHogdProtocol(),
+  EventCard replacement{.protocol = version::kHogdProtocolCommit(),
                         .address_for_exec = "127.0.0.1:3",
                         .address_for_sched = "127.0.0.1:4"};
   prepared = MempoolEventRpc::schedevent_prepare_event(replacement);
@@ -2182,7 +2182,7 @@ TEST_F(EventRpcTest,
       .block_id = 701,
       .consensus_value = archival_tip.consensus_value,
   });
-  EventCard current_card{.protocol = version::kHogdProtocol(),
+  EventCard current_card{.protocol = version::kHogdProtocolCommit(),
                          .address_for_exec = "127.0.0.1:1",
                          .address_for_sched = "127.0.0.1:2"};
   EventPrepareResult prepared =
@@ -2233,7 +2233,7 @@ TEST_F(EventRpcTest,
   ASSERT_EQ(records->size(), 3UL);
   EXPECT_EQ((*records)[0].protocol, protocol_from_text("hogp/archival_a"));
   EXPECT_EQ((*records)[1].protocol, protocol_from_text("hogp/archival_a"));
-  EXPECT_EQ((*records)[2].protocol, version::kHogdProtocol());
+  EXPECT_EQ((*records)[2].protocol, version::kHogdProtocolCommit());
 }
 
 TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)
@@ -2491,7 +2491,7 @@ TEST_F(EventRpcTest, ReconciliationLinksCurrentEpochToArchivalPrefixByHeader)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             archival.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 21,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 21,
                             current.prev_hash, 1);
 
   EXPECT_TRUE(ctx.reconcile_outbox_tip(999, current)().has_value());
@@ -2536,7 +2536,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsDisconnectedArchivalPrefix)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             archival.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 21,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 21,
                             current.prev_hash, 1);
 
   EXPECT_FALSE(ctx.reconcile_outbox_tip(323, current)().has_value());
@@ -2602,7 +2602,7 @@ TEST_F(EventRpcTest, ReconciliationValidatesCompleteMultiRecordArchivalEpoch)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 22,
                             current.consensus_value.prev_hash, 1);
 
   EXPECT_TRUE(
@@ -2643,7 +2643,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsArchivalInternalDisconnect)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 22,
                             current.consensus_value.prev_hash, 1);
 
   EXPECT_FALSE(
@@ -2674,7 +2674,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsTruncatedArchivalEpochPrefix)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 19,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 22,
                             current.consensus_value.prev_hash, 1);
 
   EXPECT_FALSE(

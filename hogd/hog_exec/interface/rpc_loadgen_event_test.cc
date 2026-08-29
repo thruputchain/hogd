@@ -95,7 +95,7 @@ protected:
   ShardCard make_shard_card()
   {
     return ShardCard{
-        .protocol = hogd::version::kHogdProtocol(),
+        .protocol = hogd::version::kHogdProtocolCommit(),
         .upid = {},
         .block_height = 0,
         .address_for_exec =

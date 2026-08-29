@@ -78,7 +78,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
       format_advertised_address(bind_ip, actual_exec_port);
   std::string address_for_mempool =
       format_advertised_address(bind_ip, actual_mempool_port);
-  EventCard card{.protocol = version::kHogdProtocol(),
+  EventCard card{.protocol = version::kHogdProtocolCommit(),
                  .upid = {},
                  .address_for_exec = address_for_exec.c_str(),
                  .address_for_sched = address_for_mempool.c_str()};

@@ -345,7 +345,7 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   }
   if (protocol->has_value()) {
     if (std::expected<void, std::string> valid =
-            require_string_value(**protocol, version::kHogdProtocolText(),
+            require_string_value(**protocol, version::kHogdProtocol(),
                                  "protocol");
         !valid) {
       return std::unexpected(std::move(valid.error()));
