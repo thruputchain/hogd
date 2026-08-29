@@ -629,11 +629,11 @@ TEST_F(StrictIndexerTest, RecoveredShortTxValueYieldsInternalError)
   // parse_tx_value requires. Recovery validates metadata only, so the DB
   // reopens; the direct lookup must report a nonfatal internal error rather
   // than tripping parse_tx_value's fatal length check.
-  overwrite_column_family(
-      path_, IndexerKeyFormat::kTxIndexColumnFamily,
-      std::string_view(reinterpret_cast<const char *>(tx_hash.data()),
-                       tx_hash.size()),
-      std::string(1, '\x01'));
+  overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily,
+                          std::string_view(reinterpret_cast<const char *>(
+                                               tx_hash.data()),
+                                           tx_hash.size()),
+                          std::string(1, '\x01'));
 
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
