@@ -2005,10 +2005,21 @@ IndexDB::get_events(EventQuery const &query) const
   // Merge-walk.  At each step, pick the iterator whose current
   // position is smallest (ascending) or largest (descending) and
   // consume it.  Stop at `limit` matches or exhaustion.
-  Position last_emitted{};
-  bool any_emitted = false;
+  // Frontier of the scan: the last contract-index row we hydrated,
+  // whether or not its topics matched.  The continuation cursor anchors
+  // here (not at the last match) so a page that fills its hydration
+  // budget without matching still advances the client past the rows it
+  // already scanned.
+  Position last_examined{};
+  std::uint32_t hydrations = 0;
 
   while (page.events.size() < limit) {
+    // Post-hydration topic filtering means a row that fails the filter
+    // still costs a tx_index read; cap that work per page and let the
+    // continuation cursor carry the client forward.
+    if (hydrations >= kEventsMaxHydrationsPerPage) {
+      break;
+    }
     // Find the winner — the valid iterator whose current position
     // leads in the requested direction.
     auto leads = [order](Position const &lhs, Position const &rhs) {
@@ -2029,6 +2040,8 @@ IndexDB::get_events(EventQuery const &query) const
     }
 
     Position const win_pos = winner->current();
+    last_examined = win_pos;
+    ++hydrations;
 
     // Hydrate.
     auto tx_events = get_tx_events(win_pos.tx);
@@ -2086,49 +2099,34 @@ IndexDB::get_events(EventQuery const &query) const
       ev.sequence_number = win_pos.seq;
       ev.emitted_event = emitted_event;
       page.events.push_back(std::move(ev));
-      last_emitted = win_pos;
-      any_emitted = true;
     }
 
     winner->advance(order);
   }
 
-  // Cursor for continuation: non-empty iff we emitted something AND
-  // any iterator is still positioned at more data.  If all iterators
-  // are exhausted, we return an empty cursor to signal end-of-stream.
-  //
-  // We signal empty cursor only when truly exhausted, to distinguish
-  // "more-results-to-scan" (selective filter yielded no matches this
-  // window) from "end of data".
+  // Cursor for continuation: non-empty iff any iterator is still
+  // positioned at more data.  We anchor it at `last_examined` — the last
+  // row we hydrated, matched or not — so a page that stopped on the
+  // hydration budget (or filled `limit`) resumes exactly past the rows it
+  // already scanned.  When every iterator is exhausted we leave the
+  // cursor empty to signal end-of-stream, distinguishing "more to scan"
+  // (a selective filter yielded no matches this window) from "end of
+  // data".  `hydrations > 0` guards against emitting a cursor for a query
+  // that examined nothing (e.g. all iterators empty at seek).
   const bool any_more = std::ranges::any_of(iters, [](ContractIter const &ci) {
     return ci.has_current();
   });
 
-  if (any_more) {
-    if (any_emitted) {
-      EventCursorPayload payload;
-      payload.order = order;
-      payload.block_height = last_emitted.block;
-      payload.tx_hash = last_emitted.tx;
-      payload.sequence_number = last_emitted.seq;
-      payload.max_block_height = max_serve_block;
-      std::string encoded = cursor::encode(payload);
-      page.cursor.append_range(std::span<const uint8_t>(
-          reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
-    }
-    else {
-      // Scanned without matches but more to check.  Synthesize a
-      // cursor from the "frontier" — the position of the winner at
-      // its last advance.  We don't have that here directly, but
-      // re-seeking to (any iterator's current) would over-skip.  For
-      // simplicity, use the input cursor (if any) or the anchor.
-      // This means empty-match pages in cursor-less mode terminate
-      // prematurely; clients should pass cursors forward even on
-      // empty pages.  Cursor-based re-entry works correctly.
-      if (have_cursor) {
-        page.cursor = query.cursor;
-      }
-    }
+  if (any_more && hydrations > 0) {
+    EventCursorPayload payload;
+    payload.order = order;
+    payload.block_height = last_examined.block;
+    payload.tx_hash = last_examined.tx;
+    payload.sequence_number = last_examined.seq;
+    payload.max_block_height = max_serve_block;
+    std::string encoded = cursor::encode(payload);
+    page.cursor.append_range(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
   }
 
   return page;

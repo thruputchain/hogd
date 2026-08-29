@@ -372,6 +372,81 @@ TEST_F(IndexDBTest, GetEventsPaginationWithCursor)
   EXPECT_TRUE(page3->cursor.empty());
 }
 
+// A query for a busy contract plus an absent topic must not scan the
+// whole retained history in one call.  Topic filtering is post-hydration,
+// so an unbounded scan would hydrate every retained row before returning
+// an empty page.  The per-page hydration budget caps that work and hands
+// back a continuation cursor, so the client still pages through all of the
+// history but no single request does history-proportional work.
+TEST_F(IndexDBTest, GetEventsNonmatchingTopicBoundsScanPerPage)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  // Ingest more retained rows than a single page may hydrate, so at least
+  // one continuation is required.  Rows are packed a handful per tx to
+  // keep the fixture cheap; each event carries topic0 = 0x10.
+  const uint32_t budget = IndexDB::kEventsMaxHydrationsPerPage;
+  const uint32_t total_rows = budget + 25;
+  const uint32_t rows_per_block = 25;
+  uint32_t ingested = 0;
+  BlockHeight block = 1;
+  while (ingested < total_rows) {
+    const uint32_t n = std::min(rows_per_block, total_rows - ingested);
+    // Distinct tx hash per block; the block count stays small (history /
+    // rows_per_block), so a single-byte fill keyed on the height is unique.
+    SHA256Hash tx;
+    std::ranges::fill(tx, static_cast<uint8_t>(block));
+    TxEventLog log;
+    log.tx_hash = tx;
+    for (uint32_t i = 0; i < n; ++i) {
+      log.events.push_back(make_event(addr, 1, 0x10));
+    }
+    ASSERT_TRUE(db->consume_events(block, std::vector{log}, {}));
+    ingested += n;
+    ++block;
+  }
+
+  // topic0 == 0x7F is absent from every ingested event, so no row matches.
+  auto run_nonmatching = [&](PaginationCursor const &cursor) {
+    EventFilter f;
+    f.contract_addresses.push_back(addr);
+    f.topics.topic0.push_back(topic_filled(0x7F));
+    EventFilterList filters;
+    filters.push_back(std::move(f));
+    EventQuery q =
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning),
+                   /*limit=*/1);
+    q.cursor = cursor;
+    return db->get_events(q);
+  };
+
+  // First page: no match, but the scan stops on the budget rather than
+  // exhausting the whole history, so it returns a continuation cursor.
+  auto page = run_nonmatching(PaginationCursor{});
+  ASSERT_TRUE(page.has_value());
+  EXPECT_TRUE(page->events.empty());
+  ASSERT_FALSE(page->cursor.empty());
+
+  // Following the cursor makes forward progress and terminates: the stream
+  // eventually reports end-of-data with an empty cursor, and no page ever
+  // yields a (nonexistent) match.  The page count is bounded by history /
+  // budget, so a small ceiling guards against a cursor that fails to
+  // advance.
+  int pages = 1;
+  while (!page->cursor.empty()) {
+    ASSERT_LT(pages, 8) << "continuation cursor is not making progress";
+    page = run_nonmatching(page->cursor);
+    ASSERT_TRUE(page.has_value());
+    EXPECT_TRUE(page->events.empty());
+    ++pages;
+  }
+}
+
 TEST_F(IndexDBTest, GetEventsTopicFilterPartialMatch)
 {
   auto db = IndexDB::make_new(tmp_dir_.directory());

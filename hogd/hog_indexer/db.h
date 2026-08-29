@@ -167,6 +167,16 @@ public:
   // kEventsMaxLimit is capped to that.
   static constexpr std::uint32_t kEventsDefaultLimit = 50;
   static constexpr std::uint32_t kEventsMaxLimit = 200;
+  // Upper bound on candidate rows hydrated from tx_index per get_events
+  // call.  The contract index is keyed by (contract, block position), not
+  // by topic, so topic filtering happens only after a candidate row has
+  // been read and XDR-deserialized from tx_index.  Without a cap, a query
+  // for a busy contract plus an absent (or selective) topic forces one
+  // tx_index read per retained contract row before the page can fill.  On
+  // reaching this budget the call stops and returns a continuation cursor,
+  // keeping per-request work bounded while still letting a client page
+  // through the entire history.
+  static constexpr std::uint32_t kEventsMaxHydrationsPerPage = 1000;
   // Genesis is committed directly at height 0. The durable event/indexer
   // stream begins with the first post-genesis block.
   static constexpr BlockHeight kFirstOutboxBlockHeight = 1;
