@@ -133,6 +133,69 @@ get_returned_buffer_entry(GasAmount gas, std::span<const uint8_t> buffer)
   return make_entry(gas, gas, std::move(body), ok_status());
 }
 
+// The SDK derives a static storage key by hashing a length-prefixed contract
+// name followed by a per-field tag. Since the 0.24 SDK it does that
+// incrementally and shares the name-prefix state across a contract's fields:
+// hasher 0 takes the name and is copied into hasher 1, which takes the field
+// tag and finalizes to the key, while hasher 0 finalizes separately to the
+// reusable prefix digest. The key is byte-identical to what the single kSHA256
+// call this replaced produced -- only the derivation differs, and it is far
+// cheaper (~840 gas here against ~4'850).
+void
+push_static_key_entries(SyscallTraceVec &expected,
+                        std::span<const uint8_t> name_preimage,
+                        std::span<const uint8_t> field_tag,
+                        SHA256Hash const &storage_key,
+                        std::span<const GasAmount, 6> gas)
+{
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Update);
+    body.sha256_update().inputs.index = 0;
+    body.sha256_update().inputs.reset = true;
+    expected.push_back(
+        make_entry(gas[0], gas[0], std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Update);
+    body.sha256_update().inputs.index = 0;
+    body.sha256_update().inputs.buffer.append_range(name_preimage);
+    body.sha256_update().inputs.reset = false;
+    expected.push_back(
+        make_entry(gas[1], gas[1], std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Copy);
+    body.sha256_copy().inputs.src_index = 0;
+    body.sha256_copy().inputs.dst_index = 1;
+    expected.push_back(
+        make_entry(gas[2], gas[2], std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Update);
+    body.sha256_update().inputs.index = 1;
+    body.sha256_update().inputs.buffer.append_range(field_tag);
+    body.sha256_update().inputs.reset = false;
+    expected.push_back(
+        make_entry(gas[3], gas[3], std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Finalize);
+    body.sha256_finalize().inputs.index = 1;
+    body.sha256_finalize().outputs =
+        SyscallSHA256FinalizeOutputs{.hash = storage_key};
+    expected.push_back(
+        make_entry(gas[4], gas[4], std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Finalize);
+    body.sha256_finalize().inputs.index = 0;
+    body.sha256_finalize().outputs =
+        SyscallSHA256FinalizeOutputs{.hash = sha256(name_preimage)};
+    expected.push_back(
+        make_entry(gas[5], gas[5], std::move(body), ok_status()));
+  }
+}
+
 std::vector<uint8_t>
 from_hex(std::string_view hex)
 {
@@ -421,6 +484,13 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
   const std::vector<uint8_t> key_preimage =
       from_hex("18174669626f6e61636369436f6e747261637443616c6c65720100");
   const SHA256Hash storage_key = sha256(std::span<const uint8_t>(key_preimage));
+  // The trailing two bytes are the field tag; everything before is the
+  // length-prefixed contract name the SDK now hashes separately.
+  const std::span<const uint8_t> key_name(key_preimage.data(),
+                                          key_preimage.size() - 2);
+  const std::span<const uint8_t> key_field_tag(key_preimage.data() +
+                                                   key_preimage.size() - 2,
+                                               2);
   const Invocation inner =
       ContractTraitClient<fibonacci::Fibonacci>(fibonacci_addr)
           .make_invocation<u8"slow_fibonacci">(50'000, uint32_t{5});
@@ -430,16 +500,14 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'918, tx.tx.invocation.calldata));
   {
-    SyscallTraceBody body(SyscallNo::kSHA256);
-    body.sha256().inputs.input.append_range(key_preimage);
-    body.sha256().outputs = SyscallSHA256Outputs{.hash = storage_key};
-    expected.push_back(make_entry(98'930,
-                                  98'930 - SHA256HashCost(key_preimage.size()),
-                                  std::move(body), ok_status()));
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'883, 99'873, 99'860,
+                                                  99'850, 99'840, 99'813};
+    push_static_key_entries(expected, key_name, key_field_tag, storage_key,
+                            kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(95'676, storage_key, 32));
+  expected.push_back(bytestring_get_len_entry(99'683, storage_key, 32));
   expected.push_back(
-      bytestring_get_entry(95'661, storage_key,
+      bytestring_get_entry(99'669, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -467,10 +535,10 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(95'548, 95'206, std::move(body), ok_status()));
+        make_entry(99'556, 99'214, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(95'177, inner_calldata));
-  expected.push_back(return_entry(95'067, {}));
+  expected.push_back(get_returned_buffer_entry(99'185, inner_calldata));
+  expected.push_back(return_entry(99'078, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -510,6 +578,13 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   const std::vector<uint8_t> key_preimage =
       from_hex("18174669626f6e61636369436f6e747261637443616c6c65720100");
   const SHA256Hash storage_key = sha256(std::span<const uint8_t>(key_preimage));
+  // The trailing two bytes are the field tag; everything before is the
+  // length-prefixed contract name the SDK now hashes separately.
+  const std::span<const uint8_t> key_name(key_preimage.data(),
+                                          key_preimage.size() - 2);
+  const std::span<const uint8_t> key_field_tag(key_preimage.data() +
+                                                   key_preimage.size() - 2,
+                                               2);
   const Invocation inner =
       ContractTraitClient<fibonacci::Fibonacci>(fibonacci_addr)
           .make_invocation<u8"slow_fibonacci">(1000, uint32_t{20});
@@ -519,16 +594,14 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'898, tx.tx.invocation.calldata));
   {
-    SyscallTraceBody body(SyscallNo::kSHA256);
-    body.sha256().inputs.input.append_range(key_preimage);
-    body.sha256().outputs = SyscallSHA256Outputs{.hash = storage_key};
-    expected.push_back(make_entry(98'911,
-                                  98'911 - SHA256HashCost(key_preimage.size()),
-                                  std::move(body), ok_status()));
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'863, 99'853, 99'840,
+                                                  99'830, 99'820, 99'793};
+    push_static_key_entries(expected, key_name, key_field_tag, storage_key,
+                            kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(95'657, storage_key, 32));
+  expected.push_back(bytestring_get_len_entry(99'664, storage_key, 32));
   expected.push_back(
-      bytestring_get_entry(95'642, storage_key,
+      bytestring_get_entry(99'650, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -554,9 +627,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(95'530, 94'530, std::move(body), ok_status()));
+        make_entry(99'538, 98'538, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(94'468, {}));
+  expected.push_back(return_entry(98'479, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

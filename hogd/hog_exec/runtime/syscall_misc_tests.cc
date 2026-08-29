@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -28,6 +29,7 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
@@ -36,13 +38,14 @@
 
 namespace hogd {
 
-class SyscallMiscTests : public ::testing::Test,
-                         public NativeContractTestFramework {
+class SyscallMiscTestsBase : public ::testing::Test,
+                             public NativeContractTestFramework {
 public:
-  SyscallMiscTests()
+  explicit SyscallMiscTestsBase(
+      std::optional<NetworkConfig> const &genesis_network_config)
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          TestDB::kHogDb, true, std::nullopt, genesis_network_config)
   {}
 
 protected:
@@ -89,6 +92,29 @@ protected:
   std::unique_ptr<RuntimeContext> runtime_context_;
 
   uint64_t nonce_ = 0;
+};
+
+// Stock genesis, which is what every test here wants unless it is pinning
+// behaviour at a network-config edge.
+class SyscallMiscTests : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTests() : SyscallMiscTestsBase(std::nullopt) {}
+};
+
+// max_cross_invoke_depth = 1 leaves room for the root frame and nothing else,
+// so every cross invoke a test entrypoint makes is over the bound. Stock
+// genesis sets 256, which no contract here comes close to.
+class SyscallMiscTestsDepthOne : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTestsDepthOne() : SyscallMiscTestsBase(depth_one_config()) {}
+
+private:
+  static NetworkConfig depth_one_config()
+  {
+    NetworkConfig config = stock_network_config();
+    config.max_cross_invoke_depth = 1;
+    return config;
+  }
 };
 
 // ── Existing tests ──────────────────────────────────────────────────
@@ -1004,6 +1030,51 @@ TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
           .uniquifier = make_new_uniquifier()}};
 
   auto handler = make_new_system_call_handler(stx, ctx);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+// ── #42: a misaligned auth-token span beats the cross-invoke depth bound ──
+//
+// The pair is the pin. The misaligned call must report the parse error even
+// though the bound would have rejected it too, and the control must show that
+// from this fixture the bound really is what rejects an otherwise-valid call
+// -- without it, the first test would read the same if the span check
+// swallowed every invoke.
+//
+// This ordering cannot be reached from a native caller: NativeSyscallContext's
+// syscall entry takes a typed span of uint32_t token ids, whose length is a
+// count of ids, so it is aligned by construction. cross_invoke_depth_test.cc
+// pins the orderings that a native caller can express.
+
+TEST_F(SyscallMiscTestsDepthOne, MisalignedAuthTokensBeatDepth)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_invoke_misaligned_tokens_beat_depth">(UINT64_MAX,
+                                                            kTargetAddress),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
+      *runtime_context_);
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+}
+
+TEST_F(SyscallMiscTestsDepthOne, DepthRefusesAnOtherwiseValidInvoke)
+{
+  deploy_target();
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_invoke_depth_refused">(
+                          UINT64_MAX, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
+      *runtime_context_);
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 }
 
