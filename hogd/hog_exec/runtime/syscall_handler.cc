@@ -1785,8 +1785,53 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
   assert(item_view);
+
+  // Deleting a retrocausal queue expands at block close into one consensus
+  // state-row removal per live block row, so a delete of a queue spanning more
+  // than kMaxRetrocausalQueueBlocksPerDeletion live block rows is refused here
+  // as a handleable syscall error: the contract can consume the queue down
+  // (pruning fully-consumed block rows) in earlier blocks and retry. The
+  // verdict reads the committed block-start snapshot -- the same state hogdb's
+  // delta admission checks and its block-close cleanup enumerates -- so the
+  // executor and hogdb always agree, and the check is consensus-uniform
+  // across proposal and validation. In-transaction consumes do not shrink the
+  // committed interval, so they cannot unlock a delete within the same
+  // transaction.
+  const SnapshotStorageItem *snapshot_item = nullptr;
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+    snapshot_item = &unmodified_item->base_item();
+  }
+  else {
+    // The item was already modified this transaction; read the block-start
+    // state through a scratch handle. The pointed-to snapshot item is owned
+    // by the per-block snapshot cache, so it outlives this scope.
+    UnmodifiedItem scratch_item;
+    auto load_status = scratch_item.load(snapshot_cache_, addrkey);
+    if (!load_status.has_value()) {
+      return load_status.error();
+    }
+    snapshot_item = &scratch_item.base_item();
+  }
+  if (snapshot_item->type() == ItemViewType::kRetrocausalQueue) {
+    auto const &meta = snapshot_item->retrocausal_queue_metadata();
+    uint64_t live_block_rows =
+        meta.max_live_block_num -
+        meta.consume_state.max_fully_consumed_block_number;
+    if (live_block_rows > kMaxRetrocausalQueueBlocksPerDeletion) {
+      return SyscallError{
+          SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueTooLargeToDelete};
+    }
+  }
+
   return item_view->set(DeletedItem{}, flags);
 }
 

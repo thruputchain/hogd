@@ -84,6 +84,19 @@ public:
                                                ChangeSet &changes,
                                                bool keep_metadata = false);
 
+  // Admission-time guard for a change that displaces a block-start retrocausal
+  // queue (a deletion or a type overwrite) at ctx.key. Returns kTooBig when
+  // the queue's committed metadata spans more than
+  // kMaxRetrocausalQueueBlocksPerDeletion live block rows -- the interval
+  // cleanup_on_deletion enumerates at block close -- so an over-budget
+  // displacement fails during execution rather than concentrating unbounded
+  // removal work into commit. Reads the same committed metadata the executor's
+  // DeleteObject check reads, so the two verdicts always agree. A metadata
+  // read error propagates (rejecting the transaction) instead of admitting an
+  // unchecked displacement.
+  static HogDbStatus<void>
+  check_displacement_block_budget(const LockContext &ctx);
+
 private:
   // Base metadata loaded from DAO at prepare_lock_contents time.
   // Contains consume_state (head), max_live_block_num (tail), live_entries.

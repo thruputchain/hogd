@@ -25,6 +25,7 @@
 #include "hogd/hog_db/item_lock/nnint128_lock.h"
 #include "hogd/hog_db/item_lock/pointer_lock.h"
 #include "hogd/hog_db/item_lock/replay_cache_lock.h"
+#include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
 #include "hogd/hog_db/status.h"
 #include "retrocausal_queue.hh"
 #include "x23/testlock.h"
@@ -263,6 +264,37 @@ ItemLock::handle_try_atomic_from_pending(
   CHECK(!std::holds_alternative<std::monostate>(lock_contents_));
   CHECK(ul.owns_lock());
   CHECK(before == nullptr || pending_refcount_ > 0);
+
+  // A non-RCQ change over a block-start retrocausal queue displaces the queue:
+  // block close stages one state-row removal per live block row
+  // (RetrocausalQueueLock::cleanup_on_deletion, reached through DeletionLock
+  // for explicit deletes and through stage_committed_changes for type
+  // overwrites). Bound that fan-out at admission. Every admission shape
+  // funnels through here -- new locks, pending joins, exclusive upgrades and
+  // downgrades -- and an over-budget displacement can never finalize, so the
+  // finalized-join path needs no separate check. Lock releases
+  // (after == nullptr) are always admitted.
+  //
+  // The executor already refuses an over-budget DeleteObject with a
+  // contract-handleable syscall error before the delta exists, reading the
+  // same committed block-start metadata, so an over-budget Deletion arriving
+  // here means the executor is not enforcing the protocol bound: reject it as
+  // executor misbehavior. Type overwrites are not gated in the executor
+  // (writes are admitted lazily, without a snapshot read), so an over-budget
+  // overwrite fails as this transaction instead.
+  if (after != nullptr && snapshot_has_auxiliary_keys() &&
+      after->get_inner<RetrocausalQueueIt>() == nullptr) {
+    if (auto budget =
+            RetrocausalQueueLock::check_displacement_block_budget(ctx);
+        !budget) {
+      if (budget.error() == HogDbCode::kTooBig && after->is_deletion()) {
+        error("executor submitted a deletion of a retrocausal queue over the "
+              "kMaxRetrocausalQueueBlocksPerDeletion cleanup budget");
+        return HogDbError{HogDbCode::kInvalidExecutorBehavior};
+      }
+      return budget.error();
+    }
+  }
 
   bool before_holds_exclusive_lock =
       (before != nullptr && before->is_exclusive());

@@ -613,6 +613,32 @@ RetrocausalQueueLock::get_concurrent_entry(uint32_t index) const
 }
 
 HogDbStatus<void>
+RetrocausalQueueLock::check_displacement_block_budget(const LockContext &ctx)
+{
+  // Callers filter on the block-start snapshot type, so a missing DAO only
+  // occurs in unit-test dummy contexts with no committed state to inspect.
+  if (ctx.dao == nullptr || !ctx.key.is_contract_data()) {
+    return {};
+  }
+
+  auto meta_ret = ctx.dao->read_retrocausal_queue_metadata(ctx.key);
+  if (!meta_ret.has_value()) {
+    // kNotFound mirrors cleanup_on_deletion: nothing persisted, nothing to
+    // clean up at close. Any other read error must propagate rather than be
+    // treated as a passing budget check.
+    if (meta_ret.error() == HogDbCode::kNotFound) {
+      return {};
+    }
+    return meta_ret.error();
+  }
+  if (live_block_count(meta_ret.value()) >
+      kMaxRetrocausalQueueBlocksPerDeletion) {
+    return HogDbError{HogDbCode::kTooBig};
+  }
+  return {};
+}
+
+HogDbStatus<void>
 RetrocausalQueueLock::cleanup_on_deletion(const LockContext &ctx,
                                           ChangeSet &changes,
                                           bool keep_metadata)
