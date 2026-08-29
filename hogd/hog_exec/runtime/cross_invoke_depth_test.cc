@@ -97,7 +97,7 @@ protected:
   // Deploys `count` native contracts at make_contract_address(0..count-1) and
   // returns a handler whose root invocation enters contract 0's entrypoint 0.
   SystemCallHandler deploy_and_make_handler(int32_t count,
-                                            RuntimeContext &runtime_context)
+                                            NativeContext &runtime_context)
   {
     for (int32_t i = 0; i < count; i++) {
       auto contract_obj = make_native_contract(i);
