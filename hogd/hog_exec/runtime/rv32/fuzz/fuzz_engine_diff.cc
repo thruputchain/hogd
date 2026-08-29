@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/arch_trace.h"
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
@@ -39,10 +40,10 @@ fail(const char *what, const fuzz::EngineDiffInput &in)
 {
   std::println(stderr, "rv32 engine divergence: {}", what);
   std::print(stderr,
-             "  gas_budget={} memory_bytes={} method_id={:#x} host_seed={:#x}"
-             " memory_start={} image_len={} words:",
-             in.gas_budget, in.memory_bytes, in.method_id, in.host_seed,
-             in.memory_start, in.initial_memory.size());
+             "  gas_budget={} memory_bytes={} max_run_gas={} method_id={:#x}"
+             " host_seed={:#x} memory_start={} image_len={} words:",
+             in.gas_budget, in.memory_bytes, in.max_run_gas, in.method_id,
+             in.host_seed, in.memory_start, in.initial_memory.size());
   const std::span<const uint8_t> code(in.code);
   for (std::size_t i = 0; i + kInstructionBytes <= code.size();
        i += kInstructionBytes) {
@@ -53,9 +54,10 @@ fail(const char *what, const fuzz::EngineDiffInput &in)
 }
 
 // Compare the untraced (production handler set) threaded machine's final
-// observable state against the canonical machine's. Skipped fields on OOG:
-// the deficit design makes only the (trap, gas_remaining==0) pair
-// consensus-visible there, and the harness's OOG gate has already checked it.
+// observable state against the canonical machine's. Only called when neither
+// engine OOGed: on OOG the deficit design makes just the
+// (trap, gas_remaining==0) pair consensus-visible, and the harness's OOG gate
+// has already checked it.
 void
 check_untraced_final_state(const Machine &cmachine, ThreadedMachine &umachine,
                            const fuzz::EngineDiffInput &in)
@@ -111,6 +113,15 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
   if (canonical_err != threaded_err) {
     fail("decoder ProgramError mismatch", *in);
   }
+
+  // The production decode gate must agree on accept/reject. Its backward
+  // lowering pass may report a different error *word* than the canonical
+  // forward scan on multi-error programs (see production_scan_error), so only
+  // the verdict is compared, never the error code.
+  const auto production_err = fuzz::production_scan_error(code);
+  if (production_err.has_value() != canonical_err.has_value()) {
+    fail("production create accept/reject mismatch", *in);
+  }
   if (canonical_err.has_value()) {
     return 0;
   }
@@ -123,17 +134,16 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
       std::make_shared<const Program>(std::move(*canonical_program));
 
   // The carve guarantees memory_start + image size <= memory_bytes <=
-  // kMaxMemoryBytes, so create can only fail for program-shape reasons the
-  // decoder screen above already ruled out; treat a residual failure as
-  // uninteresting rather than asserting.
+  // kFuzzMemCap << kMaxMemoryBytes, so with the code already decode-clean
+  // these creates can only succeed; treat a reject as divergence.
   auto pre = ThreadedMachinePreInstantiation::create(
       code, in->initial_memory, in->memory_start,
-      /*total_memory_size=*/in->memory_bytes, /*trace=*/true);
+      /*total_memory_size=*/in->memory_bytes, /*trace=*/true, in->max_run_gas);
   auto pre_untraced = ThreadedMachinePreInstantiation::create(
       code, in->initial_memory, in->memory_start,
-      /*total_memory_size=*/in->memory_bytes, /*trace=*/false);
+      /*total_memory_size=*/in->memory_bytes, /*trace=*/false, in->max_run_gas);
   if (!pre.has_value() || !pre_untraced.has_value()) {
-    return 0;
+    fail("production create rejected decode-clean code", *in);
   }
 
   Machine cmachine(program, in->memory_bytes, in->gas_budget);

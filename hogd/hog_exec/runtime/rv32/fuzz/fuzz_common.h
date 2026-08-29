@@ -13,6 +13,7 @@
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
 
 // Pure, header-only helpers shared by the rv32 fuzz targets: deterministic
@@ -23,6 +24,12 @@ namespace hogd::rv32::fuzz {
 
 inline constexpr uint64_t kFuzzGasCap = 2048;
 inline constexpr uint32_t kFuzzMemCap = 4096;
+// Smallest run-gas chunk cap the carve may select. create() clamps its cap to
+// at least the largest single-instruction gas so a valid split always exists;
+// carving below that floor would just be silently clamped back up.
+inline constexpr uint32_t kFuzzMinRunGasCap =
+    static_cast<uint32_t>(kDivInstructionGas);
+static_assert(kFuzzMinRunGasCap <= kMaxRunGas);
 // Run length <= gas budget (every instruction costs >= 1 gas), so a budget
 // below the traced step window guarantees the canonical trace_execution reaches
 // a real terminal instead of a synthetic truncation kTrap that the uncapped
@@ -101,9 +108,33 @@ threaded_scan_error(std::span<const uint8_t> code)
   return std::nullopt;
 }
 
+// Decode verdict of the PRODUCTION lowering gate over `code` alone (memory
+// arguments chosen so they can never reject). The forward scan above checks
+// exact first-error parity with the canonical decoder, but production
+// (rv32_contract.cc) runs ThreadedMachinePreInstantiation::create, whose
+// single backward lowering pass reports the LAST invalid word's error rather
+// than the first. All decode errors collapse into the same deterministic
+// deploy rejection, so across multiple invalid words only the accept/reject
+// verdict -- not the error code -- is required to match; compare has_value(),
+// not the payload.
+inline std::optional<ProgramError>
+production_scan_error(std::span<const uint8_t> code)
+{
+  const auto pre =
+      ThreadedMachinePreInstantiation::create(code, /*memory=*/{},
+                                              /*memory_start=*/0,
+                                              /*total_memory_size=*/256,
+                                              /*trace=*/false);
+  if (pre.has_value()) {
+    return std::nullopt;
+  }
+  return pre.error();
+}
+
 struct EngineDiffInput {
   uint64_t gas_budget = 0;
   uint32_t memory_bytes = 0;
+  uint32_t max_run_gas = kMaxRunGas;
   uint64_t method_id = 0;    // seeded into a0/a1 (v4 guest-dispatch entry seam)
   uint64_t host_seed = 0;    // drives the ScriptedHost schedule (below)
   uint32_t memory_start = 0; // data-space VA of initial_memory
@@ -111,9 +142,26 @@ struct EngineDiffInput {
   std::vector<uint8_t> code; // non-empty, multiple of kInstructionBytes
 };
 
-// Layout: [u64 gas][u32 memory_bytes][u64 method_id][u64 host_seed]
-// [u32 start_knob][u32 img_len_knob][image bytes...][code bytes...].
-// gas/mem are capped; start/img_len are derived so memory_start +
+// Run-gas chunk cap for the threaded lowering, from the fuzzer-chosen knob.
+// Production always runs with kMaxRunGas, but at fuzz budgets (<= kFuzzGasCap)
+// a straight line long enough to split at that cap is unreachable, so break
+// carriers -- and their refund and deficit seams -- would never appear. Bias
+// 3/4 of inputs to a small cap (kFuzzMinRunGasCap..+63) so carriers land in
+// short programs; the remaining 1/4 (including every short input, which reads
+// knob 0) keep the production cap.
+inline uint32_t
+run_gas_cap_from_knob(uint32_t knob)
+{
+  if (knob % 4 == 0) {
+    return kMaxRunGas;
+  }
+  return kFuzzMinRunGasCap + (knob / 4) % 64;
+}
+
+// Layout: [u64 gas][u32 memory_bytes][u32 run-gas-cap knob][u64 method_id]
+// [u64 host_seed][u32 start_knob][u32 img_len_knob][image bytes...]
+// [code bytes...]. gas/mem are capped and the cap knob is mapped by
+// run_gas_cap_from_knob; start/img_len are derived so memory_start +
 // initial_memory.size() <= memory_bytes always holds, the image never eats
 // the last full code word (mirroring carve_artifact_fixup), and the empty
 // image keeps its single canonical encoding (start 0). The code tail is
@@ -124,6 +172,7 @@ carve_engine_diff_input(std::span<const uint8_t> data)
   ByteReader reader(data);
   const uint64_t gas = reader.u64() % (kFuzzGasCap + 1);
   const uint32_t mem = reader.u32() % (kFuzzMemCap + 1);
+  const uint32_t cap = run_gas_cap_from_knob(reader.u32());
   const uint64_t method_id = reader.u64();
   const uint64_t host_seed = reader.u64();
   const uint32_t start_knob = reader.u32();
@@ -146,6 +195,7 @@ carve_engine_diff_input(std::span<const uint8_t> data)
   EngineDiffInput in;
   in.gas_budget = gas;
   in.memory_bytes = mem;
+  in.max_run_gas = cap;
   in.method_id = method_id;
   in.host_seed = host_seed;
   in.initial_memory.assign(tail.begin(), tail.begin() + img_len);

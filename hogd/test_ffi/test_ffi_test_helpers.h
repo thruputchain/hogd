@@ -40,7 +40,7 @@ make_db()
 {
   auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto db = create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
-                      genesis_root.size());
+                      genesis_root.size(), nullptr, 0);
   EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
   return db.db;
 }

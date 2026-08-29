@@ -50,6 +50,8 @@ void set_nonblock(BorrowedFd fd, bool on = true);
 void enable_abortive_close(BorrowedFd fd);
 
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6).
+// In IPv4-only environments where AF_INET6 sockets are unavailable,
+// falls back to an IPv4-only listener.
 // stcplisten does not make the socket non-blocking
 UniqueFd stcplisten(std::uint16_t port, int backlog = 5);
 UniqueFd stcplisten(const sockaddr_storage &bind_addr, int backlog = 5);
