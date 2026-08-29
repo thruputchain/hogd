@@ -11,15 +11,20 @@ else is measured: not `Machine`, not the spec model, not the syscall bridge.
 ## Run it
 
 ```sh
-scripts/rv32_gas_calibrate.sh --out /tmp/gas.json      # full run, a few minutes
-scripts/rv32_gas_calibrate.sh -- --quick               # smoke run, ~40s
-scripts/rv32_gas_calibrate.sh -- --op=DIV --repeats=25 # one opcode, hard
+B=build-release-ccache-tmp   # your Release build tree
+scripts/rv32_gas_calibrate.sh $B --out /tmp/gas.json      # full run, a few minutes
+scripts/rv32_gas_calibrate.sh $B -- --quick               # smoke run, ~40s
+scripts/rv32_gas_calibrate.sh $B -- --op=DIV --repeats=25 # one opcode, hard
 ```
 
-The script drives the project's ordinary Release build (`scripts/build.sh`,
-which is Release by default) and builds only the `rv32_gas_calibrate` target.
-It reuses an existing Release build directory when it finds one, so on a machine
-that already builds hogd this costs a handful of files rather than a configure.
+The build directory is required. It is not searched for and there is no
+default: which tree the binary comes from decides what is measured, and a
+benchmark that picks that for you can measure something other than what you
+asked for without ever saying so. Name an existing Release tree and the script
+builds only the `rv32_gas_calibrate` target into it -- a handful of files. Name
+a path that does not exist yet and it configures a Release build there. Name an
+existing non-Release tree and it refuses rather than reconfiguring something you
+use for other things.
 
 **The build configuration is part of the measurement.** What is being measured
 is the compiled interpreter, and Release is not a casual optimized build: it is
@@ -162,7 +167,7 @@ deliberately is the intended workflow for setting a schedule.
 The practical loop when you change `threaded_machine.h`:
 
 ```sh
-scripts/rv32_gas_calibrate.sh --out /tmp/gas-after.json
+scripts/rv32_gas_calibrate.sh build-release-ccache-tmp --out /tmp/gas-after.json
 scripts/rv32_gas_report.py /tmp/gas-before.json /tmp/gas-after.json
 ```
 
@@ -181,8 +186,8 @@ reasonably quiet machine. It runs a calibration and compares it against
 `reference.txt`, committed next to this file:
 
 ```sh
-scripts/rv32_gas_check.sh                     # exits non-zero if broken
-scripts/rv32_gas_check.sh --fingerprint-only  # "did the engine change?", instant
+scripts/rv32_gas_check.sh build-release-ccache-tmp                     # exits non-zero if broken
+scripts/rv32_gas_check.sh build-release-ccache-tmp --fingerprint-only  # "did the engine change?", instant
 ```
 
 It checks two things.
@@ -210,7 +215,7 @@ Regenerate the reference only once you understand what moved and have decided
 the schedule does or does not need to follow:
 
 ```sh
-scripts/rv32_gas_calibrate.sh --out /tmp/gas.json
+scripts/rv32_gas_calibrate.sh build-release-ccache-tmp --out /tmp/gas.json
 scripts/rv32_gas_report.py /tmp/gas.json --emit-reference > \
   hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt
 ```

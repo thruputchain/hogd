@@ -28,10 +28,14 @@
 # Exit status is 0 when the calibration still holds and 1 when it does not, so
 # it drops straight into cron.
 #
+# The build directory is a required argument, forwarded to
+# scripts/rv32_gas_calibrate.sh. It is not searched for and there is no default:
+# which tree the binary comes from decides what is measured.
+#
 # Usage:
-#   scripts/rv32_gas_check.sh                    # the periodic check
-#   scripts/rv32_gas_check.sh --out /tmp/gas.json
-#   scripts/rv32_gas_check.sh --fingerprint-only # "did the engine change?", instant
+#   scripts/rv32_gas_check.sh BUILD_DIR                    # the periodic check
+#   scripts/rv32_gas_check.sh BUILD_DIR --out /tmp/gas.json
+#   scripts/rv32_gas_check.sh BUILD_DIR --fingerprint-only # "did the engine change?", instant
 #
 # When it fails, the fix is to understand what moved -- not to regenerate the
 # reference. Regenerating is correct only once the new costs have been reviewed
@@ -49,37 +53,49 @@ OUT_PATH=""
 FINGERPRINT_ONLY="OFF"
 CALIBRATE_ARGS=()
 
+usage() {
+  echo "usage: $0 BUILD_DIR [--fingerprint-only] [--out PATH]" \
+    "[--reference PATH]" >&2
+}
+
+if [[ $# -eq 0 || "$1" == -* ]]; then
+  usage
+  exit 2
+fi
+BUILD_DIR="$1"
+shift
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --fingerprint-only)
-      FINGERPRINT_ONLY="ON"
-      shift
-      ;;
-    --out)
-      OUT_PATH="$2"
-      shift 2
-      ;;
-    --out=*)
-      OUT_PATH="${1#--out=}"
-      shift
-      ;;
-    --reference)
-      REFERENCE="$2"
-      shift 2
-      ;;
-    --reference=*)
-      REFERENCE="${1#--reference=}"
-      shift
-      ;;
-    --)
-      shift
-      CALIBRATE_ARGS=("$@")
-      break
-      ;;
-    *)
-      echo "usage: $0 [--fingerprint-only] [--out PATH] [--reference PATH]" >&2
-      exit 2
-      ;;
+  --fingerprint-only)
+    FINGERPRINT_ONLY="ON"
+    shift
+    ;;
+  --out)
+    OUT_PATH="$2"
+    shift 2
+    ;;
+  --out=*)
+    OUT_PATH="${1#--out=}"
+    shift
+    ;;
+  --reference)
+    REFERENCE="$2"
+    shift 2
+    ;;
+  --reference=*)
+    REFERENCE="${1#--reference=}"
+    shift
+    ;;
+  --)
+    shift
+    CALIBRATE_ARGS=("$@")
+    break
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
   esac
 done
 
@@ -92,7 +108,8 @@ fi
 if [[ "${FINGERPRINT_ONLY}" = "ON" ]]; then
   # Just the deterministic arm: useful by hand after touching the interpreter,
   # when you want the answer now and do not want to wait for a full run.
-  ACTUAL="$("${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" -- --fingerprint 2>/dev/null)"
+  ACTUAL="$("${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" "${BUILD_DIR}" \
+    -- --fingerprint 2>/dev/null)"
   EXPECTED="$(awk '$1 == "engine_fingerprint" { print $2 }' "${REFERENCE}")"
   if [[ -z "${ACTUAL}" ]]; then
     echo "FAIL  could not compute the engine fingerprint" >&2
@@ -117,6 +134,6 @@ fi
 
 # ${array[@]:-} on an empty array expands to one empty argument, which the
 # harness rejects as an unknown flag; expand to nothing instead.
-"${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" --out "${OUT_PATH}" \
+"${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" "${BUILD_DIR}" --out "${OUT_PATH}" \
   ${CALIBRATE_ARGS[0]+-- "${CALIBRATE_ARGS[@]}"}
 exec "${REPO_ROOT}/scripts/rv32_gas_report.py" "${OUT_PATH}" --check "${REFERENCE}"

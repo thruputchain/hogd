@@ -12,76 +12,70 @@
 # Only the rv32_gas_calibrate target is built, and it links just the RV32 ISA
 # core, so after the first configure the build is a handful of files.
 #
+# The build directory is a required argument. It is not searched for and there
+# is no default: which tree the binary comes from decides what is measured, and
+# a benchmark that picks that for you can measure something other than what you
+# asked for without ever saying so.
+#
 # Usage:
-#   scripts/rv32_gas_calibrate.sh [--build-dir DIR] [--out PATH] [-- <harness args>]
+#   scripts/rv32_gas_calibrate.sh BUILD_DIR [--out PATH] [-- <harness args>]
 #
 # Examples:
-#   scripts/rv32_gas_calibrate.sh --out /tmp/gas.json
-#   scripts/rv32_gas_calibrate.sh -- --quick
-#   scripts/rv32_gas_calibrate.sh --build-dir build-release-ccache-tmp -- --op=DIV
-#
-# Reuses an existing build directory when one is given or found, so a
-# calibration on a machine that already builds hogd costs a few files, not a
-# configure.
+#   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp --out /tmp/gas.json
+#   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp -- --quick
+#   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp -- --op=DIV
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="${RV32_GAS_BUILD_DIR:-}"
 OUT_PATH=""
 HARNESS_ARGS=()
 
+usage() {
+  echo "usage: $0 BUILD_DIR [--out PATH] [-- <harness args>]" >&2
+  echo "       BUILD_DIR is required: an existing Release build tree, or a" >&2
+  echo "       path to configure one at." >&2
+}
+
+if [[ $# -eq 0 || "$1" == -* ]]; then
+  usage
+  exit 2
+fi
+BUILD_DIR="$1"
+shift
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --build-dir)
-      BUILD_DIR="$2"
-      shift 2
-      ;;
-    --build-dir=*)
-      BUILD_DIR="${1#--build-dir=}"
-      shift
-      ;;
-    --out)
-      OUT_PATH="$2"
-      shift 2
-      ;;
-    --out=*)
-      OUT_PATH="${1#--out=}"
-      shift
-      ;;
-    --)
-      shift
-      HARNESS_ARGS=("$@")
-      break
-      ;;
-    *)
-      echo "usage: $0 [--build-dir DIR] [--out PATH] [-- <harness args>]" >&2
-      exit 2
-      ;;
+  --out)
+    OUT_PATH="$2"
+    shift 2
+    ;;
+  --out=*)
+    OUT_PATH="${1#--out=}"
+    shift
+    ;;
+  --)
+    shift
+    HARNESS_ARGS=("$@")
+    break
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
   esac
 done
 
-# Prefer a Release build directory that already exists: configuring a fresh one
-# pulls in the whole project, while reusing one costs only this target's files.
-if [[ -z "${BUILD_DIR}" ]]; then
-  for candidate in build-release-ccache-tmp build-release build; do
-    if [[ -f "${REPO_ROOT}/${candidate}/CMakeCache.txt" ]] &&
-      grep -q "^CMAKE_BUILD_TYPE:STRING=Release$" \
-        "${REPO_ROOT}/${candidate}/CMakeCache.txt" 2>/dev/null; then
-      BUILD_DIR="${candidate}"
-      break
-    fi
-  done
-fi
-BUILD_DIR="${BUILD_DIR:-build-release-gas}"
-
 CACHE="${REPO_ROOT}/${BUILD_DIR}/CMakeCache.txt"
+# Refuse an existing non-Release tree rather than reconfiguring it: the caller
+# named this directory, and silently flipping its build type would break
+# whatever else they use it for.
 if [[ -f "${CACHE}" ]] &&
   ! grep -q "^CMAKE_BUILD_TYPE:STRING=Release$" "${CACHE}" 2>/dev/null; then
   echo "error: ${BUILD_DIR} is not a Release build directory." >&2
   echo "       Gas costs describe the interpreter the node runs, which is the" >&2
-  echo "       Release one. Point --build-dir at a Release tree, or drop this" >&2
-  echo "       one and let this script configure a fresh Release build." >&2
+  echo "       Release one. Name a Release tree, or a path to configure a new" >&2
+  echo "       one at." >&2
   exit 2
 fi
 

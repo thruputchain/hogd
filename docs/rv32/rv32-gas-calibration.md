@@ -20,17 +20,19 @@ to land.
 ## Run it
 
 ```sh
-scripts/rv32_gas_calibrate.sh --out /tmp/gas-1.json
-scripts/rv32_gas_calibrate.sh --out /tmp/gas-2.json
+B=build-release-ccache-tmp   # your Release build tree
+scripts/rv32_gas_calibrate.sh $B --out /tmp/gas-1.json
+scripts/rv32_gas_calibrate.sh $B --out /tmp/gas-2.json
 scripts/rv32_gas_report.py /tmp/gas-1.json /tmp/gas-2.json            # what moved
 scripts/rv32_gas_report.py /tmp/gas-1.json /tmp/gas-2.json --schedule # merged
 scripts/rv32_gas_report.py /tmp/gas-1.json --workloads
 ```
 
-The script builds the `rv32_gas_calibrate` target through the project's
-ordinary Release build and reuses an existing Release build directory when it
-finds one. Only the RV32 ISA core is linked, so the target's own build is small.
-A full run takes a few minutes.
+The build directory is a required argument -- it is not searched for and there
+is no default, because which tree the binary comes from decides what is
+measured. The script builds only the `rv32_gas_calibrate` target into it, and
+only the RV32 ISA core is linked, so the build is small. A full run takes a few
+minutes.
 
 The build configuration is part of the measurement: Release is `-O3`, `-march`,
 libc++ under clang, and LTO across the interpreter's translation units, and an
@@ -108,7 +110,7 @@ expensive because of dependence, not capacity.
 
 ## The periodic check
 
-`scripts/rv32_gas_check.sh` runs a calibration and compares it against
+`scripts/rv32_gas_check.sh build-release-ccache-tmp` runs a calibration and compares it against
 `hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt`, exiting non-zero if
 the calibration no longer describes the engine. It is meant for a periodic job
 -- nightly, weekly, whatever cadence suits -- on a reasonably quiet machine, and
@@ -136,7 +138,7 @@ it.
 That makes the check after a `threaded_machine.h` change mechanical:
 
 ```sh
-scripts/rv32_gas_calibrate.sh --out /tmp/gas-after.json
+scripts/rv32_gas_calibrate.sh build-release-ccache-tmp --out /tmp/gas-after.json
 scripts/rv32_gas_report.py /tmp/gas-before.json /tmp/gas-after.json
 ```
 
