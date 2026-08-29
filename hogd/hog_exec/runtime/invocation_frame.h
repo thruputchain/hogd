@@ -219,6 +219,12 @@ public:
 
   HashBuffers hash_buffers_;
 
+  // Snapshot of the frame stack's retained bytestring-write footprint taken
+  // when this frame was pushed, so a reverted child frame's writes can be
+  // uncharged from the running total in finish_frame (see
+  // try_reserve_bytestring_write).
+  size_t retained_bytestring_write_footprint_on_entry_ = 0;
+
   void set_child_restore_auth_tokens(std::span<uint32_t const> token_ids)
   {
     assert(most_recent_child_frame_forwarded_auth_tokens_.empty());
@@ -421,6 +427,18 @@ public:
   ItemView *get_item_view(StorageKeyContractData const &data_key);
   ItemView *get_item_view(AddressAndKey const &addrkey);
 
+  // Charge a bytestring write of [new_len] bytes against the per-transaction
+  // retained write-set budget, replacing a prior bytestring write at the same
+  // key of [prior_len] bytes (nullopt if the key held no bytestring write yet).
+  // Returns false, charging nothing, if the write would push the retained
+  // footprint past the executor->HogDb message cap; the caller must then reject
+  // the write instead of copying the value into the frame. This bounds the
+  // memory a contract can retain by writing distinct storage keys for zero
+  // size-dependent gas, so accumulation cannot outgrow what a commit could
+  // carry and fail with an Unrecoverable allocation error (issue #3681).
+  bool try_reserve_bytestring_write(std::optional<size_t> prior_len,
+                                    size_t new_len);
+
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {
     StorageKey key(StorageKeyType::ContractData);
@@ -445,6 +463,9 @@ public:
 
 private:
   std::vector<InvocationFrame> frame_stack_;
+  // Running total of the retained bytestring-write footprint across the live
+  // frame stack, bounded by try_reserve_bytestring_write.
+  size_t retained_bytestring_write_footprint_ = 0;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
   AuthTokenRegistry auth_token_registry_;

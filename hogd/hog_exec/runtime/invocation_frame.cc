@@ -34,6 +34,28 @@
 
 namespace hogd {
 
+namespace {
+
+// Per-entry overhead charged for each retained bytestring write, on top of the
+// value bytes. It is a conservative lower bound on the executor->HogDb
+// per-delta framing (which XDR-encodes at least the contract address, itself
+// larger than this) plus the map/ItemView bookkeeping a retained entry costs.
+// Charging it bounds the retained entry count -- not just the retained bytes --
+// while staying at or below the real per-delta footprint, so no transaction the
+// commit-time footprint gate would accept is rejected during accumulation.
+constexpr size_t kBytestringWriteEntryOverhead = 32;
+
+// Bound the retained bytestring-write footprint at the same ceiling the
+// commit-time footprint gate enforces (see DatabaseProxy::
+// try_push_new_subtransaction). Because the charged footprint never exceeds
+// what those same writes encode to in a push, a transaction that would fit one
+// push is never rejected here; a contract that writes past this instead sees a
+// recoverable syscall error, so the frame cannot grow unboundedly toward an
+// allocation failure that would surface as Unrecoverable.
+constexpr size_t kMaxRetainedBytestringWriteFootprint = kExecToDbMessageCap;
+
+} // namespace
+
 InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags,
                                  size_t event_count,
@@ -288,6 +310,13 @@ InvocationFrameStack::start_frame(
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
+  // Remember the retained bytestring-write footprint at frame entry so a child
+  // frame that reverts can be uncharged in finish_frame (its writes are
+  // discarded), while a child that commits keeps its charge folded into the
+  // running total.
+  frame_stack_.back().retained_bytestring_write_footprint_on_entry_ =
+      retained_bytestring_write_footprint_;
+
   if (frame_stack_.size() >= 2) {
     InvocationFrame &parent = frame_stack_[frame_stack_.size() - 2];
     // set_child_restore_auth_tokens only allocates in its initial reserve(), so
@@ -319,6 +348,12 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
 
   assert(!frame_stack_.empty());
   bool manually_reverted = frame_stack_.back().should_revert();
+
+  // The retained bytestring-write footprint as of when this frame was pushed.
+  // A frame that reverts (a fault below, or a manual revert) discards its
+  // writes, so its charge against the running total is rolled back here.
+  size_t const retained_footprint_on_entry =
+      frame_stack_.back().retained_bytestring_write_footprint_on_entry_;
 
   // handle the try_invoke data
   if (frame_stack_.back().is_try_invoke()) {
@@ -418,6 +453,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     assert(try_invoke_failed ||
            frame_stack_.back().get_frame_output().status_code() ==
                InvocationFrameStatusCode::Fault);
+    // The reverted frame's writes are discarded; uncharge them.
+    retained_bytestring_write_footprint_ = retained_footprint_on_entry;
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
@@ -444,6 +481,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     // popping the child so the stack stays coherent (#3378).
     try {
       if (frame_stack_.back().should_revert()) {
+        // A manually-reverted frame discards its writes; uncharge them.
+        retained_bytestring_write_footprint_ = retained_footprint_on_entry;
         frame_stack_[stack_size - 2].commit_manually_reverted_frame(
             std::move(frame_stack_.back()));
       }
@@ -538,6 +577,28 @@ ItemView *
 InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
   return get_item_view(get_addrkey(data_key));
+}
+
+bool
+InvocationFrameStack::try_reserve_bytestring_write(
+    std::optional<size_t> prior_len, size_t new_len)
+{
+  size_t const prior_footprint =
+      prior_len ? kBytestringWriteEntryOverhead + *prior_len : size_t{0};
+  size_t const new_footprint = kBytestringWriteEntryOverhead + new_len;
+
+  // prior_footprint was already added to the running total (the current value
+  // at this key was itself charged when it was written or copied down from a
+  // parent frame), so the replacement is a net delta and repeated writes to one
+  // key do not accumulate.
+  assert(retained_bytestring_write_footprint_ >= prior_footprint);
+  size_t const projected =
+      retained_bytestring_write_footprint_ - prior_footprint + new_footprint;
+  if (projected > kMaxRetainedBytestringWriteFootprint) {
+    return false;
+  }
+  retained_bytestring_write_footprint_ = projected;
+  return true;
 }
 
 AuthToken const *

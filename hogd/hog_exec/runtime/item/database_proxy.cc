@@ -370,13 +370,13 @@ footprint_bound(FlaggedStorageDelta const &fd)
   return kPerDeltaFraming + footprint_bound(fd.delta);
 }
 
-// The executor->HogDb RPC message cap a push must fit. x23 bounds
-// (record.size() - 4) -- the rpc_msg header plus the call args -- against
-// max_message_size (see send_call in x23/rpc.h). exec_server runs at x23's
-// default_max_message_size, which is a runtime-mutable extern (tests lower it)
-// with no constexpr to bind to; this mirrors its compile-time default.
+// A push must fit the executor->HogDb RPC message cap, kExecToDbMessageCap
+// (database_proxy.h). x23 bounds (record.size() - 4) -- the rpc_msg header plus
+// the call args -- against max_message_size (see send_call in x23/rpc.h).
+// exec_server runs at x23's default_max_message_size, which is a
+// runtime-mutable extern (tests lower it) with no constexpr to bind to; the
+// header constant mirrors its compile-time default.
 // TODO(rstutsman): bind to an x23 constexpr default once x23 exposes one.
-constexpr size_t kExecToDbMessageCap = 0x100'0000;
 
 // Bytes of the try_push_new_subtransaction request that count against the cap
 // but are NOT per-delta: the rpc_msg header, the BlockID and TransactionID

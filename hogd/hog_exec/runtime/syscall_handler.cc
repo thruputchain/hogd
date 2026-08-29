@@ -1651,6 +1651,21 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   assert(item_view);
   assert(input_bytestring.size() <= kBytestringMaxLen);
 
+  // Bound the retained write set before copying the value into the frame.
+  // BytestringSet charges no size-dependent host gas, so without this a
+  // contract could write distinct storage keys until the executor frame
+  // exhausts memory, and that allocation failure would surface as an
+  // Unrecoverable result (issue #3681). Reject the write with a recoverable
+  // syscall error instead, retaining nothing past the budget.
+  std::optional<size_t> prior_len;
+  if (auto const *existing = item_view->get<BytestringItem>()) {
+    prior_len = existing->bytestring_.size();
+  }
+  if (!invocation_frame_stack_.try_reserve_bytestring_write(
+          prior_len, input_bytestring.size())) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());
   if (!input_bytestring.empty()) {

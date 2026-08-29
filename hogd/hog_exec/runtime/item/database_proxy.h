@@ -27,6 +27,14 @@
 
 namespace hogd {
 
+// The executor->HogDb RPC message cap a subtransaction push must fit. A push
+// whose serialized size exceeds this surfaces as a node-unrecoverable error, so
+// try_push_new_subtransaction rejects an over-cap batch before it is sent (see
+// the footprint gate in database_proxy.cc). Exposed here so the executor can
+// bound the retained write set against the same ceiling while it accumulates,
+// rather than only at commit time.
+constexpr size_t kExecToDbMessageCap = 0x100'0000;
+
 struct LocalMockDB {
   uint32_t read_port_number_;
 };

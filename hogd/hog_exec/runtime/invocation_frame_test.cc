@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -339,6 +341,77 @@ TEST_F(InvocationFrameTest, ManualRevertReclaimsThenReforward)
   // parent no longer owns the token (successful child keeps it)
   ASSERT_FALSE(
       stack.check_auth_tokens_owned(std::span<uint32_t>{&token_id.value(), 1}));
+}
+
+// Distinct-key bytestring writes accumulate against a per-transaction budget
+// and are rejected once the retained footprint would exceed the executor->HogDb
+// message cap, rather than growing the frame without bound (issue #3681).
+// Repeated writes to the same key net out to the current value and so do not
+// consume the budget.
+TEST_F(InvocationFrameTest, BytestringWriteBudgetBoundsRetainedFootprint)
+{
+  constexpr size_t kValueLen = 1024;
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(0), Calldata{}, 0, {},
+                               kMaxSha256Buffers)
+                  .has_value());
+
+  // Overwriting one key many times charges only the current value, so the
+  // budget is barely touched.
+  std::optional<size_t> prior;
+  for (int i = 0; i < 1000; ++i) {
+    ASSERT_TRUE(stack.try_reserve_bytestring_write(prior, kValueLen));
+    prior = kValueLen;
+  }
+
+  // Distinct-key writes accumulate and are eventually rejected.
+  size_t distinct_writes = 0;
+  while (stack.try_reserve_bytestring_write(std::nullopt, kValueLen)) {
+    ++distinct_writes;
+    // The budget must bound the count; this guards against a non-terminating
+    // loop if the accounting ever regresses.
+    ASSERT_LT(distinct_writes, size_t{1} << 20);
+  }
+
+  // The cap is the ~16 MiB executor->HogDb message cap, so roughly
+  // 16 MiB / (value + per-entry overhead) 1 KiB writes fit -- far more than any
+  // honest transaction needs, but firmly bounded.
+  EXPECT_GT(distinct_writes, size_t{15000});
+  EXPECT_LT(distinct_writes, size_t{17000});
+}
+
+// A frame that reverts discards its writes, so its charge against the budget is
+// rolled back and the freed footprint is available to the parent again.
+TEST_F(InvocationFrameTest, RevertedFrameUnchargesBytestringWriteBudget)
+{
+  constexpr size_t kValueLen = 1024;
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(0), Calldata{}, 0, {},
+                               kMaxSha256Buffers)
+                  .has_value());
+
+  // A child frame exhausts the budget with distinct-key writes, then reverts.
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(1), Calldata{}, 0, {},
+                               kMaxSha256Buffers)
+                  .has_value());
+  while (stack.try_reserve_bytestring_write(std::nullopt, kValueLen)) {
+  }
+  ASSERT_FALSE(stack.try_reserve_bytestring_write(std::nullopt, kValueLen));
+
+  stack.set_active_frame_return(
+      InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+  auto result = stack.finish_frame(InvokeError{InvokeErrorCode::Deterministic},
+                                   execution_mode_data_);
+  ASSERT_TRUE(result.has_value());
+  ASSERT_FALSE(result.value().first.result_.has_value());
+
+  // The reverted child's writes were uncharged, so the parent can write again.
+  EXPECT_TRUE(stack.try_reserve_bytestring_write(std::nullopt, kValueLen));
 }
 
 } // namespace hogd
