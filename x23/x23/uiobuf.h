@@ -216,9 +216,19 @@ struct BufVec {
                                     2 * storage_.back().bytes_.capacity())));
     Storage &back = storage_.back();
     auto *p = back.copy(b.data() + offset, nbytes);
-    if (!data_.empty() && p == static_cast<uint8_t *>(data_.back().iov_base) +
-                                   data_.back().iov_len)
+    // Note p and the last iov_base could technically be part of
+    // different allocations.  Since the kernel implementation of
+    // writev is outside the C++ memory model, it's okay to coalesce
+    // adjacent bytes.  Pedantically, however, we avoid doing pointer
+    // arithmetic past the array ends by converting everything to a
+    // uintptr_t.
+    if (!data_.empty() &&
+        reinterpret_cast<uintptr_t>(p) ==
+            reinterpret_cast<uintptr_t>(data_.back().iov_base) +
+                data_.back().iov_len) {
+      back.iovnum_ = iovnum() - 1;
       data_.back().iov_len += nbytes;
+    }
     else {
       back.iovnum_ = iovnum();
       data_.emplace_back(iovec{
