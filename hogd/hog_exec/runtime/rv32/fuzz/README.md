@@ -16,7 +16,17 @@ nightly CI sweep runs both from the committed seed corpus
   (OOG class + `gas_remaining==0` first; full trace parity only when neither
   engine OOGs). A fuzzer-chosen run-gas chunk cap (biased small; see
   `run_gas_cap_from_knob`) makes break carriers and their refund/deficit seams
-  reachable within the fuzz gas budget.
+  reachable within the fuzz gas budget. Each input also carves a method id
+  seeded into a0/a1 (the v4 guest-dispatch entry seam), an initial-memory
+  image placed at a carved `memory_start`, and a `ScriptedHost` seed. The
+  scripted host derives each ecall's result deterministically from
+  (seed, call index) -- nonzero continue values, host gas debits (including
+  over-budget ones), halts, host out-of-gas, and `MachineView` memory writes
+  -- so every engine must observe identical host behavior; `HostStatus::kTrap`
+  is never produced (forbidden on the threaded ecall seam). Alongside the
+  traced comparison, the same input also runs an *untraced* `ThreadedMachine`
+  (the production handler set) and compares its final observable state and
+  host call log against canonical.
 
 ## Build
 

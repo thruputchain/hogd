@@ -143,14 +143,24 @@ TEST(Rv32FuzzDecoderParity, ProductionGateRejectsMultiErrorProgram)
   EXPECT_TRUE(production_scan_error(code).has_value());
 }
 
+// [u64 gas][u32 mem][u32 cap knob][u64 method_id][u64 host_seed][u32 start]
+// [u32 img_len].
+constexpr size_t kEngineDiffHeaderBytes = 8 + 4 + 4 + 8 + 8 + 4 + 4;
+
+void
+append_u32_le(std::vector<uint8_t> &out, uint32_t value)
+{
+  for (int i = 0; i < 4; ++i) {
+    out.push_back(static_cast<uint8_t>(value >> (i * 8)));
+  }
+}
+
 TEST(Rv32FuzzCarveEngineDiff, ClampsGasAndMemAndForcesWordAlignedCode)
 {
-  std::vector<uint8_t> data(8, 0xFF); // gas u64 = all ones
-  const std::array<uint8_t, 4> mem = {0xFF, 0xFF, 0xFF, 0xFF};
-  data.insert(data.end(), mem.begin(), mem.end()); // mem u32 = all ones
-  const std::array<uint8_t, 4> knob = {0, 0, 0, 0};
-  data.insert(data.end(), knob.begin(), knob.end()); // run-gas-cap knob
-  // 6 trailing bytes -> exactly one 4-byte word of code (last 2 dropped).
+  // All-ones header: gas/mem clamp to their caps; the huge start/img_len knobs
+  // must still leave a full code word (the image may never eat the last word).
+  std::vector<uint8_t> data(kEngineDiffHeaderBytes, 0xFF);
+  // 6 trailing bytes -> at most one 4-byte word of code survives.
   for (int i = 0; i < 6; ++i) {
     data.push_back(static_cast<uint8_t>(0x13 + i));
   }
@@ -162,12 +172,14 @@ TEST(Rv32FuzzCarveEngineDiff, ClampsGasAndMemAndForcesWordAlignedCode)
   EXPECT_LE(input.memory_bytes, kFuzzMemCap);
   ASSERT_EQ(input.code.size() % kInstructionBytes, 0U);
   EXPECT_EQ(input.code.size(), 4U);
+  EXPECT_LE(input.memory_start + input.initial_memory.size(),
+            input.memory_bytes);
 }
 
 TEST(Rv32FuzzCarveEngineDiff, ReturnsNulloptWhenNoFullCodeWord)
 {
-  std::vector<uint8_t> data(8 + 4 + 4, 0); // gas + mem + cap-knob headers
-  data.push_back(0x13);                    // 1 stray byte, < one word
+  std::vector<uint8_t> data(kEngineDiffHeaderBytes, 0); // header, no code
+  data.push_back(0x13); // 1 stray byte, < one word
   EXPECT_FALSE(carve_engine_diff_input(data).has_value());
 }
 
@@ -183,15 +195,136 @@ TEST(Rv32FuzzCarveEngineDiff, RunGasCapKnobBiasesSmallAndKeepsProductionCap)
     EXPECT_GE(cap, kFuzzMinRunGasCap) << "knob " << knob;
     EXPECT_LE(cap, kMaxRunGas) << "knob " << knob;
   }
-  // The knob is the third header field: [u64 gas][u32 mem][u32 knob][code].
+  // The knob is the third header field.
   std::vector<uint8_t> data(8 + 4, 0);
-  const std::array<uint8_t, 4> knob_one = {1, 0, 0, 0};
-  data.insert(data.end(), knob_one.begin(), knob_one.end());
+  append_u32_le(data, 1);         // cap knob -> kFuzzMinRunGasCap
+  data.insert(data.end(), 24, 0); // method_id + host_seed + start + img_len
   data.insert(data.end(), {0x13, 0x00, 0x00, 0x00}); // one code word
   const auto in = carve_engine_diff_input(data);
   ASSERT_TRUE(in.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(in->max_run_gas, kFuzzMinRunGasCap);
+}
+
+TEST(Rv32FuzzCarveEngineDiff, CarriesMethodIdAndHostSeedVerbatim)
+{
+  std::vector<uint8_t> data(8 + 4 + 4, 0); // gas = 0, mem = 0, cap knob = 0
+  const std::array<uint8_t, 8> method_id = {1, 2, 3, 4, 5, 6, 7, 8};
+  data.insert(data.end(), method_id.begin(), method_id.end());
+  const std::array<uint8_t, 8> host_seed = {9, 10, 11, 12, 13, 14, 15, 16};
+  data.insert(data.end(), host_seed.begin(), host_seed.end());
+  append_u32_le(data, 0); // start knob
+  append_u32_le(data, 0); // img_len knob
+  data.insert(data.end(), {0x13, 0x00, 0x00, 0x00});
+  const auto in = carve_engine_diff_input(data);
+  ASSERT_TRUE(in.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(in->method_id, 0x0807060504030201ULL);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(in->host_seed, 0x100f0e0d0c0b0a09ULL);
+}
+
+TEST(Rv32FuzzCarveEngineDiff, SplitsImageAndCodeAtCarvedLength)
+{
+  std::vector<uint8_t> data(8, 0); // gas = 0
+  append_u32_le(data, 64);         // mem = 64 (< cap: taken verbatim)
+  append_u32_le(data, 0);          // cap knob = 0 (production cap)
+  data.insert(data.end(), 16, 0);  // method_id + host_seed
+  append_u32_le(data, 8);          // start = 8 % (64 + 1) = 8
+  append_u32_le(data, 4);          // img_len = 4 % (max_img + 1) = 4
+  data.insert(data.end(), {0xAA, 0xBB, 0xCC, 0xDD}); // image
+  data.insert(data.end(), {0x13, 0x00, 0x00, 0x00,   // two code words
+                           0x93, 0x00, 0x00, 0x00});
+  const auto in = carve_engine_diff_input(data);
+  ASSERT_TRUE(in.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const EngineDiffInput &input = in.value();
+  EXPECT_EQ(input.memory_start, 8U);
+  EXPECT_EQ(input.initial_memory,
+            (std::vector<uint8_t>{0xAA, 0xBB, 0xCC, 0xDD}));
+  EXPECT_EQ(input.code.size(), 8U);
+  EXPECT_EQ(input.code[0], 0x13U);
+}
+
+TEST(Rv32FuzzCarveEngineDiff, EmptyImageCanonicalizesStartToZero)
+{
+  std::vector<uint8_t> data(8, 0); // gas = 0
+  append_u32_le(data, 64);         // mem = 64
+  append_u32_le(data, 0);          // cap knob = 0
+  data.insert(data.end(), 16, 0);  // method_id + host_seed
+  append_u32_le(data, 8);          // nonzero start knob
+  append_u32_le(data, 0);          // img_len = 0
+  data.insert(data.end(), {0x13, 0x00, 0x00, 0x00});
+  const auto in = carve_engine_diff_input(data);
+  ASSERT_TRUE(in.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_TRUE(in->initial_memory.empty());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_EQ(in->memory_start, 0U);
+}
+
+TEST(Rv32FuzzScriptedHost, ScheduleIsDeterministicAcrossInstances)
+{
+  std::array<uint32_t, kRegisterCount> regs = {};
+  std::vector<uint8_t> mem_a(64, 0);
+  std::vector<uint8_t> mem_b(64, 0);
+  ScriptedHost a(/*seed=*/42);
+  ScriptedHost b(/*seed=*/42);
+  for (int i = 0; i < 16; ++i) {
+    const HostResult ra =
+        a.ecall(MachineView(0, 100, regs, mem_a), EcallArgs{});
+    const HostResult rb =
+        b.ecall(MachineView(0, 100, regs, mem_b), EcallArgs{});
+    EXPECT_EQ(ra.status, rb.status) << "call " << i;
+    EXPECT_EQ(ra.gas_consumed, rb.gas_consumed) << "call " << i;
+    if (ra.status == HostStatus::kContinue &&
+        rb.status == HostStatus::kContinue) {
+      EXPECT_EQ(ra.continue_value(), rb.continue_value()) << "call " << i;
+    }
+  }
+  // Identical schedules make identical guest-memory writes.
+  EXPECT_EQ(mem_a, mem_b);
+}
+
+TEST(Rv32FuzzScriptedHost, NeverReturnsHostTrap)
+{
+  // The threaded ecall seam aborts on HostStatus::kTrap by contract, so the
+  // schedule must never produce one.
+  std::array<uint32_t, kRegisterCount> regs = {};
+  std::vector<uint8_t> mem(64, 0);
+  for (uint64_t seed = 0; seed < 8; ++seed) {
+    ScriptedHost host(seed);
+    for (int i = 0; i < 64; ++i) {
+      const HostResult result =
+          host.ecall(MachineView(0, 100, regs, mem), EcallArgs{});
+      EXPECT_NE(result.status, HostStatus::kTrap);
+    }
+  }
+}
+
+TEST(Rv32FuzzScriptedHost, ScheduleCoversAllAllowedStatuses)
+{
+  // Sanity that the knob distribution actually reaches every allowed arm:
+  // continue, halt, host out-of-gas, and an over-cap gas debit.
+  std::array<uint32_t, kRegisterCount> regs = {};
+  std::vector<uint8_t> mem(64, 0);
+  bool saw_continue = false;
+  bool saw_halt = false;
+  bool saw_oog = false;
+  bool saw_big_debit = false;
+  ScriptedHost host(/*seed=*/7);
+  for (int i = 0; i < 256; ++i) {
+    const HostResult result =
+        host.ecall(MachineView(0, 100, regs, mem), EcallArgs{});
+    saw_continue = saw_continue || result.status == HostStatus::kContinue;
+    saw_halt = saw_halt || result.status == HostStatus::kHalt;
+    saw_oog = saw_oog || result.status == HostStatus::kOutOfGas;
+    saw_big_debit = saw_big_debit || result.gas_consumed > kFuzzGasCap;
+  }
+  EXPECT_TRUE(saw_continue);
+  EXPECT_TRUE(saw_halt);
+  EXPECT_TRUE(saw_oog);
+  EXPECT_TRUE(saw_big_debit);
 }
 
 TEST(Rv32FuzzCarveArtifact, ForcesNonEmptyCodeAndClampsMemoryToRemaining)
