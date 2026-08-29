@@ -761,6 +761,11 @@ TEST_P(ReadOnlyTest, NativeTokenColdReadsArePriced)
     }
   }
   EXPECT_EQ(idx, kNumReads);
+
+  // transfer_from staged a TransferEvent; finalize the transaction so the
+  // handler is not destroyed with events still pending. The gas trace above was
+  // captured during root_invoke, so the outcome of the abort is irrelevant.
+  [[maybe_unused]] auto abort_status = handler.abort_transaction();
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
