@@ -4,6 +4,28 @@ on:
     workflow_dispatch:
     push:
         branches: ["main"]
+
+# This schedule takes an exclusive lock on the whole bench cluster -- hog4
+# through hog11 -- and holds it for the ~40-60 minutes the five benchmark
+# suites take. Pushes to main land far more often than that, so without a
+# concurrency group every push adds another run that can do nothing but sit in
+# [hog_sched]'s lock acquisition waiting for its predecessors, three or four
+# deep, until something gives up or kills it. Those runs fail without ever
+# compiling a line, and each one files a ci-failure issue.
+#
+# [cancel-in-progress] is false on purpose, unlike the CCache Warmup schedule
+# that locks the same eight hosts. Cancelling a warmup costs a warm cache;
+# cancelling a benchmark run kills [hog_sched] partway through a suite, which
+# both throws away the cluster time already spent and leaves control_server and
+# the benchmark processes alive on eight hosts for the next run to reap. So a
+# run that has started keeps the cluster until it finishes, and a newer push
+# waits: GitHub keeps only the most recent pending run per group and cancels
+# the older pending ones, which is the behaviour we want -- the queue never
+# grows past one, and the run that eventually goes is for the newest commit.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.run_id }}
+    cancel-in-progress: false
+
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
     CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
