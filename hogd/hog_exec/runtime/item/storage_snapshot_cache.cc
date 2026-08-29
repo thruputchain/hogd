@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "contract.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -50,13 +49,19 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
     return db_res.error();
   }
 
-  if constexpr (is_debug_build()) {
-    if (db_res.value()) {
-      auto received_hash = sha256(*db_res.value());
-      if (received_hash != hash) {
-        panic("Received incorrect contract hash from db: {} != {}",
-              show_byte_array(received_hash), show_byte_array(hash));
-      }
+  // Bind the returned row to the hash it was fetched under. The database
+  // selects the contract-code row by `hash` but does not authenticate the
+  // bytes it returns, so recovered or tampered on-disk state could map `hash`
+  // to different, still well-formed contract bytes. Reject a mismatch as
+  // unrecoverable state corruption -- in every build -- before the row is
+  // translated or cached under `hash`.
+  if (db_res.value()) {
+    auto received_hash = sha256(*db_res.value());
+    if (received_hash != hash) {
+      error("contract fetched for hash {} hashes to {}: rejecting mismatched "
+            "persistent contract bytes",
+            show_byte_array(hash), show_byte_array(received_hash));
+      return SystemError{SystemErrorCode::Unrecoverable};
     }
   }
 

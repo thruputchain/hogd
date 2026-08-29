@@ -147,6 +147,16 @@ public:
     in_memory_db_.erase_contract(hash);
   }
 
+  // For testing only: stores a contract row under an arbitrary hash key, even
+  // one that does not equal sha256(contract). Simulates recovered or tampered
+  // on-disk state that maps a deployment's hash to different contract bytes.
+  void
+  write_contract_under_hash(SHA256Hash const &hash,
+                            std::shared_ptr<const Contract> const &contract)
+  {
+    in_memory_db_.write_contract(hash, contract);
+  }
+
 private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
@@ -679,6 +689,16 @@ public:
   void erase_contract_from_mock_db(SHA256Hash const &hash)
   {
     std::get<MockDBWrapper>(db_wrapper_).erase_contract_by_hash(hash);
+  }
+
+  // For testing only (kMockInMemory): stores a contract row under `hash` even
+  // when sha256(contract) != hash, simulating recovered or tampered on-disk
+  // state that maps a deployment's hash to different contract bytes.
+  void write_mismatched_contract_in_mock_db(
+      SHA256Hash const &hash, std::shared_ptr<const Contract> const &contract)
+  {
+    std::get<MockDBWrapper>(db_wrapper_)
+        .write_contract_under_hash(hash, contract);
   }
 
   // Only valid when test_db == kHogDb. Returns the underlying HogDb DAO

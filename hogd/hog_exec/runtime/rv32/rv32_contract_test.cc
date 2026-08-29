@@ -647,6 +647,87 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
+// A persistent contract-code row is looked up by its SHA-256 hash, but the
+// database does not authenticate the bytes it returns, so recovered or tampered
+// on-disk state could map a deployment's hash to different, still well-formed
+// RV32 bytes. StorageSnapshotCache must bind the returned row to the hash it
+// was fetched under and reject a mismatch as unrecoverable state corruption --
+// in every build -- before translating, caching, or running those bytes.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class Rv32ContractHashBindingTest : public ::testing::Test,
+                                    public NativeContractTestFramework {
+public:
+  Rv32ContractHashBindingTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          TestDB::kMockInMemory)
+  {}
+
+protected:
+  Rv32Context runtime_context_;
+
+  // A minimal, fully-translatable RV32 contract that returns `marker`. Two
+  // distinct markers give two contracts with different whole-contract hashes.
+  static std::shared_ptr<Contract> make_return_contract(uint32_t marker)
+  {
+    constexpr uint32_t kEcall = 0x00000073U;
+    constexpr int32_t kReturnSyscallNo = 6;
+    const std::vector<uint32_t> words{
+        rv32::test_program::addi(10, 0, kReturnSyscallNo),
+        rv32::test_program::addi(11, 0, 0),
+        rv32::test_program::addi(12, 0, static_cast<int32_t>(sizeof(marker))),
+        rv32::test_program::addi(13, 0, 0),
+        rv32::test_program::addi(14, 0, 0),
+        rv32::test_program::addi(15, 0, 0),
+        kEcall,
+    };
+    std::vector<uint8_t> memory(sizeof(marker));
+    std::memcpy(memory.data(), &marker, sizeof(marker));
+    auto contract = std::make_shared<Contract>(ContractType::kRv32);
+    contract->rv32_contract().data.append_range(
+        rv32::test_artifact::build_artifact(words, memory));
+    return contract;
+  }
+
+  InvokeResult invoke(ContractAddress const &addr)
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = addr,
+                                    .entrypoint = entrypoint_from_method_id(0),
+                                    .gas_limit = 100'000,
+                                    .calldata = Calldata{},
+                                },
+                            .uniquifier = make_new_uniquifier()}},
+        runtime_context_);
+    return handler.root_invoke();
+  }
+};
+
+TEST_F(Rv32ContractHashBindingTest, MismatchedPersistentBytesRejected)
+{
+  // The deployment names H = sha256(original); the persistent contract row
+  // under H instead holds `substitute`, a different but fully-translatable
+  // contract. Resolving the deployment must fail Unrecoverable rather than run
+  // the substituted code. Without the hash binding, `substitute` would
+  // translate and execute under H's identity.
+  auto original = make_return_contract(0x11111111U);
+  auto substitute = make_return_contract(0x22222222U);
+  const SHA256Hash hash = sha256(*original);
+  ASSERT_NE(sha256(*substitute), hash);
+
+  const auto addr = make_contract_address(40);
+  write_mismatched_contract_in_mock_db(hash, substitute);
+  write_deployment(addr, original); // metadata only, names hash H
+
+  auto result = invoke(addr);
+  ASSERT_FALSE(result.is_root_success());
+  EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
+}
+
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
 {
   // A single straight-line run whose total gas exceeds the legacy uint16 run
