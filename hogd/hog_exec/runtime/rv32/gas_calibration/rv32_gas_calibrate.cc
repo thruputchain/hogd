@@ -53,6 +53,9 @@ struct Options {
   std::string out_path;
   bool quick = false;
   std::string only_op;
+  // Escape hatch for working on the harness itself, never for a calibration
+  // whose numbers anyone will act on.
+  bool allow_nonproduction = false;
   // Distinct target placements measured at each target count. Two phases do
   // identical work, so spreading each point over several of them averages out
   // per-kernel layout bias instead of baking one kernel's luck into the slope.
@@ -475,16 +478,21 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
                "  \"provenance\": {\"engine_fingerprint\": \"%s\", "
                "\"host\": \"%s\", \"kernel\": \"%s\", "
                "\"cpu_model\": \"%s\", \"cpu_count\": %u, "
-               "\"compiler\": \"%s\", \"optimized\": %s, "
+               "\"compiler\": \"%s\", \"build_type\": \"%s\", "
+               "\"cxx_flags\": \"%s\", \"optimized\": %s, "
                "\"assertions_enabled\": %s, "
+               "\"production_build\": %s, "
                "\"source_revision\": \"%s\"},\n",
                escape_json(provenance.engine_fingerprint).c_str(),
                escape_json(provenance.host).c_str(),
                escape_json(provenance.kernel).c_str(),
                escape_json(provenance.cpu_model).c_str(), provenance.cpu_count,
                escape_json(provenance.compiler).c_str(),
+               escape_json(provenance.build_type).c_str(),
+               escape_json(provenance.cxx_flags).c_str(),
                provenance.optimized ? "true" : "false",
                provenance.assertions_enabled ? "true" : "false",
+               provenance.is_production_build() ? "true" : "false",
                escape_json(provenance.source_revision).c_str());
   std::fprintf(out,
                "  \"config\": {\"body_slots\": %u, \"repeats\": %u, "
@@ -584,6 +592,9 @@ main_impl(int argc, char **argv)
     else if (arg.starts_with("--out=")) {
       options.out_path = argv[i] + 6;
     }
+    else if (arg == "--allow-nonproduction") {
+      options.allow_nonproduction = true;
+    }
     else if (arg == "--fingerprint") {
       // No measurement, so this answers "did the engine change?" instantly and
       // deterministically, on any machine, without a tolerance.
@@ -614,11 +625,29 @@ main_impl(int argc, char **argv)
                provenance.engine_fingerprint.c_str());
   std::fprintf(stderr, "host: %s (%s, %u cpus)\n", provenance.host.c_str(),
                provenance.cpu_model.c_str(), provenance.cpu_count);
-  if (!provenance.optimized) {
+  std::fprintf(stderr, "build: %s %s\n",
+               provenance.build_type.empty() ? "(non-CMake)"
+                                             : provenance.build_type.c_str(),
+               provenance.cxx_flags.c_str());
+  // Refuse rather than warn. The measured engine is the compiled interpreter,
+  // and a Debug or ad-hoc build is a different one: its numbers look entirely
+  // reasonable and are silently about the wrong thing, which is the failure
+  // mode this harness exists to avoid. A warning at the top of a few minutes
+  // of output gets scrolled past; an exit does not.
+  if (!provenance.is_production_build() && !options.allow_nonproduction) {
     std::fprintf(stderr,
-                 "WARNING: this harness was not built optimized. It is "
-                 "measuring a different\n         interpreter than the node "
-                 "runs; the numbers are not usable.\n");
+                 "\nrefusing to measure a non-Release build.\n"
+                 "  The gas costs describe the interpreter the node runs, and "
+                 "that is the one the\n"
+                 "  project's Release configuration produces (-O3, -march, "
+                 "libc++ under clang, LTO).\n"
+                 "  Build with: scripts/build.sh -t Release "
+                 "rv32_gas_calibrate\n"
+                 "  or use scripts/rv32_gas_calibrate.sh, which does that for "
+                 "you.\n"
+                 "  Pass --allow-nonproduction to override for harness "
+                 "development only.\n");
+    return 2;
   }
 
   std::fprintf(stderr, "measuring noise floor...\n");

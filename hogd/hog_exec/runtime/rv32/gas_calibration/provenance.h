@@ -19,12 +19,23 @@ struct Provenance {
   std::string cpu_model;
   uint32_t cpu_count = 0;
 
-  // Build identity. An unoptimized or non-LTO build measures a different
-  // interpreter than the node runs, so a run that does not record this cannot
-  // be trusted to be measuring production codegen.
+  // Build identity. The measured engine is the *compiled* interpreter, and the
+  // project's Release build differs from a casual optimized build in ways that
+  // reach the hot path: -O3 rather than -O2, -march, libc++ under clang, LTO
+  // across the interpreter's translation units. So the flags are recorded
+  // verbatim, stamped in by CMake, rather than assumed.
   std::string compiler;
+  std::string build_type; // CMAKE_BUILD_TYPE, or empty outside CMake
+  std::string cxx_flags;  // the flags this binary was actually built with
   bool optimized = false;
   bool assertions_enabled = false;
+
+  // True when this binary was built by the project's Release configuration --
+  // the only build whose numbers describe the interpreter the node runs.
+  [[nodiscard]] bool is_production_build() const
+  {
+    return build_type == "Release" && optimized;
+  }
 
   // Source revision, from the RV32_GAS_SOURCE_REV environment variable that
   // scripts/rv32_gas_calibrate.sh fills in from git. Empty when the harness was

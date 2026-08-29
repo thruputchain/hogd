@@ -182,6 +182,12 @@ collect_provenance()
   provenance.cpu_count = std::thread::hardware_concurrency();
 
   provenance.compiler = compiler_id();
+#if defined(RV32_GAS_BUILD_TYPE)
+  provenance.build_type = RV32_GAS_BUILD_TYPE;
+#endif
+#if defined(RV32_GAS_CXX_FLAGS)
+  provenance.cxx_flags = RV32_GAS_CXX_FLAGS;
+#endif
 #if defined(__OPTIMIZE__)
   provenance.optimized = true;
 #endif

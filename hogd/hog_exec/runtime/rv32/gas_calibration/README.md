@@ -16,13 +16,25 @@ scripts/rv32_gas_calibrate.sh -- --quick               # smoke run, ~40s
 scripts/rv32_gas_calibrate.sh -- --op=DIV --repeats=25 # one opcode, hard
 ```
 
-The script builds the harness with a direct compiler invocation. It links only
-`machine.cc`, `program.cc`, and the header-only threaded interpreter, which
-carry no hogd dependencies, so this works on a bare checkout in seconds without
-configuring the node build. That is the point: a calibration you cannot run on
-a candidate validator machine in one command is a calibration nobody re-runs.
-The same targets also build under CMake (`rv32_gas_calibrate`,
-`rv32_gas_calibration_test`).
+The script drives the project's ordinary Release build (`scripts/build.sh`,
+which is Release by default) and builds only the `rv32_gas_calibrate` target.
+It reuses an existing Release build directory when it finds one, so on a machine
+that already builds hogd this costs a handful of files rather than a configure.
+
+**The build configuration is part of the measurement.** What is being measured
+is the compiled interpreter, and Release is not a casual optimized build: it is
+`-O3` rather than `-O2`, plus `-march`, plus libc++ under clang, plus LTO across
+the interpreter's translation units. An ad-hoc build produces numbers that look
+entirely reasonable and describe a different interpreter, which is the worst
+kind of wrong. So CMake stamps the build type and the exact flags into the
+binary, every run records them, and `rv32_gas_calibrate` refuses to measure
+anything but a Release build. (`--allow-nonproduction` overrides it, for working
+on the harness itself and nothing else.)
+
+Both targets build under CMake directly: `rv32_gas_calibrate` and
+`rv32_gas_calibration_test`. Only the RV32 ISA core is linked -- no OpenSSL, no
+protocol, no XDR -- so the target's own build stays small even though it lives
+in the full tree.
 
 Read the output with:
 

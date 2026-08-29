@@ -76,14 +76,6 @@ representative_specs()
   return specs;
 }
 
-uint32_t
-word_at(const Kernel &kernel, uint32_t pc)
-{
-  return uint32_t{kernel.code[pc]} | (uint32_t{kernel.code[pc + 1]} << 8) |
-         (uint32_t{kernel.code[pc + 2]} << 16) |
-         (uint32_t{kernel.code[pc + 3]} << 24);
-}
-
 // Every target slot must actually hold the opcode the spec asked for, decoded
 // by the same decoder the engine uses. A hand-written encoding table is exactly
 // the kind of thing that can be wrong in a way no timing result would reveal:

@@ -131,13 +131,25 @@ def check_comparable(runs):
               "the current tree.")
         print()
 
-    unoptimized = [run for run in runs
-                   if provenance(run).get("optimized") is False]
-    if unoptimized:
-        print("WARNING: run(s) were not built optimized: "
-              + ", ".join(run["_path"] for run in unoptimized))
+    # The measured engine is the compiled interpreter, so a run from anything
+    # but the project's Release configuration is measuring a different one --
+    # -O3, -march, libc++ under clang and LTO all reach the hot path.
+    nonproduction = [run for run in runs
+                     if provenance(run).get("production_build") is False]
+    if nonproduction:
+        print("WARNING: run(s) were not built by the Release configuration: "
+              + ", ".join(run["_path"] for run in nonproduction))
         print("         Those numbers describe a different interpreter than "
               "the node runs.")
+        print()
+
+    flags = {provenance(run).get("cxx_flags") for run in runs
+             if provenance(run).get("cxx_flags")}
+    if len(flags) > 1:
+        print("WARNING: runs were built with different flags:")
+        for flag in sorted(flags):
+            print(f"  {flag}")
+        print("         Compare them only if you meant to compare builds.")
         print()
 
     hosts = {describe_run(run) for run in runs}
@@ -244,6 +256,8 @@ def print_table(data):
     print(f"engine: {data['engine']} (traced={data['traced']}) "
           f"fingerprint {prov.get('engine_fingerprint', 'unknown')}")
     print(f"host:   {describe_run(data)}")
+    print(f"build:  {prov.get('build_type') or '(non-CMake)'} "
+          f"{prov.get('cxx_flags', '')}")
     if prov.get("source_revision"):
         print(f"source: {prov['source_revision']}")
     print(
@@ -545,6 +559,8 @@ def emit_reference(data):
     print("# what it is for.")
     print()
     print(f"engine_fingerprint {prov.get('engine_fingerprint', 'unknown')}")
+    print(f"# generated from a {prov.get('build_type', 'unknown')} build on "
+          f"{describe_run(data)}")
     print(f"tolerance {GUARD_TOLERANCE}")
     print()
     print("# guard <op> <context> <cost relative to baseline> <current gas>")

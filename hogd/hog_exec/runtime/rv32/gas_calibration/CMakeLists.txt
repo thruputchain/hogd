@@ -27,6 +27,20 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
+# Stamp the build identity into the binary so a calibration says what it was
+# built with. This is not decoration: the numbers are a property of the
+# compiled interpreter, and the Release build differs from a casual -O2 one in
+# ways that reach the hot path -- -O3, -march, libc++ under clang, LTO. A JSON
+# that does not record the flags cannot be compared with one built differently,
+# and rv32_gas_calibrate refuses to measure a non-Release build outright.
+string(TOUPPER "${CMAKE_BUILD_TYPE}" HOGD_RV32_GAS_BUILD_TYPE_UPPER)
+target_compile_definitions(
+  rv32_gas_calibration
+  PUBLIC
+  RV32_GAS_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+  RV32_GAS_CXX_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${HOGD_RV32_GAS_BUILD_TYPE_UPPER}}"
+)
+
 # The harness measures the production engine, so it has to be built the way
 # production is: optimized, with LTO across the interpreter's translation
 # units. A non-LTO or unoptimized build would price a different interpreter

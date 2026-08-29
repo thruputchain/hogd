@@ -7,8 +7,9 @@
 # mechanically rather than remembered.
 #
 # Meant for a periodic job -- nightly, weekly, whatever cadence suits -- on a
-# reasonably quiet machine. It runs a full calibration (a few minutes) and
-# checks two things against the committed reference:
+# reasonably quiet machine. It runs a full calibration through the project's
+# Release build (a few minutes; the harness refuses to measure any other build)
+# and checks two things against the committed reference:
 #
 #   1. The engine fingerprint: fusion rules, gas schedule, run limits. Pure
 #      equality, no timing, cannot flake. This catches the likeliest failure --
@@ -91,7 +92,7 @@ fi
 if [[ "${FINGERPRINT_ONLY}" = "ON" ]]; then
   # Just the deterministic arm: useful by hand after touching the interpreter,
   # when you want the answer now and do not want to wait for a full run.
-  ACTUAL="$("${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" -- --fingerprint 2>/dev/null | tail -1)"
+  ACTUAL="$("${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" -- --fingerprint 2>/dev/null)"
   EXPECTED="$(awk '$1 == "engine_fingerprint" { print $2 }' "${REFERENCE}")"
   if [[ -z "${ACTUAL}" ]]; then
     echo "FAIL  could not compute the engine fingerprint" >&2
@@ -114,5 +115,8 @@ if [[ -z "${OUT_PATH}" ]]; then
   trap 'rm -f "${OUT_PATH}"' EXIT
 fi
 
-"${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" --out "${OUT_PATH}" -- "${CALIBRATE_ARGS[@]:-}"
+# ${array[@]:-} on an empty array expands to one empty argument, which the
+# harness rejects as an unknown flag; expand to nothing instead.
+"${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" --out "${OUT_PATH}" \
+  ${CALIBRATE_ARGS[0]+-- "${CALIBRATE_ARGS[@]}"}
 exec "${REPO_ROOT}/scripts/rv32_gas_report.py" "${OUT_PATH}" --check "${REFERENCE}"

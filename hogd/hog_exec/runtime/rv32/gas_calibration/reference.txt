@@ -19,26 +19,30 @@
 # what it is for.
 
 engine_fingerprint 71e9993b420be26b
+# generated from a Release build on vm (Intel(R) Xeon(R) Processor @ 2.80GHz)
 tolerance 1.0
 
 # guard <op> <context> <cost relative to baseline> <current gas>
-guard BEQ independent/taken 2.579 1
-guard BGE independent/taken 2.581 1
-guard BGEU independent/taken 2.572 1
-guard BLT independent/taken 2.591 1
-guard BLTU independent/taken 2.620 1
-guard BNE independent/taken 2.590 1
-guard DIV chain/large 5.476 8
-guard DIVU chain/large 5.164 8
-guard LW independent/chase_64k 5.912 1
-guard MUL chain 1.623 3
-guard MULH chain 2.010 3
-guard MULHSU chain 1.997 3
-guard MULHU chain 1.934 3
-guard REM chain/large 6.775 8
-guard REMU chain/large 6.368 8
+guard BEQ independent/taken 2.546 1
+guard BGE independent/taken 2.522 1
+guard BGEU independent/taken 2.513 1
+guard BLT independent/taken 2.558 1
+guard BLTU independent/taken 2.601 1
+guard BNE independent/taken 2.535 1
+guard DIV chain/large 5.575 8
+guard DIVU chain/large 5.116 8
+guard LW independent/chase_64k 6.006 1
+guard MUL chain 1.610 3
+guard MULH chain 1.949 3
+guard MULHSU chain 2.002 3
+guard MULHU chain 2.001 3
+guard REM chain/large 6.927 8
+guard REMU chain/large 6.451 8
+guard SLT chain 1.647 1
+guard SLTIU chain 1.571 1
+guard SLTU chain 1.619 1
 
 # Worst-over-best ns/gas across the validation workloads: how
 # much real capacity the current schedule gives away. Rising
 # means pricing got less even.
-workload_spread 5.787
+workload_spread 5.669

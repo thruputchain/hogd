@@ -27,9 +27,16 @@ scripts/rv32_gas_report.py /tmp/gas-1.json /tmp/gas-2.json --schedule # merged
 scripts/rv32_gas_report.py /tmp/gas-1.json --workloads
 ```
 
-The harness links only the RV32 ISA core, which has no hogd dependencies, so
-the script builds it directly and a full run takes a few minutes on a bare
-checkout.
+The script builds the `rv32_gas_calibrate` target through the project's
+ordinary Release build and reuses an existing Release build directory when it
+finds one. Only the RV32 ISA core is linked, so the target's own build is small.
+A full run takes a few minutes.
+
+The build configuration is part of the measurement: Release is `-O3`, `-march`,
+libc++ under clang, and LTO across the interpreter's translation units, and an
+ad-hoc `-O2` build measures a different interpreter while looking perfectly
+reasonable. CMake stamps the build type and flags into the binary, every run
+records them, and the harness refuses to measure a non-Release build.
 
 Run it more than once. `--schedule` accepts several runs and merges them by
 taking the highest cost each context reached while marking any opcode that not
@@ -51,8 +58,9 @@ price the end an adversary can force.
 ## First results
 
 Host: 4-core Intel Xeon @ 2.80GHz, 32 KiB L1d and 1 MiB L2 per core, Linux,
-clang 21, `-O2 -flto`. Development container, not a validator; treat the
-ordering as the finding and the absolute nanoseconds as host-specific.
+Release build (`-O3 -march=native`, LTO). Development container, not a
+validator; treat the ordering as the finding and the absolute nanoseconds as
+host-specific.
 
 Baseline: one dispatched ALU instruction costs about **1.0 ns**, roughly 2.8
 cycles. That is the number every other cost is relative to.
