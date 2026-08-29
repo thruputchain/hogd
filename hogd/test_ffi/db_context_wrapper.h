@@ -23,6 +23,7 @@
 #include "rpc_types.hh"
 #include "storage_cost.hh"
 #include "transaction.hh"
+#include "x23/mvar.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
@@ -88,47 +89,37 @@ public:
   // handler is still open would dangle those references, so the test FFI layer
   // rejects those operations while a handler is open (issues #2433, #2436).
   //
-  // The two sides are mutually exclusive, not merely counted: a plain "are
-  // there handlers?" load only supports check-then-act, so a handler opening
+  // The two sides are mutually exclusive, not merely counted. An open-handler
+  // count on its own only supports check-then-act, so a handler opening
   // between a lifecycle operation's zero check and its replacement of borrowed
   // state was admitted against state the operation then destroyed (issue
-  // #3049). lifecycle_state_ is a small state machine that linearizes the two:
-  // a lifecycle transition is admitted only from a state with no open handlers
-  // and no other transition in flight, and while one is in flight handler
-  // admission is refused.
+  // #3049). Both sides now decide under lifecycle_state_'s lock: a transition
+  // is admitted only with no handler open and no other transition in flight,
+  // and a handler only with no transition in flight.
 
   // Registers a handler's borrow of this DBContext. Returns false when a
   // lifecycle transition is in flight; the caller must not borrow DB state in
   // that case. Must be paired with unregister_open_handler().
   [[nodiscard]] bool try_register_open_handler()
   {
-    auto state = lifecycle_state_.load(std::memory_order_relaxed);
-    do {
-      if (state & kLifecycleTransitionBit) {
+    return lifecycle_state_.with([](LifecycleState &state) {
+      if (state.transition_in_flight) {
         return false;
       }
-    } while (
-        !lifecycle_state_.compare_exchange_weak(state, state + 1,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_relaxed));
-    return true;
+      ++state.open_handlers;
+      return true;
+    });
   }
 
   void unregister_open_handler()
   {
-    [[maybe_unused]] auto prev =
-        lifecycle_state_.fetch_sub(1, std::memory_order_release);
-    // A transition cannot start while a handler is open, so it cannot be in
-    // flight here and the subtraction cannot touch the transition bit.
-    assert((prev & kLifecycleTransitionBit) == 0);
-    assert((prev & kOpenHandlerCountMask) > 0);
+    lifecycle_state_.with([](LifecycleState &state) {
+      assert(state.open_handlers > 0);
+      --state.open_handlers;
+    });
   }
 
-  bool has_open_handlers() const
-  {
-    return (lifecycle_state_.load(std::memory_order_acquire) &
-            kOpenHandlerCountMask) > 0;
-  }
+  bool has_open_handlers() const { return lifecycle_state_->open_handlers > 0; }
 
   // Exclusive DB lifecycle transition (advance_new_block(), free_db()): while
   // one is held, handler admission is refused, so state the transition
@@ -170,7 +161,8 @@ public:
   // still hold a BlockTX open, so advancing the block could drive the scheduler
   // over orphaned transaction state. Once poisoned, advance_new_block() refuses
   // to run; free_db() (full teardown) stays the only safe lifecycle operation.
-  // One-way and atomic to match lifecycle_state_.
+  // One-way and atomic so a failing close can set it without taking the
+  // lifecycle lock.
   void poison_lifecycle() { lifecycle_poisoned_.store(true); }
   bool is_lifecycle_poisoned() const { return lifecycle_poisoned_.load(); }
 
@@ -212,16 +204,18 @@ private:
   // flight. See LifecycleTransition, which is how callers take one.
   [[nodiscard]] bool try_begin_lifecycle_transition()
   {
-    std::uint32_t idle = 0;
-    return lifecycle_state_.compare_exchange_strong(idle,
-                                                    kLifecycleTransitionBit,
-                                                    std::memory_order_acq_rel,
-                                                    std::memory_order_relaxed);
+    return lifecycle_state_.with([](LifecycleState &state) {
+      if (state.open_handlers > 0 || state.transition_in_flight) {
+        return false;
+      }
+      state.transition_in_flight = true;
+      return true;
+    });
   }
 
   void end_lifecycle_transition()
   {
-    lifecycle_state_.store(0, std::memory_order_release);
+    lifecycle_state_->transition_in_flight = false;
   }
 
   using db_sched_client_t =
@@ -245,16 +239,18 @@ private:
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;
 
-  // Lifecycle admission state: the number of SyscallHandlerContexts currently
-  // borrowing this DBContext in the low bits, plus a flag for an in-flight
-  // exclusive lifecycle transition in the high bit. Kept in one word so
-  // admitting a handler and admitting a transition are a single compare and
-  // exchange each, and neither can be admitted against a stale observation of
-  // the other. See try_register_open_handler() and LifecycleTransition.
-  static constexpr std::uint32_t kLifecycleTransitionBit = 1U << 31;
-  static constexpr std::uint32_t kOpenHandlerCountMask =
-      ~kLifecycleTransitionBit;
-  std::atomic<std::uint32_t> lifecycle_state_ = 0;
+  struct LifecycleState {
+    // SyscallHandlerContexts currently borrowing this DBContext.
+    int open_handlers = 0;
+    // An advance_new_block() or free_db() is running.
+    bool transition_in_flight = false;
+  };
+
+  // Handler admission and lifecycle transitions both decide under this lock,
+  // so neither can be admitted against a stale observation of the other. See
+  // try_register_open_handler() and LifecycleTransition. Mutable so the
+  // const has_open_handlers() can take the lock.
+  mutable x23::MVar<LifecycleState> lifecycle_state_;
   // See poison_lifecycle().
   std::atomic<bool> lifecycle_poisoned_ = false;
 };
