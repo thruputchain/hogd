@@ -36,6 +36,7 @@
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "transaction_trace.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -641,6 +642,101 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
+}
+
+// Regression test for issue #3699: a native-token balance read must be priced
+// for the cold storage lookup it performs. get_balance_of loads a
+// previously-unseen address through the snapshot cache (a cold DB read) and
+// retains a snapshot-cache entry plus a parent-frame item view keyed by that
+// address; an RV32/WASM caller's own reads are bounded by its VM instruction
+// gas, but a native precompile has no such metering, so the per-call charge is
+// the only bound on how many distinct cold reads a caller can drive. Verify the
+// charge is the storage-read cost, not the old flat one gas, so the work is
+// bounded in proportion to the gas the caller pays.
+TEST_P(ReadOnlyTest, NativeTokenBalanceReadChargesStorageReadGas)
+{
+  // Must match kNativeTokenBalanceReadGasCost in precompile_native_token.cc.
+  // Pinned deliberately: update both together on a gas-schedule change.
+  constexpr uint64_t kExpectedBalanceReadGas = 1000;
+
+  constexpr ContractAddress kObserverAddr = make_contract_address(12);
+  setup_grant_storage_token(kObserverAddr, 12345);
+
+  constexpr int32_t kCallerNativeId = 100;
+  constexpr ContractAddress kCallerAddr = make_contract_address(10);
+
+  auto native_token_client =
+      ContractTraitClient<itc_erc20::ERC20>(kNativeTokenContractAddress);
+
+  // The caller's single action is one get_balance_of of an address it has not
+  // touched before, so the traced Invoke's gas delta is exactly what the child
+  // read consumed.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto res =
+            native_token_client.invoke_opt<u8"get_balance_of">(ctx,
+                                                               kObserverAddr);
+        if (!res.has_value() || !res.value().has_value() ||
+            !res.value().value().has_value() ||
+            !res.value().value().value().is_ok()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kCallerNativeId, std::move(caller_contract));
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
+  auto native_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+  Rv32Context rv32_context;
+
+  auto multiplexed_context = std::make_unique<MultiplexedContext>(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kRv32, {&rv32_context, false}},
+          {ContractType::kNative, {native_context.get(), false}},
+      });
+
+  auto caller_contract_xdr = make_native_contract(kCallerNativeId);
+  write_contract(caller_contract_xdr);
+  write_deployment(kCallerAddr, caller_contract_xdr);
+  setup_grant_storage_token(kCallerAddr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = kCallerAddr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, *multiplexed_context);
+  handler.enable_tracing();
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  // The parent is charged exactly the gas the child (get_balance_of) consumed,
+  // so the Invoke of the native-token precompile carries the read's cost.
+  bool found_invoke = false;
+  for (auto const &call : trace->system_calls) {
+    if (call.body.syscall_number() == SyscallNo::kInvoke &&
+        call.body.invoke().inputs.address == kNativeTokenContractAddress) {
+      EXPECT_EQ(call.gas_remaining_at_start - call.gas_remaining_at_end,
+                kExpectedBalanceReadGas);
+      found_invoke = true;
+    }
+  }
+  EXPECT_TRUE(found_invoke);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,

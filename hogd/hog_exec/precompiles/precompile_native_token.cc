@@ -197,6 +197,25 @@ using difference_t = std::tuple<int64_t, uint64_t>;
 
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
 
+// Gas charged for a native-token balance read (get_balance_of / get_balance).
+//
+// Reading a balance runs get_native_token_balance(), which for a
+// previously-unseen address performs a cold snapshot-item lookup and retains a
+// snapshot-cache entry and a parent-frame item view keyed by that address. A
+// flat one-gas charge lets an untrusted contract drive that cold DB read plus
+// heap retention once per attacker-chosen address for a single native child
+// gas: an RV32/WASM contract's own reads are bounded by its VM instruction gas,
+// but a native precompile has no such metering, so this constant is the only
+// bound on the work. Pricing every read at this cost bounds the number of
+// distinct cold reads (and retained cache/frame entries) in proportion to the
+// gas available, which is the property the flat charge lacked (issue #3699).
+//
+// This is a native-precompile charge only; unlike kSyscallGasCostSchedule in
+// gas_cost_table.h it is not folded into the RV32 gas-schedule digest, so it
+// carries no artifact-regeneration coupling. Like the rest of the schedule it
+// is a placeholder magnitude, tunable by a later gas-schedule pass.
+constexpr uint64_t kNativeTokenBalanceReadGasCost = 1000;
+
 using MintBurnStatus = InvokeStatus<Result<void, ERC20Exception>>;
 
 // Mirror the reference's add_to_total_supply (the SDK's plain, non-strict
@@ -701,7 +720,7 @@ make_native_token_contract()
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
-        if (!ctx.consume_gas(1)) {
+        if (!ctx.consume_gas(kNativeTokenBalanceReadGasCost)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
         auto balance = ctx.handler().get_native_token_balance(contract_address);
@@ -722,7 +741,7 @@ make_native_token_contract()
       [](NativeSyscallContext &ctx)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance");
-        if (!ctx.consume_gas(1)) {
+        if (!ctx.consume_gas(kNativeTokenBalanceReadGasCost)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
