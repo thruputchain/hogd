@@ -1423,4 +1423,97 @@ TEST(ItemLockTest, ExclusiveDeployContractReportsRefundAgainstSnapshotCost)
   EXPECT_EQ(committed.value(), -5000);
 }
 
+// A change that displaces a block-start retrocausal queue (a deletion or a
+// type overwrite) stages one state-row removal per live block row at block
+// close (RetrocausalQueueLock::cleanup_on_deletion), so admission bounds the
+// queue's live-block span at kMaxRetrocausalQueueBlocksPerDeletion. The
+// executor already refuses an over-budget DeleteObject with a handleable
+// syscall error before the delta exists, so an over-budget Deletion reaching
+// hogdb is executor misbehavior (kInvalidExecutorBehavior); a type overwrite
+// is not executor-gated and fails as the transaction (kTooBig). RCQ deltas do
+// not displace the queue and are admitted regardless of its span, as is any
+// change over a non-RCQ snapshot.
+TEST(ItemLockTest, BoundsRetrocausalQueueDisplacementCleanup)
+{
+  auto dir_status = Directory::open_temporary();
+  ASSERT_TRUE(dir_status.has_value());
+  auto dir = std::move(*dir_status);
+
+  auto db_status =
+      Database::open(dir.get_path(), Database::estimate_heap_size(10_MiB), 0);
+  ASSERT_TRUE(db_status.has_value());
+  HogDbDAO dao(RAMDB(std::move(*db_status)));
+
+  ItemKey key = make_item_key(make_address(7), 64681);
+  ASSERT_TRUE(key.is_contract_data());
+  LockContext ctx(&dao, 0, key, &kTestCostModel);
+
+  // Metadata for a queue spanning `live_blocks` unconsumed block rows;
+  // cleanup_on_deletion would stage that many removes at block close.
+  auto write_meta = [&](uint64_t live_blocks) {
+    RetrocausalQueueMetadata meta{};
+    meta.max_live_block_num = live_blocks;
+    meta.live_entries = live_blocks;
+    ASSERT_TRUE(dao.write_retrocausal_queue_metadata(key, meta).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  };
+
+  auto make_rcq_snapshot_lock = [] {
+    return ItemLock(
+        std::pair<int128_t, ItemLockCacheData>(0,
+                                               ItemLockCacheData::from_rcq()));
+  };
+
+  auto deletion = make_deletion_change();
+
+  // At the budget: the deletion is admitted.
+  write_meta(kMaxRetrocausalQueueBlocksPerDeletion);
+  {
+    auto lock = make_rcq_snapshot_lock();
+    EXPECT_TRUE(
+        lock.try_atomic_change_lock(nullptr, &deletion, ctx).has_value());
+  }
+
+  // One row over the budget: a deletion is executor misbehavior on both the
+  // plain and the exclusive admission path.
+  write_meta(kMaxRetrocausalQueueBlocksPerDeletion + 1);
+  {
+    auto lock = make_rcq_snapshot_lock();
+    auto r = lock.try_atomic_change_lock(nullptr, &deletion, ctx);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), HogDbCode::kInvalidExecutorBehavior);
+  }
+  {
+    auto lock = make_rcq_snapshot_lock();
+    auto exclusive_deletion = make_deletion_change();
+    exclusive_deletion.set_permanent_exclusive();
+    auto r = lock.try_atomic_change_lock(nullptr, &exclusive_deletion, ctx);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), HogDbCode::kInvalidExecutorBehavior);
+  }
+
+  // An over-budget type overwrite fails as the transaction.
+  {
+    auto lock = make_rcq_snapshot_lock();
+    auto overwrite = make_bytestring_change({1, 2, 3});
+    auto r = lock.try_atomic_change_lock(nullptr, &overwrite, ctx);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), HogDbCode::kTooBig);
+  }
+
+  // An RCQ delta keeps the queue an RCQ: admitted regardless of span.
+  {
+    auto lock = make_rcq_snapshot_lock();
+    auto insert = make_rcq_insert_change(9);
+    EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &insert, ctx).has_value());
+  }
+
+  // A deletion over a non-RCQ snapshot has no fan-out to bound.
+  {
+    ItemLock lock(0);
+    EXPECT_TRUE(
+        lock.try_atomic_change_lock(nullptr, &deletion, ctx).has_value());
+  }
+}
+
 } // namespace hogd

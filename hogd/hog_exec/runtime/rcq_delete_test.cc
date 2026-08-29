@@ -26,6 +26,8 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/storage_item/retrocausal_queue.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
@@ -2165,6 +2167,31 @@ protected:
           return {};
         });
 
+    // Method 71: DeleteObject on a queue whose committed metadata spans more
+    // live block rows than the per-deletion cleanup budget. The syscall must
+    // refuse with the dedicated handleable resource-limit error -- not fault
+    // the transaction -- and the same transaction must be able to keep using
+    // the queue it could not delete.
+    builder.add<SerializationFormat::kTxs>(
+        71, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+          auto res = ctx.syscall<SyscallNo::kDeleteObject>(
+              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          if (!res.has_value() ||
+              res.value() !=
+                  SyscallErrorCode::
+                      kSyscallErrorCodeRetrocausalQueueTooLargeToDelete) {
+            ADD_FAILURE() << "over-budget RCQ delete was not refused with the "
+                             "handleable resource-limit error";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (!rcq_insert(ctx, 7)) {
+            ADD_FAILURE() << "insert into the queue after the refused delete "
+                             "failed";
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          return {};
+        });
+
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, builder.build());
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -4229,6 +4256,34 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+// An explicit delete of a queue whose committed metadata spans more live
+// block rows than kMaxRetrocausalQueueBlocksPerDeletion is refused inside the
+// DeleteObject syscall, before any delta exists, with a handleable error
+// (method 71 asserts the code and continues the transaction by inserting into
+// the queue it could not delete). Only metadata needs seeding: the executor
+// check, hogdb's admission backstop, and the block-close cleanup all derive
+// the removal interval from committed metadata, never from the rows
+// themselves.
+TEST_P(RCQDeleteTest, DeleteOverCleanupBudgetRefusedHandleably)
+{
+  RetrocausalQueue seeded(kMaxRetrocausalQueueBlocksPerDeletion + 1);
+  write_item(get_queue_addrkey(),
+             std::make_shared<const StorageItemWrapper>(
+                 std::move(seeded), get_default_cost_model()));
+
+  invoke_method(71);
+
+  advance_block();
+
+  // The refused delete left no delta; the transaction's insert committed.
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  auto const &meta = queue->metadata();
+  EXPECT_EQ(meta.live_entries, 1);
+  EXPECT_EQ(meta.max_live_block_num, kMaxRetrocausalQueueBlocksPerDeletion + 2);
+}
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, RCQDeleteTest,
                          ::testing::Values(TestDB::kMockInMemory,

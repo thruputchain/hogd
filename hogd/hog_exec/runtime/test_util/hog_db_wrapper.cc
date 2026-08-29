@@ -56,6 +56,24 @@ HogdbWrapper::write_item(AddressAndKey const &addrkey,
     CHECK(ret.has_value());
     return;
   }
+  case StorageItemType::kItemTypeRetrocausalQueue:
+  {
+    // Persist the queue the way block commit would: the metadata row derived
+    // by to_wire_item(), plus one auxiliary row per retained block.
+    ItemKey key = make_item_key(addrkey);
+    auto ret = ctx_.get_db().write_retrocausal_queue_metadata(
+        key, item->to_wire_item().metadata());
+    CHECK(ret.has_value());
+    auto const &queue = item->queue();
+    for (const RetrocausalQueueBlock *block =
+             queue.try_get_next_block(queue.get_lowest_block_number() + 1);
+         block != nullptr;
+         block = queue.try_get_next_block(block->block_number + 1)) {
+      auto block_ret = ctx_.get_db().write_retrocausal_queue_block(key, *block);
+      CHECK(block_ret.has_value());
+    }
+    return;
+  }
   case StorageItemType::kItemTypeDeleted:
   {
     info("write_item: removing item");
