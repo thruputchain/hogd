@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -167,6 +168,15 @@ public:
   // kEventsMaxLimit is capped to that.
   static constexpr std::uint32_t kEventsDefaultLimit = 50;
   static constexpr std::uint32_t kEventsMaxLimit = 200;
+
+  // Per-filter budget on topic alternatives (topic0 + topic1 + topic2).
+  // protocol/indexer.x caps filters and contract addresses but leaves the
+  // topic-alternative lists unbounded; each list is scanned linearly against
+  // every candidate event (topic_layout.cc), so an oversized list lets one
+  // schema-valid get_events request impose query work far beyond the intended
+  // budget.  A handful of alternatives per position covers real clients (event
+  // name plus a few participant addresses) while keeping the merge-walk cheap.
+  static constexpr std::size_t kMaxTopicAlternativesPerFilter = 64;
   // Genesis is committed directly at height 0. The durable event/indexer
   // stream begins with the first post-genesis block.
   static constexpr BlockHeight kFirstOutboxBlockHeight = 1;

@@ -17,6 +17,7 @@
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
+#include "hogd/hog_indexer/topic_layout.h"
 #include "hogd/init.h"
 #include "hogd/metrics/health.h"
 #include "indexer.hh"
@@ -706,6 +707,60 @@ TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
   TransactionRefPageResult block_refs =
       block_explorer_->get_transactions_by_block(block_query)();
   EXPECT_EQ(block_refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
+}
+
+// A get_events filter may carry at most kMaxTopicAlternativesPerFilter topic
+// alternatives across its three positions.  A filter at the budget still
+// matches; one over it is rejected before the walk (empty page), so an
+// unbounded topic list can't amplify the per-event linear topic scan.
+TEST_F(IndexerTest, EventTopicAlternativeBudgetEnforced)
+{
+  ContractAddress contract;
+  std::ranges::fill(contract, 0xAA);
+  SHA256Hash tx_hash;
+  std::ranges::fill(tx_hash, 0x33);
+
+  constexpr std::uint8_t kMatchingByte = 0x42;
+  constexpr std::uint8_t kNonmatchingByte = 0x11;
+
+  TxEmittedEvent event;
+  event.contract_address = contract;
+  event.num_topics = 1;
+  event.serialized_event.resize(kTopicSizeBytes);
+  std::ranges::fill(event.serialized_event, kMatchingByte);
+  TxEventLog log;
+  log.tx_hash = tx_hash;
+  log.events.push_back(event);
+  ingest_legacy_events(100, TxEventLogBatch{log}, create_tx_bodies(1))();
+
+  // Single-filter query whose topic0 holds `count` alternatives, only the
+  // last of which matches the ingested event.
+  auto query_with = [&](std::size_t count) {
+    EventFilter filter{};
+    filter.contract_addresses.push_back(contract);
+    filter.topics.topic0.resize(count);
+    for (Topic &topic : filter.topics.topic0) {
+      std::ranges::fill(topic, kNonmatchingByte);
+    }
+    std::ranges::fill(filter.topics.topic0.back(), kMatchingByte);
+    EventQuery query{};
+    query.filters.push_back(std::move(filter));
+    query.order = IterationOrder::IterationOrderAscending;
+    query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    query.limit = 0;
+    return query;
+  };
+
+  // At the budget: the event is served.
+  EventPage at_budget = unwrap_page(block_explorer_->get_events(
+      query_with(IndexDB::kMaxTopicAlternativesPerFilter))());
+  ASSERT_EQ(at_budget.events.size(), 1);
+  EXPECT_EQ(at_budget.events[0].tx_hash, tx_hash);
+
+  // One over the budget: rejected before the walk -> empty page.
+  EventPage over_budget = unwrap_page(block_explorer_->get_events(
+      query_with(IndexDB::kMaxTopicAlternativesPerFilter + 1))());
+  EXPECT_TRUE(over_budget.events.empty());
 }
 
 } // namespace hogd
