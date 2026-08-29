@@ -414,4 +414,34 @@ TEST_F(InvocationFrameTest, RevertedFrameUnchargesBytestringWriteBudget)
   EXPECT_TRUE(stack.try_reserve_bytestring_write(std::nullopt, kValueLen));
 }
 
+// Replacing a bytestring at a key with another item type (a delete or an nnint
+// write) releases its charge, so a contract that alternates a bytestring write
+// with another type on one key cannot leak the budget (issue #3681).
+TEST_F(InvocationFrameTest, ReleasingBytestringWriteReclaimsBudget)
+{
+  constexpr size_t kValueLen = 1024;
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_);
+  ASSERT_TRUE(stack
+                  .start_frame(make_test_address(0), Calldata{}, 0, {},
+                               kMaxSha256Buffers)
+                  .has_value());
+
+  // Far more write/replace cycles on one key than would fit if the charge
+  // leaked; each write is followed by the release the replacing write performs.
+  for (int i = 0; i < 100'000; ++i) {
+    ASSERT_TRUE(stack.try_reserve_bytestring_write(std::nullopt, kValueLen));
+    stack.release_bytestring_write(kValueLen);
+  }
+
+  // The budget is fully reclaimed, so a large batch of distinct writes still
+  // fits.
+  size_t distinct_writes = 0;
+  while (stack.try_reserve_bytestring_write(std::nullopt, kValueLen)) {
+    ++distinct_writes;
+    ASSERT_LT(distinct_writes, size_t{1} << 20);
+  }
+  EXPECT_GT(distinct_writes, size_t{15000});
+}
+
 } // namespace hogd

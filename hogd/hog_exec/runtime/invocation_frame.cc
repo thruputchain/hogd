@@ -601,6 +601,14 @@ InvocationFrameStack::try_reserve_bytestring_write(
   return true;
 }
 
+void
+InvocationFrameStack::release_bytestring_write(size_t prior_len)
+{
+  size_t const prior_footprint = kBytestringWriteEntryOverhead + prior_len;
+  assert(retained_bytestring_write_footprint_ >= prior_footprint);
+  retained_bytestring_write_footprint_ -= prior_footprint;
+}
+
 AuthToken const *
 InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
 {

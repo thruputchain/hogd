@@ -439,6 +439,15 @@ public:
   bool try_reserve_bytestring_write(std::optional<size_t> prior_len,
                                     size_t new_len);
 
+  // Release the budget charged for a bytestring write of [prior_len] bytes when
+  // another item type (a delete or an nnint write) replaces it at the same key.
+  // Callers must invoke this whenever a non-bytestring write overwrites a
+  // bytestring, so the charge does not outlive the value it accounted for --
+  // otherwise a contract that alternates a bytestring write with another type
+  // on one key could exhaust the budget while retaining only a small delta
+  // (issue #3681).
+  void release_bytestring_write(size_t prior_len);
+
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {
     StorageKey key(StorageKeyType::ContractData);

@@ -1776,6 +1776,14 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
+  // Overwriting a bytestring at this key with an nnint releases the
+  // bytestring's retained-write-set charge, so it does not outlive the value
+  // (issue #3681).
+  if (auto const *existing = item_view->get<BytestringItem>()) {
+    invocation_frame_stack_.release_bytestring_write(
+        existing->bytestring_.size());
+  }
+
   // Writing to an nnint, without explicitly defining the set value,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
@@ -1802,6 +1810,14 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
+
+  // Deleting a bytestring at this key releases its retained-write-set charge,
+  // so it does not outlive the value (issue #3681).
+  if (auto const *existing = item_view->get<BytestringItem>()) {
+    invocation_frame_stack_.release_bytestring_write(
+        existing->bytestring_.size());
+  }
+
   return item_view->set(DeletedItem{}, flags);
 }
 
