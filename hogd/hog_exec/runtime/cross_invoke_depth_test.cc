@@ -70,12 +70,19 @@ invoke_expecting(ContractAddress const &next,
 // An entrypoint on a contract the bound must keep unreachable. Deployed and
 // named as an invoke target so the refusal is observed at the call, but
 // running its body is the failure these tests look for.
+//
+// It returns successfully so that running it is distinguishable from being
+// refused: a refused invoke reports Fault, and so would a body that failed, so
+// a body that faulted would leave the caller's status assertion passing for the
+// wrong reason. Returning success makes the caller observe Return instead, and
+// the deepest frame of a chain reach the root as a success -- either way the
+// assertion fails on its own, without relying on the ADD_FAILURE below.
 NativeContract::function_t
 unreachable_entrypoint()
 {
   return [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
     ADD_FAILURE() << "a contract past the cross-invoke bound was entered";
-    return InvokeError{InvokeErrorCode::Deterministic};
+    return {};
   };
 }
 
