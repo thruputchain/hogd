@@ -228,6 +228,39 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
             ProgramError::kUnsupportedSystemInstruction);
 }
 
+TEST(Rv32Threaded, decodeRejectVerdictMatchesCanonicalOnMultiErrorPrograms)
+{
+  using test_program::addi;
+  // create()'s single backward lowering pass reports the LAST invalid word's
+  // error; the canonical forward decoder (Program::validate) reports the
+  // FIRST. The reject *sets* are identical and every decode error maps to the
+  // same deterministic deploy rejection, so on programs holding several
+  // invalid words of different kinds only the accept/reject verdict is
+  // pinned -- deliberately not the error code, which legitimately differs
+  // between the two scan directions.
+  const auto expect_both_reject = [](std::span<const uint32_t> words,
+                                     ProgramError expected_first_error) {
+    const std::vector<uint8_t> bytes = words_to_bytes(words);
+    const ProgramResult canonical = Program::validate(bytes);
+    EXPECT_FALSE(canonical.ok);
+    EXPECT_EQ(canonical.error, expected_first_error);
+    EXPECT_FALSE(ThreadedMachinePreInstantiation::create(
+                     bytes, /*memory=*/{}, /*memory_start=*/0,
+                     /*total_memory_size=*/256, /*trace=*/false)
+                     .has_value());
+  };
+  // All three per-word error kinds, in both orders, with a valid word between.
+  expect_both_reject(std::vector<uint32_t>{0xffffffffU, addi(1, 0, 1),
+                                           0x00200073U},
+                     ProgramError::kUnsupportedInstruction);
+  expect_both_reject(std::vector<uint32_t>{0x00200073U, addi(1, 0, 1),
+                                           0xffffffffU},
+                     ProgramError::kUnsupportedSystemInstruction);
+  expect_both_reject(std::vector<uint32_t>{0x00000000U, 0xffffffffU,
+                                           0x00200073U},
+                     ProgramError::kUnsupportedCompressedInstruction);
+}
+
 TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
 {
   using test_program::op;
@@ -331,12 +364,14 @@ using test_program::op;
 
 std::shared_ptr<const ThreadedMachinePreInstantiation>
 threaded_from_words(std::span<const uint32_t> words,
-                    uint32_t total_memory_size = 256, bool trace = false)
+                    uint32_t total_memory_size = 256, bool trace = false,
+                    uint32_t max_run_gas = kMaxRunGas)
 {
   auto pre_instantiation =
       ThreadedMachinePreInstantiation::create(words_to_bytes(words),
                                               /*memory=*/{}, /*memory_start=*/0,
-                                              total_memory_size, trace);
+                                              total_memory_size, trace,
+                                              max_run_gas);
   EXPECT_TRUE(pre_instantiation.has_value());
   return std::make_shared<const ThreadedMachinePreInstantiation>(
       std::move(pre_instantiation.value()));
@@ -2547,6 +2582,150 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/20000 - charged,
                          /*check_pc=*/true, /*gas_limit=*/20000);
+}
+
+// Sweep every budget 0..max_budget over `words` lowered with a non-default
+// chunk cap `max_run_gas`, holding the untraced and traced threaded engines to
+// the canonical (StepResult, trap, gas_remaining) at each budget. The small
+// cap places break carriers inside short programs, so the carrier refund and
+// deficit seams get swept without kMaxRunGas-scale div chains.
+void
+expect_budget_sweep_parity_capped(std::span<const uint32_t> words,
+                                  uint32_t max_run_gas, uint64_t max_budget)
+{
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
+                                      /*trace=*/false, max_run_gas);
+  auto traced = threaded_from_words(words, /*total_memory_size=*/256,
+                                    /*trace=*/true, max_run_gas);
+  for (uint64_t budget = 0; budget <= max_budget; ++budget) {
+    Machine cmachine(canonical, 256, budget);
+    RecordingHost chost;
+    const StepResult cresult = cmachine.run(chost);
+
+    ThreadedMachine tmachine(*threaded, budget);
+    RecordingHost thost;
+    EXPECT_EQ(tmachine.run(thost), cresult) << "budget " << budget;
+    EXPECT_EQ(tmachine.trap(), cmachine.trap()) << "budget " << budget;
+    EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining())
+        << "budget " << budget;
+
+    ThreadedMachine trmachine(*traced, budget);
+    RecordingHost trhost;
+    TraceObserver tobs;
+    EXPECT_EQ(trmachine.run(trhost, tobs), cresult) << "budget " << budget;
+    EXPECT_EQ(trmachine.trap(), cmachine.trap()) << "budget " << budget;
+    EXPECT_EQ(trmachine.gas_remaining(), cmachine.gas_remaining())
+        << "budget " << budget;
+  }
+}
+
+// The smallest cap create() accepts: it clamps to at least kDivInstructionGas
+// so a valid split exists for every single instruction.
+constexpr uint32_t kMinRunGasCap = static_cast<uint32_t>(kDivInstructionGas);
+
+TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
+{
+  using test_program::load;
+  // Chunk cap 8 over [7 addi][LW][7 addi][ecall] (gas 1 each, 16 slots).
+  // Backward-greedy lowering: the trailing [7 addi + ecall] fills an 8-gas
+  // chunk, the lw cannot fold into it (1+8 > 8), so the lw at slot 7 is the
+  // break carrier ending the first chunk. Its Brk fault path must refund
+  // nothing at every budget: below 8 the run enters in deficit (canonical
+  // OOGs inside the prefix), at exactly 8 the fault lands with zero balance,
+  // above 8 the remainder must match canonical's charge-through-the-lw.
+  std::vector<uint32_t> words(7, addi(1, 0, 1));
+  words.push_back(load(5, 2, 0, 300)); // slot 7: OOB lw -> carrier
+  words.insert(words.end(), 7, addi(2, 0, 2));
+  words.push_back(kEcallWord);
+  auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
+                                      /*trace=*/false, kMinRunGasCap);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
+            (&op_load<false, 4, false, true>));
+  expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
+}
+
+TEST(Rv32ThreadedTrapGas, cappedLoadFaultAtChunkHeadAfterCarrierBudgetSweep)
+{
+  using test_program::load;
+  // Chunk cap 8 over [8 addi][LW][6 addi][ecall] (16 slots): the trailing
+  // [LW + 6 addi + ecall] fills an 8-gas chunk headed by the faulting lw, and
+  // the addi at slot 7 becomes the break carrier ending the first chunk. The
+  // fault fires at a run head -- straight out of enter_run's charge (budget >=
+  // the 9-gas prefix) or inside a deficit run (budget below it, where
+  // canonical ran dry in the first chunk or exactly at the boundary).
+  std::vector<uint32_t> words(8, addi(1, 0, 1));
+  words.push_back(load(5, 2, 0, 300)); // slot 8: OOB lw heads chunk 2
+  words.insert(words.end(), 6, addi(2, 0, 2));
+  words.push_back(kEcallWord);
+  auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
+                                      /*trace=*/false, kMinRunGasCap);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
+            (&op_ri<false, add_op, true>));
+  expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
+}
+
+TEST(Rv32ThreadedTrapGas, cappedLoadFaultMidSecondChunkBudgetSweep)
+{
+  using test_program::load;
+  // Chunk cap 8 over [8 addi][addi][LW][5 addi][ecall] (16 slots): the fault
+  // sits mid-chunk in the SECOND chunk (slots 8..15), past the carrier at
+  // slot 7. Budgets 8..9 enter that chunk in deficit with the fault in the
+  // unaffordable suffix (canonical OOGs at or before the lw -> kOutOfGas, 0);
+  // budget 10 pays exactly through the lw, so the deficit settle must still
+  // classify kBadMemory with zero remaining; larger budgets refund the
+  // unexecuted suffix.
+  std::vector<uint32_t> words(9, addi(1, 0, 1));
+  words.push_back(load(5, 2, 0, 300)); // slot 9: OOB lw mid chunk 2
+  words.insert(words.end(), 5, addi(2, 0, 2));
+  words.push_back(kEcallWord);
+  auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
+                                      /*trace=*/false, kMinRunGasCap);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
+            (&op_ri<false, add_op, true>));
+  expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
+}
+
+TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
+{
+  using test_program::load;
+  using test_program::store;
+  // Accesses whose [addr, addr+width) wraps past 2^32 must trap kBadMemory in
+  // both engines. The two bounds predicates are different forms of the same
+  // check (canonical: subtraction, host.h:15; threaded: uint64 widening,
+  // host.h:30), so the wrap seam -- where a naive uint32 addr+width would
+  // wrap to a small in-bounds value -- is pinned here explicitly.
+  {
+    // lw at 0xFFFFFFFE: [0xFFFFFFFE, +4) wraps.
+    const std::vector<uint32_t> words = {addi(1, 0, -2), load(2, 2, 1, 0)};
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/98);
+  }
+  {
+    // sw at 0xFFFFFFFE.
+    const std::vector<uint32_t> words = {addi(1, 0, -2), store(1, 2, 0, 2)};
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/98);
+  }
+  {
+    // lh at 0xFFFFFFFF: the two-byte range crosses zero.
+    const std::vector<uint32_t> words = {addi(1, 0, -1), load(2, 1, 1, 0)};
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/98);
+  }
+  {
+    // lb at 0xFFFFFFFF: addr+1 lands exactly on 2^32.
+    const std::vector<uint32_t> words = {addi(1, 0, -1), load(2, 0, 1, 0)};
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/98);
+  }
+  {
+    // base+imm wraps mod 2^32 before the bounds check: 1 + (-2) = 0xFFFFFFFF.
+    const std::vector<uint32_t> words = {addi(1, 0, 1), load(2, 0, 1, -2)};
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/98);
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

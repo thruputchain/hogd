@@ -803,7 +803,7 @@ protected:
       if constexpr (requires { a_.allocate_at_least(n); }) {
         auto ar = a_.allocate_at_least(n + ExtraAlloc);
         newb.end = newb.begin = start_array_lifetime(ar.ptr, ar.count);
-        newb.bufend = newb.begin + ar.count - ExtraAlloc;
+        newb.bufend = newb.begin + std::min(ar.count - ExtraAlloc, max_size());
       }
       else {
         newb.end = newb.begin =

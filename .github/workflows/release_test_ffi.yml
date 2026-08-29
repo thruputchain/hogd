@@ -420,19 +420,19 @@ jobs:
           echo "Tag matches version: $EXPECTED_TAG"
 
       - name: Download Linux Artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: libtest_ffi-linux-x86_64
           path: artifacts
 
       - name: Download Linux ARM64 Artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: libtest_ffi-linux-arm64
           path: artifacts
 
       - name: Download macOS Artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: libtest_ffi-macos-arm64
           path: artifacts
@@ -456,7 +456,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: Bindings for Rust SDK (${{ github.ref_name }})
