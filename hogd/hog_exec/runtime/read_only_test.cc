@@ -655,9 +655,11 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 // bounded in proportion to the gas the caller pays.
 TEST_P(ReadOnlyTest, NativeTokenBalanceReadChargesStorageReadGas)
 {
-  // Must match kNativeTokenBalanceReadGasCost in precompile_native_token.cc.
-  // Pinned deliberately: update both together on a gas-schedule change.
-  constexpr uint64_t kExpectedBalanceReadGas = 1000;
+  // get_balance_of charges the one-gas base op plus one
+  // kNativeTokenStorageReadGasCost for its balance read (see
+  // precompile_native_token.cc). Pinned deliberately: update on a gas-schedule
+  // change.
+  constexpr uint64_t kExpectedBalanceReadGas = 1 + 1000;
 
   constexpr ContractAddress kObserverAddr = make_contract_address(12);
   setup_grant_storage_token(kObserverAddr, 12345);

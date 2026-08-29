@@ -45,6 +45,26 @@ using ERC20Exception =
 
 namespace {
 
+// Gas charged for one native-token cold storage read -- a balance read
+// (get_native_token_balance) or an allowance read (kNonnegativeIntGet on an
+// allowance key). Each such read of a previously-unseen key performs a cold
+// snapshot-item lookup and retains a snapshot-cache entry and a parent-frame
+// item view keyed by that address/pair. An RV32/WASM contract's own reads are
+// bounded by its VM instruction gas, but a native precompile has no such
+// metering, so this constant is the only bound on the work: without it an
+// untrusted caller could drive one cold DB read plus heap retention per
+// attacker-chosen key for a single gas -- through get_balance_of, but equally
+// through transfer_from's owner/allowance reads and the other balance- and
+// allowance-reading methods. Pricing every such read bounds the number of
+// distinct cold reads (and retained cache/frame entries) in proportion to the
+// gas the caller pays (issue #3699).
+//
+// This is a native-precompile charge only; unlike kSyscallGasCostSchedule in
+// gas_cost_table.h it is not folded into the RV32 gas-schedule digest, so it
+// carries no artifact-regeneration coupling. Like the rest of the schedule it
+// is a placeholder magnitude, tunable by a later gas-schedule pass.
+constexpr uint64_t kNativeTokenStorageReadGasCost = 1000;
+
 // Compute an event-signature topic the same way the SDK does:
 // sha256("<major_version>::<crate_name>::<type_name>"). See
 // groundhog_contract_util::event_signature in the SDK.
@@ -127,6 +147,30 @@ allowance_key(ContractAddress owner, ContractAddress spender)
   return sha256(*data); // NOLINT(bugprone-unchecked-optional-access)
 }
 
+// Charge for the cold storage work a native-token balance read performs, then
+// read and return the balance. Every externally reachable balance read must go
+// through here so no path can perform an unpriced cold snapshot lookup; see
+// kNativeTokenStorageReadGasCost.
+InvokeStatus<int128_t>
+charged_native_token_balance(NativeSyscallContext &ctx,
+                             ContractAddress const &address)
+{
+  if (!ctx.consume_gas(kNativeTokenStorageReadGasCost)) {
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  auto balance = ctx.handler().get_native_token_balance(address);
+  if (!balance.has_value()) {
+    return balance.error().to_invoke_error();
+  }
+  if (!balance.value().has_value()) {
+    // Staged-negative balance (system-path state the WASM reference can never
+    // occupy) surfaces as a deterministic fault, not an ERC20 error -- a
+    // deliberate carve-out from byte parity, as at each caller.
+    return InvokeError{InvokeErrorCode::Deterministic};
+  }
+  return balance.value().value();
+}
+
 // Return an ERC20 contract-level revert carrying `code`, byte-identical to the
 // reference contract throwing the same ERC20Error (same selector + CXS body).
 InvokeStatus<Result<void, ERC20Exception>>
@@ -145,6 +189,13 @@ adjust_allowance(NativeSyscallContext &ctx, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
 {
   auto allow_key = allowance_key(owner, spender);
+
+  // Price the cold allowance-key snapshot lookup below (see
+  // kNativeTokenStorageReadGasCost): owner/spender are attacker-influenced, so
+  // this read is a distinct-key amplification vector just like a balance read.
+  if (!ctx.consume_gas(kNativeTokenStorageReadGasCost)) {
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  }
 
   int128_t output_set{};
   bool output_set_opt{};
@@ -196,25 +247,6 @@ using amount_t = std::tuple<uint64_t, uint64_t>;
 using difference_t = std::tuple<int64_t, uint64_t>;
 
 constexpr uint128_t kMaxInt128 = std::numeric_limits<int128_t>::max();
-
-// Gas charged for a native-token balance read (get_balance_of / get_balance).
-//
-// Reading a balance runs get_native_token_balance(), which for a
-// previously-unseen address performs a cold snapshot-item lookup and retains a
-// snapshot-cache entry and a parent-frame item view keyed by that address. A
-// flat one-gas charge lets an untrusted contract drive that cold DB read plus
-// heap retention once per attacker-chosen address for a single native child
-// gas: an RV32/WASM contract's own reads are bounded by its VM instruction gas,
-// but a native precompile has no such metering, so this constant is the only
-// bound on the work. Pricing every read at this cost bounds the number of
-// distinct cold reads (and retained cache/frame entries) in proportion to the
-// gas available, which is the property the flat charge lacked (issue #3699).
-//
-// This is a native-precompile charge only; unlike kSyscallGasCostSchedule in
-// gas_cost_table.h it is not folded into the RV32 gas-schedule digest, so it
-// carries no artifact-regeneration coupling. Like the rest of the schedule it
-// is a placeholder magnitude, tunable by a later gas-schedule pass.
-constexpr uint64_t kNativeTokenBalanceReadGasCost = 1000;
 
 using MintBurnStatus = InvokeStatus<Result<void, ERC20Exception>>;
 
@@ -288,17 +320,11 @@ mint_impl(NativeSyscallContext &ctx, ContractAddress receiver, amount_t amount)
   // Strict credit, mirroring the reference's add_to_balance: reject at
   // invoke with TooLarge when the running balance (committed base + net
   // in-tx delta) cannot absorb the credit, before staging any state.
-  auto receiver_balance = ctx.handler().get_native_token_balance(receiver);
+  auto receiver_balance = charged_native_token_balance(ctx, receiver);
   if (!receiver_balance) {
-    return receiver_balance.error().to_invoke_error();
+    return receiver_balance.error();
   }
-  if (!receiver_balance.value().has_value()) {
-    // Staged-negative balance (system-path state the WASM reference can never
-    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
-    // carve-out from byte parity, as in transfer_impl.
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (integer_add_overflow(receiver_balance.value().value(), signed_amount)) {
+  if (integer_add_overflow(receiver_balance.value(), signed_amount)) {
     return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
@@ -357,14 +383,11 @@ burn_impl(NativeSyscallContext &ctx, ContractAddress owner, amount_t amount)
 
   // Match the reference ERC20's strict balance debit: reject before staging
   // any state if the requested burn exceeds the owner's running balance.
-  auto owner_balance = ctx.handler().get_native_token_balance(owner);
+  auto owner_balance = charged_native_token_balance(ctx, owner);
   if (!owner_balance) {
-    return owner_balance.error().to_invoke_error();
+    return owner_balance.error();
   }
-  if (!owner_balance.value().has_value()) {
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (signed_amount > owner_balance.value().value()) {
+  if (signed_amount > owner_balance.value()) {
     return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
@@ -430,17 +453,11 @@ transfer_impl(NativeSyscallContext &ctx, ContractAddress receiver,
   // non_negative_int_try_strict_inc: the running balance (committed base +
   // net in-tx delta) may not go below zero. A debit landing exactly at
   // zero is accepted -- the reference's only rejection is `total < 0`.
-  auto owner_avail = ctx.handler().get_native_token_balance(*owner);
+  auto owner_avail = charged_native_token_balance(ctx, *owner);
   if (!owner_avail.has_value()) {
-    return owner_avail.error().to_invoke_error();
+    return owner_avail.error();
   }
-  if (!owner_avail.value().has_value()) {
-    // Staged-negative balance (system-path state the WASM reference can never
-    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
-    // carve-out from byte parity.
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (amount_signed_int > owner_avail.value().value()) {
+  if (amount_signed_int > owner_avail.value()) {
     return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
@@ -516,17 +533,11 @@ transfer_from_impl(NativeSyscallContext &ctx, ContractAddress owner,
   // Strict per-debit balance check; see transfer_impl for the semantics
   // (fail iff amount > committed base + net in-tx delta; exact-zero
   // landings succeed).
-  auto owner_avail = ctx.handler().get_native_token_balance(owner);
+  auto owner_avail = charged_native_token_balance(ctx, owner);
   if (!owner_avail.has_value()) {
-    return owner_avail.error().to_invoke_error();
+    return owner_avail.error();
   }
-  if (!owner_avail.value().has_value()) {
-    // Staged-negative balance (system-path state the WASM reference can never
-    // occupy) surfaces as a deterministic fault, not TooLarge -- deliberate
-    // carve-out from byte parity.
-    return InvokeError{InvokeErrorCode::Deterministic};
-  }
-  if (amount_signed_int > owner_avail.value().value()) {
+  if (amount_signed_int > owner_avail.value()) {
     return erc20_error(itc_erc20::ERC20Error::TooLarge);
   }
 
@@ -621,6 +632,13 @@ get_allowance_impl(NativeSyscallContext &ctx, ContractAddress owner,
   }
 
   auto allow_key = allowance_key(owner, spender);
+
+  // Price the cold allowance-key snapshot lookup below (see
+  // kNativeTokenStorageReadGasCost): owner/spender are attacker-chosen, so this
+  // read is a distinct-key amplification vector just like a balance read.
+  if (!ctx.consume_gas(kNativeTokenStorageReadGasCost)) {
+    return InvokeError{InvokeErrorCode::OutOfGas};
+  }
 
   int128_t output_set{};
   bool output_set_opt{};
@@ -720,18 +738,15 @@ make_native_token_contract()
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance_of: contract_address {}",
               x23::show(contract_address));
-        if (!ctx.consume_gas(kNativeTokenBalanceReadGasCost)) {
+        if (!ctx.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
-        auto balance = ctx.handler().get_native_token_balance(contract_address);
+        auto balance = charged_native_token_balance(ctx, contract_address);
         if (!balance.has_value()) {
-          return balance.error().to_invoke_error();
+          return balance.error();
         }
-        if (!balance.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        assert(balance.value().value() >= 0);
-        uint128_t ubalance = balance.value().value();
+        assert(balance.value() >= 0);
+        uint128_t ubalance = balance.value();
         return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
@@ -741,7 +756,7 @@ make_native_token_contract()
       [](NativeSyscallContext &ctx)
           -> InvokeStatus<Result<amount_t, ERC20Exception>> {
         trace("native token get_balance");
-        if (!ctx.consume_gas(kNativeTokenBalanceReadGasCost)) {
+        if (!ctx.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
@@ -750,15 +765,12 @@ make_native_token_contract()
           return caller_address.error();
         }
 
-        auto balance = ctx.handler().get_native_token_balance(*caller_address);
+        auto balance = charged_native_token_balance(ctx, *caller_address);
         if (!balance.has_value()) {
-          return balance.error().to_invoke_error();
+          return balance.error();
         }
-        if (!balance.value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
-        assert(balance.value().value() >= 0);
-        uint128_t ubalance = balance.value().value();
+        assert(balance.value() >= 0);
+        uint128_t ubalance = balance.value();
         return {Result<amount_t, ERC20Exception>::make_ok(
             std::make_tuple(ubalance >> 64, ubalance & 0xffffffffffffffffULL))};
       });
