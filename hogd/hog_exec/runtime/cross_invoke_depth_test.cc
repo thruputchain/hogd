@@ -67,20 +67,21 @@ invoke_expecting(ContractAddress const &next,
   };
 }
 
-// An entrypoint that invokes `next` and requires the cross-invoke bound to
-// refuse it.
+// An entrypoint that invokes `next` forwarding `tokens` with `flags`, and
+// requires the syscall itself to report `expected`.
 //
-// The refusal arrives on the syscall's own error channel, which is what
-// separates it from a callee that ran and trapped -- that reports
-// kSyscallErrorCodeNone with frame_status Fault. Refusing before a frame is
-// created also makes the call a complete no-op, so the outputs seeded below
-// must come back exactly as they went in. They are seeded with values the
-// syscall could never write on this path: a refusal writes nothing, and
-// admitting the call would write Return or Fault, never Abort.
+// Every rejection pinned through this helper happens before a child frame is
+// created, so each is a complete no-op: the outputs are seeded with values the
+// syscall could not produce on that path -- nothing is written on a rejection,
+// and an admitted call would write Return or Fault, never Abort -- so any
+// write at all fails the test.
 NativeContract::function_t
-invoke_expecting_depth_refusal(ContractAddress const &next)
+invoke_expecting_rejection(ContractAddress const &next, InvokeFlagSet flags,
+                           std::vector<uint32_t> tokens,
+                           SyscallErrorCode expected)
 {
-  return [next](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+  return [next, flags, tokens = std::move(tokens),
+          expected](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     CopyableInvokeOutputs outputs{
         .return_buffer_len = UINT32_MAX,
         .returned_auth_token_len = UINT32_MAX,
@@ -89,25 +90,35 @@ invoke_expecting_depth_refusal(ContractAddress const &next)
     CopyableInvokeInputs inputs{
         .entrypoint_id = 0,
         .gas_limit = UINT64_MAX,
-        .flags = std::to_underlying(InvokeFlag::None),
+        .flags = flags,
     };
-    auto r =
-        ctx.syscall<SyscallNo::kInvoke>(next, std::span<const std::byte>{},
-                                        std::span<uint32_t>{}, inputs, outputs);
-    if (!r.has_value() ||
-        r.value() != SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded) {
-      ADD_FAILURE() << "invoke past the bound did not report "
-                       "kSyscallErrorCodeInvokeDepthExceeded";
+    // The syscall takes a mutable span, so hand it one over a local copy.
+    std::vector<uint32_t> forwarded = tokens;
+    auto r = ctx.syscall<SyscallNo::kInvoke>(next, std::span<const std::byte>{},
+                                             std::span<uint32_t>{forwarded},
+                                             inputs, outputs);
+    if (!r.has_value() || r.value() != expected) {
+      ADD_FAILURE() << "invoke reported the wrong syscall error code";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     if (outputs.return_buffer_len != UINT32_MAX ||
         outputs.returned_auth_token_len != UINT32_MAX ||
         outputs.frame_status != InvocationFrameStatusCode::Abort) {
-      ADD_FAILURE() << "a refused invoke wrote to the caller's outputs";
+      ADD_FAILURE() << "a rejected invoke wrote to the caller's outputs";
       return InvokeError{InvokeErrorCode::Deterministic};
     }
     return {};
   };
+}
+
+// The plain case: nothing wrong with the call except that the bound has no
+// room for it.
+NativeContract::function_t
+invoke_expecting_depth_refusal(ContractAddress const &next)
+{
+  return invoke_expecting_rejection(
+      next, std::to_underlying(InvokeFlag::None), {},
+      SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded);
 }
 
 // An entrypoint on a contract the bound must keep unreachable. Deployed and
@@ -162,6 +173,29 @@ protected:
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier()},
         runtime_context);
+  }
+
+  // Deploys `deployed` contracts and runs `probe` as contract 0's entrypoint.
+  // Contracts 1.. are deployed but must not be entered. The probe reports
+  // through ADD_FAILURE and by failing its own frame, so a successful root is
+  // the pass condition.
+  void run_probe(int32_t deployed, NativeContract::function_t probe)
+  {
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> probe_fns;
+    probe_fns.emplace(0, std::move(probe));
+    contract_map.emplace(0, std::make_unique<NativeContract>(
+                                std::move(probe_fns)));
+    for (int32_t i = 1; i < deployed; i++) {
+      std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+      fns.emplace(0, unreachable_entrypoint());
+      contract_map.emplace(i, std::make_unique<NativeContract>(std::move(fns)));
+    }
+
+    auto runtime_context =
+        std::make_unique<NativeContext>(std::move(contract_map));
+    auto handler = deploy_and_make_handler(deployed, *runtime_context);
+    ASSERT_TRUE(handler.root_invoke().result_);
   }
 
 private:
@@ -279,6 +313,78 @@ TEST_F(CrossInvokeDepthOneTest, RootInvocationRunsWithNoCrossInvokes)
   ASSERT_TRUE(res.result_);
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Return);
+}
+
+// The order in which invoke() rejects a call is observable: a contract sees
+// exactly one error code, so which check wins is part of the syscall contract.
+// These pin that order around the depth bound, so a refactor that reorders the
+// checks fails here rather than silently changing what contracts observe.
+//
+// Every case runs under CrossInvokeDepthOneTest, where the root frame alone
+// fills the bound, so each invoke below would be depth-refused if nothing else
+// rejected it first. The one ordering not pinned here is the misaligned
+// auth-token span: it is a check on the raw byte span, and the native syscall
+// entry takes a typed span<uint32_t> that cannot express it.
+
+// Reentrance is checked in validate_new_invocation, ahead of the depth guard.
+TEST_F(CrossInvokeDepthOneTest, ReentranceBeatsDepth)
+{
+  run_probe(1,
+            invoke_expecting_rejection(
+                make_contract_address(0), std::to_underlying(InvokeFlag::None),
+                {}, SyscallErrorCode::kSyscallErrorCodeReentrance));
+}
+
+// Auth-token ownership is checked in validate_new_invocation, ahead of the
+// depth guard. The target is a different contract so reentrance does not win
+// first.
+TEST_F(CrossInvokeDepthOneTest, UnownedAuthTokenBeatsDepth)
+{
+  run_probe(2, invoke_expecting_rejection(
+                   make_contract_address(1),
+                   std::to_underlying(InvokeFlag::None), {0xDEAD},
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+}
+
+// Duplicate ids are rejected by syscall_Invoke_inner before the handler is
+// reached at all.
+TEST_F(CrossInvokeDepthOneTest, DuplicateAuthTokenIdsBeatDepth)
+{
+  run_probe(2, invoke_expecting_rejection(
+                   make_contract_address(1),
+                   std::to_underlying(InvokeFlag::None), {7, 7},
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+}
+
+// validate_invoke_flags admits only TryInvoke and ReadOnly, and runs before
+// the handler is reached. 0x8 is not a defined InvokeFlag.
+TEST_F(CrossInvokeDepthOneTest, InvalidFlagsBeatDepth)
+{
+  run_probe(2, invoke_expecting_rejection(
+                   make_contract_address(1), 0x8, {},
+                   SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+}
+
+// The load-bearing direction: resolve_runtime sits *after* the depth guard, so
+// a target that is not deployed still reports the bound. Hoisting deployment
+// resolution above the guard would silently change this to
+// kInvalidSyscallInput.
+TEST_F(CrossInvokeDepthOneTest, DepthBeatsUnresolvableTarget)
+{
+  run_probe(1, invoke_expecting_depth_refusal(make_contract_address(9)));
+}
+
+// Control for DepthBeatsUnresolvableTarget. This fixture leaves room under the
+// bound, so the same invoke of an undeployed address gets past the depth guard
+// and reports the missing deployment instead. Without it that test would still
+// pass if the guard swallowed every call, and the ordering it claims to pin
+// would not be pinned at all.
+TEST_F(CrossInvokeDepthTest, UnresolvableTargetReportedWhenDepthAllows)
+{
+  run_probe(1,
+            invoke_expecting_rejection(
+                make_contract_address(9), std::to_underlying(InvokeFlag::None),
+                {}, SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
 }
 
 // NOLINTEND(bugprone-exception-escape)
