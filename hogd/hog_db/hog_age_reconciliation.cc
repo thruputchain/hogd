@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -38,24 +39,30 @@ is_prefixed_address_key(std::span<const std::byte> key, Prefix prefix)
          static_cast<Prefix>(key.front()) == prefix;
 }
 
-uint128_t
+// Returns the total number of hogs across the three groups, and whether that
+// sum overflowed uint128_t. A legitimate total never exceeds the account
+// balance (a non-negative int128_t), so an overflow can only come from a
+// corrupted row and always means the true total is larger than the balance.
+std::pair<uint128_t, bool>
 sum_hogs(const HogAge &age)
 {
-  return from_xdr(age.num_hogs[kHogAgeGroupToSchedule]) +
-         from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]) +
-         from_xdr(age.num_hogs[kHogAgeGroupReceived]);
+  auto [partial, overflow_a] =
+      overflowing_add(from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
+                      from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]));
+  auto [total, overflow_b] =
+      overflowing_add(partial, from_xdr(age.num_hogs[kHogAgeGroupReceived]));
+  return {total, overflow_a || overflow_b};
 }
 
 HogDbStatus<void>
 reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
                                  HogDbDAO &db)
 {
-  const uint128_t existing_total = sum_hogs(age);
-  if (existing_total == balance) {
+  const auto [existing_total, overflow] = sum_hogs(age);
+  if (!overflow && existing_total == balance) {
     return {};
   }
 
-  HogAge new_age = age;
   const uint128_t to_schedule_before =
       from_xdr(age.num_hogs[kHogAgeGroupToSchedule]);
   const uint128_t already_scheduled_before =
@@ -63,30 +70,30 @@ reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
   const uint128_t received_before =
       from_xdr(age.num_hogs[kHogAgeGroupReceived]);
 
-  if (existing_total < balance) {
+  HogAge new_age = age;
+  if (!overflow && existing_total < balance) {
     const uint128_t deficit = balance - existing_total;
     new_age.num_hogs[kHogAgeGroupToSchedule] =
         to_xdr(to_schedule_before + deficit);
   }
   else {
-    uint128_t excess = existing_total - balance;
-    uint128_t received = received_before;
-    uint128_t already_scheduled = already_scheduled_before;
-    uint128_t to_schedule = to_schedule_before;
+    // The groups sum to more than the balance -- either the exact total
+    // exceeds it, or the total overflowed uint128_t, which can only happen for
+    // a corrupted row and likewise means the true total is larger than the
+    // balance. Reduce the groups back down to the balance, draining received
+    // first, then already_scheduled, then to_schedule. We work with the
+    // retained amounts rather than an "excess" that could itself overflow, so
+    // the arithmetic stays well-defined even when the total wrapped.
+    uint128_t remaining = balance;
+    const uint128_t to_schedule = std::min(to_schedule_before, remaining);
+    remaining -= to_schedule;
+    const uint128_t already_scheduled =
+        std::min(already_scheduled_before, remaining);
+    remaining -= already_scheduled;
+    const uint128_t received = std::min(received_before, remaining);
+    remaining -= received;
 
-    uint128_t deducted = std::min(excess, received);
-    received -= deducted;
-    excess -= deducted;
-
-    deducted = std::min(excess, already_scheduled);
-    already_scheduled -= deducted;
-    excess -= deducted;
-
-    deducted = std::min(excess, to_schedule);
-    to_schedule -= deducted;
-    excess -= deducted;
-
-    CHECK_EQ(excess, 0UL);
+    CHECK_EQ(remaining, 0UL);
     new_age.num_hogs[kHogAgeGroupReceived] = to_xdr(received);
     new_age.num_hogs[kHogAgeGroupAlreadyScheduled] = to_xdr(already_scheduled);
     new_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(to_schedule);
