@@ -19,18 +19,36 @@ extern "C" {
 // contexts -- and drive them from different threads without data races or
 // undefined behavior (the DB is clean under ThreadSanitizer).
 //
-// DB lifecycle operations are guarded, but not serialized. advance_new_block()
-// and free_db() are rejected (kTestFFIErrorCodeUnrecoverableError) while any
-// syscall handler derived from that DB is open -- for the handler's whole
-// lifetime, from the moment open_syscall_handler() / open_mocked_syscall_
-// handler() begins constructing it (so a concurrent advance cannot replace
-// state a half-built handler is borrowing) through close_syscall_handler(). If
-// a close fails to abort its transaction, the DB is poisoned: advance_new_block
-// is refused thereafter and the DB can only be freed. Beyond that guarding the
-// harness does not order your operations: running transactions or the setup_*
-// mutators (setup_create_contract, setup_deploy_contract, ...) concurrently
-// against the same DB leaves the *result* unspecified -- sequence them yourself
-// if you need a deterministic outcome.
+// DB lifecycle operations are mutually exclusive with open handlers, and with
+// each other. advance_new_block() and free_db() are rejected
+// (kTestFFIErrorCodeUnrecoverableError) while any syscall handler derived from
+// that DB is open -- for the handler's whole lifetime, from the moment
+// open_syscall_handler() / open_mocked_syscall_handler() begins constructing it
+// (so a concurrent advance cannot replace state a half-built handler is
+// borrowing) through close_syscall_handler(). For advance_new_block() the
+// exclusion runs both ways: while an advance is in flight, opening a handler
+// on that DB is itself rejected with kTestFFIErrorCodeUnrecoverableError, so a
+// caller racing those two from different threads sees one of them fail rather
+// than a handler bound to a snapshot the advance is replacing. A rejected open
+// borrows nothing and returns a null handler; retry it once the advance
+// returns.
+//
+// free_db() is weaker, and no in-library guard can make it otherwise: it
+// destroys the `db` handle itself, so a call that is already inside the
+// library -- an open_syscall_handler() still deserializing its argument, say --
+// has no object left to be rejected against. Every other call on that handle
+// must have returned before free_db() is called, and none may start after it;
+// the open-handler rejection above only catches a handler that has already
+// registered its borrow, and is not a substitute for sequencing the free
+// yourself.
+//
+// If a close fails to abort its transaction, the DB is poisoned:
+// advance_new_block is refused thereafter and the DB can only be freed. Beyond
+// that guarding the harness does not order your operations:
+// running transactions or the setup_* mutators (setup_create_contract,
+// setup_deploy_contract, ...) concurrently against the same DB leaves the
+// *result* unspecified -- sequence them yourself if you need a deterministic
+// outcome.
 //
 // A single runtime context or syscall handler is stateful and is itself NOT
 // internally synchronized -- drive each individual handle from one thread at a

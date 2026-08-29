@@ -412,16 +412,33 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
 TestFFIErrorCode
 free_db(DBContext *ptr) noexcept
 {
+  if (ptr == nullptr) {
+    return kTestFFIErrorCodeNone;
+  }
+
   // Syscall handlers borrow the DB (and its snapshot/proxies) by reference, so
   // freeing it while a handler is still open would dangle those references on a
   // later close/invoke. Reject the free instead of crashing (issue #2433).
-  if (ptr != nullptr && ptr->has_open_handlers()) {
+  // Taking the exclusive lifecycle transition also makes the free and an
+  // advance mutually exclusive, and refuses handler admission for the rest of
+  // the teardown (issue #3049). It cannot do more than that: this call destroys
+  // the DBContext, so a caller that has already entered another entry point on
+  // this handle has nothing left to be rejected against. Sequencing free_db()
+  // after every other call on the handle stays the caller's job -- see the
+  // threading contract in test_bindings.h.
+  DBContext::LifecycleTransition teardown(*ptr);
+  if (!teardown.held()) {
     best_effort_log([] {
       error("free_db called while syscall handlers derived from this DB are "
-            "still open; close them first");
+            "still open (or another DB lifecycle operation is in flight); "
+            "close them first");
     });
     return kTestFFIErrorCodeUnrecoverableError;
   }
+
+  // The DBContext is about to be destroyed, so there is nothing left to end
+  // the transition on; it dies with the state it was protecting.
+  teardown.release_without_ending();
   try {
     delete ptr;
   } catch (std::exception const &e) {
@@ -440,11 +457,19 @@ advance_new_block(void *db) noexcept
 
   // Advancing the block replaces the snapshot cache that open handlers still
   // reference; reject it while any handler derived from this DB is open so a
-  // later root_invoke() doesn't read freed snapshot state (issue #2436).
-  if (ptr->has_open_handlers()) {
+  // later root_invoke() doesn't read freed snapshot state (issue #2436). Hold
+  // the DB's exclusive lifecycle transition across the whole advance rather
+  // than sampling the open-handler count once: the transition is admitted only
+  // from a state with no open handlers, and it refuses handler admission until
+  // the snapshot replacement is complete, closing the window in which a
+  // concurrently opening handler bound to the cache this advance frees (issue
+  // #3049).
+  DBContext::LifecycleTransition transition(*ptr);
+  if (!transition.held()) {
     best_effort_log([] {
       error("advance_new_block called while syscall handlers derived from this "
-            "DB are still open; close them first");
+            "DB are still open (or another DB lifecycle operation is in "
+            "flight); close them first");
     });
     return kTestFFIErrorCodeUnrecoverableError;
   }
