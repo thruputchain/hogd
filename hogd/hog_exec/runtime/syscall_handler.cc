@@ -1776,25 +1776,29 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
-  // Overwriting a bytestring at this key with an nnint releases the
-  // bytestring's retained-write-set charge, so it does not outlive the value
-  // (issue #3681).
+  // If this write replaces a bytestring, its retained-write-set charge must be
+  // released -- but only once the write is actually applied, since set() below
+  // can fail validation and leave the bytestring in place (issue #3681).
+  std::optional<size_t> replaced_bytestring_len;
   if (auto const *existing = item_view->get<BytestringItem>()) {
-    invocation_frame_stack_.release_bytestring_write(
-        existing->bytestring_.size());
+    replaced_bytestring_len = existing->bytestring_.size();
   }
 
   // Writing to an nnint, without explicitly defining the set value,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  return item_view->set(NNIntItem{.base_value_ =
-                                      set_value.has_value()
-                                          ? std::optional<int128_xdr>(
-                                                to_xdr(*set_value))
-                                          : std::nullopt,
-                                  .add_value_ = to_xdr(add_value)},
-                        input_flags);
+  auto set_status =
+      item_view->set(NNIntItem{.base_value_ = set_value.has_value()
+                                                  ? std::optional<int128_xdr>(
+                                                        to_xdr(*set_value))
+                                                  : std::nullopt,
+                               .add_value_ = to_xdr(add_value)},
+                     input_flags);
+  if (set_status.has_value() && replaced_bytestring_len) {
+    invocation_frame_stack_.release_bytestring_write(*replaced_bytestring_len);
+  }
+  return set_status;
 }
 
 SystemStatus<SyscallStatus<void>>
@@ -1811,14 +1815,18 @@ SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
-  // Deleting a bytestring at this key releases its retained-write-set charge,
-  // so it does not outlive the value (issue #3681).
+  // If this delete replaces a bytestring, release its retained-write-set charge
+  // -- but only once the delete is actually applied (issue #3681).
+  std::optional<size_t> replaced_bytestring_len;
   if (auto const *existing = item_view->get<BytestringItem>()) {
-    invocation_frame_stack_.release_bytestring_write(
-        existing->bytestring_.size());
+    replaced_bytestring_len = existing->bytestring_.size();
   }
 
-  return item_view->set(DeletedItem{}, flags);
+  auto set_status = item_view->set(DeletedItem{}, flags);
+  if (set_status.has_value() && replaced_bytestring_len) {
+    invocation_frame_stack_.release_bytestring_write(*replaced_bytestring_len);
+  }
+  return set_status;
 }
 
 namespace {
