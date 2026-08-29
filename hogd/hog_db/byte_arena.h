@@ -26,19 +26,17 @@ public:
     return dest;
   }
 
-  // Store an item [key + type_byte + value] contiguously in the arena.
+  // Store an item [key + value] contiguously in the arena.
   std::span<const std::byte> store_item(std::span<const std::byte> key,
-                                        uint8_t type,
                                         std::span<const std::byte> value)
   {
-    size_t total = key.size() + 1 + value.size();
+    size_t total = key.size() + value.size();
     auto dest = alloc(total);
     if (!key.empty()) {
       std::memcpy(dest.data(), key.data(), key.size());
     }
-    dest[key.size()] = static_cast<std::byte>(type);
     if (!value.empty()) {
-      std::memcpy(dest.data() + key.size() + 1, value.data(), value.size());
+      std::memcpy(dest.data() + key.size(), value.data(), value.size());
     }
     return dest;
   }

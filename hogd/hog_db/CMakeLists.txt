@@ -87,6 +87,7 @@ add_executable(
   item_lock/bytestring_lock_test.cc
   item_lock/nnint128_lock_test.cc
   item_lock/replay_cache_lock_test.cc
+  materialized_change_test.cc
   mock_authdb_rpc.cc
   permanent_exclusive_narrow_wai_test.cc
   recovery_tests.cc
