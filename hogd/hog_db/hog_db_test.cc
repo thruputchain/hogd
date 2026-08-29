@@ -985,6 +985,33 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationRepairsOverflowWrappedTotal)
   EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
 }
 
+TEST_F(HogDbTest,
+       StartupHogAgeReconciliationRepairsOverflowWrappedTotalBelowBalance)
+{
+  // A tampered row whose group total overflows uint128_t can wrap to a value
+  // that is *below* the balance (here 50 + UINT128_MAX == 49 < 100). The
+  // overflow must still be detected and the row repaired down to the balance;
+  // it must not be mistaken for a genuine deficit and topped up, which would
+  // leave the corrupted overflowing total in place.
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 100));
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/50,
+                   /*already_scheduled=*/0,
+                   /*received=*/std::numeric_limits<uint128_t>::max(),
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+
+  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 50U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
+  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 50U);
+}
+
 TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenBalanceRowLacksHogAge)
 {
   Address account = make_address(kAddress);
