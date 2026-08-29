@@ -1396,6 +1396,38 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   EXPECT_EQ(records->front().protocol, "hogp/archival");
 }
 
+TEST_F(IndexerOutboxTest, OversizedEpochOriginIsRejectedBeforePayloadProcessing)
+{
+  // A tampered current-protocol epoch-origin file can declare a payload larger
+  // than the fixed IndexerOutboxEpochOrigin shape and supply a matching digest.
+  // Recovery must reject it from the header's shape bound alone -- before
+  // enumeration hashes the declared payload or load materializes it -- rather
+  // than letting the fixed-shape record ride the generic outbox payload cap.
+  IndexerOutboxStore store = open_store(dir_);
+  auto committed = make_committed(152, {}, {});
+  initialize_test_origin(store, committed);
+  const std::string filename =
+      IndexerOutboxStore::current_epoch_origin_filename();
+
+  TestOutboxFile origin = read_envelope(dir_, filename);
+  x23::Buf oversized = envelope_payload(origin);
+  oversized.resize(oversized.size() + 4);
+  set_envelope_payload(origin, std::move(oversized));
+  write_envelope(dir_, filename, origin);
+
+  auto origins = store.enumerate_epoch_origins_raw();
+  ASSERT_FALSE(origins.has_value());
+  EXPECT_NE(origins.error().find("epoch origin payload size mismatch"),
+            std::string::npos)
+      << origins.error();
+
+  auto loaded = store.load_current_epoch_origin();
+  ASSERT_FALSE(loaded.has_value());
+  EXPECT_NE(loaded.error().find("epoch origin payload size mismatch"),
+            std::string::npos)
+      << loaded.error();
+}
+
 TEST_F(IndexerOutboxTest,
        CandidateCardinalityAndCommittedBodyMismatchAreRejected)
 {

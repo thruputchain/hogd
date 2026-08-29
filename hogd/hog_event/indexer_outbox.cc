@@ -291,6 +291,20 @@ make_header(const IndexerOutboxEpochOrigin &payload, size_t payload_size,
   return header;
 }
 
+// A current-protocol epoch-origin record stores a fixed-shape
+// IndexerOutboxEpochOrigin whose only variable-length field is the protocol
+// commit string, which is pinned to the current protocol. Its encoded payload
+// size is therefore a constant, letting recovery bound the declared payload to
+// this exact size before hashing, allocating, or reading it -- so a fixed-shape
+// record never rides the generic multi-gigabyte outbox payload cap.
+uint64_t
+current_epoch_origin_payload_byte_length()
+{
+  IndexerOutboxEpochOrigin probe{};
+  probe.origin.protocol = version::kHogdProtocol();
+  return x23::xdr_size(probe);
+}
+
 template<typename Payload>
 IndexerOutboxStatus<x23::Buf>
 encode_file(const Payload &payload)
@@ -1926,6 +1940,19 @@ IndexerOutboxStore::load_header(std::string_view filename) const
       header.payload_byte_length > kMaxIndexerOutboxPayloadBytes ||
       header.payload_byte_length != file_size - 4 - header_size) {
     return std::unexpected("indexer outbox header/file size mismatch");
+  }
+  // A current-protocol epoch-origin payload is the fixed shape
+  // IndexerOutboxEpochOrigin, so bound it to that exact size here -- before
+  // enumeration hashes the declared payload or load materializes it -- rather
+  // than letting the generic outbox payload cap apply. Older-protocol origins
+  // are intentionally opaque (their shape can have drifted), so they keep the
+  // generic bound. See #3691.
+  if (header.record_identity.kind() ==
+          IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
+      std::string_view(header.protocol) == version::kHogdProtocol() &&
+      header.payload_byte_length !=
+          current_epoch_origin_payload_byte_length()) {
+    return std::unexpected("epoch origin payload size mismatch");
   }
   return header;
 }
