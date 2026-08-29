@@ -424,17 +424,10 @@ TEST(RecoveryTests, RecoveredHighBitRCQLiveEntriesDiesOnLoad)
 // CRC-valid recovered row with a negative size used to convert to a
 // near-SIZE_MAX size_t and overflow that product on the first replay-cache
 // lock. Admission bounds every legitimate count, so a negative (or over-cap)
-// size is corrupt on-disk state; loading the metadata now fail-stops before
-// any cost arithmetic, mirroring the retrocausal-queue guard above.
-TEST(RecoveryTests, RecoveredNegativeReplayCacheSizeDiesOnLoad)
+// size is corrupt on-disk state; loading the metadata now rejects it -- in
+// every build, release included -- before any cost arithmetic runs.
+TEST(RecoveryTests, RecoveredNegativeReplayCacheSizeRejectedOnLoad)
 {
-  if constexpr (!is_debug_build()) {
-    // The "CHECK FAILED" panic message this death test matches is only
-    // produced in debug builds (x23::panic is std::unreachable() under
-    // NDEBUG).
-    GTEST_SKIP();
-  }
-
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
 
@@ -455,16 +448,14 @@ TEST(RecoveryTests, RecoveredNegativeReplayCacheSizeDiesOnLoad)
     ASSERT_TRUE(dao.commit().has_value());
   }
 
-  EXPECT_DEATH(
-      {
-        DBStatus<std::unique_ptr<Database>> db =
-            Database::open(dir->get_path(), kDefaultHeapSize, 0);
-        ASSERT_TRUE(db);
-        auto dao = HogDbDAO(RAMDB(std::move(*db)));
-        auto recovered = dao.read_address_replay_cache_meta(address);
-        (void)recovered;
-      },
-      "CHECK FAILED");
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kDefaultHeapSize, 0);
+  ASSERT_TRUE(db);
+  auto dao = HogDbDAO(RAMDB(std::move(*db)));
+
+  auto recovered = dao.read_address_replay_cache_meta(address);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
 }
 
 TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
