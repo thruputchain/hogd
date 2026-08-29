@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <set>
 #include <utility>
@@ -11,6 +12,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -24,6 +26,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -402,6 +405,68 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
   auto r2 =
       rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, second);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
+}
+
+// Regression for #3689: two permanent-exclusive writes over two expensive
+// snapshot items under the same address each produce a large negative marginal
+// storage cost. Accumulating both in InvokeTX::lock_storage used to be
+// unchecked signed __int128 addition, which overflows (UB). The accumulator is
+// now range-checked and must instead report a deterministic recoverable
+// storage-write failure. The fixture uses tampered on-disk state (max-sized RCQ
+// snapshots plus a max-valued cost model), which is exactly what the failure
+// model requires to be rejected rather than turned into UB.
+TEST(RpcFromExecSecurityTest,
+     PermanentExclusiveStorageAccumulationDoesNotOverflow)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  for (std::size_t i = 0; i < addr.size(); ++i) {
+    addr[i] = static_cast<std::uint8_t>(i + 1);
+  }
+
+  auto addrkey_a = make_data_key(addr, 0xA1);
+  auto addrkey_b = make_data_key(addr, 0xB2);
+
+  // Two snapshot RCQ rows for the same address, each at the largest live-entry
+  // count HogDbDAO admits. Combined with a max-valued cost model, each snapshot
+  // storage cost lands just under INT128_MAX.
+  RetrocausalQueueMetadata metadata{};
+  metadata.live_entries =
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+  ASSERT_TRUE(
+      dao.write_retrocausal_queue_metadata(make_item_key(addrkey_a), metadata)
+          .has_value());
+  ASSERT_TRUE(
+      dao.write_retrocausal_queue_metadata(make_item_key(addrkey_b), metadata)
+          .has_value());
+  ASSERT_TRUE(dao.write_address_balance(addr, int128_t{1'000'000'000}));
+
+  RPCContext ctx(std::move(dao), nullptr);
+  constexpr auto kMaxUint64 = std::numeric_limits<std::uint64_t>::max();
+  ctx.initialize_cost_model(StorageCostModel(kMaxUint64, 0, kMaxUint64, 0, 0));
+  ctx.set_network_config(stock_network_config());
+  ASSERT_TRUE(
+      ctx.open_block_tx(BlockID{1},
+                        BlockExecutionMode::kBlockExecutionModeProposal));
+  HogDbExecutorRpc rpc(ctx);
+
+  auto make_exclusive_zero_set_add = [](AddressAndKey addrkey) {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+    delta.nnint().set_value = to_xdr(int128_t{0});
+    delta.nnint().add_value = to_xdr(int128_t{0});
+    return FlaggedStorageDelta{.addrkey = std::move(addrkey),
+                               .delta = std::move(delta),
+                               .flags = std::to_underlying(
+                                   StorageDeltaFlags::ExclusiveLock)};
+  };
+
+  StorageDeltaBatch batch;
+  batch.push_back(make_exclusive_zero_set_add(std::move(addrkey_a)));
+  batch.push_back(make_exclusive_zero_set_add(std::move(addrkey_b)));
+
+  auto r = rpc.try_push_new_subtransaction(BlockID{1}, TransactionID{1}, batch);
+  EXPECT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
 }
 
 } // namespace

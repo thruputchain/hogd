@@ -267,9 +267,11 @@ private:
 
   void request_balance_change(Address const &addr, int128_t delta);
 
-  // lock_storage locks the storage for the given address.
-  // cost must be nonnegative.
-  void lock_storage(Address const &addr, int128_t cost);
+  // lock_storage accumulates a marginal storage cost against the address's
+  // running total. cost may be negative (permanent-exclusive updates release
+  // storage relative to a snapshot); returns kOverflow if the accumulated
+  // total would not fit in a signed __int128, leaving state unchanged.
+  HogDbStatus<void> lock_storage(Address const &addr, int128_t cost);
 
   HogDbStatus<void> update_balance_lock(Address const &addr);
 

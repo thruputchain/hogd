@@ -184,10 +184,28 @@ InvokeTX::update_balance_lock(Address const &addr)
   return {};
 }
 
-void
+HogDbStatus<void>
 InvokeTX::lock_storage(Address const &addr, int128_t cost)
 {
   auto &bal_stats = balance_deltas_[addr];
+
+  // The running total this cost accumulates onto: the current version's total,
+  // or 0 when this address has no version yet.
+  int128_t base_total = bal_stats.empty()
+                            ? int128_t{0}
+                            : bal_stats.back().total_locked_storage_amount;
+
+  // Permanent-exclusive storage updates can return large negative marginal
+  // costs (local_cost - snapshot_cost), so overwriting two expensive snapshot
+  // items under the same address could otherwise drive this signed __int128
+  // accumulator past its bounds -- undefined behavior. Reject an
+  // unrepresentable total deterministically before mutating any state,
+  // mirroring the checked arithmetic already used in request_nnint128 (#3689).
+  auto [new_total, of] = overflowing_add(base_total, cost);
+  if (of) [[unlikely]] {
+    return HogDbError(HogDbCode::kOverflow);
+  }
+
   if (bal_stats.empty()) {
     bal_stats.emplace_back(
         StorageBalanceVersion{.manual_transfer_amount = 0,
@@ -205,7 +223,8 @@ InvokeTX::lock_storage(Address const &addr, int128_t cost)
   assert(!bal_stats.empty());
   assert(bal_stats.back().tx_depth == tx_depth_);
 
-  bal_stats.back().total_locked_storage_amount += cost;
+  bal_stats.back().total_locked_storage_amount = new_total;
+  return {};
 }
 
 HogDbStatus<void>
@@ -428,7 +447,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     v.emplace_back(std::move(change), tx_depth_);
     // now lock the storage
     if (marginal_storage != 0) {
-      lock_storage(key.get_address(), marginal_storage);
+      if (auto s = lock_storage(key.get_address(), marginal_storage); !s) {
+        return s.error();
+      }
       v.back().locked_storage_cost = marginal_storage;
     }
 
@@ -470,7 +491,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // now to lock the storage
   if (marginal_storage != 0) {
-    lock_storage(key.get_address(), marginal_storage);
+    if (auto s = lock_storage(key.get_address(), marginal_storage); !s) {
+      return s.error();
+    }
     v.back().locked_storage_cost = *ret;
   }
 
