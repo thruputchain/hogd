@@ -142,7 +142,7 @@ fi
 # 0.0854 ns) -- but that host does not reproduce the instability either, so it
 # cannot discriminate. Verify on a host that does before believing this helps.
 if command -v setarch >/dev/null 2>&1 &&
-   setarch "$(uname -m)" -R true >/dev/null 2>&1; then
+  setarch "$(uname -m)" -R true >/dev/null 2>&1; then
   RUNNER+=(setarch "$(uname -m)" -R)
 fi
 
