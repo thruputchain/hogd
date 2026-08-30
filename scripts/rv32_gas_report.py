@@ -72,30 +72,13 @@ BOUND_VIOLATION_MARGIN = 0.05
 # away, and the outliers are where a cheaper context is worth adding.
 EXTREME_HEADROOM = 0.60
 
-# Only cells at least this many times the baseline are guarded by --check.
+# Cells at least this many times the normalizer are guarded by --check.
 #
-# This threshold is set from measured behaviour, not taste. Back-to-back runs on
-# one host move the expensive, resolved cells by 1-7% and the near-baseline
-# cells by up to 60%, because a drift far too small to matter for a 5x cell is
-# an enormous relative change for a 1.05x one. A gate that guarded everything
-# would fail on the near-baseline population most nights and be muted within a
-# week. Guarding only cells with something real to measure is what makes a
-# nightly run worth reading.
-#
-# That reasoning was about the *contrast* estimator, whose near-baseline cells
-# were a small difference between large timings and moved by 60% run to run.
-# The saturated measurement is an absolute level: three back-to-back runs put
-# its relative spread at 12.5% median and 16.8% at p90 across the whole ISA,
-# cheap cells included, against a tolerance of 100%. The cheap population is no
-# longer the noisy one, so excluding it now discards coverage for a reason that
-# has stopped being true -- on the bench host the 1.5x floor left 9 guards out
-# of 100 measured cells.
-#
-# Now zero, because ratios are against the median cell rather than against ADD.
-# "At or above the baseline" excluded cells cheaper than one chosen opcode;
-# against a median it would exclude half the ISA by construction. Nothing is
-# excluded: a cell reproducing to a tenth of a percent has plenty of headroom
-# under a tolerance that only fires when it doubles.
+# Zero: everything usable is guarded. The old 1.5x floor excluded the
+# near-baseline population, which moved up to 60% run to run under the contrast
+# estimator. The saturated measurement reproduces at 0.2% median across the
+# whole ISA, so there is no noisy population left to exclude -- and against a
+# median normalizer a floor of 1.0 would drop half the ISA by construction.
 GUARD_MIN_RATIO = 0.0
 
 # How far a cell has to sit from the baseline before the per-opcode table will

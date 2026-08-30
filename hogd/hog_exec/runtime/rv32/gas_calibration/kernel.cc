@@ -954,19 +954,11 @@ build_kernel(const KernelSpec &spec)
   // Loop control: decrement, then a forward branch that skips a JAL back to
   // the body head.
   //
-  // The obvious form -- decrement and branch *backwards* over the body -- is
-  // what this used to do, and it silently breaks once the body is large. A
-  // B-type immediate is 13 bits signed, so it reaches 4096 bytes: exactly 1024
-  // instructions. At 1024 body slots the back edge needs -4100 and the encoder
-  // truncates it rather than refusing, so the kernel jumps into the middle of
-  // itself. Measured before the fix: a 2048-slot kernel reported a *clean
-  // halt* having executed 2107 of the 16443 gas it was credited with, and
-  // every opcode in it priced at exactly the baseline -- including a
-  // pointer-chased load, which cannot cost what an add costs.
-  //
-  // JAL's immediate is 21 bits signed, which reaches a megabyte and so covers
-  // anything kMaxCodeBytes allows. The branch that skips it only ever jumps
-  // two instructions, so it stays in range whatever the body size.
+  // Not a backwards branch: a B-type immediate is 13 bits signed, reaching
+  // only 1024 instructions, and the encoder truncates rather than refuses --
+  // the kernel jumps into the middle of itself and still halts cleanly. JAL's
+  // 21 bits cover anything kMaxCodeBytes allows, and the branch skipping it
+  // only ever jumps two instructions.
   words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
   // beq counter, x0, +8 -- when the counter hits zero, skip the JAL and fall
   // into the ecall.

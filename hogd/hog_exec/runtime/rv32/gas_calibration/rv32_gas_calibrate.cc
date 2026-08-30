@@ -322,30 +322,17 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
       (static_cast<double>(slots_per_target(base)) * filler_ns) +
       result.fit.slope;
 
-  // An absolute upper bound, which is what a gas schedule actually needs.
+  // An absolute upper bound, the fallback for a cell that cannot be saturated.
   //
-  // The slope above is a contrast: a small difference between large timings,
-  // fitted across kernels that differ in layout as well as in content. On a
-  // machine where that layout bias is comparable to the effect, the fit hands
-  // the bias to the slope, and the result can come out *negative* -- an
-  // instruction that costs less than nothing, which is not a number a gas
-  // schedule can use. Measured on a 64-core EPYC: half the ISA priced below a
-  // no-op, and the same sweeps moved by whole dispatches between runs.
-  //
-  // The densest kernel needs no contrast. It runs `target_slots` targets and
-  // some fillers per iteration, so
+  // The densest kernel runs `target_slots` targets and some fillers per
+  // iteration, so
   //
   //     T = n_target * c_target + n_filler * c_filler + loop overhead
   //
-  // and since every one of those terms is non-negative, T / n_target is an
-  // upper bound on c_target unconditionally -- no subtraction, no fit, no
-  // dependence on what the filler costs. It cannot be negative.
-  //
-  // The looseness is 1 + (n_filler * c_filler) / (n_target * c_target), so
-  // with the body half targets it is at most ~2x, and it *tightens as the
-  // target gets more expensive*: a pointer-chased load at 6 ns against a
-  // 0.65 ns filler is bounded to within 11%. The margin is worst exactly
-  // where the opcode is cheap and being wrong costs least.
+  // and every term is non-negative, so T / n_target bounds c_target from above
+  // -- no subtraction, no fit, no way to come out negative. It reads up to ~2x
+  // high with the body half targets, and tightens as the target gets more
+  // expensive, which is the right way round.
   const uint32_t densest = sweep->target_counts.back();
   if (densest > 0) {
     std::vector<double> dense_samples;
@@ -366,17 +353,10 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   }
   // The primary measurement: a body made entirely of this target.
   //
-  // Everything above is a contrast -- the target's cost minus the filler it
-  // displaced -- and a contrast between two large timings goes negative as
-  // soon as layout noise rivals the effect. Roughly 30% of sweeps came out
-  // negative that way, which is not a cost a gas schedule can use.
-  //
-  // A saturated body has no filler to subtract. Its time divided by its
-  // instruction count is, directly, what a program made of this instruction
-  // costs per instruction -- which is also the question worst-case pricing
-  // asks. Only ADDI declines to be measured this way, because addi;addi is a
-  // fusion rule; the audit catches that rather than letting the fused cost be
-  // reported as the unfused one.
+  // Everything above is a contrast, which goes negative as soon as layout
+  // noise rivals the effect. This has no filler to subtract: its time over the
+  // substitutions placed is directly what a program made of this instruction
+  // costs, which is what worst-case pricing asks.
   {
     KernelSpec sat = base;
     sat.saturated = true;
@@ -460,23 +440,14 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                 result.saturated_note = "saturated kernel did not halt cleanly";
               }
               else {
-                // Divide by the substitutions placed, not by the instructions
-                // retired. Two reasons, and they point the same way.
-                //
-                // Units: a pair's cost is quoted per pair, because that is what
-                // the report compares against its ceiling (the two opcodes'
-                // costs summed). Per-instruction would read half of it.
-                //
-                // Direction: the iteration also runs the two boundary fillers
-                // and three loop-control instructions, and their time is in the
-                // numerator either way. Dividing by the instruction count
-                // spreads it over them too, which averages the target *down*
-                // toward the filler -- an understatement, and understating is
+                // Substitutions placed, not instructions retired. Units: a
+                // pair's cost is quoted per pair, matching the ceiling it is
+                // compared against. Direction: the iteration also runs two
+                // boundary fillers and three loop instructions, and spreading
+                // their time across those averages the target down, which is
                 // the one direction worst-case pricing cannot tolerate.
                 // Attributing all of it to the targets makes this an upper
-                // bound on the target's own cost instead. The looseness is the
-                // scaffolding over the target count: about 0.1% at the body
-                // sizes used here, and always in the safe direction.
+                // bound, loose by about 1% at these body sizes.
                 result.ns_saturated =
                     one[0].median() / static_cast<double>(kernel->target_units);
               }
@@ -487,17 +458,10 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     }
   }
 
-  // A cell with no cost at all has nothing a schedule could use. Report that
-  // rather than passing a negative number downstream: worst-case pricing would
-  // sort it to the bottom and quietly treat the opcode as free.
-  //
-  // All three estimators have to be consulted, in the same order the report's
-  // cost_ns() tries them. This used to test only the saturated level and the
-  // contrast, which predates the bound landing as the middle rung: a cell that
-  // cannot saturate (ADDI, a fusion rule) and whose contrast went negative was
-  // rejected while holding a perfectly good non-negative bound, and the guard
-  // for it then failed the gate as "not measured in this run" rather than
-  // being checked.
+  // A cell with no cost at all has nothing a schedule could use. Reject it
+  // rather than pass a negative downstream, where worst-case pricing would
+  // sort it to the bottom and treat the opcode as free. All three estimators
+  // have to be consulted, in the order cost_ns() tries them.
   if (result.ns_saturated <= 0.0 && result.ns_upper_bound <= 0.0 &&
       result.ns_per_instruction <= 0.0) {
     result.rejected_because =

@@ -169,22 +169,14 @@ struct KernelSpec {
   uint32_t target_slots = 0;
   // Fill every interior slot with the target instead of capping at half.
   //
-  // The capped form exists so a *contrast* is clean: targets stay non-adjacent
-  // so no fusion can appear or disappear as target_slots varies. But a
-  // contrast is a difference between two large timings, and when the layout
-  // noise is comparable to the effect the difference goes negative -- an
-  // instruction costing less than nothing.
+  // The cap exists to keep a contrast clean -- targets non-adjacent, so no
+  // fusion appears or disappears as target_slots varies. A saturated body
+  // needs no contrast: its time over its substitution count is directly what a
+  // program made of this opcode costs, so it cannot go negative and does not
+  // depend on the filler.
   //
-  // A saturated body needs no contrast. Its time divided by its instruction
-  // count *is* the per-instruction cost of a program made of this opcode,
-  // measured absolutely. It cannot be negative, does not depend on what the
-  // filler costs, and is the question a gas schedule actually asks: if someone
-  // fills a block with this instruction, what does each one cost?
-  //
-  // Adjacent targets can fuse, which would make the body execute fewer
-  // dispatches than it has instructions. That is what the lowering audit is
-  // for: it rejects a saturated body whose slots did not each stay one
-  // instruction, rather than quietly reporting the fused cost.
+  // Adjacent targets would fuse, so single targets are lowered with fusion off
+  // and pairs keep it; run_sweep decides, and the audit checks either way.
   bool saturated = false;
   // Rotates the target placement within the body without changing how many
   // targets there are. Two kernels differing only in phase do identical work,

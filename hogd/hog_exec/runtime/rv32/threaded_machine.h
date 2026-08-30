@@ -2001,20 +2001,15 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     }
 
     // EXPERIMENT(fuse): collapse this slot and its successor into one fused
-    // handler when (head, tail) match a rule, saving a dispatch.
-    //
-    // `fuse` defaults true and production never passes anything else. The
-    // calibration harness turns it off to price a single opcode: a body made
-    // entirely of one instruction is exactly the shape that trips a rule, so
-    // without the knob the harness has to detect fusion after the fact and
-    // discard the measurement, and a rule it fails to notice is reported as
-    // the unfused cost. Fusion is behavior-preserving and never changes gas,
-    // so the two lowerings agree on everything except how many dispatches
-    // they execute -- which is the quantity being measured. Only when i+1
+    // handler when (head, tail) match a rule, saving a dispatch. Only when i+1
     // is a real instruction (not the fall-off sentinel) and was not itself
     // consumed as a fusion tail (`next_fused`) -- a slot belongs to at most one
     // pair. The tail slot keeps its standalone handler and gas_to_run as the
     // branch-in fallback; fusion is behavior-preserving and never changes gas.
+    //
+    // `fuse` is false only for the gas calibration, which prices a single
+    // opcode and needs the unfused dispatch count. Production takes the
+    // default.
     bool fused_here = false;
     // Do not fuse across a chunk boundary: a fused handler skips the
     // intervening enter_run, so a pair may not straddle a break carrier

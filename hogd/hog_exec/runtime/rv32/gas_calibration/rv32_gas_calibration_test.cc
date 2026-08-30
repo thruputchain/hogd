@@ -339,19 +339,13 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
 
 // A kernel must run all of its body, at every body size the harness allows.
 //
-// This is the invariant that a silently-truncated loop breaks, and it broke:
-// the loop used to close with a single backwards branch over the body, and a
-// B-type immediate reaches 4096 bytes -- exactly 1024 instructions. At 1024
-// body slots the encoder truncated the offset instead of refusing, so the
-// kernel jumped into the middle of itself. At 1024 and 1536 it trapped, which
-// the harness caught. At 2048 it reported a *clean halt* having burned 2107 of
-// the 16443 gas it was credited with, which the harness did not catch: every
-// opcode in that run priced at exactly the baseline, a pointer-chased load
-// included, and the sweep looked beautifully reproducible because it had
-// stopped measuring.
-//
-// Comparing consumed gas against credited gas catches all of that in one
-// assertion, so size the bodies past the old cliff and check it.
+// This is what a silently-truncated loop breaks. The old backwards branch
+// overflowed its 13-bit immediate past 1024 slots and the encoder truncated
+// rather than refused: at 2048 slots the kernel reported a clean halt having
+// burned 2107 of 16443 credited gas, every opcode priced at the baseline, and
+// the sweep looked reproducible because it had stopped measuring. Comparing
+// consumed against credited gas catches that in one assertion, so size the
+// bodies past the old cliff.
 TEST(Rv32GasCalibrationKernel, RunsTheWholeBodyAtEveryBodySize)
 {
   HaltHost host;

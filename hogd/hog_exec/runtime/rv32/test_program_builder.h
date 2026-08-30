@@ -21,22 +21,15 @@ require_valid_field(bool condition)
   }
 }
 
-// Every encoder below masks its immediate to the field width. Without a range
-// check that mask is a silent truncation: the instruction encodes, decodes and
-// runs, just with a different immediate than the caller asked for, so the
-// program does something plausible rather than failing. A branch built that way
-// jumped into the middle of its own loop body and still reported a clean halt.
+// Every encoder below masks its immediate to the field width, so out of range
+// it silently encodes a different instruction that runs and halts cleanly.
 //
-// Callers spell an immediate either way -- as the signed offset it means, or
-// as the raw field bits (the conformance vectors pass 0x800 for -2048) -- and
-// the encoder cannot tell which was intended. So this rejects only values that
-// fit neither: outside [-2^(bits-1), 2^bits), no reading of them survives the
-// mask. Where the signed reading is the only valid one, the caller knows that
-// and checks it there; build_kernel does exactly that for JALR's body-slot
-// offset.
-//
-// u_type takes a full 32-bit value and keeps its top 20 bits by definition, so
-// there is nothing to truncate there.
+// Callers spell immediates either way -- as the signed offset, or as the raw
+// field bits (the conformance vectors pass 0x800 for -2048) -- and the encoder
+// cannot tell which. So reject only what fits neither: outside
+// [-2^(bits-1), 2^bits). Where the signed reading is the only valid one the
+// caller checks it there, as build_kernel does for JALR's slot offset. u_type
+// keeps the top 20 bits of a 32-bit value by definition, so it has none.
 inline void
 require_immediate_fits(int32_t imm, int bits)
 {
