@@ -2794,7 +2794,7 @@ TEST(Mempool, MultiSignerSigningsShareATransactionHash)
 // can occupy. Eviction is approximate, but the ceiling is not.
 TEST(Mempool, FailedSignatureCacheIsBounded)
 {
-  FailedSignatureCache cache(/*bucket_count=*/64);
+  FailedSignatureCache cache(/*num_buckets=*/64);
 
   SHA256Hash hash{};
   for (size_t i = 0; i < cache.max_entries() * 4; i++) {
@@ -2812,7 +2812,7 @@ TEST(Mempool, FailedSignatureCacheIsBounded)
 // ones a flood of one-shot garbage would push out.
 TEST(Mempool, FailedSignatureCacheKeepsRepeatedlyHitEntries)
 {
-  FailedSignatureCache cache(/*bucket_count=*/64);
+  FailedSignatureCache cache(/*num_buckets=*/64);
 
   SHA256Hash repeated{};
   const size_t marker = 0xD1CED1CED1CED1CEULL;
