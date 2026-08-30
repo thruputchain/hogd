@@ -125,6 +125,7 @@ public:
   Metrics::Counter rejected_capacity_rpc_count;
   Metrics::Counter rejected_malformed_unvetted_rpc_count;
   Metrics::Counter rejected_malformed_vetted_rpc_count;
+  Metrics::Counter rejected_oversize_lookup_rpc_count;
   Metrics::Counter auth_failed_tx_count;
   Metrics::Counter nomination_attempt_count;
   Metrics::Counter nomination_success_count;
@@ -229,6 +230,10 @@ MempoolMetrics::init()
       kComponent, "rejected_malformed_vetted_rpc_count",
       "Vetted submission RPCs rejected due to malformed transaction "
       "batches.");
+  rejected_oversize_lookup_rpc_count = metrics.per_thread_counter(
+      kComponent, "rejected_oversize_lookup_rpc_count",
+      "Transaction lookup RPCs rejected because the requested batch or the "
+      "reply it would build was too large.");
   auth_failed_tx_count = metrics.per_thread_counter(
       kComponent, "auth_failed_tx_count",
       "Submitted transactions rejected by authentication.");

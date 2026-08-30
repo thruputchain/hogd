@@ -164,6 +164,34 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   EXPECT_FALSE(result[1]);
 }
 
+TEST(Mempool, LookupAtBatchLimitIsServed)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
+
+  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
+
+  EXPECT_EQ(result.size(), hashes.size());
+}
+
+TEST(Mempool, LookupRejectsBatchOverLimit)
+{
+  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
+                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize + 1);
+
+  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
+
+  // A rejected lookup replies empty; a served one replies with one slot per
+  // requested hash, which is how a caller tells the two apart.  The limit is
+  // checked before the pre-ready path so that its request-sized reply is
+  // bounded too.
+  EXPECT_EQ(result.size(), 0UL);
+}
+
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
 {
   Registration &registration = Registration::registration();
@@ -955,6 +983,135 @@ TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
                                                           batch)();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+}
+
+TEST(Mempool, LookupPreservesPositionsForMissingHashes)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  const TransactionHash present = sha256(txs[0].tx);
+  const TransactionHash absent = sha256(txs[1].tx);
+  ASSERT_NE(present, absent);
+
+  TransactionHashBatch hashes;
+  hashes.push_back(absent);
+  hashes.push_back(present);
+  hashes.push_back(absent);
+  hashes.push_back(present);
+
+  auto result =
+      server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
+
+  // The reply is positional: resolving each distinct hash once must not
+  // reorder or compact the slots.
+  ASSERT_EQ(result.size(), hashes.size());
+  EXPECT_FALSE(result[0]);
+  EXPECT_FALSE(result[2]);
+  ASSERT_TRUE(result[1]);
+  ASSERT_TRUE(result[3]);
+  EXPECT_EQ(*result[1], txs[0]);
+  EXPECT_EQ(*result[3], txs[0]);
+}
+
+TEST(Mempool, LookupAnswersRepeatedHashWithOneCopyPerSlot)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  constexpr size_t kRepeats = 64;
+  TransactionHashBatch hashes;
+  hashes.resize(kRepeats, sha256(txs[0].tx));
+
+  auto result =
+      server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
+
+  // One [find_tx] serves all [kRepeats] slots, but each slot owns its own
+  // copy: [x23::Ptr] is a [std::unique_ptr], so they cannot be shared.
+  ASSERT_EQ(result.size(), kRepeats);
+  for (const x23::Ptr<SignedTransaction> &tx : result) {
+    ASSERT_TRUE(tx);
+    EXPECT_EQ(*tx, txs[0]);
+  }
+}
+
+TEST(Mempool, LookupRejectsBatchThatWouldOverrunTheReplyBudget)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  // [Calldata] is unbounded on the wire and nothing caps a transaction's size
+  // at admission, so the batch limit alone does not bound the reply: a
+  // handful of copies of one big transaction is all it takes.
+  constexpr size_t kCalldataBytes = 1UL << 20;
+  txs[0].tx.invocation.calldata.resize(kCalldataBytes);
+
+  MempoolTestInfra server;
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  const size_t tx_bytes = x23::xdr_size(txs[0]);
+  ASSERT_GT(tx_bytes, 0UL);
+  const size_t served =
+      MempoolCoordinatorRpc::kMaxLookupTransactionsReplyBytes / tx_bytes;
+  ASSERT_GT(served, 0UL);
+  ASSERT_LT(served + 1, MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
+
+  TransactionHashBatch within_budget;
+  within_budget.resize(served, sha256(txs[0].tx));
+  auto ok = server.mempool_coord_rpc().schedcoord_lookup_transactions(
+      within_budget)();
+  EXPECT_EQ(ok.size(), served);
+
+  TransactionHashBatch over_budget;
+  over_budget.resize(served + 1, sha256(txs[0].tx));
+  auto rejected =
+      server.mempool_coord_rpc().schedcoord_lookup_transactions(over_budget)();
+
+  // Refused before the reply is built, rather than built and then refused by
+  // [make_record] once the memory has already been committed.
+  EXPECT_EQ(rejected.size(), 0UL);
+}
+
+TEST(Mempool, GatewayLookupEnforcesTheSameBatchLimit)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  TransactionHashBatch hashes;
+  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize + 1,
+                sha256(txs[0].tx));
+
+  // The gateway surface is the unauthenticated one, so the limit has to hold
+  // there and not only on the coordinator port.
+  EXPECT_EQ(gateway.schedgateway_lookup_tx(hashes)().size(), 0UL);
+
+  hashes.resize(1, sha256(txs[0].tx));
+  auto served = gateway.schedgateway_lookup_tx(hashes)();
+  ASSERT_EQ(served.size(), 1UL);
+  ASSERT_TRUE(served[0]);
+  EXPECT_EQ(*served[0], txs[0]);
 }
 
 TEST(Mempool, Propose)
