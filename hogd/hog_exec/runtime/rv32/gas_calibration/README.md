@@ -108,12 +108,23 @@ fallback for the few opcodes that cannot be saturated.
 
 **Suppress fusion, and check that you did.** A saturated body puts copies of
 the target next to each other, which is exactly the arrangement a fusion rule
-can match -- so the audit is load-bearing rather than a formality. It rejects a
-body whose slots did not each stay one instruction, because a fused body
-executes fewer dispatches than it has instructions and dividing its time by the
-instruction count would report the fused cost as the unfused one. Across the
-ISA, three cells decline on those grounds: `ADDI` in both contexts and the
-`auipc;jalr` pair, all of which are fusion rules by design.
+matches. So the harness does not try to detect fusion and discard the result --
+it lowers those bodies with fusion off (`PreInstantiation::create`'s `fuse`
+flag, defaulted true, untouched by production) and measures the unfused cost.
+That is the cost the schedule charges anyway: fusion is a saving the engine may
+or may not get, and worst-case pricing cannot assume it.
+
+Detect-after-the-fact was the earlier approach and it has a blind spot worth
+recording. The audit compares each slot against the same word lowered *in
+isolation*, but the isolated probe is `filler, target, filler` and the filler is
+an `add` -- so for target `add` the probe fuses exactly as the body does, both
+sides match, and the audit reports clean. The cell every ratio used to be
+divided by was the one cell the audit structurally could not check. With the
+flag, all 100 single-target cells saturate rather than 98; `ADDI` is measurable
+for the first time, having declined only because `addi;addi` is a rule.
+
+Pair rows are the opposite: `auipc;jalr` exists to measure the fused form, so
+those keep fusion on and their audit requires the rule to fire.
 
 In the contrast sweep, targets are instead placed non-adjacently and separated
 by an R-type `add` filler on private registers, which no fusion rule matches in
@@ -229,14 +240,19 @@ fails: unlike a fingerprint change it does not prove the numbers moved, and
 failing on every edit would leave a periodic job red through normal development
 until somebody regenerated the reference, which is how a job stops being read.
 
-**The guarded costs.** How expensive the worst cases are relative to the
-baseline instruction *measured in the same run*. Only cells at or above 1.5x
-baseline are guarded, because those are the ones that reproduce tightly;
-guarding the near-baseline population would fail most nights on drift far too
-small to matter, and a job that cries wolf gets muted and then catches nothing.
-The tolerance on top of that is 100% -- a guarded cost has to double before it
-fires. This is an alarm for things being wildly out of whack, not a performance
-budget.
+**The guarded costs.** How expensive each case is relative to the **median
+saturated cell** *measured in the same run*. Every usable cell is guarded: with
+fusion off the whole ISA reproduces to 0.12% median and 2.90% worst across two
+back-to-back bench runs, so there is no noisy population left to exclude. The
+tolerance is 100% -- a guarded cost has to double before it fires. This is an
+alarm for things being wildly out of whack, not a performance budget.
+
+The median rather than a named opcode, because one cell carrying every ratio is
+one cell whose misbehaviour is indistinguishable from the whole ISA moving. On
+the bench host that happened: every ratio scaled by 2.015x between two runs
+while the opcodes held to 0.1%, because the divisor -- `ADD` -- was both
+silently fusing and, on that microarchitecture, genuinely about twice as fast
+as `AND`. A median over ~100 cells cannot be moved by one of them.
 
 Ratios rather than nanoseconds make the reference portable across **identical**
 hardware, which is what the bench pool is. They do **not** make it portable

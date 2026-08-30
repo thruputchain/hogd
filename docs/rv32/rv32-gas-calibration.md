@@ -189,11 +189,10 @@ the calibration no longer describes the engine. It is meant for a periodic job
 it is not built to run on every change.
 
 It checks three things: the engine fingerprint (deterministic, cannot flake), a
-set of guarded costs held as ratios to the baseline measured in the same run,
+set of guarded costs held as ratios to the median cell measured in the same run,
 and the interaction bound -- that no program or pair costs more than the sum of
-its opcodes' individual worst cases. The cost tolerance is loose by design: only
-cells at or above 1.5x baseline are guarded, and a guarded cost has to double
-before it fires. The bound is not loose, because exceeding it is a failure of
+its opcodes' individual worst cases. The cost tolerance is loose by design:
+every usable cell is guarded, and a guarded cost has to double before it fires. The bound is not loose, because exceeding it is a failure of
 the pricing method rather than a drifted measurement.
 
 The ratios are portable across **identical** hardware, which is what the bench
