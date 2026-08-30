@@ -289,8 +289,27 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
+  // Drop signings authentication has already rejected before paying for
+  // another verification of the same bytes.
+  auto drop_rejected_node =
+      submit_dag.async<void>("drop known-bad signatures",
+                             submit_dag.after(capacity_node),
+                             [&]() -> x23::Async<void> {
+                               x23::Vec<size_t> to_remove_indices;
+                               for (size_t i = 0; i < txs->size(); i++) {
+                                 if (signature_rejected(sha256((*txs)[i]))) {
+                                   to_remove_indices.push_back(i);
+                                 }
+                               }
+                               if (!to_remove_indices.empty()) {
+                                 remove_indices(/*remove_from=*/*txs,
+                                                /*indices=*/to_remove_indices);
+                               }
+                               co_return;
+                             });
+
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(capacity_node),
+      "verify transactions", submit_dag.after(drop_rejected_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
         const BlockHeight verify_height = scheduler_->current_block();
         co_return co_await auth_client_->authmempool_verify_transactions(
@@ -309,6 +328,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
+            // Only [kAuthFailed] is a verdict about these bytes. The other
+            // codes describe this node's own state and must not be cached.
+            if (code == AuthErrorCode::kAuthFailed) {
+              mark_signature_rejected(sha256((*txs)[i]));
+            }
             to_remove_indices.push_back(i);
           }
         }
@@ -436,8 +460,27 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_return;
                              });
 
+  // Drop signings authentication has already rejected before paying for
+  // another verification of the same bytes.
+  auto drop_rejected_node =
+      submit_dag.async<void>("drop known-bad signatures",
+                             submit_dag.after(lock_commit_node),
+                             [&]() -> x23::Async<void> {
+                               x23::Vec<size_t> to_remove_indices;
+                               for (size_t i = 0; i < txs->size(); i++) {
+                                 if (signature_rejected(sha256((*txs)[i]))) {
+                                   to_remove_indices.push_back(i);
+                                 }
+                               }
+                               if (!to_remove_indices.empty()) {
+                                 remove_indices(/*remove_from=*/*txs,
+                                                /*indices=*/to_remove_indices);
+                               }
+                               co_return;
+                             });
+
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(lock_commit_node),
+      "verify transactions", submit_dag.after(drop_rejected_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
         const BlockHeight verify_height = scheduler_->current_block();
         co_return co_await auth_client_->authmempool_verify_transactions(
@@ -453,6 +496,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
+            // Only [kAuthFailed] is a verdict about these bytes. The other
+            // codes describe this node's own state and must not be cached.
+            if (code == AuthErrorCode::kAuthFailed) {
+              mark_signature_rejected(sha256((*txs)[i]));
+            }
             to_remove_indices.push_back(i);
           }
         }
@@ -2738,6 +2786,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
+        clear_expired_rejected_signatures();
 
         // We need to do two things:
         // 1. If the nominated block is not the committed block, we need to

@@ -2491,6 +2491,63 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
+// The rejected-signature cache spares us reverifying bytes authentication has
+// already turned down. It is keyed on the whole [SignedTransaction] for the
+// same reason the blacklist above was removed: keyed on [TransactionHash] it
+// would name every signing of the transaction, so one bad copy from an
+// anonymous submitter would lock out the genuine one.
+TEST(Mempool, RejectedSignatureCacheDoesNotBlockValidSigning)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+
+  SignedTransaction poisoned_tx = txs[0];
+  DecoratedSignature bad_signature =
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  bad_signature.signature.ed25519()[0] ^= 0xff;
+  poisoned_tx.signatures.push_back(bad_signature);
+
+  // Same transaction, so the two share a [TransactionHash] ...
+  ASSERT_EQ(sha256(poisoned_tx.tx), sha256(good_tx.tx));
+  // ... but different bytes, so they must not share a cache key.
+  ASSERT_NE(sha256(poisoned_tx), sha256(good_tx));
+
+  // The bad signing fails authentication and is never admitted. Submitting the
+  // identical bytes again is served from the cache, with the same outcome.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  // The genuine signing of that same transaction must still be admitted.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
 {
   MempoolTestInfra server(/*skip_genesis_block=*/true);

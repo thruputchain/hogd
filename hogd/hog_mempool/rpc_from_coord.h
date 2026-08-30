@@ -77,6 +77,12 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
+  static constexpr size_t kRejectedSignatureBlockExpiryDelta = 5;
+  // Bounds the memory an attacker can occupy by submitting many distinct
+  // invalid signings. The cache is best-effort, so declining an insert costs
+  // only a reverification if those exact bytes are submitted again.
+  static constexpr size_t kMaxRejectedSignatures = 100'000;
+
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
                         size_t num_exec_shards = 1)
@@ -726,6 +732,83 @@ private:
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
+  // Records signings that authentication has definitively rejected, so that
+  // resubmitting the same bytes does not cost a second verification.
+  //
+  // The key is sha256 of the whole [SignedTransaction]. The verdict comes from
+  // [verify_auth], which consumes signatures, so the key must cover them too.
+  // A [TransactionHash] key names every signing of a transaction, which would
+  // let one submitter's bad copy speak for all of them.
+  //
+  // This is an admission-path throttle only, and must never be consulted while
+  // validating a block: a proposal carries [TransactionHash]es, and a signature
+  // this node was handed by a submitter is not evidence about a proposer's
+  // block. Only [kAuthFailed] belongs here -- [kAuthStaleBlockHeight] and
+  // [kAuthInternal] describe this node's own state, not the transaction.
+  void mark_signature_rejected(const SHA256Hash &signed_tx_hash)
+  {
+    if (rejected_signature_count_.load(std::memory_order_relaxed) >=
+        kMaxRejectedSignatures) {
+      return;
+    }
+    const BlockHeight expiry =
+        last_committed_block_.value.proposal_header.block_height +
+        kRejectedSignatureBlockExpiryDelta;
+    auto [hashes, hashes_lock] = rejected_signatures_[expiry];
+    auto [entry, entry_lock] = hashes.insert(signed_tx_hash, 0);
+    if (entry != nullptr) {
+      rejected_signature_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  bool signature_rejected(const SHA256Hash &signed_tx_hash)
+  {
+    const BlockHeight min_unexpired_height =
+        last_committed_block_.value.proposal_header.block_height + 1;
+    const BlockHeight max_unexpired_height =
+        last_committed_block_.value.proposal_header.block_height +
+        kRejectedSignatureBlockExpiryDelta;
+    for (BlockHeight height = min_unexpired_height;
+         height <= max_unexpired_height; height++) {
+      auto [hashes, hashes_lock] = rejected_signatures_.find(height);
+      if (hashes == nullptr) {
+        continue;
+      }
+      auto [entry, entry_lock] = hashes->find(signed_tx_hash);
+      if (entry != nullptr) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void clear_expired_rejected_signatures()
+  {
+    const BlockHeight cutoff =
+        last_committed_block_.value.proposal_header.block_height;
+    for (BlockHeight height = cutoff;
+         height >
+         cutoff - static_cast<BlockHeight>(kRejectedSignatureBlockExpiryDelta);
+         height--) {
+      size_t removed = 0;
+      {
+        auto [hashes, hashes_lock] = rejected_signatures_.find(height);
+        if (hashes != nullptr) {
+          removed = hashes->size();
+        }
+      }
+      rejected_signatures_.remove(height);
+      // Saturating. The count is advisory, and an insert racing between the
+      // size() above and this remove() must not wrap it below zero, which
+      // would disable the cache for the life of the process.
+      size_t prev = rejected_signature_count_.load(std::memory_order_relaxed);
+      while (!rejected_signature_count_.compare_exchange_weak(
+          prev, prev > removed ? prev - removed : 0,
+          std::memory_order_relaxed)) {
+      }
+    }
+  }
+
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
   const NetworkHash network_hash_;
@@ -759,6 +842,10 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
+  using RejectedSignatureSet =
+      SynchronizedMap<SHA256Hash, char, SipHash24Hasher>;
+  SynchronizedMap<BlockHeight, RejectedSignatureSet> rejected_signatures_;
+  std::atomic<size_t> rejected_signature_count_ = 0;
 
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
