@@ -114,8 +114,34 @@ enum class OperandMagnitude : uint8_t {
 // the divide-specific chain form.
 [[nodiscard]] bool is_divide_target(Op op);
 
+// An adjacent instruction *pair* to substitute, instead of a single opcode.
+//
+// Per-opcode sweeps can only measure instructions in isolation, so they cannot
+// see a cost that exists only in the interaction between two of them. The
+// validation workloads found one -- word_copy runs far slower than its opcodes
+// predict, because each store writes the address the next load reads and the
+// pair serializes on store-to-load forwarding.
+//
+// A pair substitution measures that directly: two adjacent slots replace two
+// fillers, and the sweep's slope is nanoseconds per pair. The two kinds below
+// differ only in whether the load reads the address the store just wrote, so
+// the difference between them *is* the forwarding penalty, with the register
+// chain and instruction mix held identical.
+enum class PairKind : uint8_t {
+  kNone,
+  // sw rX, off(base) ; lw rX, off(base) -- the load reads back what the store
+  // just wrote, so it waits on store-to-load forwarding.
+  kStoreLoadForward,
+  // sw rX, off(base) ; lw rX, off'(base) -- stores and loads use disjoint
+  // regions, so nothing forwards. The control.
+  kStoreLoadDistinct,
+};
+
 struct KernelSpec {
   Op target = Op::kAdd;
+  // When set, `target` is ignored and each substitution places this pair into
+  // two adjacent slots instead.
+  PairKind pair = PairKind::kNone;
   OperandContext context = OperandContext::kIndependent;
   WorkingSet working_set = WorkingSet::kNone;
   OperandMagnitude magnitude = OperandMagnitude::kDefault;
@@ -194,6 +220,18 @@ enum class KernelError {
 [[nodiscard]] std::string context_name(OperandContext context);
 [[nodiscard]] std::string working_set_name(WorkingSet working_set);
 [[nodiscard]] std::string magnitude_name(OperandMagnitude magnitude);
+[[nodiscard]] std::string pair_name(PairKind pair);
+
+// Instructions one substitution places: 2 for a pair, 1 otherwise.
+[[nodiscard]] uint32_t slots_per_target(const KernelSpec &spec);
+
+// The most substitutions a body of `body_slots` can hold while keeping at least
+// one filler between them. Shared so the sweep planner and the kernel builder
+// cannot disagree: when they did, the densest kernel placed two pairs adjacent,
+// the trailing load of one fused with the leading store of the next, and the
+// audit rejected the sweep.
+[[nodiscard]] uint32_t max_target_slots(uint32_t body_slots,
+                                        const KernelSpec &spec);
 
 // Gas the current in-tree schedule charges for one instance of `op`.
 [[nodiscard]] uint64_t scheduled_gas_for(Op op);

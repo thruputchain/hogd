@@ -56,6 +56,21 @@ SIGMA_THRESHOLD = 2.0
 # the two stop being comparable.
 DEFAULT_RESOLUTION = 4
 
+# How far a program may exceed the sum of its opcodes' individual worst cases
+# before it counts as a bound violation rather than measurement scatter.
+#
+# Any excess at all is in principle a failure of the method -- worst-case
+# per-opcode pricing promises exactly that a program costs no more than that sum
+# -- so this margin is small. It exists only so run-to-run noise on a shared
+# machine does not raise an alarm about the method.
+BOUND_VIOLATION_MARGIN = 0.05
+
+# Headroom above which a program is flagged as heavily overcharged: it is being
+# billed for more than 1/(1-x) times what it costs. Not a correctness problem --
+# overcharging is the safe direction -- but it is capacity the schedule gives
+# away, and the outliers are where a cheaper context is worth adding.
+EXTREME_HEADROOM = 0.60
+
 # Only cells at least this many times the baseline are guarded by --check.
 #
 # This threshold is set from measured behaviour, not taste. Back-to-back runs on
@@ -173,7 +188,35 @@ def context_label(cell):
 
 
 def usable_cells(data):
-    return [cell for cell in data["opcodes"] if cell["usable"]]
+    """Per-opcode cells only.
+
+    Pair rows measure an interaction, not an instruction, so they must never
+    reach the schedule: there is no opcode to charge them to. They are analysed
+    separately, against the bound their two opcodes imply.
+    """
+    return [cell for cell in data["opcodes"]
+            if cell["usable"] and not cell.get("pair")]
+
+
+def pair_cells(data):
+    return [cell for cell in data["opcodes"]
+            if cell["usable"] and cell.get("pair")]
+
+
+def measured_ops(data):
+    return {cell["op"] for cell in usable_cells(data)}
+
+
+def missing_ops(data, needed):
+    """Opcodes a bound claim would need but this run did not measure.
+
+    A filtered run (--op=X) measures a handful of opcodes, and the cost model
+    silently falls back to the baseline for the rest. Summing that produces a
+    confident-looking bound that is simply wrong -- and since a bound violation
+    is reported as a failure of the method, a partial run must not be allowed to
+    raise one.
+    """
+    return sorted(needed - measured_ops(data))
 
 
 def resolved(cell):
@@ -521,6 +564,63 @@ def taken_branch_premium(data):
     return max(0.0, mean_taken - mean_through)
 
 
+def print_pair_bounds(data):
+    """Can an interaction cost more than its opcodes' worst cases sum to?
+
+    This is the question per-opcode worst-case pricing rests on. Each cost is
+    measured for one instruction in isolation; charging a program the sum of
+    those costs bounds it only if no combination is *superadditive*. A pair
+    sweep measures a two-instruction interaction directly, so it can answer
+    that for the interactions we know how to construct.
+    """
+    pairs = pair_cells(data)
+    if not pairs:
+        return []
+    worst = cost_model(data, worst_case=True)
+    baseline = data["baseline"]["ns_per_filler_instruction"]
+
+    absent = missing_ops(data, {"SW", "LW"})
+    if absent:
+        print("interaction bounds: skipped -- this run did not measure "
+              + ", ".join(absent))
+        print("so there is no bound to compare a pair against.")
+        print()
+        return []
+
+    print("interaction bounds: can a pair beat its opcodes' worst cases?")
+    print()
+    header = (f"{'pair':<18}{'measured':>10}{'worst sum':>11}{'headroom':>10}"
+              f"{'+/-':>9}")
+    print(header)
+    print("-" * len(header))
+    violations = []
+    for cell in sorted(pairs, key=lambda c: c["op"]):
+        # Both pair kinds are a store plus a load, so the bound they must
+        # respect is a worst-case SW plus a worst-case LW.
+        ceiling = worst.get("SW", baseline) + worst.get("LW", baseline)
+        measured = cell["ns_per_instruction"]
+        headroom = (ceiling - measured) / ceiling if ceiling else 0.0
+        if headroom < -BOUND_VIOLATION_MARGIN:
+            violations.append((cell["op"], measured, ceiling))
+        print(f"{cell['op']:<18}{measured:>10.3f}{ceiling:>11.3f}"
+              f"{headroom * 100:>9.1f}%{cell.get('slope_stderr_ns', 0.0):>9.3f}")
+
+    forward = next((c for c in pairs if "forward" in c["op"]), None)
+    distinct = next((c for c in pairs if "distinct" in c["op"]), None)
+    if forward and distinct:
+        penalty = forward["ns_per_instruction"] - distinct["ns_per_instruction"]
+        print()
+        print(f"store-to-load forwarding penalty: {penalty:.3f} ns per pair")
+        print(f"  ({penalty / baseline:.2f}x a baseline instruction). The two "
+              f"rows differ only in")
+        print("  whether the load reads the address the store just wrote, so "
+              "the difference")
+        print("  is the forwarding cost with instruction mix and register "
+              "chain held equal.")
+    print()
+    return violations
+
+
 def print_prediction(data):
     """Does the sum of separately measured opcode costs equal a real program?
 
@@ -632,26 +732,74 @@ def print_prediction(data):
         print("reads, so the pair serializes on store-to-load forwarding, which")
         print("no single-opcode sweep measures.")
         print()
-        print("That is a gap in the MODEL. Whether it is a gap in the PRICING is")
-        print("the headroom column, and there it is still subadditive -- the")
-        print("pair costs less than its two opcodes' individual worst cases sum")
-        print("to. So worst-case pricing bounds it. What is not established is")
-        print("that every interaction behaves that way: this axis has one")
-        print("measured point, not a sweep.")
+        print("That is a gap in the MODEL. Whether it is a gap in the PRICING")
+        print("is the headroom column, and the interaction sweep below prices")
+        print("the effect directly rather than leaving it inferred.")
 
-    over = [w["name"] for w in workloads
-            if w["ns_per_iteration"] > predict(w, worst)]
     print()
-    if over:
-        print("WARNING: measured time exceeds the worst-case prediction for: "
-              + ", ".join(over))
-        print("         Gas would underprice these programs. Investigate "
-              "before pricing.")
+    needed = set()
+    for workload in workloads:
+        needed |= set(workload["op_counts"])
+    absent = missing_ops(data, needed)
+    if absent:
+        print("Bound check skipped: this run did not measure "
+              + ", ".join(absent) + ".")
+        print("Their cost fell back to the baseline, so any bound computed "
+              "from it would")
+        print("be fiction. Run a full calibration to check the bound.")
+        print()
+        print_pair_bounds(data)
+        return 0
+
+    violations = [(w["name"], w["ns_per_iteration"], predict(w, worst))
+                  for w in workloads
+                  if w["ns_per_iteration"]
+                  > predict(w, worst) * (1.0 + BOUND_VIOLATION_MARGIN)]
+    extreme = [(w["name"], (predict(w, worst) - w["ns_per_iteration"])
+                / predict(w, worst))
+               for w in workloads
+               if predict(w, worst)
+               and (predict(w, worst) - w["ns_per_iteration"])
+               / predict(w, worst) > EXTREME_HEADROOM]
+
+    if violations:
+        print("BOUND VIOLATION: these programs cost more than the sum of their")
+        print("opcodes' individual worst cases:")
+        for name, measured, ceiling in violations:
+            print(f"  {name}: {measured:.2f} ns vs a {ceiling:.2f} ns bound "
+                  f"({measured / ceiling:.2f}x)")
+        print("Pricing each opcode at its own worst case does not bound these.")
+        print("That is a failure of the method, not an imprecise number: it "
+              "needs an")
+        print("interaction term, or a blanket margin large enough to cover it.")
     else:
-        print("No workload exceeds its worst-case prediction, so pricing at "
-              "the worst measured")
-        print("context bounds every one of them.")
-    return 0
+        print("No workload exceeds the sum of its opcodes' individual worst")
+        print("cases, so pricing each opcode at its worst measured context "
+              "bounds")
+        print("every program measured here.")
+
+    if extreme:
+        print()
+        print(f"Heavily overcharged (over {EXTREME_HEADROOM * 100:.0f}% "
+              f"headroom -- billed for more than")
+        print(f"{1 / (1 - EXTREME_HEADROOM):.1f}x what they cost):")
+        for name, headroom in sorted(extreme, key=lambda item: -item[1]):
+            print(f"  {name}: {headroom * 100:.0f}% headroom "
+                  f"({1 / (1 - headroom):.1f}x)")
+        print("Safe, but capacity given away. Each is a program whose opcodes")
+        print("are being charged for a context it does not use -- which is "
+              "where a")
+        print("cheaper context, if one can be measured, would pay for itself.")
+
+    print()
+    pair_violations = print_pair_bounds(data)
+    if pair_violations:
+        print("BOUND VIOLATION on an interaction: " +
+              ", ".join(name for name, _, _ in pair_violations))
+        print("A pair costing more than its two opcodes' worst cases sum to "
+              "means")
+        print("per-opcode worst-case pricing is unsound as a method.")
+    return 1 if (violations or pair_violations) else 0
 
 
 def print_workloads(data):
@@ -744,8 +892,18 @@ def emit_reference(data):
     print("# which prints this block from the bench host.")
     print("#")
     print("# Checked by scripts/rv32_gas_check.sh. Costs are multiples of the")
-    print("# baseline instruction measured in the same run, not nanoseconds, so")
-    print("# the file is portable across hosts. Only cells at or above")
+    print("# baseline instruction measured in the same run, not nanoseconds.")
+    print("#")
+    print("# That makes the file portable across IDENTICAL hardware, and not")
+    print("# across microarchitectures. Measured: a reference taken on one")
+    print("# cloud host failed 3 of 18 guards on another with the same engine")
+    print("# fingerprint. The baseline is dispatch-bound and scales with core")
+    print("# width and clock; a chained multiply or a pointer-chased load is")
+    print("# latency-bound and does not, so their ratio is not invariant.")
+    print("# Regenerate on the machine class the check will run on -- the")
+    print("# calibration workflow's mode=reference does exactly that.")
+    print("#")
+    print("# Only cells at or above")
     print(f"# {GUARD_MIN_RATIO}x baseline are guarded: cheaper ones do not")
     print("# reproduce tightly enough to gate on.")
     print("#")
@@ -868,6 +1026,28 @@ def check_against_reference(data, reference_path):
             warnings.append(
                 f"{key[0]} {key[1]}: {ratio:.2f}x baseline and not in the "
                 f"reference (charged {cell['scheduled_gas']} gas)"
+            )
+
+    # A program costing more than its opcodes' individual worst cases sum to
+    # means per-opcode worst-case pricing does not bound it. That is a failure
+    # of the method rather than a drifted number, so it fails the check
+    # regardless of what the reference says.
+    baseline_ns = data["baseline"]["ns_per_filler_instruction"]
+    worst_costs = cost_model(data, worst_case=True)
+    for cell in pair_cells(data):
+        ceiling = (worst_costs.get("SW", baseline_ns)
+                   + worst_costs.get("LW", baseline_ns))
+        if missing_ops(data, {"SW", "LW"}):
+            continue
+        if cell["ns_per_instruction"] > ceiling * (1.0 + BOUND_VIOLATION_MARGIN):
+            failures.append(
+                f"{cell['op']}: {cell['ns_per_instruction']:.2f} ns exceeds "
+                f"the {ceiling:.2f} ns bound its two opcodes' worst cases "
+                f"imply.\n"
+                "  Pricing each opcode at its own worst case does not bound "
+                "programs that\n"
+                "  use them together -- the method needs an interaction term "
+                "or a margin."
             )
 
     rates = [w["ns_per_gas"] for w in data.get("workloads") or []

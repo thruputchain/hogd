@@ -1,6 +1,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -400,7 +401,69 @@ target_word(const KernelSpec &spec, uint32_t index)
                           encoding.funct7);
 }
 
+// The two words of one pair substitution.
+//
+// Both kinds chain through kChainReg -- pair k+1's store consumes pair k's
+// load -- so the register dependence is identical and the only difference is
+// whether the load's address is the one the store just wrote. That is what
+// makes the difference between them attributable to store-to-load forwarding
+// and to nothing else.
+//
+// Addresses: the base register holds kL1RegionBase (2048) and a 12-bit signed
+// offset reaches [0, 4095]. Forwarding uses one address for both halves;
+// distinct sends stores to the upper 2 KiB and loads to the lower, which never
+// overlap, so no load can read a line a store recently touched.
+std::array<uint32_t, 2>
+pair_words(const KernelSpec &spec, uint32_t index)
+{
+  constexpr uint8_t kWordFunct3 = 2; // sw / lw
+  const auto store_offset =
+      static_cast<int32_t>((index * 64U) % 2048U); // aligned, line-strided
+  const int32_t load_offset = spec.pair == PairKind::kStoreLoadForward
+                                  ? store_offset
+                                  : store_offset - 2048;
+  return {test_program::store(kAddressBankBase, kChainReg, store_offset,
+                              kWordFunct3),
+          test_program::load(kChainReg, kWordFunct3, kAddressBankBase,
+                             load_offset)};
+}
+
 } // namespace
+
+uint32_t
+slots_per_target(const KernelSpec &spec)
+{
+  return spec.pair == PairKind::kNone ? 1 : 2;
+}
+
+uint32_t
+max_target_slots(uint32_t body_slots, const KernelSpec &spec)
+{
+  if (body_slots < 8) {
+    return 0;
+  }
+  const uint32_t per_target = slots_per_target(spec);
+  // Slot 0 and the last slot stay filler; a pair's tail must also fit inside
+  // that interior, so the head can sit one slot lower than a single target's.
+  const uint32_t placeable = (body_slots - 2) - (per_target - 1);
+  // One filler between substitutions, so the period is per_target + 1. Deriving
+  // the cap from the same span the placement walks is what keeps the minimum
+  // gap at or above that period.
+  return placeable / (per_target + 1);
+}
+
+std::string
+pair_name(PairKind pair)
+{
+  switch (pair) {
+  case PairKind::kStoreLoadForward:
+    return "sw;lw forward";
+  case PairKind::kStoreLoadDistinct:
+    return "sw;lw distinct";
+  default:
+    return "none";
+  }
+}
 
 std::expected<uint32_t, KernelError>
 canonical_instruction_word(Op op, uint8_t reg)
@@ -637,7 +700,7 @@ scheduled_gas_for(Op op)
 std::expected<Kernel, KernelError>
 build_kernel(const KernelSpec &spec)
 {
-  if (!is_measurable_target(spec.target)) {
+  if (spec.pair == PairKind::kNone && !is_measurable_target(spec.target)) {
     return std::unexpected(KernelError::kUnsupportedTarget);
   }
   if (spec.body_slots < 8) {
@@ -652,9 +715,11 @@ build_kernel(const KernelSpec &spec)
   // disappear as target_slots varies. Targets therefore live in the interior,
   // and capping them at half the interior keeps any two targets non-adjacent.
   const uint32_t interior_slots = spec.body_slots - 2;
-  if (spec.target_slots > interior_slots / 2) {
+  const uint32_t per_target = slots_per_target(spec);
+  if (spec.target_slots > max_target_slots(spec.body_slots, spec)) {
     return std::unexpected(KernelError::kTooManyTargets);
   }
+  const uint32_t placeable_slots = interior_slots - (per_target - 1);
 
   std::vector<uint32_t> prologue;
   emit_prologue(prologue, spec.working_set, spec.trip_count);
@@ -671,20 +736,27 @@ build_kernel(const KernelSpec &spec)
     // cluster target-to-target adjacency and the remainder filler-to-filler,
     // making the fusion exposure a function of target_slots -- the exact
     // confound the fixed-boundary design exists to remove.
-    for (uint32_t i = 0; i < interior_slots; ++i) {
-      const uint32_t before = (i * spec.target_slots) / interior_slots;
-      const uint32_t after = ((i + 1) * spec.target_slots) / interior_slots;
+    for (uint32_t i = 0; i < placeable_slots; ++i) {
+      const uint32_t before = (i * spec.target_slots) / placeable_slots;
+      const uint32_t after = ((i + 1) * spec.target_slots) / placeable_slots;
       if (after != before) {
         // Rotate the whole evenly-spaced set. A cyclic rotation of a cyclically
         // even set keeps every gap, so targets stay non-adjacent at any phase.
-        const uint32_t rotated = (i + spec.placement_phase) % interior_slots;
+        const uint32_t rotated = (i + spec.placement_phase) % placeable_slots;
         target_slot_indices.push_back(rotated + 1);
       }
     }
   }
   std::ranges::sort(target_slot_indices);
   for (uint32_t ordinal = 0; ordinal < target_slot_indices.size(); ++ordinal) {
-    body[target_slot_indices[ordinal]] = target_word(spec, ordinal);
+    const uint32_t slot = target_slot_indices[ordinal];
+    if (spec.pair == PairKind::kNone) {
+      body[slot] = target_word(spec, ordinal);
+      continue;
+    }
+    const std::array<uint32_t, 2> words = pair_words(spec, ordinal);
+    body[slot] = words[0];
+    body[slot + 1] = words[1];
   }
 
   std::vector<uint32_t> words = prologue;
@@ -715,8 +787,12 @@ build_kernel(const KernelSpec &spec)
   }
   kernel.body_start_pc = body_start_index * kInstructionBytes;
   for (const uint32_t slot : target_slot_indices) {
-    kernel.target_slot_pcs.push_back((body_start_index + slot) *
-                                     kInstructionBytes);
+    // Record every slot a substitution occupies, so the audit checks both
+    // halves of a pair rather than only its head.
+    for (uint32_t offset = 0; offset < per_target; ++offset) {
+      kernel.target_slot_pcs.push_back((body_start_index + slot + offset) *
+                                       kInstructionBytes);
+    }
   }
 
   kernel.instructions_per_iteration = spec.body_slots + 2;
@@ -724,21 +800,26 @@ build_kernel(const KernelSpec &spec)
       prologue.size() +
       (uint64_t{spec.trip_count} * kernel.instructions_per_iteration) + 1;
 
-  uint64_t body_gas = 0;
-  for (uint32_t slot = 0; slot < spec.body_slots; ++slot) {
-    const bool is_target = std::ranges::find(target_slot_indices, slot) !=
-                           target_slot_indices.end();
-    body_gas += is_target ? scheduled_gas_for(spec.target)
-                          : scheduled_gas_for(Op::kAdd);
+  // Charge the body by decoding it with the production decoder rather than by
+  // reasoning about which slot holds what. The slot-walking version silently
+  // assumed one instruction per target, which stopped being true the moment a
+  // substitution could place a pair -- and a gas total that disagrees with what
+  // the engine charges would break the test that pins them equal.
+  const std::vector<uint8_t> body_code = test_program::code_from_words(body);
+  const auto body_gas = scheduled_gas_for_code(body_code);
+  if (!body_gas.has_value()) {
+    return std::unexpected(body_gas.error());
+  }
+  const std::vector<uint8_t> prologue_code =
+      test_program::code_from_words(prologue);
+  const auto prologue_gas = scheduled_gas_for_code(prologue_code);
+  if (!prologue_gas.has_value()) {
+    return std::unexpected(prologue_gas.error());
   }
   const uint64_t loop_gas =
       scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBne);
-  uint64_t prologue_gas = 0;
-  for (size_t i = 0; i < prologue.size(); ++i) {
-    prologue_gas += kBaseInstructionGas;
-  }
-  kernel.scheduled_gas = prologue_gas +
-                         (uint64_t{spec.trip_count} * (body_gas + loop_gas)) +
+  kernel.scheduled_gas = *prologue_gas +
+                         (uint64_t{spec.trip_count} * (*body_gas + loop_gas)) +
                          scheduled_gas_for(Op::kEcall);
   return kernel;
 }

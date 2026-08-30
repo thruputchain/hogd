@@ -199,14 +199,29 @@ calibration behind the current schedule silently keeps describing the old
 interpreter.
 
 **The guarded costs.** How expensive the worst cases are relative to the
-baseline instruction *measured in the same run*. Ratios, not nanoseconds, so
-the reference survives moving to different hardware. Only cells at or above
-1.5x baseline are guarded, because those are the ones that reproduce tightly;
+baseline instruction *measured in the same run*. Only cells at or above 1.5x
+baseline are guarded, because those are the ones that reproduce tightly;
 guarding the near-baseline population would fail most nights on drift far too
 small to matter, and a job that cries wolf gets muted and then catches nothing.
 The tolerance on top of that is 100% -- a guarded cost has to double before it
 fires. This is an alarm for things being wildly out of whack, not a performance
 budget.
+
+Ratios rather than nanoseconds make the reference portable across **identical**
+hardware, which is what the bench pool is. They do **not** make it portable
+across microarchitectures, and it is worth being exact about that because the
+obvious reading is too optimistic: a reference taken on one cloud host failed 3
+of 18 guards on another, with the same engine fingerprint. The baseline is
+dispatch-bound and scales with core width and clock, while a chained multiply or
+a pointer-chased load is latency-bound and does not, so the two do not move
+together and their ratio is not invariant. Regenerate the reference on the
+machine class the check will run on; `mode=reference` in the workflow exists for
+exactly that.
+
+**The interaction bound.** A program must cost no more than the sum of its
+opcodes' individual worst cases, or per-opcode worst-case pricing does not bound
+it. That is a property of the method, not a drifted number, so it fails the
+check on its own terms.
 
 It also warns, without failing, when a cell has become expensive that is not in
 the reference at all. A newly expensive instruction is exactly what a gas
@@ -272,13 +287,27 @@ against 5.71 + 1.21 = 6.92 ns for a worst-case `LW` plus a worst-case `SW` --
 subadditive, 52% under. So the bound holds, and it holds by the method rather
 than by luck.
 
-What is *not* established is that every interaction behaves that way. If some
-pair were **superadditive** -- costing more than its opcodes' individual worst
-cases sum to -- then per-opcode worst-case pricing would be unsound as a method,
-not merely imprecise. This axis has one measured point, not a sweep. The report
-flags any fused workload that overshoots, so the class of gap announces itself,
-and a `headroom` that ever goes negative is the signal that the method itself
-needs an interaction term or a blanket margin.
+That axis is now swept rather than inferred. A **pair substitution** puts two
+adjacent instructions into the body instead of one, so the sweep's slope is
+nanoseconds per pair, and two kinds that differ only in whether the load reads
+the address the store just wrote isolate the forwarding cost with instruction
+mix and register chain held equal:
+
+| pair | ns | vs a worst-case `SW` + worst-case `LW` |
+|---|---:|---:|
+| `sw;lw distinct` (control) | 1.42 | 81% under |
+| `sw;lw forward` | 1.87 | 76% under |
+
+So store-to-load forwarding costs about **0.45 ns per pair**, roughly 0.7x a
+baseline instruction, and the forwarding pair is nowhere near superadditive.
+Per-opcode worst-case pricing bounds it with room to spare.
+
+That settles this interaction, not all of them. A pair costing more than its
+opcodes' individual worst cases sum to would make the method unsound rather than
+imprecise, so `--predict` checks every workload and every pair against that
+bound and `--check` fails on a violation. The same machinery takes any new pair
+kind, which is how the next suspected interaction should be settled -- by
+measuring it, not by arguing it is covered.
 
 `--workloads` is the check that matters most for pricing. It runs realistic loop bodies,
 including deliberately fusible ones, and reports nanoseconds of real work per

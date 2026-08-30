@@ -74,6 +74,9 @@ struct SweepResult {
   std::string working_set;
   std::string magnitude;
   std::string branch_mode;
+  // A pair row measures an interaction, not an opcode, so it must never feed
+  // the per-opcode schedule -- only the superadditivity analysis.
+  bool is_pair = false;
   uint64_t scheduled_gas = 0;
   LinearFit fit;
   double worst_relative_mad = 0.0;
@@ -151,9 +154,9 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
 // targets are ever adjacent, which is what keeps every target's neighbours
 // filler and therefore keeps fusion out of the body.
 std::vector<uint32_t>
-sweep_counts(uint32_t body_slots, bool quick)
+sweep_counts(uint32_t body_slots, bool quick, const KernelSpec &spec)
 {
-  const uint32_t cap = (body_slots - 2) / 2;
+  const uint32_t cap = max_target_slots(body_slots, spec);
   if (quick) {
     return {0, cap / 2, cap};
   }
@@ -165,15 +168,20 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
           const std::string &branch_mode)
 {
   SweepResult result;
-  result.op = op_name(base.target);
-  result.context = context_name(base.context);
+  result.is_pair = base.pair != PairKind::kNone;
+  result.op = result.is_pair ? pair_name(base.pair) : op_name(base.target);
+  result.context = result.is_pair ? "pair" : context_name(base.context);
   result.working_set = working_set_name(base.working_set);
   result.magnitude = magnitude_name(base.magnitude);
   result.branch_mode = branch_mode;
-  result.scheduled_gas = scheduled_gas_for(base.target);
+  // What the current schedule charges for one substitution: both halves of a
+  // pair, or the single opcode.
+  result.scheduled_gas =
+      result.is_pair ? scheduled_gas_for(Op::kSw) + scheduled_gas_for(Op::kLw)
+                     : scheduled_gas_for(base.target);
 
   const std::vector<uint32_t> counts =
-      sweep_counts(options.body_slots, options.quick);
+      sweep_counts(options.body_slots, options.quick, base);
   auto sweep = build_sweep(base, counts, 64, options.placements);
   if (!sweep.has_value()) {
     result.rejected_because =
@@ -422,6 +430,9 @@ plan_sweeps(const Options &options)
     if (!options.only_op.empty() && op_name(op) != options.only_op) {
       continue;
     }
+    if (options.only_op == "PAIR") {
+      continue;
+    }
     KernelSpec base;
     base.target = op;
     base.body_slots = options.body_slots;
@@ -478,6 +489,22 @@ plan_sweeps(const Options &options)
     chain.context = OperandContext::kChain;
     plans.push_back({chain, ""});
   }
+
+  // Interaction sweeps. These are not opcodes and never price one; they exist
+  // to test whether a pair can cost more than its two opcodes' individual worst
+  // cases sum to. If one can, pricing each opcode at its own worst case does
+  // not bound programs that use them together, which would be a hole in the
+  // method rather than in any single number.
+  if (options.only_op.empty() || options.only_op == "PAIR") {
+    KernelSpec forward;
+    forward.pair = PairKind::kStoreLoadForward;
+    forward.working_set = WorkingSet::kL1Region;
+    forward.body_slots = options.body_slots;
+    plans.push_back({forward, ""});
+    KernelSpec distinct = forward;
+    distinct.pair = PairKind::kStoreLoadDistinct;
+    plans.push_back({distinct, ""});
+  }
   return plans;
 }
 
@@ -528,7 +555,8 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
     std::println(
         out,
         "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
-        "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"scheduled_gas\": "
+        "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
+        "\"scheduled_gas\": "
         "{}, \"usable\": {}, \"rejected_because\": \"{}\", \"slope_ns\": "
         "{:.6f}, \"theil_sen_ns\": {:.6f}, \"r_squared\": {:.6f}, "
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
@@ -536,10 +564,11 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "\"max_run_gas_seen\": {}}}{}",
         escape_json(sweep.op), escape_json(sweep.context),
         escape_json(sweep.working_set), escape_json(sweep.magnitude),
-        escape_json(sweep.branch_mode), sweep.scheduled_gas,
-        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
-        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
-        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
+        escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
+        sweep.scheduled_gas, sweep.usable ? "true" : "false",
+        escape_json(sweep.rejected_because), sweep.fit.slope,
+        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
+        sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }
@@ -671,7 +700,11 @@ main_impl(int argc, char **argv)
   for (size_t i = 0; i < plans.size(); ++i) {
     const SweepPlan &plan = plans[i];
     std::println(stderr, "[{}/{}] {} {}{}{}{}", i + 1, plans.size(),
-                 op_name(plan.spec.target), context_name(plan.spec.context),
+                 plan.spec.pair != PairKind::kNone ? pair_name(plan.spec.pair)
+                                                   : op_name(plan.spec.target),
+                 plan.spec.pair != PairKind::kNone
+                     ? "pair"
+                     : context_name(plan.spec.context),
                  plan.spec.working_set == WorkingSet::kNone
                      ? ""
                      : (" " + working_set_name(plan.spec.working_set)).c_str(),

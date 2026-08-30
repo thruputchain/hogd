@@ -363,6 +363,101 @@ TEST(Rv32GasCalibrationProvenance, CalibrationOperandsDoNotFuse)
          "any of them fire, its slope is not a per-instruction cost";
 }
 
+// A pair substitution has to keep every property a single-opcode one has:
+// its two slots land inside the interior, pairs never touch each other (the
+// trailing load of one beside the leading store of the next would fuse), and
+// the lowering leaves all of it alone. The cap and the placement span are
+// computed in two different files, and when they disagreed by one the densest
+// kernel did exactly that and the audit caught it -- so the cap is asserted
+// here rather than trusted.
+TEST(Rv32GasCalibrationKernel, PairsStayApartAndUnfused)
+{
+  for (const PairKind kind :
+       {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct}) {
+    KernelSpec spec;
+    spec.pair = kind;
+    spec.working_set = WorkingSet::kL1Region;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(kTestBodySlots, spec);
+    ASSERT_GT(spec.target_slots, 0U) << pair_name(kind);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << pair_name(kind);
+    // Two recorded slots per pair: both halves are audited, not just the head.
+    EXPECT_EQ(kernel.value().target_slot_pcs.size(), spec.target_slots * 2)
+        << pair_name(kind);
+
+    const uint32_t first_slot =
+        kernel.value().body_start_pc / kInstructionBytes;
+    const uint32_t last_slot = first_slot + spec.body_slots - 1;
+    std::vector<uint32_t> slots;
+    for (const uint32_t pc : kernel.value().target_slot_pcs) {
+      slots.push_back(pc / kInstructionBytes);
+    }
+    for (const uint32_t slot : slots) {
+      EXPECT_GT(slot, first_slot) << pair_name(kind);
+      EXPECT_LT(slot, last_slot) << pair_name(kind);
+    }
+    // Slots come in adjacent couples, and consecutive couples never touch.
+    for (size_t i = 0; i + 1 < slots.size(); i += 2) {
+      EXPECT_EQ(slots[i + 1], slots[i] + 1) << pair_name(kind);
+      if (i + 2 < slots.size()) {
+        EXPECT_GT(slots[i + 2], slots[i + 1] + 1)
+            << "pairs at " << slots[i] << " and " << slots[i + 2]
+            << " touch, so the leading store fuses with the trailing load";
+      }
+    }
+    EXPECT_TRUE(audit_kernel(kernel.value(), spec).clean()) << pair_name(kind);
+  }
+}
+
+// One more target than the cap allows must be refused, not silently placed
+// somewhere that fuses.
+TEST(Rv32GasCalibrationKernel, PairCapIsEnforced)
+{
+  KernelSpec spec;
+  spec.pair = PairKind::kStoreLoadForward;
+  spec.working_set = WorkingSet::kL1Region;
+  spec.body_slots = kTestBodySlots;
+  spec.trip_count = kTestTripCount;
+  spec.target_slots = max_target_slots(kTestBodySlots, spec) + 1;
+  EXPECT_FALSE(build_kernel(spec).has_value());
+}
+
+// The pair kernels must run and be charged exactly, like every other kernel:
+// the gas accounting was rewritten to decode the body when pairs made the
+// old slot-walking version wrong.
+TEST(Rv32GasCalibrationKernel, PairKernelsRunTheWorkTheyAreCreditedWith)
+{
+  HaltHost host;
+  for (const PairKind kind :
+       {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct}) {
+    KernelSpec spec;
+    spec.pair = kind;
+    spec.working_set = WorkingSet::kL1Region;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(kTestBodySlots, spec);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << pair_name(kind);
+    auto program =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(program.has_value()) << pair_name(kind);
+
+    ThreadedMachine machine(*program, kGasLimit);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted) << pair_name(kind);
+    EXPECT_EQ(outcome.trap, Trap::kNone) << pair_name(kind);
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
+        << pair_name(kind);
+  }
+}
+
 TEST(Rv32GasCalibrationFit, RecoversAKnownSlope)
 {
   std::vector<MeasurementPoint> points;

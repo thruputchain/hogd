@@ -116,12 +116,21 @@ the calibration no longer describes the engine. It is meant for a periodic job
 -- nightly, weekly, whatever cadence suits -- on a reasonably quiet machine, and
 it is not built to run on every change.
 
-It checks the engine fingerprint (deterministic, cannot flake) and a set of
-guarded costs expressed as ratios to the baseline instruction measured in the
-same run, so the reference works across hardware. The tolerance is loose by
-design: only cells at or above 1.5x baseline are guarded, and a guarded cost has
-to double before it fires. That separates a real blowout from the ordinary
-few-percent drift of a shared machine, and keeps the job worth reading.
+It checks three things: the engine fingerprint (deterministic, cannot flake), a
+set of guarded costs held as ratios to the baseline measured in the same run,
+and the interaction bound -- that no program or pair costs more than the sum of
+its opcodes' individual worst cases. The cost tolerance is loose by design: only
+cells at or above 1.5x baseline are guarded, and a guarded cost has to double
+before it fires. The bound is not loose, because exceeding it is a failure of
+the pricing method rather than a drifted measurement.
+
+The ratios are portable across **identical** hardware, which is what the bench
+pool is, and not across microarchitectures: a reference taken on one cloud host
+failed 3 of 18 guards on another with the same engine fingerprint. The baseline
+is dispatch-bound and scales with core width and clock; a chained multiply or a
+pointer-chased load is latency-bound and does not. So bootstrap the reference on
+the pool the check runs on -- `mode=reference` exists for that -- and do not
+expect one taken elsewhere to hold.
 
 `--fingerprint-only` answers "did the engine change?" instantly, without
 measuring, for use by hand after touching the interpreter.
@@ -238,11 +247,27 @@ sum of its opcodes' individual worst cases. Here the pair measures 3.35 ns
 against 6.92 ns for a worst-case `LW` plus a worst-case `SW`, so it is
 subadditive by 52% and the bound holds by the method rather than by coincidence.
 
-The open question is sharper than "is 69% a lot". It is whether any interaction
-can be **superadditive** -- cost more than its opcodes' individual worst cases
-sum to. If one can, per-opcode worst-case pricing is unsound as a method and
-needs an interaction term or a blanket margin. Nothing measured so far is, but
-this axis has exactly one point. A negative `headroom` is the tripwire.
+The sharper question -- whether any interaction can be **superadditive**, costing
+more than its opcodes' individual worst cases sum to -- is now measured rather
+than argued. A *pair substitution* places two adjacent instructions per
+substitution instead of one, so a sweep's slope is nanoseconds per pair, and two
+kinds differing only in whether the load reads the address the store just wrote
+isolate the effect:
+
+| pair | ns/pair | vs worst-case `SW` + worst-case `LW` (7.66 ns) |
+|---|---:|---:|
+| `sw;lw distinct` (control) | 1.42 | 81% under |
+| `sw;lw forward` | 1.87 | 76% under |
+
+Store-to-load forwarding costs about **0.45 ns per pair** -- real, measurable,
+and nowhere near superadditive. Worst-case per-opcode pricing bounds it.
+
+`--predict` now checks every workload and every pair against that bound and
+`--check` fails on a violation, because a superadditive interaction would make
+the method unsound rather than merely imprecise. It also lists the programs with
+the most headroom, which is the opposite failure: `load_use` is billed 8.3x what
+it costs, `branch_dense` 4.1x. Safe, but that is capacity the schedule gives
+away, and it is where a cheaper context would pay for itself.
 
 ## Before changing the schedule
 
@@ -261,11 +286,12 @@ this axis has exactly one point. A negative `headroom` is the tripwire.
 - Price `JAL`, `JALR`, `FENCE`, and the trapping opcodes. The substitution
   design cannot hold them constant, so they are unmeasured and would keep
   placeholder costs.
-- Sweep store-to-load forwarding as its own context, rather than relying on one
-  observed point being subadditive. The general form is a *pair* substitution --
-  substituting two adjacent slots instead of one -- which would also let the
-  harness measure fusion's benefit directly instead of inferring it, and would
-  turn "no interaction is superadditive" from an assumption into a measurement.
+- Extend the pair sweep to other suspected interactions. The mechanism is in
+  place and store-to-load forwarding is measured; the same shape would let the
+  harness price fusion's benefit directly instead of inferring it from a slot
+  count.
+- Regenerate `reference.txt` on the bench pool. The committed one was taken on a
+  development container and will not hold there.
 - Re-run after interpreter changes, not only before schedule changes. A new
   fusion rule or a dispatch change moves these numbers, and a schedule
   calibrated against the old engine silently loses its margin. The engine
