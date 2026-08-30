@@ -4,6 +4,12 @@ name = "rv32_gas_calibration"
 name = "{{ .hog_schedule }}_{{ .hog_host }}"
 script = """
 
+# This script is delivered by typing it into a remote pty, whose input buffer
+# drops whatever arrives past ~4 KiB before the shell drains it -- silently,
+# leaving a half-executed script and a confusing failure far from the cause.
+# Keep it small. The reasoning behind each step is in
+# docs/rv32/rv32-gas-calibration.md, not here.
+
 set -x
 
 echo 'cloning hogd'
@@ -14,9 +20,7 @@ git checkout -q {{ .git_commit }}
 
 source ./scripts/ci/configure_git_cache.sh
 
-# Only what a configure needs. The rv32_gas_calibrate target itself links just
-# the RV32 ISA core, but CMake configures the whole project before it can build
-# anything.
+# Only what a configure needs; CMake configures the whole project regardless.
 git submodule update --init --recursive \
    protocol \
    external/rocksdb \
@@ -30,16 +34,8 @@ git submodule update --init --recursive \
 
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
-# Configure Release with an explicitly pinned compiler. Both halves matter.
-#
-# Release because the measured engine is the *compiled* interpreter: -O3,
-# -march, and LTO across the interpreter's translation units all reach the hot
-# path, and rv32_gas_calibrate refuses to measure anything else.
-#
-# Pinned compiler because the costs are a property of the generated code. The
-# engine fingerprint is deliberately compiler-independent, so it will not catch
-# a compiler change -- only the numbers move, silently. Every run recording the
-# same compiler is what makes them comparable over time.
+# Release, and a pinned compiler: the costs are a property of the generated
+# code, and the engine fingerprint does not catch a compiler change.
 echo 'configure release'
 ./scripts/build.sh -d build/release -t Release -c gcc -x "-DBUILD_BENCHMARKS=OFF" -n \
   > configure.log 2>&1 || (cat configure.log && exit 1)
@@ -49,67 +45,52 @@ cmake --build build/release --parallel "$(nproc)" --target rv32_gas_calibrate \
   > build.log 2>&1 || (cat build.log && exit 1)
 
 mkdir -p ${HOG_DUMP_DIR}
+J=${HOG_DUMP_DIR}/rv32-gas-calibration.json
 
-# `reference` produces the numbers and prints a reference file without gating;
-# that is how a new host is bootstrapped, since the committed reference holds
-# costs as ratios measured somewhere else. `check` (the default) gates.
+# `reference` bootstraps a host without gating; `check` (the default) gates.
 if [ "{{ .mode }}" = "reference" ]; then
 
   echo 'running calibration (reference mode, not gating)'
-  ./scripts/rv32_gas_calibrate.sh build/release \
-    --out ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+  ./scripts/rv32_gas_calibrate.sh build/release --out $J
 
   echo '===== per-opcode costs ====='
-  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+  ./scripts/rv32_gas_report.py $J
 
   echo '===== validation workloads ====='
-  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --workloads
+  ./scripts/rv32_gas_report.py $J --workloads
 
-  echo '===== additivity: do the per-opcode costs predict real programs? ====='
-  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --predict
+  echo '===== additivity: do the costs predict real programs? ====='
+  ./scripts/rv32_gas_report.py $J --predict
 
-  # The point of the whole harness. Gas costs have to come from the machine
-  # class that runs the chain, not from whatever laptop or container generated
-  # them, so print the proposal here where it is measured on bench hardware.
-  #
-  # One run: the report says so itself, and says which distinctions not to
-  # trust because of it. Dispatch this workflow a few times and pass the
-  # collected JSON to --schedule together before adopting anything -- it merges
-  # runs, takes the highest cost each context reached, and marks the cells that
-  # did not reproduce.
+  # Gas costs have to come from the machine class that runs the chain, so the
+  # proposal is printed here. This is one run; collect several and pass them
+  # to --schedule together before adopting anything.
   echo '===== proposed gas schedule from this host ====='
-  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
-    --schedule
+  ./scripts/rv32_gas_report.py $J --schedule
 
   echo '===== proposed reference.txt for this host ====='
   echo 'To adopt: copy the block below over'
   echo 'hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
-  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
-    --emit-reference | tee ${HOG_DUMP_DIR}/rv32-gas-reference.txt
+  ./scripts/rv32_gas_report.py $J --emit-reference \
+    | tee ${HOG_DUMP_DIR}/rv32-gas-reference.txt
 
 else
 
   echo 'running calibration and checking it against the committed reference'
   CHECK_RESULT=0
-  ./scripts/rv32_gas_check.sh build/release \
-    --out ${HOG_DUMP_DIR}/rv32-gas-calibration.json > check.log 2>&1 \
+  ./scripts/rv32_gas_check.sh build/release --out $J > check.log 2>&1 \
     || CHECK_RESULT=$?
   cat check.log
 
   if [ $CHECK_RESULT -ne 0 ]; then
-    # A failure here is one of two things, and the check output says which: the
-    # engine fingerprint moved (a fusion rule, gas cost, or run limit changed,
-    # so the calibration behind the current gas costs describes a different
-    # interpreter), or a guarded worst-case cost doubled relative to the
-    # baseline. Neither is fixed by regenerating the reference.
+    # Either the engine fingerprint moved or a guarded worst-case cost doubled;
+    # the check output says which. Neither is fixed by regenerating.
     echo '===== per-opcode costs from the failing run ====='
-    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json || true
+    ./scripts/rv32_gas_report.py $J || true
     echo '===== validation workloads ====='
-    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
-      --workloads || true
+    ./scripts/rv32_gas_report.py $J --workloads || true
     echo '===== additivity ====='
-    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
-      --predict || true
+    ./scripts/rv32_gas_report.py $J --predict || true
     exit $CHECK_RESULT
   fi
 

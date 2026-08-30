@@ -183,12 +183,24 @@ measuring, for use by hand after touching the interpreter.
 In CI this is the **RV32 Gas Calibration** workflow
 (`.github/workflows/rv32_gas_calibration.yml`, driving
 `scripts/schedules/rv32_gas_calibration.toml` through `hog_sched`). Manual
-dispatch for now; it is pinned to one bench host and builds Release with a
-pinned compiler, because both the host and the generated code are part of what
-is being measured. Dispatch it with `mode=reference` to bootstrap a new bench
-host -- that measures without gating and prints a reference file for that
-machine, which is needed because the committed reference's ratios were measured
-elsewhere.
+dispatch for now; it runs on the bench pool and builds Release with a pinned
+compiler, because both the host and the generated code are part of what is
+being measured -- the fingerprint is deliberately compiler-independent, so a
+compiler change would move the numbers silently.
+
+`mode=reference` measures without gating and prints, in order: the per-opcode
+costs, the validation workloads, the additivity check, the **proposed gas
+schedule for that host**, and a reference block for it. Use it to bootstrap a
+new bench host, whose ratios the committed reference does not describe, and to
+get schedule numbers off the machine class that runs the chain rather than off
+a development container. `check`, the default, gates.
+
+One thing to know before editing that schedule file: `hog_sched` delivers the
+job by typing it into a remote pty, and the pty drops whatever arrives past
+about 4 KiB before the shell has drained it. Past that the remote runs a
+truncated script and fails somewhere unrelated to the edit -- the symptom seen
+once here was an ssh-agent error in a line that was never sent. Keep the
+embedded script short and put the explanation here instead.
 
 ## Re-running after an interpreter change
 
