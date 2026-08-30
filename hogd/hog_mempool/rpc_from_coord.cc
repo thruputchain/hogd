@@ -2765,7 +2765,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
-        failed_signatures_.reclaim_if_full();
 
         // We need to do two things:
         // 1. If the nominated block is not the committed block, we need to

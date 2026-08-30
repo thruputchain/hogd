@@ -38,6 +38,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
+#include "hogd/hog_mempool/failed_signature_cache.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
@@ -2787,6 +2788,49 @@ TEST(Mempool, MultiSignerSigningsShareATransactionHash)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{ordered})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// The cache bounds what someone submitting endless distinct invalid signings
+// can occupy. Eviction is approximate, but the ceiling is not.
+TEST(Mempool, FailedSignatureCacheIsBounded)
+{
+  FailedSignatureCache cache(/*bucket_count=*/64);
+
+  SHA256Hash hash{};
+  for (size_t i = 0; i < cache.max_entries() * 4; i++) {
+    std::memcpy(hash.data(), &i, sizeof(i));
+    cache.insert(hash);
+  }
+
+  EXPECT_LE(cache.size(), cache.max_entries());
+  // Still doing its job at the ceiling: the most recent signing is retained.
+  EXPECT_TRUE(cache.contains(hash));
+}
+
+// A signing that keeps being resubmitted stays cached, which is the point of
+// promoting on a hit -- otherwise the entries worth keeping are exactly the
+// ones a flood of one-shot garbage would push out.
+TEST(Mempool, FailedSignatureCacheKeepsRepeatedlyHitEntries)
+{
+  FailedSignatureCache cache(/*bucket_count=*/64);
+
+  SHA256Hash repeated{};
+  const size_t marker = 0xD1CED1CED1CED1CEULL;
+  std::memcpy(repeated.data(), &marker, sizeof(marker));
+  cache.insert(repeated);
+
+  // Enough distinct signings to sweep the clock hand around every bucket many
+  // times over.
+  SHA256Hash filler{};
+  for (size_t i = 0; i < cache.max_entries() * 8; i++) {
+    std::memcpy(filler.data(), &i, sizeof(i));
+    cache.insert(filler);
+    // Keep the entry live, as a submitter replaying the same bytes would. The
+    // read bit is what carries it past the clock hand.
+    ASSERT_TRUE(cache.contains(repeated));
+  }
+
+  EXPECT_TRUE(cache.contains(repeated));
 }
 
 // [FailedSignatureCache] is a public-gateway admission throttle. Transactions
