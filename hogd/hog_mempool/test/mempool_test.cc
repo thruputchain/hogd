@@ -2416,14 +2416,15 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
 
   // The genuine transaction, correctly signed.
   SignedTransaction good_tx = txs[0];
-  good_tx.signatures.push_back(make_signature(
-      sk, tx, /*public_key_id=*/0, MempoolTestInfra::kNetworkHash));
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
 
   // The attacker's copy: identical [Transaction], corrupted signature bytes.
   // The two share a [TransactionHash], which is what makes the attack possible.
   SignedTransaction poisoned_tx = txs[0];
-  DecoratedSignature bad_signature = make_signature(
-      sk, tx, /*public_key_id=*/0, MempoolTestInfra::kNetworkHash);
+  DecoratedSignature bad_signature =
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
   bad_signature.signature.ed25519()[0] ^= 0xff;
   poisoned_tx.signatures.push_back(bad_signature);
 
