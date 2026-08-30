@@ -396,15 +396,15 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
                          -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
 
-      if (xdrs[i].size() > 0) {
+      if (!xdrs[i].empty()) {
         std::memcpy(parallel.xdr.data() + offset, xdrs[i].data(),
                     xdrs[i].size());
       }
       co_return;
     }(i, offsets[i], parallel, xdrs));
   }
-  for (size_t i = 0; i < copies.size(); i++) {
-    co_await copies[i];
+  for (x23::Async<void> &copy : copies) {
+    co_await copy;
   }
   co_return;
 }
