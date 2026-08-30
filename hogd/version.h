@@ -74,7 +74,14 @@ protocol_token()
 /// `protocol_text` in hogd/xdr/protocol_token.h. Handing the array to
 /// something expecting a string does not compile, so those callers cannot be
 /// missed by accident.
-inline std::array<std::uint8_t, kHogdProtocolLen>
+///
+/// Returned by reference to the process-wide token rather than by value: a
+/// `protocol_text` view taken off a returned temporary dangles the moment the
+/// statement ends, which is what `protocol_text(kHogdProtocol())` looks like
+/// it does not do (hogd issue #3718). Borrowing the token keeps that reading
+/// true. Callers that want their own copy still get one from
+/// `ProtocolCommit x = kHogdProtocol();`.
+inline const std::array<std::uint8_t, kHogdProtocolLen> &
 kHogdProtocol()
 {
   return detail::protocol_token();
