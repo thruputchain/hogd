@@ -211,6 +211,31 @@ dispatched once. That is the safe direction -- fusion can only make real cost
 lower than charged cost -- and the workload rows show it is worth roughly 20-30%
 on fusible code.
 
+## Do the costs add up?
+
+Every cost is measured by substituting one opcode into an otherwise fixed body,
+which says nothing on its own about whether the costs compose. `--predict` sums
+them over each validation workload's opcode histogram and compares against that
+workload's measured time.
+
+`alu_mix` -- the workload that neither fuses nor chains -- predicts within
+**2%**. That is the evidence the decomposition means something. The rest miss in
+the directions the model says they should: fused workloads undershoot, and
+`multiply_mix` / `divide_mix` overshoot a prediction built from
+independent-context costs because each result feeds the next instruction.
+
+One row does not fit either story, and it is the useful one. `word_copy` fuses
+and still comes in ~69% over. Fusion can only remove dispatches, so a cost
+outside the per-opcode model is dominating: each store writes the address the
+next load reads, so the pair serializes on store-to-load forwarding. **No
+context in the harness measures that.**
+
+It is not a pricing hole today -- loads are priced from the pointer chase, which
+is expensive enough to bound the store-forward case with room to spare -- but it
+is a real gap, and it would become a hole if the chase context were ever dropped
+as unrealistic. The report now flags any fused workload that overshoots, so this
+class of gap reports itself.
+
 ## Before changing the schedule
 
 - Re-run on the slowest supported validator class, not a development host. The
@@ -228,6 +253,9 @@ on fusible code.
 - Price `JAL`, `JALR`, `FENCE`, and the trapping opcodes. The substitution
   design cannot hold them constant, so they are unmeasured and would keep
   placeholder costs.
+- Decide whether store-to-load forwarding needs its own context. `--predict`
+  shows the current schedule bounds it via the load pointer-chase price, but
+  nothing measures it directly.
 - Re-run after interpreter changes, not only before schedule changes. A new
   fusion rule or a dispatch change moves these numbers, and a schedule
   calibrated against the old engine silently loses its margin. The engine

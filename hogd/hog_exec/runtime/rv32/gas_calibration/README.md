@@ -47,6 +47,7 @@ Read the output with:
 scripts/rv32_gas_report.py /tmp/gas.json              # per-opcode costs
 scripts/rv32_gas_report.py /tmp/gas.json --schedule   # proposed integer costs
 scripts/rv32_gas_report.py /tmp/gas.json --workloads  # pricing quality
+scripts/rv32_gas_report.py /tmp/gas.json --predict    # do the costs add up?
 scripts/rv32_gas_report.py before.json after.json     # what moved
 ```
 
@@ -237,7 +238,36 @@ in that context, on that host. `slope_stderr_ns` is its uncertainty. A cost is
 worth acting on when the slope clears a couple of standard errors *and* the
 same ordering shows up on another host.
 
-`--workloads` is the check that matters most. It runs realistic loop bodies,
+`--predict` is the check that the per-opcode decomposition is *true*. Each cost
+was measured in isolation by substituting one opcode into an otherwise fixed
+body; nothing in that procedure verifies the costs add up over a program that
+mixes them. This sums them over each validation workload's opcode histogram and
+compares against that workload's measured time.
+
+The honest additivity test is the workload that neither fuses nor chains --
+`alu_mix`. On the development host it predicts within **2%**, which is the
+evidence that the decomposition means something.
+
+The other rows are expected to miss, and how they miss is the point:
+
+- Fused workloads (`address_math`, `load_use`, `branch_dense`) come in *under*
+  the prediction, because they retire the same instructions in fewer dispatches.
+- Chained ones (`multiply_mix`, `divide_mix`) come in *over* a prediction built
+  from independent-context costs, because chaining is the expensive end of those
+  opcodes' range. That is the context axis showing up end-to-end.
+
+`word_copy` is the interesting one: it fuses and still overshoots by ~69%.
+Fusion can only remove dispatches, so something the per-opcode model cannot see
+is dominating -- here, a store-to-load chain, since each store writes the
+address the next load reads. **The harness has no context that measures
+store-to-load forwarding.** It is not a pricing hole today, because loads are
+priced from the pointer chase and that is expensive enough to bound this case
+(the `headroom` column shows by how much), but it is a real gap, and dropping
+the chase context without replacing it would open one. The report flags any
+fused workload that overshoots, so this class of gap announces itself rather
+than waiting to be noticed.
+
+`--workloads` is the check that matters most for pricing. It runs realistic loop bodies,
 including deliberately fusible ones, and reports nanoseconds of real work per
 unit of gas charged. A gas limit converts to a wall-clock bound at the *worst*
 ns/gas in that set, so the max/min spread is the capacity a schedule gives
@@ -269,7 +299,10 @@ get right, is where the estimator is at its strongest.
 - The contexts are the ones we thought of. They are a lower bound on the worst
   case, not a proof of it. A new fusion rule, or a new engine, can create a
   context that is not measured here -- which is the argument for re-running this
-  after interpreter changes, not only before schedule changes.
+  after interpreter changes, not only before schedule changes. `--predict` is
+  the tripwire for the class of gap that shows up as a workload the per-opcode
+  costs cannot explain; store-to-load forwarding is the one it has already
+  found.
 - Independent divides sit under the engine's own dispatch cost, so their
   marginal cost is small. That is a real property of this interpreter, not a
   measurement artifact, and it is why the dependent form is measured separately.

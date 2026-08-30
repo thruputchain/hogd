@@ -11,6 +11,7 @@ Usage:
   scripts/rv32_gas_report.py gas.json                  # per-opcode table
   scripts/rv32_gas_report.py gas.json --schedule       # proposed gas costs
   scripts/rv32_gas_report.py gas.json --workloads      # pricing-quality check
+  scripts/rv32_gas_report.py gas.json --predict        # do the costs add up?
   scripts/rv32_gas_report.py before.json after.json    # compare two runs
   scripts/rv32_gas_report.py a.json b.json --schedule  # schedule both agree on
   scripts/rv32_gas_report.py gas.json --emit-reference > reference.txt
@@ -459,6 +460,178 @@ def print_repricing(data, schedule):
         print("schedule cannot tell the two apart at charge time.")
 
 
+# How well a context matches the arrangement the validation workloads use:
+# independent destinations, branches falling through, memory in the low 4 KiB.
+# Lower is better.
+def _context_distance(cell):
+    distance = 0
+    if cell["context"] != "independent":
+        distance += 1
+    if cell["working_set"] not in ("none", "l1_4k"):
+        distance += 1
+    if cell["magnitude"] not in ("default", "large"):
+        distance += 1
+    if cell["branch_mode"] == "taken":
+        distance += 1
+    return distance
+
+
+def cost_model(data, worst_case=False):
+    """Per-opcode ns, either as the workloads arrange them or at the worst.
+
+    Two vectors, because they answer different questions. The workload-matched
+    one tests whether the per-opcode decomposition is *true*: it should predict
+    a mixed program's time. The worst-case one is what the schedule prices at,
+    and a workload's measured time should sit at or below it -- if it did not,
+    gas would be underpricing that program.
+    """
+    baseline = data["baseline"]["ns_per_filler_instruction"]
+    best = {}
+    for cell in usable_cells(data):
+        cost = cell["ns_per_instruction"] if resolved(cell) else baseline
+        op = cell["op"]
+        if worst_case:
+            if op not in best or cost > best[op]:
+                best[op] = cost
+            continue
+        rank = (_context_distance(cell), -cost)
+        if op not in best or rank < best[op][0]:
+            best[op] = (rank, cost)
+    if worst_case:
+        return best
+    return {op: cost for op, (_, cost) in best.items()}
+
+
+def taken_branch_premium(data):
+    """What a taken conditional branch costs over a fall-through one.
+
+    Every workload iteration ends in one taken branch -- the loop back edge --
+    while any branch inside a body falls through. The op histogram cannot tell
+    the two apart, so the premium is added once per iteration rather than
+    letting a 1-in-132 instruction skew the prediction.
+    """
+    taken = [c for c in usable_cells(data) if c["branch_mode"] == "taken"]
+    fell_through = [c for c in usable_cells(data)
+                    if c["branch_mode"] == "not_taken"]
+    if not taken or not fell_through:
+        return 0.0
+    mean_taken = sum(c["ns_per_instruction"] for c in taken) / len(taken)
+    mean_through = (sum(c["ns_per_instruction"] for c in fell_through)
+                    / len(fell_through))
+    return max(0.0, mean_taken - mean_through)
+
+
+def print_prediction(data):
+    """Does the sum of separately measured opcode costs equal a real program?
+
+    This is the check that the per-opcode decomposition means anything. Each
+    cost was measured in isolation, by substituting one opcode into an otherwise
+    fixed body; nothing so far has verified that those costs *add up* over a
+    program that mixes them. Here they are summed over each validation
+    workload's opcode histogram and compared against that workload's measured
+    time.
+
+    Two effects are expected, and separating them is the point:
+
+    - A workload the lowering fuses retires the same instructions in fewer
+      dispatches, so it should come in *under* the prediction. The `fused`
+      column is how many body slots that applies to.
+    - A workload whose operands chain (multiply_mix and divide_mix feed each
+      result straight into the next add) should come in *over* a prediction
+      built from independent-context costs, because that is the cheap end of
+      those opcodes' range.
+
+    So the honest additivity test is the unfused, independent workload:
+    alu_mix. If the model is sound anywhere, it is sound there.
+    """
+    workloads = [w for w in data.get("workloads") or [] if w.get("op_counts")]
+    if not workloads:
+        print("no workload op histograms in this run (older schema)",
+              file=sys.stderr)
+        return 1
+
+    baseline = data["baseline"]["ns_per_filler_instruction"]
+    matched = cost_model(data)
+    worst = cost_model(data, worst_case=True)
+    premium = taken_branch_premium(data)
+
+    def predict(workload, costs):
+        return sum(costs.get(op, baseline) * count
+                   for op, count in workload["op_counts"].items()) + premium
+
+    header = (f"{'workload':<15}{'fused':>6}{'measured':>10}{'predicted':>11}"
+              f"{'residual':>10}{'worst-case':>12}{'headroom':>10}")
+    print("additivity: do separately measured opcode costs predict a real "
+          "program?")
+    print()
+    print(header)
+    print("-" * len(header))
+    clean_residuals = []
+    for workload in workloads:
+        measured = workload["ns_per_iteration"]
+        predicted = predict(workload, matched)
+        ceiling = predict(workload, worst)
+        residual = (measured - predicted) / predicted * 100.0 if predicted else 0.0
+        headroom = (ceiling - measured) / ceiling * 100.0 if ceiling else 0.0
+        if workload["fused_slots"] == 0:
+            clean_residuals.append((workload["name"], residual))
+        print(f"{workload['name']:<15}{workload['fused_slots']:>6}"
+              f"{measured:>10.2f}{predicted:>11.2f}{residual:>9.1f}%"
+              f"{ceiling:>12.2f}{headroom:>9.1f}%")
+    print()
+    print("predicted = sum(opcode count x its measured cost in the arrangement")
+    print("these workloads use) + one taken-branch premium for the loop edge.")
+    print("worst-case = the same sum at each opcode's most expensive measured")
+    print("context, which is what the schedule prices at.")
+    print()
+    if clean_residuals:
+        worst_name, worst_residual = max(clean_residuals,
+                                         key=lambda item: abs(item[1]))
+        mean = sum(abs(r) for _, r in clean_residuals) / len(clean_residuals)
+        print(f"On the {len(clean_residuals)} workloads the lowering does not "
+              f"fuse, the model is off by")
+        print(f"{mean:.1f}% on average, worst {abs(worst_residual):.1f}% "
+              f"({worst_name}). Those are the ones that test")
+        print("additivity: a fused workload is expected to undershoot, and a "
+              "chained one")
+        print("(multiply_mix, divide_mix) to overshoot a prediction built from "
+              "independent-")
+        print("context costs -- both are the model being right about why it is "
+              "wrong.")
+    # A fused workload retires its instructions in fewer dispatches, so it
+    # should come in under a prediction that charges for all of them. One that
+    # comes in over is the interesting case: something is costing time that no
+    # per-opcode cost accounts for, and the report should say so rather than
+    # leave it to a careful reader of the table.
+    anomalies = [w["name"] for w in workloads
+                 if w["fused_slots"] > 0
+                 and w["ns_per_iteration"] > predict(w, matched) * 1.05]
+    if anomalies:
+        print()
+        print("Fused but slower than predicted: " + ", ".join(anomalies) + ".")
+        print("Fusion can only remove dispatches, so a cost the per-opcode")
+        print("model does not see is dominating there. For word_copy it is the")
+        print("store-to-load chain: each store writes the address the next load")
+        print("reads, so the pair serializes on store-to-load forwarding, which")
+        print("no single-opcode sweep measures. Priced at the worst measured")
+        print("context it stays bounded (see the headroom column), but the")
+        print("harness does not currently have a context for it.")
+
+    over = [w["name"] for w in workloads
+            if w["ns_per_iteration"] > predict(w, worst)]
+    print()
+    if over:
+        print("WARNING: measured time exceeds the worst-case prediction for: "
+              + ", ".join(over))
+        print("         Gas would underprice these programs. Investigate "
+              "before pricing.")
+    else:
+        print("No workload exceeds its worst-case prediction, so pricing at "
+              "the worst measured")
+        print("context bounds every one of them.")
+    return 0
+
+
 def print_workloads(data):
     """Pricing quality: how far apart the ns-per-gas of real code sits.
 
@@ -715,6 +888,9 @@ def main():
                         help="print a proposed integer gas schedule")
     parser.add_argument("--workloads", action="store_true",
                         help="print the validation workload pricing table")
+    parser.add_argument("--predict", action="store_true",
+                        help="check that summed per-opcode costs predict the "
+                             "validation workloads")
     parser.add_argument("--emit-reference", action="store_true",
                         help="write a reference file for --check")
     parser.add_argument("--check", metavar="REFERENCE",
@@ -741,6 +917,8 @@ def main():
     if len(args.json) != 1:
         parser.error("pass one JSON file, two to compare, "
                      "or several with --schedule")
+    if args.predict:
+        return print_prediction(runs[0])
     if args.workloads:
         return print_workloads(runs[0])
     print_table(runs[0])

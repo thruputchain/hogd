@@ -65,6 +65,9 @@ if [ "{{ .mode }}" = "reference" ]; then
   echo '===== validation workloads ====='
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --workloads
 
+  echo '===== additivity: do the per-opcode costs predict real programs? ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --predict
+
   echo '===== proposed reference.txt for this host ====='
   echo 'To adopt: copy the block below over'
   echo 'hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
@@ -91,6 +94,9 @@ else
     echo '===== validation workloads ====='
     ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
       --workloads || true
+    echo '===== additivity ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+      --predict || true
     exit $CHECK_RESULT
   fi
 
@@ -106,11 +112,9 @@ CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credenti
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
 
-# Pinned to one host, not "?". The costs are nanoseconds on a particular
-# machine, and the committed reference holds them as ratios precisely so a host
-# change does not invalidate it -- but a run that lands somewhere different each
-# time still moves the numbers under the tolerance for no reason. Pinning keeps
-# successive runs comparable; changing the pin means regenerating the reference
-# there first (mode=reference).
+# Any bench host: they are the same hardware, so pinning one would only
+# constrain scheduling without making the numbers more comparable. What keeps
+# runs comparable across machines is that the reference holds costs as ratios to
+# the baseline instruction measured in the same run, not as nanoseconds.
 [jobs.host]
-bench_1 = "hog11"
+bench_1 = "?"
