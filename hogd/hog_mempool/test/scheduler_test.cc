@@ -372,6 +372,16 @@ TEST(Scheduler, CommitTouchingExcludedAccountAbortsRemoveFromScheduler)
   txs[2].tx.uniquifier.block_expiry_height = 12; // ordinary follow-up
 
   MempoolTestInfra server;
+  // Genesis initialization and the ceremony trigger auth_data_changed()
+  // callbacks that also call remove_from_scheduler(), which clears and reuses a
+  // function-static [accounts] map before taking [global_lock_]. Wait for the
+  // initial block commit so such a callback cannot overlap -- and clobber that
+  // shared map for -- the remove_from_scheduler() call below, exactly as the
+  // RemoveFromRunqueue* tests do. add_txs() reloads each account's hog age from
+  // the DB (read_average_hog_ages), so the set_hogs() balances below still take
+  // effect after the wait.
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+
   server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
                   /*num_hogs=*/balance);
   server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
