@@ -28,6 +28,7 @@
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 
 namespace hogd {
@@ -344,9 +345,8 @@ load_bootstrap_manifest(std::filesystem::path const &path)
     return std::unexpected(std::move(protocol.error()));
   }
   if (protocol->has_value()) {
-    if (std::expected<void, std::string> valid =
-            require_string_value(**protocol, version::kHogdProtocol(),
-                                 "protocol");
+    if (std::expected<void, std::string> valid = require_string_value(
+            **protocol, protocol_text(version::kHogdProtocol()), "protocol");
         !valid) {
       return std::unexpected(std::move(valid.error()));
     }

@@ -14,6 +14,7 @@
 #include "event_outbox_internal.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -22,7 +23,6 @@
 namespace hogd {
 
 inline constexpr uint32_t kIndexerOutboxEnvelopeFormatVersion = 1;
-inline constexpr size_t kMaxIndexerOutboxProtocolCommitBytes = 64;
 inline constexpr size_t kIndexerRpcRecordMarkerBytes = sizeof(uint32_t);
 inline constexpr size_t kMaxIndexerEventPullRpcRecordBytes =
     kIndexerRpcMaxMessageSize + kIndexerRpcRecordMarkerBytes;
@@ -45,7 +45,7 @@ template<typename T> using IndexerOutboxStatus = std::expected<T, std::string>;
 
 struct IndexerOutboxCommittedRecordInfo {
   BlockHeight block_height;
-  std::string protocol;
+  ProtocolCommit protocol;
   uint64_t payload_byte_length;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
@@ -58,14 +58,14 @@ struct IndexerOutboxCommittedRecordInfo {
 struct IndexerOutboxCandidateRecordInfo {
   BlockID block_id;
   BlockHeight block_height;
-  std::string protocol;
+  ProtocolCommit protocol;
   uint64_t payload_byte_length;
   SHA256Hash payload_digest;
   EventsHash event_root;
 };
 
 struct IndexerOutboxEpochOriginInfo {
-  std::string protocol;
+  ProtocolCommit protocol;
   uint64_t epoch_sequence;
   BlockHeight first_height;
   ConsensusValueHash first_prev_hash;
@@ -137,7 +137,11 @@ public:
 
   static std::string candidate_filename(BlockID block_id);
   static std::string committed_filename(BlockHeight block_height);
-  static std::string epoch_origin_filename(std::string_view protocol);
+  // The token is the file's identity, so it has exactly one spelling here:
+  // the full fixed-width array, padding included. Taking text instead would
+  // let a caller name a file from an unpadded token and then fail to match it
+  // against the padded one its own header round-trips back.
+  static std::string epoch_origin_filename(const ProtocolCommit &protocol);
   static std::string current_epoch_origin_filename();
   x23::Async<IndexerOutboxStatus<void>>
   publish_candidate(const IndexerOutboxCandidatePayload &payload) const;
@@ -175,7 +179,7 @@ public:
   load_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
   load_committed_record(BlockHeight block_height,
-                        std::string_view expected_protocol) const;
+                        const ProtocolCommit &expected_protocol) const;
   // Reconciliation validates the whole immutable namespace before enabling
   // this lookup. Thereafter the singleton flock and no-clobber publication let
   // the latest identity come from the append cache and older identities from

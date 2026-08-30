@@ -72,6 +72,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
@@ -938,7 +939,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
             "00000000000000000000000000000000000000000000000000000000000000aa");
     w.field("profile", "local-dev");
     if (include_protocol) {
-      w.field("protocol", version::kHogdProtocol());
+      w.field("protocol", protocol_text(version::kHogdProtocol()));
     }
     w.object_field("devWallet", [&](json::Writer &w) {
       w.field("profile", "hog-devnode-default");
@@ -1233,7 +1234,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(readiness.manifest_hash,
             hex_string(hash_string(read_file(readiness.manifest_path))));
   EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
-            version::kHogdProtocol());
+            protocol_text(version::kHogdProtocol()));
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
@@ -2604,7 +2605,8 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
 
   std::filesystem::rename(
       outbox_dir / IndexerOutboxStore::current_epoch_origin_filename(),
-      outbox_dir / IndexerOutboxStore::epoch_origin_filename("hogp/archival"));
+      outbox_dir / IndexerOutboxStore::epoch_origin_filename(
+                       protocol_from_text("hogp/archival")));
 
   expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
                           "0", "--dev-account-seed", "groundhog-dev-accounts",

@@ -33,6 +33,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 
 namespace hogd {
 namespace {
@@ -65,7 +66,7 @@ struct ManifestBuilder {
   std::string profile = "local-dev";
 
   bool include_protocol = true;
-  std::string protocol = std::string(version::kHogdProtocol());
+  std::string protocol = std::string(protocol_text(version::kHogdProtocol()));
 
   bool include_dev_wallet = true;
   std::string dev_wallet_profile = "hog-devnode-default";
