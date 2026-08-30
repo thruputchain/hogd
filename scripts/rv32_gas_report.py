@@ -340,21 +340,24 @@ def print_table(data):
     print(f"noise floor:  {noise_floor:.4f} ns/instr")
     print()
     ow = op_width(cell["op"] for cell in data["opcodes"])
-    header = (f"{'op':<{ow}}{'context':<26}{'ns/instr':>10}{'slope':>9}"
-              f"{'+/-':>8}{'sigma':>7}{'gas':>5}  verdict")
+    header = (f"{'op':<{ow}}{'context':<26}{'ns/instr':>10}{'bound':>9}"
+              f"{'slope':>9}{'+/-':>8}{'sigma':>7}{'gas':>5}  verdict")
     print(header)
     print("-" * len(header))
     for cell in data["opcodes"]:
         if not cell["usable"]:
             print(f"{cell['op']:<{ow}}{context_label(cell):<26}{'--':>10}"
-                  f"{'--':>9}{'--':>8}{'--':>7}{cell['scheduled_gas']:>5}"
+                  f"{'--':>9}{'--':>9}{'--':>8}{'--':>7}"
+                  f"{cell['scheduled_gas']:>5}"
                   f"  rejected: {cell['rejected_because']}")
             continue
         verdict = "costs more than ADD" if resolved(cell) and cell["slope_ns"] > 0 else (
             "costs less than ADD" if resolved(cell) else "same as ADD")
         print(
             f"{cell['op']:<{ow}}{context_label(cell):<26}"
-            f"{cell['ns_per_instruction']:>10.4f}{cell['slope_ns']:>9.4f}"
+            f"{cell['ns_per_instruction']:>10.4f}"
+            f"{cell.get('ns_upper_bound', 0.0):>9.4f}"
+            f"{cell['slope_ns']:>9.4f}"
             f"{cell.get('slope_stderr_ns', 0.0):>8.4f}{sigmas(cell):>7.1f}"
             f"{cell['scheduled_gas']:>5}  {verdict}"
         )

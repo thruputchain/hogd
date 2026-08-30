@@ -82,6 +82,9 @@ struct SweepResult {
   // Empty for a single-opcode row.
   std::vector<std::string> pair_ops;
   uint64_t scheduled_gas = 0;
+  // Absolute upper bound on one target's cost, from the densest kernel alone.
+  // Non-negative by construction; see where it is computed for the derivation.
+  double ns_upper_bound = 0.0;
   LinearFit fit;
   double worst_relative_mad = 0.0;
   LoweringAudit audit;
@@ -306,6 +309,49 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   // the filler's own measured absolute cost back gives an absolute per
   // instruction number.
   result.ns_per_instruction = filler_ns + result.fit.slope;
+
+  // An absolute upper bound, which is what a gas schedule actually needs.
+  //
+  // The slope above is a contrast: a small difference between large timings,
+  // fitted across kernels that differ in layout as well as in content. On a
+  // machine where that layout bias is comparable to the effect, the fit hands
+  // the bias to the slope, and the result can come out *negative* -- an
+  // instruction that costs less than nothing, which is not a number a gas
+  // schedule can use. Measured on a 64-core EPYC: half the ISA priced below a
+  // no-op, and the same sweeps moved by whole dispatches between runs.
+  //
+  // The densest kernel needs no contrast. It runs `target_slots` targets and
+  // some fillers per iteration, so
+  //
+  //     T = n_target * c_target + n_filler * c_filler + loop overhead
+  //
+  // and since every one of those terms is non-negative, T / n_target is an
+  // upper bound on c_target unconditionally -- no subtraction, no fit, no
+  // dependence on what the filler costs. It cannot be negative.
+  //
+  // The looseness is 1 + (n_filler * c_filler) / (n_target * c_target), so
+  // with the body half targets it is at most ~2x, and it *tightens as the
+  // target gets more expensive*: a pointer-chased load at 6 ns against a
+  // 0.65 ns filler is bounded to within 11%. The margin is worst exactly
+  // where the opcode is cheap and being wrong costs least.
+  const uint32_t densest = sweep->target_counts.back();
+  if (densest > 0) {
+    std::vector<double> dense_samples;
+    for (size_t i = 0; i < points.size(); ++i) {
+      if (sweep->target_counts[i] == densest) {
+        dense_samples.push_back(points[i].median());
+      }
+    }
+    if (!dense_samples.empty()) {
+      // Median over placement phases: the phases do identical work, so the
+      // spread between them is layout systematics. That spread is small next
+      // to the structural margin above, so there is nothing to gain by taking
+      // the worst one and stability to lose.
+      std::ranges::sort(dense_samples);
+      const double dense_ns = dense_samples[dense_samples.size() / 2];
+      result.ns_upper_bound = dense_ns / static_cast<double>(densest);
+    }
+  }
   result.usable = true;
   return result;
 }
@@ -631,7 +677,8 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         out,
         "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
-        "\"pair_ops\": {}, \"scheduled_gas\": "
+        "\"pair_ops\": {}, \"ns_upper_bound\": {:.6f}, "
+        "\"scheduled_gas\": "
         "{}, \"usable\": {}, \"rejected_because\": \"{}\", \"slope_ns\": "
         "{:.6f}, \"theil_sen_ns\": {:.6f}, \"r_squared\": {:.6f}, "
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
@@ -640,10 +687,11 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         escape_json(sweep.op), escape_json(sweep.context),
         escape_json(sweep.working_set), escape_json(sweep.magnitude),
         escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
-        json_string_array(sweep.pair_ops), sweep.scheduled_gas,
-        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
-        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
-        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
+        json_string_array(sweep.pair_ops), sweep.ns_upper_bound,
+        sweep.scheduled_gas, sweep.usable ? "true" : "false",
+        escape_json(sweep.rejected_because), sweep.fit.slope,
+        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
+        sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }
