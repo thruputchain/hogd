@@ -125,4 +125,25 @@ if command -v taskset >/dev/null 2>&1; then
   RUNNER=(taskset -c 0)
 fi
 
+# Disable ASLR for the measured process. EXPERIMENT, not an established fix.
+#
+# On a 64-core EPYC bench host the same binary measuring the same opcode gives
+# a different answer each run: back-to-back runs moved SUB by 6.3 ns, LUI and
+# SLL by 2.3 ns, XORI by -2.1 ns, with the jumps landing near whole multiples
+# of a dispatch. Within a run each of those fits tightly (one had sigma 687),
+# so whatever moves is fixed for the life of a process and redrawn between
+# them. The one sweep that stays put is ADD substituted for the ADD filler --
+# the only one that does not change which handlers execute.
+#
+# That is consistent with handler load addresses driving indirect-branch
+# aliasing in a direct-threaded dispatch, which ASLR redraws per process. It is
+# NOT yet demonstrated: on a quiet 4-core Xeon, three runs with ASLR on and
+# three with it off were indistinguishable (median sweep spread 0.0856 vs
+# 0.0854 ns) -- but that host does not reproduce the instability either, so it
+# cannot discriminate. Verify on a host that does before believing this helps.
+if command -v setarch >/dev/null 2>&1 &&
+   setarch "$(uname -m)" -R true >/dev/null 2>&1; then
+  RUNNER+=(setarch "$(uname -m)" -R)
+fi
+
 exec "${RUNNER[@]}" "${BINARY}" "${HARNESS_ARGS[@]:-}"
