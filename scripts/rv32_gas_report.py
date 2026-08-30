@@ -252,6 +252,33 @@ def cost_ns(cell):
     return cell["ns_per_instruction"]
 
 
+def baseline_ns(data):
+    """The cost every other cost is expressed relative to.
+
+    The saturated ADD body, when there is one -- the same kind of measurement
+    as every cell it normalizes, taken in the same run, so the two move
+    together when the machine's speed does.
+
+    The recorded `baseline` is a different kind of measurement: a fit over
+    kernels of varying body size with an all-filler body. On a quiet host the
+    two agree. On a loaded one they do not, and the mismatch lands in every
+    ratio. Two bench runs three minutes apart recorded baselines of 1.1333 and
+    0.6610 ns -- the machine really was 71% faster -- and ADDI's guarded ratio
+    moved 1.68x to 4.09x purely because its kernel and the baseline's kernel
+    did not scale together. Normalizing by a measurement of the same shape
+    removes that.
+
+    Falls back to the recorded baseline for runs that predate the saturated
+    estimator.
+    """
+    for cell in data["opcodes"]:
+        if (cell.get("usable") and cell["op"] == "ADD"
+                and cell["context"] == "independent"
+                and cell.get("ns_saturated", 0.0) > 0.0):
+            return cell["ns_saturated"]
+    return data["baseline"]["ns_per_filler_instruction"]
+
+
 def pair_ops(cell):
     """The two opcodes a pair row places, as the calibrator recorded them.
 
@@ -335,7 +362,7 @@ def merge_runs(runs):
     merged = {}
     total_runs = len(runs)
     for data in runs:
-        baseline = data["baseline"]["ns_per_filler_instruction"]
+        baseline = baseline_ns(data)
         for cell in usable_cells(data):
             key = (cell["op"], context_label(cell))
             entry = merged.get(key)
@@ -385,7 +412,7 @@ def worst_by_op(runs):
 def print_table(data):
     check_comparable([data])
     noise_floor = data["noise_floor_ns_per_instruction"]
-    baseline = data["baseline"]["ns_per_filler_instruction"]
+    baseline = baseline_ns(data)
     prov = provenance(data)
     print(f"engine: {data['engine']} (traced={data['traced']}) "
           f"fingerprint {prov.get('engine_fingerprint', 'unknown')}")
@@ -434,7 +461,7 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
     worst = worst_by_op(runs)
     if not worst:
         return None, None
-    baseline = min(data["baseline"]["ns_per_filler_instruction"]
+    baseline = min(baseline_ns(data)
                    for data in runs)
     if baseline <= 0.0:
         return None, None
@@ -624,7 +651,7 @@ def cost_model(data, worst_case=False):
     and a workload's measured time should sit at or below it -- if it did not,
     gas would be underpricing that program.
     """
-    baseline = data["baseline"]["ns_per_filler_instruction"]
+    baseline = baseline_ns(data)
     best = {}
     for cell in usable_cells(data):
         cost = cost_ns(cell) if resolved(cell) else baseline
@@ -673,7 +700,7 @@ def print_pair_bounds(data):
     if not pairs:
         return []
     worst = cost_model(data, worst_case=True)
-    baseline = data["baseline"]["ns_per_filler_instruction"]
+    baseline = baseline_ns(data)
 
     needed = set()
     for cell in pairs:
@@ -758,7 +785,7 @@ def print_prediction(data):
               file=sys.stderr)
         return 1
 
-    baseline = data["baseline"]["ns_per_filler_instruction"]
+    baseline = baseline_ns(data)
     matched = cost_model(data)
     worst = cost_model(data, worst_case=True)
     premium = taken_branch_premium(data)
@@ -996,7 +1023,7 @@ def relative_cost(cell, baseline):
 def emit_reference(data):
     """Write the reference a later run is checked against."""
     prov = provenance(data)
-    baseline = data["baseline"]["ns_per_filler_instruction"]
+    baseline = baseline_ns(data)
     print("# RV32 gas calibration reference.")
     print("#")
     print("# Regenerate with:")
@@ -1099,7 +1126,7 @@ def check_against_reference(data, reference_path):
     """
     reference = load_reference(reference_path)
     prov = provenance(data)
-    baseline = data["baseline"]["ns_per_filler_instruction"]
+    baseline = baseline_ns(data)
     failures = []
     warnings = []
 
@@ -1183,13 +1210,13 @@ def check_against_reference(data, reference_path):
     # means per-opcode worst-case pricing does not bound it. That is a failure
     # of the method rather than a drifted number, so it fails the check
     # regardless of what the reference says.
-    baseline_ns = data["baseline"]["ns_per_filler_instruction"]
+    pair_floor = baseline_ns(data)
     worst_costs = cost_model(data, worst_case=True)
     for cell in pair_cells(data):
         ops = pair_ops(cell)
         if not ops or missing_ops(data, set(ops)):
             continue
-        ceiling = sum(worst_costs.get(op, baseline_ns) for op in ops)
+        ceiling = sum(worst_costs.get(op, pair_floor) for op in ops)
         if cost_ns(cell) > ceiling * (1.0 + BOUND_VIOLATION_MARGIN):
             failures.append(
                 f"{cell['op']}: {cost_ns(cell):.2f} ns exceeds "
