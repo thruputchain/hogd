@@ -297,9 +297,10 @@ TEST_F(IndexDBTest, GetEventsMemoizesRepeatedTransactionHydration)
     rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
     rocksdb::PerfContext *perf = rocksdb::get_perf_context();
     perf->Reset();
-    auto page = db.get_events(make_query(
-        std::move(filters), IterationOrder::IterationOrderAscending,
-        BlockAnchor(BlockAnchorKind::AnchorAtBeginning), kEventCount));
+    auto page = db.get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning),
+                   kEventCount));
     EXPECT_TRUE(page.has_value());
     return std::pair{std::move(page), perf->get_read_bytes};
   };
