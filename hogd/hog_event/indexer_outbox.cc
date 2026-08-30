@@ -292,6 +292,16 @@ make_header(const IndexerOutboxEpochOrigin &payload, size_t payload_size,
   return header;
 }
 
+// The protocol commit is a fixed-width token, so every IndexerOutboxEpochOrigin
+// field is fixed-width and its encoded payload size is a constant, independent
+// of field values. Recovery uses this to reject any epoch origin whose declared
+// payload is not exactly this size before hashing or materializing it.
+uint64_t
+epoch_origin_payload_byte_length()
+{
+  return x23::xdr_size(IndexerOutboxEpochOrigin{});
+}
+
 template<typename Payload>
 IndexerOutboxStatus<x23::Buf>
 encode_file(const Payload &payload)
@@ -1923,6 +1933,15 @@ IndexerOutboxStore::load_header(std::string_view filename) const
       header.payload_byte_length > kMaxIndexerOutboxPayloadBytes ||
       header.payload_byte_length != file_size - 4 - header_size) {
     return std::unexpected("indexer outbox header/file size mismatch");
+  }
+  // An epoch-origin payload is the fixed-size IndexerOutboxEpochOrigin struct
+  // for every protocol, so require its declared size to match exactly here --
+  // before enumeration hashes the declared payload or load materializes it --
+  // rather than letting the generic outbox payload cap apply. See #3691.
+  if (header.record_identity.kind() ==
+          IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
+      header.payload_byte_length != epoch_origin_payload_byte_length()) {
+    return std::unexpected("epoch origin payload size mismatch");
   }
   return header;
 }
