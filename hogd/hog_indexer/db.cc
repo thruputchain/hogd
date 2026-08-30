@@ -48,7 +48,6 @@
 #include "hogd/hog_indexer/status.h"
 #include "hogd/hog_indexer/topic_layout.h"
 #include "hogd/xdr/indexer_payload_validation.h"
-#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "network.hh"
 #include "pagination.hh"

@@ -37,6 +37,7 @@
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
