@@ -1,0 +1,74 @@
+name: RV32 Gas Calibration
+
+# Manual dispatch only for now. The natural home for this is a periodic
+# schedule -- the check exists to catch a calibration that has quietly stopped
+# describing the engine, which is a thing that happens over weeks, not per PR --
+# but it wants a settled reference on the bench host first. Adding a `schedule:`
+# trigger later is a one-line change.
+on:
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: >-
+                    check: gate against the committed reference.
+                    reference: measure and print a reference for this host,
+                    without gating (use once to bootstrap a new bench host).
+                type: choice
+                required: true
+                default: check
+                options:
+                    - check
+                    - reference
+env:
+    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+
+jobs:
+    calibrate:
+        runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
+
+        steps:
+            - name: Clean up .gitconfig
+              run: |
+                  echo "Cleaning up .gitconfig"
+                  rm -f /home/hogci/.gitconfig
+            - uses: webfactory/ssh-agent@v0.10.0
+              with:
+                  ssh-private-key: |
+                      ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+                      ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_BCS_RS_KEY }}
+                      ${{ secrets.HOGD_SELF_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
+                      ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+                      ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+                      ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
+                      ${{ secrets.HOGD_TO_PROTOCOL_GO }}
+                      ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
+                      ${{ secrets.HOGD_TO_LIB_GO_KEY }}
+                      ${{ secrets.HOGD_TO_SCP_KEY }}
+                      ${{ secrets.HOGD_TO_XDR_RPC }}
+                      ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+                      ${{ secrets.HOGD_TO_HOGX_KEY }}
+            - uses: actions/checkout@v6
+            - name: Run hog schedule
+              run: |
+                  hog_sched \
+                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
+                    --key=github_repo --value=${{ github.repository }} \
+                    --key=git_commit --value=${{ github.sha }} \
+                    --key=mode --value=${{ inputs.mode }} \
+                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
+                    --timeout-sec=2400 \
+                    ./scripts/schedules/rv32_gas_calibration.toml
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions

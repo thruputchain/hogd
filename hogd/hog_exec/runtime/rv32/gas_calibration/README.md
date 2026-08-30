@@ -211,6 +211,13 @@ It also warns, without failing, when a cell has become expensive that is not in
 the reference at all. A newly expensive instruction is exactly what a gas
 schedule needs to hear about, but on a new host it may just be the first look.
 
+In CI it runs as the **RV32 Gas Calibration** workflow (manual dispatch;
+`scripts/schedules/rv32_gas_calibration.toml`), pinned to one bench host so
+successive runs stay comparable. Its `mode=reference` option measures without
+gating and prints a reference file for that host -- which is how a new bench
+host gets bootstrapped, since the committed reference's ratios were measured
+somewhere else.
+
 Regenerate the reference only once you understand what moved and have decided
 the schedule does or does not need to follow:
 

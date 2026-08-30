@@ -66,7 +66,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-CACHE="${REPO_ROOT}/${BUILD_DIR}/CMakeCache.txt"
+# Resolve the build directory before anything uses it. scripts/build.sh
+# interprets its -d argument relative to its own working directory, so a
+# relative BUILD_DIR would otherwise mean different trees depending on where
+# this script was invoked from -- and the whole point of naming it explicitly is
+# that it is unambiguous.
+case "${BUILD_DIR}" in
+/*) ;;
+*) BUILD_DIR="${REPO_ROOT}/${BUILD_DIR}" ;;
+esac
+
+CACHE="${BUILD_DIR}/CMakeCache.txt"
 # Refuse an existing non-Release tree rather than reconfiguring it: the caller
 # named this directory, and silently flipping its build type would break
 # whatever else they use it for.
@@ -85,7 +95,7 @@ fi
 echo "building rv32_gas_calibrate (Release) in ${BUILD_DIR}..." >&2
 "${REPO_ROOT}/scripts/build.sh" -d "${BUILD_DIR}" -t Release rv32_gas_calibrate >&2
 
-BINARY="${REPO_ROOT}/${BUILD_DIR}/hogd/hog_exec/runtime/rv32/gas_calibration/rv32_gas_calibrate"
+BINARY="${BUILD_DIR}/hogd/hog_exec/runtime/rv32/gas_calibration/rv32_gas_calibrate"
 if [[ ! -x "${BINARY}" ]]; then
   echo "error: ${BINARY} was not produced by the build" >&2
   exit 1

@@ -126,6 +126,16 @@ few-percent drift of a shared machine, and keeps the job worth reading.
 `--fingerprint-only` answers "did the engine change?" instantly, without
 measuring, for use by hand after touching the interpreter.
 
+In CI this is the **RV32 Gas Calibration** workflow
+(`.github/workflows/rv32_gas_calibration.yml`, driving
+`scripts/schedules/rv32_gas_calibration.toml` through `hog_sched`). Manual
+dispatch for now; it is pinned to one bench host and builds Release with a
+pinned compiler, because both the host and the generated code are part of what
+is being measured. Dispatch it with `mode=reference` to bootstrap a new bench
+host -- that measures without gating and prints a reference file for that
+machine, which is needed because the committed reference's ratios were measured
+elsewhere.
+
 ## Re-running after an interpreter change
 
 Every calibration JSON records an engine fingerprint: a hash of the gas
