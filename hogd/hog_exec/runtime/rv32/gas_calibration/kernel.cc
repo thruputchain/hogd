@@ -560,6 +560,11 @@ max_target_slots(uint32_t body_slots, const KernelSpec &spec)
   // Slot 0 and the last slot stay filler; a pair's tail must also fit inside
   // that interior, so the head can sit one slot lower than a single target's.
   const uint32_t placeable = (body_slots - 2) - (per_target - 1);
+  if (spec.saturated) {
+    // Every interior slot. Adjacency is the point, so there is no gap to keep;
+    // the audit is what checks the slots did not fuse.
+    return placeable;
+  }
   // One filler between substitutions, so the period is per_target + 1. Deriving
   // the cap from the same span the placement walks is what keeps the minimum
   // gap at or above that period.

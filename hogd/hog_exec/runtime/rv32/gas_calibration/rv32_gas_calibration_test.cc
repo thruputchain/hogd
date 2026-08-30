@@ -174,6 +174,74 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
 // trap or early exit in one assertion -- if a kernel silently ran a different
 // number of instructions than the harness credits it with, every ns-per
 // instruction derived from it would be wrong by that ratio.
+// A saturated body must really be all target, and must run.
+//
+// The saturated measurement divides a kernel's time by its instruction count
+// and calls the result the per-instruction cost of a program made of that
+// opcode. That claim rests on two things the harness controls: every interior
+// slot actually holds the target, and the kernel actually executes all of it.
+// Check both against the production decoder and the engine's own gas
+// accounting, for every opcode that can be saturated.
+TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
+{
+  HaltHost host;
+  size_t measured = 0;
+  size_t fused = 0;
+  for (size_t index = 0; index < kOpCount; ++index) {
+    const Op op = static_cast<Op>(index);
+    if (!is_measurable_target(op)) {
+      continue;
+    }
+    KernelSpec spec;
+    spec.target = op;
+    spec.saturated = true;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(spec.body_slots, spec);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << op_name(op);
+    // Every interior slot is a target: the whole point of saturation.
+    EXPECT_EQ(kernel.value().target_slot_pcs.size(), spec.body_slots - 2)
+        << op_name(op);
+
+    if (!audit_kernel(kernel.value(), spec).clean()) {
+      // Adjacent copies of this opcode fuse, so it cannot be saturated. The
+      // driver reports that rather than measuring the fused form; here just
+      // record that it is a minority case.
+      ++fused;
+      continue;
+    }
+    ++measured;
+
+    const auto program = ThreadedProgram::create(kernel.value().code);
+    ASSERT_TRUE(program.has_value()) << op_name(op);
+    for (const uint32_t pc : kernel.value().target_slot_pcs) {
+      const auto decoded = program->instruction_at(pc / kInstructionBytes);
+      ASSERT_TRUE(decoded.has_value()) << op_name(op);
+      EXPECT_EQ(decoded->op, op) << "saturated body slot at pc " << pc
+                                 << " decoded as " << op_name(decoded->op);
+    }
+
+    auto pre =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(pre.has_value()) << op_name(op);
+    ThreadedMachine machine(*pre, kGasLimit);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted) << op_name(op);
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
+        << op_name(op) << " did not run its whole saturated body";
+  }
+  // Saturation has to work for most of the ISA or the primary estimator has no
+  // coverage. Only opcodes that pair with themselves under a fusion rule are
+  // expected to decline.
+  EXPECT_GT(measured, 35U);
+  EXPECT_LE(fused, 3U);
+}
+
 // A kernel must run all of its body, at every body size the harness allows.
 //
 // This is the invariant that a silently-truncated loop breaks, and it broke:

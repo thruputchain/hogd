@@ -212,6 +212,25 @@ def pair_cells(data):
             if cell["usable"] and cell.get("pair")]
 
 
+def cost_ns(cell):
+    """This cell's per-instruction cost in nanoseconds.
+
+    The saturated measurement when there is one: a body made entirely of this
+    opcode, timed and divided by its instruction count. Absolute, so it cannot
+    be negative, and it does not depend on what the filler costs.
+
+    Falls back to the contrast estimate (baseline + slope) when a saturated
+    body could not be built -- which happens only when adjacent copies of the
+    opcode are a fusion rule, so no program can contain a run of them unfused.
+    `saturated_note` says which. The contrast is what produced negative costs
+    for about a third of sweeps, so a fallback cell is the one to distrust.
+    """
+    saturated = cell.get("ns_saturated", 0.0)
+    if saturated > 0.0:
+        return saturated
+    return cell["ns_per_instruction"]
+
+
 def pair_ops(cell):
     """The two opcodes a pair row places, as the calibrator recorded them.
 
@@ -281,7 +300,7 @@ def merge_runs(runs):
             cell_resolved = resolved(cell)
             # An unresolved cell contributes the baseline, not its fitted
             # value, so noise can never win the max and invent a cost.
-            cost = cell["ns_per_instruction"] if cell_resolved else baseline
+            cost = cost_ns(cell) if cell_resolved else baseline
             if entry is None:
                 merged[key] = {
                     "op": cell["op"],
@@ -340,7 +359,7 @@ def print_table(data):
     print(f"noise floor:  {noise_floor:.4f} ns/instr")
     print()
     ow = op_width(cell["op"] for cell in data["opcodes"])
-    header = (f"{'op':<{ow}}{'context':<26}{'ns/instr':>10}{'bound':>9}"
+    header = (f"{'op':<{ow}}{'context':<26}{'ns/instr':>10}{'contrast':>9}"
               f"{'slope':>9}{'+/-':>8}{'sigma':>7}{'gas':>5}  verdict")
     print(header)
     print("-" * len(header))
@@ -355,8 +374,8 @@ def print_table(data):
             "costs less than ADD" if resolved(cell) else "same as ADD")
         print(
             f"{cell['op']:<{ow}}{context_label(cell):<26}"
-            f"{cell['ns_per_instruction']:>10.4f}"
-            f"{cell.get('ns_upper_bound', 0.0):>9.4f}"
+            f"{cost_ns(cell):>10.4f}"
+            f"{cell.get('ns_per_instruction', 0.0):>9.4f}"
             f"{cell['slope_ns']:>9.4f}"
             f"{cell.get('slope_stderr_ns', 0.0):>8.4f}{sigmas(cell):>7.1f}"
             f"{cell['scheduled_gas']:>5}  {verdict}"
@@ -390,7 +409,7 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
         # is the model straining where target and filler differ too much for
         # the difference to belong to the target alone. Pricing there would
         # undercharge, so the floor holds.
-        ns = max(cell["ns_per_instruction"], baseline)
+        ns = max(cost_ns(cell), baseline)
         ratio = ns / unit
         schedule[op] = {
             "ratio": ratio,
@@ -398,7 +417,7 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
             "current_gas": cell["scheduled_gas"],
             "context": cell["context"],
             "ns": ns,
-            "floored": ns > cell["ns_per_instruction"],
+            "floored": ns > cost_ns(cell),
             "resolved": cell["resolved"],
         }
     return schedule, unit
@@ -566,7 +585,7 @@ def cost_model(data, worst_case=False):
     baseline = data["baseline"]["ns_per_filler_instruction"]
     best = {}
     for cell in usable_cells(data):
-        cost = cell["ns_per_instruction"] if resolved(cell) else baseline
+        cost = cost_ns(cell) if resolved(cell) else baseline
         op = cell["op"]
         if worst_case:
             if op not in best or cost > best[op]:
@@ -593,8 +612,8 @@ def taken_branch_premium(data):
                     if c["branch_mode"] == "not_taken"]
     if not taken or not fell_through:
         return 0.0
-    mean_taken = sum(c["ns_per_instruction"] for c in taken) / len(taken)
-    mean_through = (sum(c["ns_per_instruction"] for c in fell_through)
+    mean_taken = sum(cost_ns(c) for c in taken) / len(taken)
+    mean_through = (sum(cost_ns(c) for c in fell_through)
                     / len(fell_through))
     return max(0.0, mean_taken - mean_through)
 
@@ -645,7 +664,7 @@ def print_pair_bounds(data):
                   f"{'--':>9}  (run predates pair_ops; no bound)")
             continue
         ceiling = sum(worst.get(op, baseline) for op in ops)
-        measured = cell["ns_per_instruction"]
+        measured = cost_ns(cell)
         headroom = (ceiling - measured) / ceiling if ceiling else 0.0
         if headroom < -BOUND_VIOLATION_MARGIN:
             violations.append((cell["op"], measured, ceiling))
@@ -655,7 +674,7 @@ def print_pair_bounds(data):
     forward = next((c for c in pairs if "forward" in c["op"]), None)
     distinct = next((c for c in pairs if "distinct" in c["op"]), None)
     if forward and distinct:
-        penalty = forward["ns_per_instruction"] - distinct["ns_per_instruction"]
+        penalty = cost_ns(forward) - cost_ns(distinct)
         print()
         print(f"store-to-load forwarding penalty: {penalty:.3f} ns per pair")
         print(f"  ({penalty / baseline:.2f}x a baseline instruction). The two "
@@ -907,8 +926,8 @@ def print_comparison(before, after):
     print(header)
     print("-" * len(header))
     for key in sorted(before_cells.keys() & after_cells.keys()):
-        old = before_cells[key]["ns_per_instruction"]
-        new = after_cells[key]["ns_per_instruction"]
+        old = cost_ns(before_cells[key])
+        new = cost_ns(after_cells[key])
         delta = new - old
         # Anything inside the noise floor is not a change worth printing a
         # percentage for.
@@ -929,7 +948,7 @@ def relative_cost(cell, baseline):
     what a plain ALU op costs on the same machine" is a fact about the engine,
     and holds across hosts well enough to gate on.
     """
-    return cell["ns_per_instruction"] / baseline if baseline > 0 else 0.0
+    return cost_ns(cell) / baseline if baseline > 0 else 0.0
 
 
 def emit_reference(data):
@@ -1129,9 +1148,9 @@ def check_against_reference(data, reference_path):
         if not ops or missing_ops(data, set(ops)):
             continue
         ceiling = sum(worst_costs.get(op, baseline_ns) for op in ops)
-        if cell["ns_per_instruction"] > ceiling * (1.0 + BOUND_VIOLATION_MARGIN):
+        if cost_ns(cell) > ceiling * (1.0 + BOUND_VIOLATION_MARGIN):
             failures.append(
-                f"{cell['op']}: {cell['ns_per_instruction']:.2f} ns exceeds "
+                f"{cell['op']}: {cost_ns(cell):.2f} ns exceeds "
                 f"the {ceiling:.2f} ns bound its two opcodes "
                 f"({' + '.join(ops)}) worst cases imply.\n"
                 "  Pricing each opcode at its own worst case does not bound "

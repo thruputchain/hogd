@@ -85,6 +85,11 @@ struct SweepResult {
   // Absolute upper bound on one target's cost, from the densest kernel alone.
   // Non-negative by construction; see where it is computed for the derivation.
   double ns_upper_bound = 0.0;
+  // Absolute ns per instruction of a body made entirely of this target. The
+  // primary number: no contrast, no filler, so it cannot come out negative.
+  // Zero when the saturated body could not be measured (see the note).
+  double ns_saturated = 0.0;
+  std::string saturated_note;
   LinearFit fit;
   double worst_relative_mad = 0.0;
   LoweringAudit audit;
@@ -352,6 +357,90 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
       result.ns_upper_bound = dense_ns / static_cast<double>(densest);
     }
   }
+  // The primary measurement: a body made entirely of this target.
+  //
+  // Everything above is a contrast -- the target's cost minus the filler it
+  // displaced -- and a contrast between two large timings goes negative as
+  // soon as layout noise rivals the effect. Roughly 30% of sweeps came out
+  // negative that way, which is not a cost a gas schedule can use.
+  //
+  // A saturated body has no filler to subtract. Its time divided by its
+  // instruction count is, directly, what a program made of this instruction
+  // costs per instruction -- which is also the question worst-case pricing
+  // asks. Only ADDI declines to be measured this way, because addi;addi is a
+  // fusion rule; the audit catches that rather than letting the fused cost be
+  // reported as the unfused one.
+  {
+    KernelSpec sat = base;
+    sat.saturated = true;
+    sat.body_slots = options.body_slots;
+    sat.target_slots = max_target_slots(options.body_slots, sat);
+    sat.placement_phase = 0;
+    sat.trip_count = 64;
+    auto probe = build_kernel(sat);
+    if (!probe.has_value()) {
+      result.saturated_note = "saturated kernel not representable: " +
+                              kernel_error_name(probe.error());
+    }
+    else {
+      auto seed =
+          ThreadedMachinePreInstantiation::create(probe->code,
+                                                  probe->initial_memory, 0,
+                                                  probe->memory_bytes,
+                                                  /*trace=*/false);
+      if (!seed.has_value()) {
+        result.saturated_note = "saturated probe would not instantiate";
+        result.usable = true;
+        return result;
+      }
+      sat.trip_count = tune_trip_count(*seed, 64, options.target_ns);
+      auto kernel = build_kernel(sat);
+      if (!kernel.has_value()) {
+        result.saturated_note = "saturated kernel not representable at the "
+                                "tuned trip count: " +
+                                kernel_error_name(kernel.error());
+      }
+      else {
+        const LoweringAudit audit = audit_kernel(*kernel, sat);
+        if (!audit.clean()) {
+          result.saturated_note =
+              "saturated body fused " + std::to_string(audit.rewritten_slots) +
+              " slot(s) (first at " +
+              std::to_string(audit.first_rewritten_slot) +
+              "); adjacent copies of this opcode are a fusion rule, so a "
+              "program cannot be made of it unfused";
+        }
+        else {
+          auto program =
+              ThreadedMachinePreInstantiation::create(kernel->code,
+                                                      kernel->initial_memory, 0,
+                                                      kernel->memory_bytes,
+                                                      false);
+          if (!program.has_value()) {
+            result.saturated_note = "saturated kernel would not instantiate";
+          }
+          else {
+            std::vector<MeasurementPoint> one{
+                {.label = result.op + "/saturated",
+                 .x = 0.0,
+                 .program = &*program,
+                 .trip_count = sat.trip_count}};
+            measure_interleaved(one, {.repeats = options.repeats,
+                                      .warmup_runs = options.warmup_runs});
+            if (!one[0].ran_clean) {
+              result.saturated_note = "saturated kernel did not halt cleanly";
+            }
+            else {
+              result.ns_saturated =
+                  one[0].median() /
+                  static_cast<double>(kernel->instructions_per_iteration);
+            }
+          }
+        }
+      }
+    }
+  }
+
   result.usable = true;
   return result;
 }
@@ -678,6 +767,7 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
         "\"pair_ops\": {}, \"ns_upper_bound\": {:.6f}, "
+        "\"ns_saturated\": {:.6f}, \"saturated_note\": \"{}\", "
         "\"scheduled_gas\": "
         "{}, \"usable\": {}, \"rejected_because\": \"{}\", \"slope_ns\": "
         "{:.6f}, \"theil_sen_ns\": {:.6f}, \"r_squared\": {:.6f}, "
@@ -688,6 +778,7 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         escape_json(sweep.working_set), escape_json(sweep.magnitude),
         escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
         json_string_array(sweep.pair_ops), sweep.ns_upper_bound,
+        sweep.ns_saturated, escape_json(sweep.saturated_note),
         sweep.scheduled_gas, sweep.usable ? "true" : "false",
         escape_json(sweep.rejected_because), sweep.fit.slope,
         sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
