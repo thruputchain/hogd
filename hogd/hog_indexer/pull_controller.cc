@@ -236,7 +236,7 @@ IndexerPullController::run(const std::stop_token &stop)
     try {
       const IndexerProgress requested_progress = db_.durable_progress();
       EventIndexerPullRequest request{
-          .protocol = version::kHogdProtocolCommit(),
+          .protocol = version::kHogdProtocol(),
           .progress = requested_progress,
       };
       EventIndexerPullResult result =

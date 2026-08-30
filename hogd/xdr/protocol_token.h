@@ -30,7 +30,7 @@ protocol_text(const ProtocolCommit &protocol)
 }
 
 /// A token built from text, padded or truncated to the fixed width the same
-/// way hogd derives its own (see version::kHogdProtocolCommit). Round-trips
+/// way hogd derives its own (see version::kHogdProtocol). Round-trips
 /// with [protocol_text] for any text that already fills the array.
 inline ProtocolCommit
 protocol_from_text(std::string_view text)

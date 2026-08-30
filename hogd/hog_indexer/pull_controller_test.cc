@@ -245,7 +245,7 @@ public:
 
   CaughtUpPullRpc()
   {
-    origin_.protocol = version::kHogdProtocolCommit();
+    origin_.protocol = version::kHogdProtocol();
     origin_.first_height = IndexDB::kFirstOutboxBlockHeight;
     std::ranges::fill(origin_.first_prev_hash, 0x42);
     ProposalTxs proposal{};
@@ -333,7 +333,7 @@ public:
 
   explicit BlockingPullRpc(Mode mode) : mode_(mode)
   {
-    origin_.protocol = version::kHogdProtocolCommit();
+    origin_.protocol = version::kHogdProtocol();
     origin_.first_height = IndexDB::kFirstOutboxBlockHeight;
     std::ranges::fill(origin_.first_prev_hash, 0x42);
   }
@@ -408,7 +408,7 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
   const std::vector<EventIndexerPullRequest> requests =
       event_server.impl()->requests();
   ASSERT_GE(requests.size(), 3UL);
-  EXPECT_EQ(requests[0].protocol, version::kHogdProtocolCommit());
+  EXPECT_EQ(requests[0].protocol, version::kHogdProtocol());
   EXPECT_EQ(requests[0].progress.state(),
             IndexerProgressState::IndexerProgressUninitialized);
   EXPECT_EQ(requests[1].progress.state(),
@@ -481,8 +481,7 @@ TEST(IndexerPullController,
               IndexerProgressState::IndexerProgressInitialized);
     EXPECT_EQ(progress.initialized().contiguous_height, 2);
     EXPECT_EQ(progress.initialized().origin.epoch_sequence, 1UL);
-    EXPECT_EQ(progress.initialized().origin.protocol,
-              version::kHogdProtocolCommit());
+    EXPECT_EQ(progress.initialized().origin.protocol, version::kHogdProtocol());
     auto record = db->get_tx_record(sha256(archival_body.signed_tx.tx));
     ASSERT_TRUE(record.has_value()) << record.error();
     EXPECT_EQ(record->height, 1);

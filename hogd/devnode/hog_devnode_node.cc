@@ -1138,7 +1138,7 @@ HogDevnodeNode::register_db_with_mempool()
   const BlockHeight block_height =
       std::max<BlockHeight>(ctx_->get_tip().value.proposal_header.block_height,
                             BlockHeight{0});
-  client.scheddb_intro_shard({.protocol = version::kHogdProtocolCommit(),
+  client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                               .block_height = block_height,
                               .address_for_exec = exec_address.c_str(),
                               .address_for_sched = sched_address.c_str(),
@@ -1158,7 +1158,7 @@ HogDevnodeNode::register_event_with_mempool()
       format_advertised_address(bind_host_, event_exec_server_.port());
   std::string sched_address =
       format_advertised_address(bind_host_, event_sched_server_.port());
-  EventCard card{.protocol = version::kHogdProtocolCommit(),
+  EventCard card{.protocol = version::kHogdProtocol(),
                  .upid = {},
                  .address_for_exec = exec_address.c_str(),
                  .address_for_sched = sched_address.c_str()};
@@ -1193,7 +1193,7 @@ HogDevnodeNode::register_auth_with_mempool()
           client_res.error().error_code().message());
   sched_auth_client_t client = std::move(*client_res);
   AuthCard auth_card = {
-      .protocol = version::kHogdProtocolCommit(),
+      .protocol = version::kHogdProtocol(),
       .upid = {},
       .address_for_db =
           format_advertised_address(bind_host_, auth_db_server_.port()).c_str(),
@@ -1226,7 +1226,7 @@ HogDevnodeNode::register_coordinator_with_mempool()
   auto client = std::move(*client_res);
   std::string coord_address =
       format_advertised_address(bind_host_, coordinator_sched_server_.port());
-  CoordCard card{.protocol = version::kHogdProtocolCommit(),
+  CoordCard card{.protocol = version::kHogdProtocol(),
                  .address_for_sched = coord_address.c_str()};
   CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
            CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);

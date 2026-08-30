@@ -369,7 +369,7 @@ private:
     std::string sched_address =
         make_address(kAddress, db_scheduler_server_->port());
     std::string auth_address = make_address(kAddress, db_auth_server_->port());
-    client.scheddb_intro_shard({.protocol = version::kHogdProtocolCommit(),
+    client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
                                 .block_height = 0,
                                 .address_for_exec = exec_address.c_str(),
                                 .address_for_sched = sched_address.c_str(),
@@ -385,7 +385,7 @@ private:
         make_address(kAddress, event_exec_server_.port());
     std::string sched_address =
         make_address(kAddress, event_sched_server_->port());
-    EventCard card{.protocol = version::kHogdProtocolCommit(),
+    EventCard card{.protocol = version::kHogdProtocol(),
                    .upid = {},
                    .address_for_exec = exec_address.c_str(),
                    .address_for_sched = sched_address.c_str()};
@@ -408,7 +408,7 @@ private:
         create_client<MempoolAuth1>(kAddress, mempool_auth_server_.port())()
             .value();
     AuthCard auth_card = {
-        .protocol = version::kHogdProtocolCommit(),
+        .protocol = version::kHogdProtocol(),
         .upid = {},
         .address_for_db =
             make_address(kAddress, auth_db_server_.port()).c_str(),
@@ -434,7 +434,7 @@ private:
                       .value();
     std::string coord_address =
         make_address(kAddress, coordinator_sched_server_.port());
-    CoordCard card{.protocol = version::kHogdProtocolCommit(),
+    CoordCard card{.protocol = version::kHogdProtocol(),
                    .address_for_sched = coord_address.c_str()};
     CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);

@@ -29,6 +29,7 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 
 namespace hogd {
@@ -139,7 +140,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
     w.field("chainState",
             node.recovered_existing_chain() ? "recovered" : "fresh");
     w.field("networkHash", format_network_hash(network_hash));
-    w.field("protocol", version::kHogdProtocol());
+    w.field("protocol", protocol_text(version::kHogdProtocol()));
     w.object_field("producer", [&](json::Writer &w) {
       w.field("binary", "hog-devnode");
       w.field("version", version::kHogdVersion);

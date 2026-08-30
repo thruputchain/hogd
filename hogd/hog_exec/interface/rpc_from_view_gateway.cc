@@ -59,7 +59,7 @@ make_view_database_identifier(std::string const &db_executor_address)
   return ShardedDB(IntroExecResult{
       .exec_id = 0,
       .shards = {ShardCard{
-          .protocol = version::kHogdProtocolCommit(),
+          .protocol = version::kHogdProtocol(),
           .upid = {},
           .block_height = 0,
           .address_for_exec = db_executor_address.c_str(),
@@ -87,7 +87,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
 ViewGatewayIntroOutcome
 ViewGatewayRpc::viewgateway_intro(ProtocolCommit const &protocol)
 {
-  if (protocol != version::kHogdProtocolCommit()) {
+  if (protocol != version::kHogdProtocol()) {
     return ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol;
   }
   return ViewGatewayIntroOutcome::ViewGatewayIntroSuccess;

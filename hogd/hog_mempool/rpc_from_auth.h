@@ -4,7 +4,6 @@
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
-#include <string_view>
 #include <utility>
 
 #include "auth_card.hh"
@@ -66,8 +65,8 @@ public:
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
     info("got {}, expected {}", protocol_text(card.protocol),
-         version::kHogdProtocol());
-    if (card.protocol != version::kHogdProtocolCommit()) {
+         protocol_text(version::kHogdProtocol()));
+    if (card.protocol != version::kHogdProtocol()) {
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
 

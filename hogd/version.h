@@ -6,7 +6,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <string_view>
 
 extern "C" {
@@ -24,7 +23,7 @@ constexpr const char *kHogdGitHash = hogd_commit;
 
 /// Width of the protocol token, matching `typedef opaque ProtocolCommit[20]`
 /// in protocol/network.x. This header stays free of the generated XDR
-/// headers, so hog_db/rpc_from_gateway.cc carries the static_assert tying the
+/// headers, so hogd/xdr/protocol_token.h carries the static_assert tying the
 /// two together.
 inline constexpr std::size_t kHogdProtocolLen = 20;
 
@@ -64,35 +63,19 @@ protocol_token()
   return kToken;
 }
 
-/// The same bytes as a NUL-terminated C string, so the text accessor can hand
-/// out a `const char *` exactly as it always has.
-inline const char *
-protocol_cstr()
-{
-  static const std::string kText = [] {
-    const std::array<std::uint8_t, kHogdProtocolLen> &token = protocol_token();
-    return std::string(reinterpret_cast<const char *>(token.data()),
-                       token.size());
-  }();
-  return kText.c_str();
-}
-
 } // namespace detail
 
-/// The protocol token as printable text, for runtime manifests, log lines,
-/// and indexer outbox filenames. NUL-terminated and valid for the life of the
-/// process.
-inline const char *
-kHogdProtocol()
-{
-  return detail::protocol_cstr();
-}
-
-/// The same token in the fixed-width form the wire carries. `ProtocolCommit`
-/// is an array, so this always occupies exactly [kHogdProtocolLen] bytes and
-/// costs no allocation to send or compare.
+/// This build's protocol token, in the fixed-width form the wire carries.
+/// `ProtocolCommit` is an array, so this always occupies exactly
+/// [kHogdProtocolLen] bytes and costs no allocation to send or compare.
+///
+/// The bytes are printable ASCII, and the few callers that want them as text
+/// -- runtime manifests, log lines, indexer outbox filenames -- go through
+/// `protocol_text` in hogd/xdr/protocol_token.h. Handing the array to
+/// something expecting a string does not compile, so those callers cannot be
+/// missed by accident.
 inline std::array<std::uint8_t, kHogdProtocolLen>
-kHogdProtocolCommit()
+kHogdProtocol()
 {
   return detail::protocol_token();
 }

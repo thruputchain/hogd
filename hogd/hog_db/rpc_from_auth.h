@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <optional>
-#include <string_view>
 #include <utility>
 
 #include "auth_card.hh"
@@ -30,7 +29,7 @@ public:
 
   x23::Async<DBAuthIntroResult> dbauth_intro(AuthCard card)
   {
-    if (card.protocol != version::kHogdProtocolCommit()) {
+    if (card.protocol != version::kHogdProtocol()) {
       co_return DBAuthIntroResult(DBAuthIntroOutcome::kIntroFailure);
     }
     std::optional<BlockHeight> last_published =

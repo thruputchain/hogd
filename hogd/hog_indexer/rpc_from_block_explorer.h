@@ -26,7 +26,7 @@ public:
   static x23::Async<IndexerBlockExplorerIntroOutcome>
   indexer_block_explorer_intro(ProtocolCommit protocol)
   {
-    if (protocol != version::kHogdProtocolCommit()) {
+    if (protocol != version::kHogdProtocol()) {
       co_return IndexerBlockExplorerIntroOutcome::IntroMismatchedProtocol;
     }
     co_return IndexerBlockExplorerIntroOutcome::IntroSuccess;

@@ -9,8 +9,6 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -169,8 +167,8 @@ public:
   schedulercoord_intro_coord(CoordCard card)
   {
     info("got {}, expected {}", protocol_text(card.protocol),
-         version::kHogdProtocol());
-    if (card.protocol != version::kHogdProtocolCommit()) {
+         protocol_text(version::kHogdProtocol()));
+    if (card.protocol != version::kHogdProtocol()) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }

@@ -47,7 +47,7 @@ block_explorer_init(const std::string &indexer_server_addr,
           client_res.error().error_code().message());
   indexer_block_explorer_client_t client = std::move(*client_res);
   const IndexerBlockExplorerIntroOutcome intro_result =
-      client.indexer_block_explorer_intro(version::kHogdProtocolCommit())();
+      client.indexer_block_explorer_intro(version::kHogdProtocol())();
   if (intro_result != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
     info("block explorer failed to connect to indexer (error: {})",
          intro_result);

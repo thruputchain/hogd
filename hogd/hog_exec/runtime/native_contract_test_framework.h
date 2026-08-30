@@ -211,7 +211,7 @@ public:
 
   EventCard make_event_card(std::string const &addr = "localhost")
   {
-    return EventCard{.protocol = version::kHogdProtocolCommit(),
+    return EventCard{.protocol = version::kHogdProtocol(),
                      .upid = {},
                      .address_for_exec =
                          std::format("{}:{}", addr, exec_port()).c_str(),

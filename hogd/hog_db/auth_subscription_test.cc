@@ -93,7 +93,7 @@ protected:
 
     // Create AuthCard pointing to the mock server
     std::string server_address = std::format("localhost:{}", port);
-    auth_card_ = AuthCard{.protocol = version::kHogdProtocolCommit(),
+    auth_card_ = AuthCard{.protocol = version::kHogdProtocol(),
                           .upid = {},
                           .address_for_db = server_address.c_str(),
                           .address_for_mempool = ""};
@@ -360,7 +360,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
     MockAuthDBServer mock_auth_server2;
     uint16_t port2 = mock_auth_server2.start_server(0);
     std::string server_address2 = std::format("localhost:{}", port2);
-    AuthCard auth_card2 = AuthCard{.protocol = version::kHogdProtocolCommit(),
+    AuthCard auth_card2 = AuthCard{.protocol = version::kHogdProtocol(),
                                    .upid = {},
                                    .address_for_db = server_address2.c_str(),
                                    .address_for_mempool = ""};
@@ -371,7 +371,7 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
   MockAuthDBServer mock_auth_server3;
   uint16_t port3 = mock_auth_server3.start_server(0);
   std::string server_address3 = std::format("localhost:{}", port3);
-  AuthCard auth_card3 = AuthCard{.protocol = version::kHogdProtocolCommit(),
+  AuthCard auth_card3 = AuthCard{.protocol = version::kHogdProtocol(),
                                  .upid = {},
                                  .address_for_db = server_address3.c_str(),
                                  .address_for_mempool = ""};
@@ -434,15 +434,15 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
 
 TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 {
-  AuthCard bad_card = AuthCard{.protocol = version::kHogdProtocolCommit(),
+  AuthCard bad_card = AuthCard{.protocol = version::kHogdProtocol(),
                                .upid = {},
                                .address_for_db = "localhost:12345",
                                .address_for_mempool = ""};
-  AuthCard bad_card2 = AuthCard{.protocol = version::kHogdProtocolCommit(),
+  AuthCard bad_card2 = AuthCard{.protocol = version::kHogdProtocol(),
                                 .upid = {},
                                 .address_for_db = "unresolvable:12345",
                                 .address_for_mempool = ""};
-  AuthCard bad_card3 = AuthCard{.protocol = version::kHogdProtocolCommit(),
+  AuthCard bad_card3 = AuthCard{.protocol = version::kHogdProtocol(),
                                 .upid = {},
                                 .address_for_db = "unparseable_nonsense",
                                 .address_for_mempool = ""};
@@ -571,7 +571,7 @@ TEST_F(AuthSubscriptionTest, OutOfOrderAuthPublishProgresses)
   uint16_t port = mock_server.start_server(0);
   std::string server_address = std::format("localhost:{}", port);
   AuthCard ordered_auth_card =
-      AuthCard{.protocol = version::kHogdProtocolCommit(),
+      AuthCard{.protocol = version::kHogdProtocol(),
                .upid = {},
                .address_for_db = server_address.c_str(),
                .address_for_mempool = ""};
@@ -648,7 +648,8 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   // takes its place is the confusion the fixed width does allow: a short token
   // padded out to the array, sharing a prefix with the real one. Rejecting it
   // is what makes the padding part of the token's identity rather than filler.
-  const std::string_view current_protocol = version::kHogdProtocol();
+  const std::string_view current_protocol =
+      protocol_text(version::kHogdProtocol());
   AuthCard padded_prefix_card =
       AuthCard{.protocol = protocol_from_text(current_protocol.substr(0, 12)),
                .upid = {},

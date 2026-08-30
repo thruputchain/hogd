@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <string_view>
 #include <utility>
 
 #include "hogd/base/log.h"
@@ -43,7 +42,7 @@ public:
   static x23::Async<SchedGatewayIntroOutcome>
   schedgateway_intro(ProtocolCommit protocol)
   {
-    if (protocol != version::kHogdProtocolCommit()) {
+    if (protocol != version::kHogdProtocol()) {
       co_return SchedGatewayIntroOutcome::SchedGatewayIntroMismatchedProtocol;
     }
     co_return SchedGatewayIntroOutcome::SchedGatewayIntroSuccess;

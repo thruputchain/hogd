@@ -973,7 +973,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   EXPECT_EQ(current_origin->origin.first_height, 7);
   EXPECT_EQ(current_origin->origin.first_prev_hash,
             committed.consensus_value.prev_hash);
-  EXPECT_EQ(current_origin->origin.protocol, version::kHogdProtocolCommit());
+  EXPECT_EQ(current_origin->origin.protocol, version::kHogdProtocol());
   EXPECT_TRUE(store
                   .initialize_current_epoch_origin(
                       7, committed.consensus_value.prev_hash)()
@@ -1549,7 +1549,7 @@ TEST_F(IndexerOutboxTest,
   IndexerOutboxCommittedPayload payload =
       make_committed(1, {body}, {make_event(body, 1)});
   IndexerCommittedBlock block = *make_indexer_committed_block(payload)();
-  IndexerOutboxOrigin origin{.protocol = version::kHogdProtocolCommit(),
+  IndexerOutboxOrigin origin{.protocol = version::kHogdProtocol(),
                              .first_height = 1};
   EventIndexerPullResult result(EventIndexerPullOutcome::EventIndexerPullBlock);
   result.pulled_block() = {
