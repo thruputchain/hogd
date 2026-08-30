@@ -125,13 +125,4 @@ if command -v taskset >/dev/null 2>&1; then
   RUNNER=(taskset -c 0)
 fi
 
-# Pin the code layout too. ASLR redraws handler addresses per process, which
-# moves indirect-branch aliasing in a direct-threaded dispatch. Added when the
-# contrast estimator was unstable on the bench host; never shown to matter, and
-# the current estimator reproduces there to 0.2% either way.
-if command -v setarch >/dev/null 2>&1 &&
-  setarch "$(uname -m)" -R true >/dev/null 2>&1; then
-  RUNNER+=(setarch "$(uname -m)" -R)
-fi
-
 exec "${RUNNER[@]}" "${BINARY}" "${HARNESS_ARGS[@]:-}"
