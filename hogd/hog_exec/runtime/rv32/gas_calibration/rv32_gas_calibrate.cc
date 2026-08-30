@@ -229,12 +229,27 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     return result;
   }
 
+  const uint32_t trip_count =
+      tune_trip_count(*sweep->programs.back(), 64, options.target_ns);
+  sweep = build_sweep(base, counts, trip_count, options.placements);
+  if (!sweep.has_value()) {
+    result.rejected_because = "kernel not representable at the tuned trip "
+                              "count: " +
+                              kernel_error_name(sweep.error());
+    return result;
+  }
+
   // Audit every kernel in the sweep, not just the densest. A fit is a
   // statement about the difference between these specific programs, so a
   // fusion or run split in any one of them corrupts the slope -- and the
   // handler lookups are cached, so checking all of them costs little.
+  //
+  // After the rebuild, and at the trip count the measured kernels were built
+  // with. This used to run before the sweep was rebuilt at the tuned trip
+  // count, so the verdict described programs that were then discarded and the
+  // ones actually timed went unchecked.
   KernelSpec audited = base;
-  audited.trip_count = 64;
+  audited.trip_count = trip_count;
   for (size_t i = 0; i < sweep->kernels.size(); ++i) {
     audited.target_slots = sweep->target_counts[i];
     const LoweringAudit audit = audit_kernel(sweep->kernels[i], audited);
@@ -263,16 +278,6 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                     std::to_string(audit.first_rewritten_slot) + ")";
       return result;
     }
-  }
-
-  const uint32_t trip_count =
-      tune_trip_count(*sweep->programs.back(), 64, options.target_ns);
-  sweep = build_sweep(base, counts, trip_count, options.placements);
-  if (!sweep.has_value()) {
-    result.rejected_because = "kernel not representable at the tuned trip "
-                              "count: " +
-                              kernel_error_name(sweep.error());
-    return result;
   }
 
   std::vector<MeasurementPoint> points;
