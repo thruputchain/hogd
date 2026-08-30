@@ -97,7 +97,9 @@ public:
 
     write_deployment(addr,
                      DeployedContractHash{.hash = contract_hash,
-                                          .contract_size = contract_size},
+                                          .contract_size = contract_size,
+                                          .contract_type =
+                                              contract->contract_type()},
                      nullptr);
   }
 

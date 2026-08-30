@@ -109,7 +109,10 @@ TEST(TestBindingsTest, MissingContractOnDeploymentTest)
 
   ContractAddress deployment_addr{};
 
-  Contract contract{};
+  // Any well-formed contract works here: the point is that its hash was
+  // never stored. The union needs an explicit type now that discriminant 0
+  // is reserved.
+  Contract contract(ContractType::kRv32);
   auto hash = sha256(contract);
 
   // the contract size is for deployment costs, which we ignore in this test.
