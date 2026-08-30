@@ -58,13 +58,6 @@ edition = "2024"
 
 [workspace.dependencies]
 # groundhog dependencies
-#
-# The sdk_rs crates come from the registry like every other groundhog
-# dependency here. They used to be git dependencies, which pinned the whole SDK
-# to whatever commit Cargo.lock happened to hold and made "which SDK is hogd
-# built against?" a question only the lockfile could answer; a version answers
-# it in the manifest. Move these together — sdk_rs releases its crates in
-# lockstep on one version line.
 sdk = { registry = "groundhog", version = "0.24.2" }
 groundhog-rv32-runtime = { registry = "groundhog", version = "0.24.2" }
 # default features include std, which cannot build for the on-chain targets
@@ -77,14 +70,12 @@ thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
-# Standard interface crates. These carry their own version line in sdk_rs,
-# bumped on an SDK semver-major rather than on every release.
+# Standard interface crates. Their own version line in sdk_rs.
 groundhog-erc20-if = { registry = "groundhog", version = "0.1.16" }
 groundhog-erc1271-if = { registry = "groundhog", version = "0.1.16" }
 
-# Standard test crates. Nothing built here enables the `bottle-test` / `dev`
-# features that reach them, but cargo resolves optional dependencies either
-# way, so they still need a source.
+# Standard test crates. Only reached through optional contract features that
+# nothing here enables, but cargo resolves optional deps regardless.
 bottle-test-if = { registry = "groundhog", version = "0.24.2" }
 erc20-test = { registry = "groundhog", version = "0.24.2" }
 erc20-bottle-test = { registry = "groundhog", version = "0.24.2" }
