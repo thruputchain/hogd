@@ -187,6 +187,15 @@ def context_label(cell):
     return "/".join(parts)
 
 
+def op_width(names):
+    """Width of the opcode column, wide enough for the longest name.
+
+    Pair rows carry names like "sw;lw distinct" that overflow a column sized
+    for opcodes, which runs the name straight into the context beside it.
+    """
+    return max(8, max((len(str(name)) for name in names), default=0) + 2)
+
+
 def usable_cells(data):
     """Per-opcode cells only.
 
@@ -318,20 +327,21 @@ def print_table(data):
     )
     print(f"noise floor:  {noise_floor:.4f} ns/instr")
     print()
-    header = (f"{'op':<8}{'context':<26}{'ns/instr':>10}{'slope':>9}"
+    ow = op_width(cell["op"] for cell in data["opcodes"])
+    header = (f"{'op':<{ow}}{'context':<26}{'ns/instr':>10}{'slope':>9}"
               f"{'+/-':>8}{'sigma':>7}{'gas':>5}  verdict")
     print(header)
     print("-" * len(header))
     for cell in data["opcodes"]:
         if not cell["usable"]:
-            print(f"{cell['op']:<8}{context_label(cell):<26}{'--':>10}"
+            print(f"{cell['op']:<{ow}}{context_label(cell):<26}{'--':>10}"
                   f"{'--':>9}{'--':>8}{'--':>7}{cell['scheduled_gas']:>5}"
                   f"  rejected: {cell['rejected_because']}")
             continue
         verdict = "costs more than ADD" if resolved(cell) and cell["slope_ns"] > 0 else (
             "costs less than ADD" if resolved(cell) else "same as ADD")
         print(
-            f"{cell['op']:<8}{context_label(cell):<26}"
+            f"{cell['op']:<{ow}}{context_label(cell):<26}"
             f"{cell['ns_per_instruction']:>10.4f}{cell['slope_ns']:>9.4f}"
             f"{cell.get('slope_stderr_ns', 0.0):>8.4f}{sigmas(cell):>7.1f}"
             f"{cell['scheduled_gas']:>5}  {verdict}"
@@ -402,7 +412,9 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
         print("runs (ideally from several hosts) to see which distinctions "
               "survive.")
     print()
-    header = f"{'op':<8}{'worst context':<26}{'ns/instr':>10}{'ratio':>8}{'current':>8}{'proposed':>9}  note"
+    ow = op_width(schedule)
+    header = (f"{'op':<{ow}}{'worst context':<26}{'ns/instr':>10}{'ratio':>8}"
+              f"{'current':>8}{'proposed':>9}  note")
     print(header)
     print("-" * len(header))
     changed = 0
@@ -414,7 +426,7 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
             changed += 1
             note = (note + " CHANGED").strip()
         print(
-            f"{op:<8}{entry['context']:<26}{entry['ns']:>10.4f}"
+            f"{op:<{ow}}{entry['context']:<26}{entry['ns']:>10.4f}"
             f"{entry['ratio']:>8.2f}{entry['current_gas']:>8}"
             f"{entry['proposed_gas']:>9}  {note}"
         )
@@ -856,7 +868,9 @@ def print_comparison(before, after):
           f" -> {after['baseline']['ns_per_filler_instruction']:.4f} ns")
     print(f"noise floor (max of the two runs): {floor:.4f} ns/instr")
     print()
-    header = f"{'op':<8}{'context':<26}{'before':>10}{'after':>10}{'delta':>10}{'%':>8}"
+    ow = op_width(key[0] for key in before_cells.keys() & after_cells.keys())
+    header = (f"{'op':<{ow}}{'context':<26}{'before':>10}{'after':>10}"
+              f"{'delta':>10}{'%':>8}")
     print(header)
     print("-" * len(header))
     for key in sorted(before_cells.keys() & after_cells.keys()):
@@ -868,7 +882,7 @@ def print_comparison(before, after):
         if abs(delta) <= floor:
             continue
         percent = (delta / old * 100.0) if old else 0.0
-        print(f"{key[0]:<8}{key[1]:<26}{old:>10.4f}{new:>10.4f}"
+        print(f"{key[0]:<{ow}}{key[1]:<26}{old:>10.4f}{new:>10.4f}"
               f"{delta:>+10.4f}{percent:>+8.1f}")
     return 0
 
