@@ -4,6 +4,7 @@
 #include <exception>
 #include <future>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <latch>
 #include <limits>
 #include <memory>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
@@ -2489,6 +2491,300 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
           get_tip.db_tip().id, good_proposal)();
   EXPECT_EQ(res_good.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
+}
+
+namespace {
+
+struct NamedSigning {
+  const char *name;
+  SignedTransaction signed_tx;
+};
+
+// Signings that share [base_tx] -- and therefore its [TransactionHash] -- but
+// that authentication must reject. Between them they cover what someone who
+// does not hold the signing key can produce (corrupt, absent, borrowed from
+// another key, another transaction, or another network) and the orderings the
+// auth-claim rules turn down as malformed.
+//
+// [key_id_0_sk] signs as registered key 0. [unrelated_sk] is a key the account
+// has never registered.
+inline std::vector<NamedSigning>
+rejectable_signings(const Transaction &base_tx, const SecretKey &key_id_0_sk,
+                    const SecretKey &unrelated_sk,
+                    const NetworkHash &network_hash)
+{
+  const DecoratedSignature good =
+      make_signature(key_id_0_sk, base_tx, /*public_key_id=*/0, network_hash);
+
+  auto signing = [&base_tx](std::initializer_list<DecoratedSignature> sigs) {
+    SignedTransaction out;
+    out.tx = base_tx;
+    for (const DecoratedSignature &sig : sigs) {
+      out.signatures.push_back(sig);
+    }
+    return out;
+  };
+
+  DecoratedSignature flipped = good;
+  flipped.signature.ed25519()[0] ^= 0xff;
+
+  DecoratedSignature zeroed = good;
+  for (auto &byte : zeroed.signature.ed25519()) {
+    byte = 0;
+  }
+
+  // A real signature by a key the account does not list.
+  const DecoratedSignature unrelated_key =
+      make_signature(unrelated_sk, base_tx, /*public_key_id=*/0, network_hash);
+
+  // A real signature by the right key over a different transaction.
+  Transaction other_tx = base_tx;
+  other_tx.uniquifier.nonce = base_tx.uniquifier.nonce + 1;
+  const DecoratedSignature other_message =
+      make_signature(key_id_0_sk, other_tx, /*public_key_id=*/0, network_hash);
+
+  // A real signature by the right key over this transaction, but bound to a
+  // different network by the signature preimage.
+  NetworkHash other_network = network_hash;
+  other_network[0] ^= 0xff;
+  const DecoratedSignature other_chain =
+      make_signature(key_id_0_sk, base_tx, /*public_key_id=*/0, other_network);
+
+  // Valid bytes attributed to a key slot the account has not registered.
+  DecoratedSignature unregistered_slot = good;
+  unregistered_slot.public_key_id = 1;
+
+  return {
+      {"no signatures", signing({})},
+      {"bit-flipped signature", signing({flipped})},
+      {"zeroed signature", signing({zeroed})},
+      {"signature by an unregistered key", signing({unrelated_key})},
+      {"signature over a different transaction", signing({other_message})},
+      {"signature bound to a different network", signing({other_chain})},
+      {"signature attributed to an unregistered slot",
+       signing({unregistered_slot})},
+      // Signer ids must be strictly increasing, so a repeated id is malformed
+      // even though each copy verifies on its own.
+      {"duplicated signer id", signing({good, good})},
+      {"valid signature followed by a corrupt one", signing({good, flipped})},
+  };
+}
+
+// Registers [key_id_0_sk] as key 0 with weight 1 and requires weight 1.
+inline SecretKey
+register_single_signer(MempoolTestInfra &server, Transaction &tx)
+{
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  return sk;
+}
+
+inline SecretKey
+unregistered_signer()
+{
+  AddressAuthData scratch = get_default_account();
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = create_key_pair(scratch, /*idx=*/0, /*weight=*/1);
+  return sk;
+}
+
+} // namespace
+
+// The property the whole design rests on: [TransactionHash] covers
+// [Transaction] and nothing else, so no manipulation of the signatures can
+// change it. That is what makes a signature-keyed verdict stored under a
+// [TransactionHash] unsound, and it is why the cache below keys on the whole
+// [SignedTransaction] instead.
+TEST(Mempool, TransactionHashIsIndependentOfSignatureManipulation)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  Transaction &tx = txs[0].tx;
+  const SecretKey sk = register_single_signer(server, tx);
+  const SecretKey unrelated = unregistered_signer();
+
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+
+  const TransactionHash tx_hash = sha256(tx);
+  const SHA256Hash good_signing_hash = sha256(good_tx);
+
+  for (const NamedSigning &attack :
+       rejectable_signings(tx, sk, unrelated, MempoolTestInfra::kNetworkHash)) {
+    SCOPED_TRACE(attack.name);
+    // The manipulated signing is indistinguishable from the genuine one by
+    // transaction hash ...
+    EXPECT_EQ(sha256(attack.signed_tx.tx), tx_hash);
+    // ... and distinguishable by the hash that covers the signatures.
+    EXPECT_NE(sha256(attack.signed_tx), good_signing_hash);
+  }
+}
+
+// No manipulation of a transaction's signatures may let a third party move this
+// node's verdict on a block carrying the genuine transaction. Every rejected
+// signing must leave validation answering MissingTxs, and the genuine
+// transaction must still be admitted and validate afterwards.
+TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  Transaction &tx = txs[0].tx;
+  const SecretKey sk = register_single_signer(server, tx);
+  const SecretKey unrelated = unregistered_signer();
+
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+  const TransactionHash tx_hash = sha256(tx);
+
+  // Submit every rejectable signing over the unauthenticated gateway path,
+  // twice each so the second submission exercises the rejected-signature
+  // cache. None may be admitted.
+  for (const NamedSigning &attack :
+       rejectable_signings(tx, sk, unrelated, MempoolTestInfra::kNetworkHash)) {
+    SCOPED_TRACE(attack.name);
+    for (int attempt = 0; attempt < 2; attempt++) {
+      server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+          t_to_parallel_batch(SignedTransactionBatch{attack.signed_tx})())();
+      ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+    }
+  }
+
+  // After all of that, a proposal carrying the genuine transaction is still
+  // only missing data -- never invalid.
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  TransactionHashBatch tx_hashes{tx_hash};
+  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+      NondeterministicProposalData{}};
+  Proposal proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height =
+                     get_tip.db_tip().value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .nondeterministic_data =
+                           t_to_parallel_batch(tx_nondeterministic_data)()}};
+
+  SchedulerValidationResult res_missing =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, proposal)();
+  ASSERT_EQ(res_missing.outcome(),
+            SchedulerValidationResult::SchedulerValidationMissingTxs);
+  ASSERT_EQ(res_missing.missing_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_missing.missing_tx_hashes()[0], tx_hash);
+
+  // And the genuine signing of that same transaction is still accepted.
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal good_proposal = res_nominate.proposed_block().proposal;
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+
+  SchedulerValidationResult res_good =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, good_proposal)();
+  EXPECT_EQ(res_good.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+}
+
+// With k-of-N signers a transaction legitimately has many valid signings, so
+// the distinction between "this transaction" and "these signature bytes"
+// matters in normal operation and not only under attack.
+TEST(Mempool, MultiSignerSigningsShareATransactionHash)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey key_0 =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  const Ed25519SecretKey key_1 =
+      create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  Transaction &tx = txs[0].tx;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 0b11;
+  claim.source_address_claim().required_weight = 2;
+  tx.auth_claim = claim;
+
+  SecretKey sk_0(CryptographicScheme::Ed25519);
+  sk_0.ed25519() = key_0;
+  SecretKey sk_1(CryptographicScheme::Ed25519);
+  sk_1.ed25519() = key_1;
+
+  const DecoratedSignature sig_0 =
+      make_signature(sk_0, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  const DecoratedSignature sig_1 =
+      make_signature(sk_1, tx, /*public_key_id=*/1,
+                     MempoolTestInfra::kNetworkHash);
+
+  // Signer ids must be strictly increasing, so this is the one accepted
+  // ordering and the reverse is malformed.
+  SignedTransaction ordered = txs[0];
+  ordered.signatures.push_back(sig_0);
+  ordered.signatures.push_back(sig_1);
+
+  SignedTransaction reversed = txs[0];
+  reversed.signatures.push_back(sig_1);
+  reversed.signatures.push_back(sig_0);
+
+  // Only one signer: below the required weight.
+  SignedTransaction below_threshold = txs[0];
+  below_threshold.signatures.push_back(sig_0);
+
+  const TransactionHash tx_hash = sha256(tx);
+  EXPECT_EQ(sha256(reversed.tx), tx_hash);
+  EXPECT_EQ(sha256(below_threshold.tx), tx_hash);
+  EXPECT_NE(sha256(reversed), sha256(ordered));
+  EXPECT_NE(sha256(below_threshold), sha256(ordered));
+
+  // Neither rejected signing is admitted, and neither may keep the properly
+  // ordered, fully weighted signing out afterwards.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{reversed})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{below_threshold})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{ordered})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
 // The rejected-signature cache spares us reverifying bytes authentication has
