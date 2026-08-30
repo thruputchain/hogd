@@ -62,11 +62,6 @@ make_deployed_contract_hash(std::shared_ptr<const Contract> const &contract)
     return DeployedContractHash{.hash = sha256(*contract),
                                 .contract_size = 0,
                                 .contract_type = contract->contract_type()};
-  case ContractType::kWasmi:
-    return DeployedContractHash{.hash = sha256(*contract),
-                                .contract_size = static_cast<uint32_t>(
-                                    contract->wasmi_contract().data.size()),
-                                .contract_type = ContractType::kWasmi};
   case ContractType::kRv32:
     return DeployedContractHash{.hash = sha256(*contract),
                                 .contract_size = static_cast<uint32_t>(
