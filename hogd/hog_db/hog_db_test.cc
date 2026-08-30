@@ -637,7 +637,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
                                  std::to_underlying(StorageDeltaFlags::None)));
 
   DeployedContractHash deployed_hash{.hash = sha256(contract),
-                                     .contract_size = 10};
+                                     .contract_size = 10,
+                                     .contract_type = ContractType::kRv32};
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr3, deployed_hash, std::to_underlying(StorageDeltaFlags::None)));
   int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
