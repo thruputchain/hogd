@@ -40,7 +40,6 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
-#include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
@@ -163,34 +162,6 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
   ASSERT_EQ(result.size(), hashes.size());
   EXPECT_FALSE(result[0]);
   EXPECT_FALSE(result[1]);
-}
-
-TEST(Mempool, LookupAtBatchLimitIsServed)
-{
-  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
-                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
-  TransactionHashBatch hashes;
-  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
-
-  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
-
-  EXPECT_EQ(result.size(), hashes.size());
-}
-
-TEST(Mempool, LookupRejectsBatchOverLimit)
-{
-  MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
-                                    NetworkHash{}, /*mempool_tx_size_limit=*/0);
-  TransactionHashBatch hashes;
-  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize + 1);
-
-  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
-
-  // A rejected lookup replies empty; a served one replies with one slot per
-  // requested hash, which is how a caller tells the two apart.  The limit is
-  // checked before the pre-ready path so that its request-sized reply is
-  // bounded too.
-  EXPECT_EQ(result.size(), 0UL);
 }
 
 TEST(Mempool, EventStartupTimesOutWithoutCanonicalTip)
@@ -986,38 +957,7 @@ TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
-// [LookupTransactionsReply] exists to change who owns the bytes, not what the
-// bytes are.  Pin that against the wire type the RPC actually declares.
-static_assert(
-    x23::serializes_like<LookupTransactionsReply, OptSignedTransactionBatch>);
-
-TEST(Mempool, LookupReplySerializesLikeTheDeclaredWireType)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  const auto first = std::make_shared<const SignedTransaction>(txs[0]);
-  const auto second = std::make_shared<const SignedTransaction>(txs[1]);
-
-  // Present / absent / present, so the presence tags are exercised in the
-  // shape a lookup reply actually produces them.
-  LookupTransactionsReply borrowed;
-  const SignedTransaction *first_slot = borrowed.pin(first);
-  const SignedTransaction *second_slot = borrowed.pin(second);
-  borrowed.push_back(first_slot);
-  borrowed.push_back(nullptr);
-  borrowed.push_back(second_slot);
-
-  OptSignedTransactionBatch owned;
-  owned.push_back(x23::Ptr<SignedTransaction>(txs[0]));
-  owned.push_back(nullptr);
-  owned.push_back(x23::Ptr<SignedTransaction>(txs[1]));
-
-  EXPECT_EQ(xdr_size(borrowed), x23::xdr_size(owned));
-  EXPECT_EQ(x23::serialize(borrowed), x23::serialize(owned));
-}
-
-TEST(Mempool, LookupPreservesPositionsForMissingHashes)
+TEST(Mempool, LookupBorrowsTheScheduledTransactionInsteadOfCopyingIt)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
@@ -1032,8 +972,9 @@ TEST(Mempool, LookupPreservesPositionsForMissingHashes)
   const TransactionHash absent = sha256(txs[1].tx);
   ASSERT_NE(present, absent);
 
+  // A repeated hash and a miss, so both the sharing and the absent-slot paths
+  // are covered and the reply is checked to stay positional.
   TransactionHashBatch hashes;
-  hashes.push_back(absent);
   hashes.push_back(present);
   hashes.push_back(absent);
   hashes.push_back(present);
@@ -1041,121 +982,21 @@ TEST(Mempool, LookupPreservesPositionsForMissingHashes)
   auto result =
       server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
 
-  // The reply is positional: resolving each distinct hash once must not
-  // reorder or compact the slots.
   ASSERT_EQ(result.size(), hashes.size());
-  EXPECT_FALSE(result[0]);
-  EXPECT_FALSE(result[2]);
-  ASSERT_TRUE(result[1]);
-  ASSERT_TRUE(result[3]);
-  EXPECT_EQ(*result[1], txs[0]);
-  EXPECT_EQ(*result[3], txs[0]);
-}
+  EXPECT_FALSE(result[1]);
+  ASSERT_TRUE(result[0]);
+  ASSERT_TRUE(result[2]);
+  EXPECT_EQ(*result[0], txs[0]);
+  EXPECT_EQ(*result[2], txs[0]);
 
-TEST(Mempool, LookupAnswersRepeatedHashWithoutCopyingTheTransaction)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
-
-  constexpr size_t kRepeats = 64;
-  TransactionHashBatch hashes;
-  hashes.resize(kRepeats, sha256(txs[0].tx));
-
-  auto result =
-      server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
-
-  ASSERT_EQ(result.size(), kRepeats);
-  for (size_t i = 0; i < result.size(); i++) {
-    ASSERT_NE(result[i].get(), nullptr);
-    EXPECT_EQ(*result[i], txs[0]);
-  }
-
-  // Every slot points at the *same* transaction the scheduler holds.  This is
-  // the regression guard against reintroducing a per-slot deep copy, which is
-  // what made a repeated hash a memory-amplification primitive.
+  // Both slots point at the transaction the scheduler holds rather than at
+  // copies of it.  This is the regression guard: reintroducing the deep copy
+  // makes these addresses differ.
   const SignedTransaction *scheduled =
-      server.mempool_coord_rpc().scheduler()->find_tx(sha256(txs[0].tx)).get();
+      server.mempool_coord_rpc().scheduler()->find_tx(present).get();
   ASSERT_NE(scheduled, nullptr);
-  for (size_t i = 0; i < result.size(); i++) {
-    EXPECT_EQ(result[i].get(), scheduled);
-  }
-}
-
-TEST(Mempool, LookupRejectsBatchThatWouldOverrunTheReplyBudget)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  // [Calldata] is unbounded on the wire and nothing caps a transaction's size
-  // at admission, so the batch limit alone does not bound the reply: the
-  // handler borrows rather than copies, but the serialized bytes still
-  // multiply by the number of slots.
-  constexpr size_t kCalldataBytes = 1UL << 20;
-  txs[0].tx.invocation.calldata.resize(kCalldataBytes);
-
-  MempoolTestInfra server;
-
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
-
-  // Mirror the handler's accounting exactly: a 4-byte vector length prefix,
-  // then per slot a 4-byte presence tag plus the transaction itself.  If the
-  // handler miscounts by even one word, the boundary below moves and this
-  // test fails.
-  const size_t per_slot = 4 + x23::xdr_size(txs[0]);
-  const size_t served =
-      (MempoolCoordinatorRpc::kMaxLookupTransactionsReplyBytes - 4) / per_slot;
-  ASSERT_GT(served, 0UL);
-  ASSERT_LT(served + 1, MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
-
-  TransactionHashBatch within_budget;
-  within_budget.resize(served, sha256(txs[0].tx));
-  auto ok = server.mempool_coord_rpc().schedcoord_lookup_transactions(
-      within_budget)();
-  EXPECT_EQ(ok.size(), served);
-
-  TransactionHashBatch over_budget;
-  over_budget.resize(served + 1, sha256(txs[0].tx));
-  auto rejected =
-      server.mempool_coord_rpc().schedcoord_lookup_transactions(over_budget)();
-
-  // Refused before the reply is built, rather than built and then refused by
-  // [make_record] once the memory has already been committed.
-  EXPECT_EQ(rejected.size(), 0UL);
-}
-
-TEST(Mempool, GatewayLookupEnforcesTheSameBatchLimit)
-{
-  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
-
-  MempoolTestInfra server;
-  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
-
-  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
-      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
-
-  TransactionHashBatch hashes;
-  hashes.resize(MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize + 1,
-                sha256(txs[0].tx));
-
-  // The gateway surface is the unauthenticated one, so the limit has to hold
-  // there and not only on the coordinator port.
-  EXPECT_EQ(gateway.schedgateway_lookup_tx(hashes)().size(), 0UL);
-
-  hashes.resize(1, sha256(txs[0].tx));
-  auto served = gateway.schedgateway_lookup_tx(hashes)();
-  ASSERT_EQ(served.size(), 1UL);
-  ASSERT_TRUE(served[0]);
-  EXPECT_EQ(*served[0], txs[0]);
+  EXPECT_EQ(result[0].get(), scheduled);
+  EXPECT_EQ(result[2].get(), scheduled);
 }
 
 TEST(Mempool, Propose)

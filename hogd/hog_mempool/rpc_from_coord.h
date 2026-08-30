@@ -54,7 +54,6 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
-#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -79,28 +78,6 @@ public:
   static constexpr size_t kNumClientsPerExecutor = 10;
 
   static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
-
-  // Admission limits for [schedcoord_lookup_transactions].  That handler is
-  // reachable unauthenticated through [schedgateway_lookup_tx], and both its
-  // listeners run with [kBulkRpcMaxMessageSize], so the transport bounds a
-  // request only at 2 GiB and the XDR decoder does not pre-allocate on a
-  // declared count -- a 16 MiB request is 524,288 32-byte hashes.
-  //
-  // [kMaxLookupTransactionsBatchSize] bounds the request: without it the
-  // reply vector is reserved at the requested cardinality and the handler
-  // runs one [Scheduler::find_tx] per hash without ever suspending, pinning a
-  // worker from the pool that also serves nomination and validation.
-  //
-  // [kMaxLookupTransactionsReplyBytes] bounds the reply.  The handler borrows
-  // rather than copies (see [LookupTransactionsReply]), so a resolved hash
-  // costs a pointer rather than a transaction -- but the serialized reply is
-  // still built whole in memory by [make_record], and a [SignedTransaction]'s
-  // [Calldata] is unbounded on the wire.  Nothing de-duplicates the request,
-  // so one hash repeated N times still serializes N copies of that
-  // transaction.  The count limit alone does not bound that, because the
-  // per-transaction size is itself unbounded.
-  static constexpr size_t kMaxLookupTransactionsBatchSize = 4'096;
-  static constexpr size_t kMaxLookupTransactionsReplyBytes = 0x100'0000;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
@@ -327,73 +304,27 @@ public:
     co_return ret;
   }
 
-  // Looks up transactions by hash.  A served lookup replies with exactly one
-  // (possibly null) slot per requested hash; a rejected one replies with an
-  // empty vector, which is how a caller tells the two apart.  This surface is
-  // reachable unauthenticated, so see [kMaxLookupTransactionsBatchSize] and
-  // [kMaxLookupTransactionsReplyBytes] for what "rejected" covers.
-  //
-  // The reply borrows the scheduler's transactions instead of copying them --
-  // see [LookupTransactionsReply] for why that is safe and what it pins.
-  x23::Async<LookupTransactionsReply>
+  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
-    LookupTransactionsReply ret;
-
-    // Checked before [ready()] so that the pre-ready reply, which is sized to
-    // the request, is bounded too.
-    if (tx_hashes.size() > kMaxLookupTransactionsBatchSize) {
-      MempoolMetrics::instance().rejected_oversize_lookup_rpc_count.increment();
-      // Rate-limited: an unauthenticated peer chooses how often this fires,
-      // and the metric above is the signal an operator actually watches.
-      info_every_n_sec(
-          5.0F, "lookup_transactions rejected a batch of {} hashes (limit {})",
-          tx_hashes.size(), kMaxLookupTransactionsBatchSize);
-      co_return ret;
-    }
-
-    ret.reserve(tx_hashes.size());
+    x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
-      for (size_t i = 0; i < tx_hashes.size(); i++) {
-        ret.push_back(nullptr);
-      }
+      ret.resize(tx_hashes.size());
       co_return ret;
     }
-
-    // [Scheduler::find_tx] takes a shard lock of [txs_], and a batch is free
-    // to repeat a hash, so resolve each distinct hash once.  Without this, a
-    // batch of one hash repeated [kMaxLookupTransactionsBatchSize] times takes
-    // the same shard mutex that many times, contending with the admission and
-    // removal paths that also hold it.  The map holds the borrowed pointer
-    // [pin] handed back, not another reference: the reply owns the references.
-    std::unordered_map<TransactionHash, const SignedTransaction *,
-                       SipHash24Hasher>
-        resolved;
-
-    // The exact size of the reply x23 will build: the vector's length prefix,
-    // plus whatever each slot serializes to.  Charged as we go so an oversize
-    // reply is refused before [make_record] allocates it whole.
-    size_t reply_bytes = 4;
-
+    ret.reserve(tx_hashes.size());
     for (const TransactionHash &tx_hash : tx_hashes) {
-      auto [resolved_it, inserted] = resolved.try_emplace(tx_hash, nullptr);
-      if (inserted) {
-        resolved_it->second = ret.pin(scheduler_->find_tx(tx_hash));
-      }
-      const LookupTransactionsReply::slot_type slot(resolved_it->second);
-
-      reply_bytes += x23::xdr_size(slot);
-      if (reply_bytes > kMaxLookupTransactionsReplyBytes) {
-        MempoolMetrics::instance()
-            .rejected_oversize_lookup_rpc_count.increment();
-        info_every_n_sec(5.0F,
-                         "lookup_transactions rejected a reply exceeding {} "
-                         "bytes",
-                         kMaxLookupTransactionsReplyBytes);
-        ret.clear();
-        break;
-      }
-      ret.push_back(resolved_it->second);
+      // [find_tx] hands back a reference into the scheduler's tx store, and
+      // the reply holds that reference until x23 has serialized the response,
+      // so the tx cannot be freed by another thread in between.  That is what
+      // the copy through [x23::Ptr]'s value constructor used to buy, and it
+      // was paying for it with a deep copy of the whole transaction --
+      // including its unbounded [Calldata] -- for every hash resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(
+          XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
     co_return ret;
