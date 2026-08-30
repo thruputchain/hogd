@@ -564,6 +564,13 @@ def print_prediction(data):
     print("additivity: do separately measured opcode costs predict a real "
           "program?")
     print()
+    print("residual = (measured - predicted) / predicted:")
+    print("  positive -> ran SLOWER than the sum of its parts (model "
+          "underpredicts)")
+    print("  negative -> ran FASTER (model overpredicts, e.g. fusion)")
+    print("headroom = (worst-case - measured) / worst-case: slack the schedule")
+    print("  has at this workload. Negative would mean gas underprices it.")
+    print()
     print(header)
     print("-" * len(header))
     clean_residuals = []
