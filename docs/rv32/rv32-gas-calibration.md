@@ -75,12 +75,39 @@ The contexts are the load-bearing part. An opcode does not have one cost, and
 which end of its range applies is the guest author's choice, so gas has to
 price the end an adversary can force.
 
+## How reproducible is it
+
+Two back-to-back runs on the bench host (`hog10`, AMD EPYC 9554, Release built
+with gcc), comparing the saturated measurement against the contrast it
+replaced, as a relative difference between the two runs:
+
+| | median | p90 | negative costs |
+|---|---:|---:|---:|
+| saturated | **0.5%** | **1.9%** | 0 of 101 |
+| contrast | 3.0% | 253% | 26 of 101 |
+
+The expensive cells agree between runs to within a few tenths of a percent:
+
+```
+              run 1 / run 2   (x baseline)
+LH   chase      3.77 / 3.75
+JALR            3.71 / 3.69
+LW   chase      3.55 / 3.54
+DIV  chain      2.82 / 2.81
+```
+
+That host is the one that made the contrast unusable -- back-to-back runs there
+moved `SUB` by 6.3 ns and priced 28% of the ISA below zero. The same machine,
+the same binary, and the same sweeps reproduce to under 2% once the estimator
+stops taking a difference.
+
 ## First results
 
 Host: 4-core Intel Xeon @ 2.80GHz, 32 KiB L1d and 1 MiB L2 per core, Linux,
 Release build (`-O3 -march=native`, LTO). Development container, not a
 validator; treat the ordering as the finding and the absolute nanoseconds as
-host-specific.
+host-specific. These numbers predate the saturated estimator, so the absolute
+values are the contrast's; the ordering is unchanged.
 
 Baseline: one dispatched ALU instruction costs about **1.0 ns**, roughly 2.8
 cycles. That is the number every other cost is relative to.
