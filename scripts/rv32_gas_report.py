@@ -237,6 +237,18 @@ def cost_ns(cell):
     saturated = cell.get("ns_saturated", 0.0)
     if saturated > 0.0:
         return saturated
+    # Second choice: the densest alternating kernel's time divided by its
+    # target count. Its targets are non-adjacent, so it is available exactly
+    # when saturation is not -- and it is still one absolute timing over one
+    # count, so it cannot be negative either. It over-attributes the fillers'
+    # time to the targets, which makes it loose by up to about 2x, but loose
+    # and conservative beats precise and unstable for a gas bound.
+    bound = cell.get("ns_upper_bound", 0.0)
+    if bound > 0.0:
+        return bound
+    # Last resort: the contrast. Kept so an older run still reports, but this
+    # is the estimator that produces negative costs, so a cell reaching here
+    # is one to distrust.
     return cell["ns_per_instruction"]
 
 
