@@ -561,9 +561,15 @@ max_target_slots(uint32_t body_slots, const KernelSpec &spec)
   // that interior, so the head can sit one slot lower than a single target's.
   const uint32_t placeable = (body_slots - 2) - (per_target - 1);
   if (spec.saturated) {
-    // Every interior slot. Adjacency is the point, so there is no gap to keep;
-    // the audit is what checks the slots did not fuse.
-    return placeable;
+    // Every interior slot a substitution can start at without landing on the
+    // previous one. Adjacency is the point, so unlike the sweep below there is
+    // no filler gap to keep -- but a pair still occupies two slots, and a head
+    // at every slot would make each pair's first instruction overwrite the
+    // previous pair's second. The body would come out as a run of stores with
+    // one trailing load, audit clean (sw;sw is not a fusion rule), and be
+    // reported as the cost of a pair. Dividing by per_target tiles them
+    // instead: sw lw sw lw, which is what "a program made of this pair" means.
+    return placeable / per_target;
   }
   // One filler between substitutions, so the period is per_target + 1. Deriving
   // the cap from the same span the placement walks is what keeps the minimum
@@ -967,6 +973,7 @@ build_kernel(const KernelSpec &spec)
                        memory_access_width(spec.target));
   }
   kernel.body_start_pc = body_start_index * kInstructionBytes;
+  kernel.target_units = static_cast<uint32_t>(target_slot_indices.size());
   for (const uint32_t slot : target_slot_indices) {
     // Record every slot a substitution occupies, so the audit checks both
     // halves of a pair rather than only its head.

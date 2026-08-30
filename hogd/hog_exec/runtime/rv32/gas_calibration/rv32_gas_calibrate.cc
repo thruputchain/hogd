@@ -432,9 +432,25 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
               result.saturated_note = "saturated kernel did not halt cleanly";
             }
             else {
+              // Divide by the substitutions placed, not by the instructions
+              // retired. Two reasons, and they point the same way.
+              //
+              // Units: a pair's cost is quoted per pair, because that is what
+              // the report compares against its ceiling (the two opcodes'
+              // costs summed). Per-instruction would read half of it.
+              //
+              // Direction: the iteration also runs the two boundary fillers
+              // and three loop-control instructions, and their time is in the
+              // numerator either way. Dividing by the instruction count
+              // spreads it over them too, which averages the target *down*
+              // toward the filler -- an understatement, and understating is
+              // the one direction worst-case pricing cannot tolerate.
+              // Attributing all of it to the targets makes this an upper
+              // bound on the target's own cost instead. The looseness is the
+              // scaffolding over the target count: about 0.1% at the body
+              // sizes used here, and always in the safe direction.
               result.ns_saturated =
-                  one[0].median() /
-                  static_cast<double>(kernel->instructions_per_iteration);
+                  one[0].median() / static_cast<double>(kernel->target_units);
             }
           }
         }

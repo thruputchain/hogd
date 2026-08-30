@@ -212,6 +212,14 @@ struct Kernel {
   // Byte offsets of the body slots that hold the target instruction, in
   // program order. lowering_audit.h uses these to check the lowering.
   std::vector<uint32_t> target_slot_pcs;
+  // Substitutions placed in the body: one per target instruction for a single
+  // target, one per *pair* for a pair. target_slot_pcs holds every slot they
+  // occupy, so it is twice this for a pair -- which is why the two are not
+  // interchangeable. This is the denominator a saturated timing divides by,
+  // because it is the unit the cost is quoted in: ns per instruction for a
+  // single target, ns per pair for a pair, which is what a pair's ceiling
+  // (its two opcodes' costs summed) is compared against.
+  uint32_t target_units = 0;
   // Byte offset of the first body slot.
   uint32_t body_start_pc = 0;
 };

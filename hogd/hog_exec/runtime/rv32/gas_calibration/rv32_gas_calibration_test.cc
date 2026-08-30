@@ -182,6 +182,56 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
 // slot actually holds the target, and the kernel actually executes all of it.
 // Check both against the production decoder and the engine's own gas
 // accounting, for every opcode that can be saturated.
+TEST(Rv32GasCalibrationKernel, SaturatedPairsTileWithoutOverlapping)
+{
+  // A saturated pair body has to be the pair repeated -- sw lw sw lw -- not a
+  // run of stores. Each substitution occupies two slots, so placing a head at
+  // every interior slot makes each pair's first instruction land on the
+  // previous pair's second: the body collapses to all-first-component with a
+  // single tail at the end, and it audits clean because sw;sw is not a fusion
+  // rule. The pair's cost would then be measured on a program that contains
+  // essentially none of the interaction the row exists to measure.
+  for (const PairKind pair :
+       {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct}) {
+    KernelSpec spec;
+    spec.pair = pair;
+    spec.saturated = true;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(spec.body_slots, spec);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << pair_name(pair);
+
+    const auto [head_op, tail_op] = pair_components(pair);
+    const auto program = ThreadedProgram::create(kernel.value().code);
+    ASSERT_TRUE(program.has_value()) << pair_name(pair);
+
+    // Every recorded slot alternates head, tail, head, tail: two slots per
+    // substitution, in program order, none of them overwritten.
+    const auto &pcs = kernel.value().target_slot_pcs;
+    ASSERT_EQ(pcs.size() % 2U, 0U) << pair_name(pair);
+    ASSERT_GT(pcs.size(), 2U) << pair_name(pair);
+    for (size_t i = 0; i < pcs.size(); i += 2) {
+      EXPECT_EQ(pcs[i + 1], pcs[i] + kInstructionBytes)
+          << pair_name(pair) << ": pair halves are not adjacent";
+      const auto head = program->instruction_at(pcs[i] / kInstructionBytes);
+      const auto tail = program->instruction_at(pcs[i + 1] / kInstructionBytes);
+      ASSERT_TRUE(head.has_value() && tail.has_value()) << pair_name(pair);
+      EXPECT_EQ(head->op, head_op) << pair_name(pair) << " at pc " << pcs[i];
+      EXPECT_EQ(tail->op, tail_op)
+          << pair_name(pair) << " at pc " << pcs[i + 1];
+    }
+
+    // And the body really is made of the pair: at least a third of it, which a
+    // body of stores with one trailing load could never reach.
+    EXPECT_GE(kernel.value().target_units, spec.body_slots / 3)
+        << pair_name(pair);
+    EXPECT_EQ(pcs.size(), size_t{kernel.value().target_units} * 2U)
+        << pair_name(pair);
+  }
+}
+
 TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
 {
   HaltHost host;
