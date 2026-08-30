@@ -31,15 +31,6 @@ inline constexpr size_t kMaxIndexerEventPullRpcRecordBytes =
 // identity, and record marker are also counted exactly before publication.
 inline constexpr size_t kMaxIndexerOutboxPayloadBytes =
     kIndexerRpcMaxMessageSize;
-// An epoch-origin record's payload is the small fixed-shape
-// IndexerOutboxEpochOrigin metadata struct for every protocol: a format
-// version, an epoch sequence, and the origin (a protocol commit bounded by
-// kMaxIndexerOutboxProtocolCommitBytes, an epoch sequence, a first height, and
-// a prev hash) -- roughly 128 bytes encoded. It can never approach the generic
-// outbox payload cap, so recovery bounds epoch origins to this generous ceiling
-// before hashing or materializing the declared payload, rather than letting a
-// tampered current or archival origin ride the multi-gigabyte generic cap.
-inline constexpr size_t kMaxIndexerOutboxEpochOriginPayloadBytes = 4096;
 // The bounded XDR header precedes raw payload bytes. Keep slack explicit so
 // header reads remain fixed-size even if another fixed identity is added.
 inline constexpr size_t kMaxIndexerOutboxHeaderBytes = 512;

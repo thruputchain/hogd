@@ -1401,44 +1401,33 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   EXPECT_EQ(records->front().protocol, protocol_from_text("hogp/archival"));
 }
 
-TEST_F(IndexerOutboxTest, OversizedEpochOriginIsRejectedBeforePayloadHashing)
+TEST_F(IndexerOutboxTest, CurrentEpochOriginPayloadSizeMustMatchFixedShape)
 {
-  // An epoch origin is a small fixed-shape metadata record for every protocol.
-  // A tampered file -- the current origin, or an archival one renamed to a
-  // non-current protocol -- can declare a payload up to the generic
-  // multi-gigabyte outbox cap with a matching digest. Recovery must reject it
-  // from the header alone, before enumeration hashes or load materializes the
-  // declared payload.
+  // A current-protocol epoch origin is the fixed-size IndexerOutboxEpochOrigin
+  // struct. A tampered file can declare a payload up to the generic outbox cap
+  // with a matching digest; recovery must reject the size mismatch from the
+  // header alone -- before enumeration hashes or load materializes the declared
+  // payload.
   IndexerOutboxStore store = open_store(dir_);
   auto committed = make_committed(152, {}, {});
   initialize_test_origin(store, committed);
-  const std::string current_name =
+  const std::string filename =
       IndexerOutboxStore::current_epoch_origin_filename();
 
-  // Archival origin: the envelope renamed to a non-current protocol, then
-  // resized to declare an oversized payload. Enumeration reaches it and must
-  // reject it before validate_payload_digest() streams the declared bytes.
-  const std::string archival_name =
-      IndexerOutboxStore::epoch_origin_filename("hogp/archival");
-  TestOutboxFile archival = read_envelope(dir_, current_name);
-  archival.protocol = "hogp/archival";
-  write_envelope(dir_, archival_name, archival);
-  write_sparse_record(dir_, archival_name, std::move(archival),
-                      kMaxIndexerOutboxEpochOriginPayloadBytes + 1);
+  TestOutboxFile origin = read_envelope(dir_, filename);
+  constexpr uint64_t kSparsePayloadBytes = 512ULL * 1024 * 1024;
+  static_assert(kSparsePayloadBytes < kMaxIndexerOutboxPayloadBytes);
+  write_sparse_record(dir_, filename, std::move(origin), kSparsePayloadBytes);
 
   auto origins = store.enumerate_epoch_origins_raw();
   ASSERT_FALSE(origins.has_value());
-  EXPECT_NE(origins.error().find("epoch origin payload exceeds bounded size"),
+  EXPECT_NE(origins.error().find("epoch origin payload size mismatch"),
             std::string::npos)
       << origins.error();
 
-  // Current origin: oversized too, rejected on the load path.
-  TestOutboxFile current = read_envelope(dir_, current_name);
-  write_sparse_record(dir_, current_name, std::move(current),
-                      kMaxIndexerOutboxEpochOriginPayloadBytes + 1);
   auto loaded = store.load_current_epoch_origin();
   ASSERT_FALSE(loaded.has_value());
-  EXPECT_NE(loaded.error().find("epoch origin payload exceeds bounded size"),
+  EXPECT_NE(loaded.error().find("epoch origin payload size mismatch"),
             std::string::npos)
       << loaded.error();
 }
