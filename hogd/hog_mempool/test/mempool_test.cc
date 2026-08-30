@@ -1188,6 +1188,73 @@ TEST(Mempool, NominateTxWithError)
             kNumBlocks + 1);
 }
 
+// RPC-level companion to
+// Scheduler.CommitTouchingExcludedAccountAbortsRemoveFromScheduler (in
+// scheduler_test.cc). This drives mempool audit Finding 2 entirely through the
+// coordinator's public RPC surface -- no direct scheduler access -- so it shows
+// the abort is reachable by an honest node using normal APIs. It aborts on
+// CHECK_EQ(ready_accounts_.erase(...), 1) at scheduler.cc:1172.
+//
+// The path is the "nominated block + honest client retry" variant that
+// remove_from_scheduler's own comment (scheduler.cc:1119) anticipates:
+//   1. Submit an affordable tx (txs[0]) and one whose gas_limit exceeds the
+//      account's balance (txs[1]). Nothing on the submit path compares
+//      gas_limit against a balance, so both are admitted.
+//   2. Nominate: txs[0] is included in the block; txs[1] is over budget, so the
+//      account is discarded and excluded from the block, leaving
+//      ready_accounts_ while the nomination is pending.
+//   3. The client resubmits txs[0] -- an ordinary retry of a still-unconfirmed
+//      tx. It lands back on the excluded account's runqueue; the account stays
+//      out of ready_accounts_.
+//   4. Commit the nominated block. remove_from_scheduler(nominated tx hashes,
+//      including txs[0]) empties the account's runqueue, account_is_ready()
+//      returns false, and ready_accounts_.erase() returns 0 -- firing the
+//      CHECK.
+//
+// Default test accounts are funded with 5'000'000'000 * 10 hogs
+// (grant_initial_tokens_for_account), so txs[1]'s gas_limit of 5'000'000'000 *
+// 20 is over budget. In an assert-enabled build the commit below aborts; the
+// test is expected to fail until the scheduler tolerates an absent account on
+// this path (erase_ready_account). If the account were not excluded, the commit
+// would return SchedulerCommitOK and this test would pass.
+TEST(Mempool, CommitOfExcludedAccountTxAbortsRemoveFromScheduler)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable, scheduled first
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  // Over budget: 20x the default tx gas is 2x the account's funded balance.
+  txs[1].tx.invocation.gas_limit = txs[0].tx.invocation.gas_limit * 20;
+
+  MempoolTestInfra server;
+
+  // 1. Submit both txs through the coordinator's honest ingress.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[1]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 2UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+
+  // 2. Nominate: txs[0] is included; txs[1] excludes the account from the
+  // block.
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // 3. Honest client retry of the still-unconfirmed affordable tx. It lands
+  // back on the excluded account's runqueue.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  // 4. Commit the nominated block. remove_from_scheduler touches txs[0] on the
+  // excluded account's runqueue and aborts at scheduler.cc:1172.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
 TEST(Mempool, BlockHeightsIncrement)
 {
   MempoolTestInfra server;
