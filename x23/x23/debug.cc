@@ -248,7 +248,7 @@ dump_rusage(int fd)
   };
 }
 
-#ifdef NDEBUG
+#if NDEBUG
 namespace detail {
 void
 do_panic_release(std::string_view fmt, std::format_args args) noexcept
