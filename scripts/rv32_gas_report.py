@@ -269,7 +269,28 @@ def missing_ops(data, needed):
 
 
 def resolved(cell):
-    """Whether this cell's cost differs measurably from the filler baseline."""
+    """Whether this cell has a cost worth using, rather than falling back to
+    the baseline.
+
+    A saturated measurement always does. It is an absolute level -- a body of
+    this opcode, timed, divided by its instruction count -- so there is no null
+    hypothesis to clear and nothing to be indistinguishable from. Asking it to
+    prove it differs from the filler is a category error: it never touched the
+    filler.
+
+    The sigma test below belongs to the contrast, which measures the opcode
+    *minus* the filler and so genuinely can fail to tell them apart. It stays
+    for cells that fall back to it.
+
+    Conflating the two silently broke the bound check. On a host where the
+    contrast is noise almost nothing cleared 2 sigma, so cost_model substituted
+    the baseline for nearly every opcode, the worst-case sum for a workload
+    collapsed to about (instruction count x baseline), and real programs came
+    out "exceeding" it -- reported as a failure of the method rather than of
+    the number feeding it.
+    """
+    if cell.get("ns_saturated", 0.0) > 0.0:
+        return True
     stderr = cell.get("slope_stderr_ns", 0.0)
     if stderr <= 0.0:
         return False
