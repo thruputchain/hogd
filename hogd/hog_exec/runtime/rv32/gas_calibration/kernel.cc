@@ -918,13 +918,31 @@ build_kernel(const KernelSpec &spec)
         test_program::addi(kJalrBaseReg, kJalrBaseReg, lo);
   }
   words.insert(words.end(), body.begin(), body.end());
-  // Loop control: decrement and branch back to the body head. This pair fuses
-  // (fuse_alu_branch) into one slot, which is fine -- it is identical in every
-  // kernel of a sweep and lands in the fit's intercept.
+  // Loop control: decrement, then a forward branch that skips a JAL back to
+  // the body head.
+  //
+  // The obvious form -- decrement and branch *backwards* over the body -- is
+  // what this used to do, and it silently breaks once the body is large. A
+  // B-type immediate is 13 bits signed, so it reaches 4096 bytes: exactly 1024
+  // instructions. At 1024 body slots the back edge needs -4100 and the encoder
+  // truncates it rather than refusing, so the kernel jumps into the middle of
+  // itself. Measured before the fix: a 2048-slot kernel reported a *clean
+  // halt* having executed 2107 of the 16443 gas it was credited with, and
+  // every opcode in it priced at exactly the baseline -- including a
+  // pointer-chased load, which cannot cost what an add costs.
+  //
+  // JAL's immediate is 21 bits signed, which reaches a megabyte and so covers
+  // anything kMaxCodeBytes allows. The branch that skips it only ever jumps
+  // two instructions, so it stays in range whatever the body size.
   words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
+  // beq counter, x0, +8 -- when the counter hits zero, skip the JAL and fall
+  // into the ecall.
+  words.push_back(
+      test_program::branch(0, kLoopCounterReg, 0,
+                           2 * static_cast<int32_t>(kInstructionBytes)));
   const int32_t back_edge =
-      -static_cast<int32_t>((spec.body_slots + 1) * kInstructionBytes);
-  words.push_back(test_program::branch(1, kLoopCounterReg, 0, back_edge));
+      -static_cast<int32_t>((spec.body_slots + 2) * kInstructionBytes);
+  words.push_back(test_program::j_type(0, back_edge));
   words.push_back(0x00000073U); // ecall: the halting host ends the run
 
   if (words.size() * kInstructionBytes > kMaxCodeBytes) {
@@ -953,10 +971,13 @@ build_kernel(const KernelSpec &spec)
     }
   }
 
-  kernel.instructions_per_iteration = spec.body_slots + 2;
+  // Steady state: the body, the decrement, the skip branch, and the JAL back.
+  kernel.instructions_per_iteration = spec.body_slots + 3;
+  // The last iteration takes the skip branch instead of the JAL, so the JAL
+  // retires trip_count - 1 times rather than trip_count.
   kernel.dynamic_instructions =
-      prologue.size() +
-      (uint64_t{spec.trip_count} * kernel.instructions_per_iteration) + 1;
+      prologue.size() + (uint64_t{spec.trip_count} * (spec.body_slots + 2)) +
+      (uint64_t{spec.trip_count} - 1) + 1;
 
   // Charge the body by decoding it with the production decoder rather than by
   // reasoning about which slot holds what. The slot-walking version silently
@@ -974,11 +995,15 @@ build_kernel(const KernelSpec &spec)
   if (!prologue_gas.has_value()) {
     return std::unexpected(prologue_gas.error());
   }
+  // Charged per iteration: the decrement and the skip branch. The JAL back is
+  // charged separately because the final iteration takes the branch instead,
+  // so it executes one time fewer than the loop runs.
   const uint64_t loop_gas =
-      scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBne);
-  kernel.scheduled_gas = *prologue_gas +
-                         (uint64_t{spec.trip_count} * (*body_gas + loop_gas)) +
-                         scheduled_gas_for(Op::kEcall);
+      scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBeq);
+  kernel.scheduled_gas =
+      *prologue_gas + (uint64_t{spec.trip_count} * (*body_gas + loop_gas)) +
+      ((uint64_t{spec.trip_count} - 1) * scheduled_gas_for(Op::kJal)) +
+      scheduled_gas_for(Op::kEcall);
   return kernel;
 }
 

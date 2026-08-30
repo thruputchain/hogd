@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
@@ -173,6 +174,59 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
 // trap or early exit in one assertion -- if a kernel silently ran a different
 // number of instructions than the harness credits it with, every ns-per
 // instruction derived from it would be wrong by that ratio.
+// A kernel must run all of its body, at every body size the harness allows.
+//
+// This is the invariant that a silently-truncated loop breaks, and it broke:
+// the loop used to close with a single backwards branch over the body, and a
+// B-type immediate reaches 4096 bytes -- exactly 1024 instructions. At 1024
+// body slots the encoder truncated the offset instead of refusing, so the
+// kernel jumped into the middle of itself. At 1024 and 1536 it trapped, which
+// the harness caught. At 2048 it reported a *clean halt* having burned 2107 of
+// the 16443 gas it was credited with, which the harness did not catch: every
+// opcode in that run priced at exactly the baseline, a pointer-chased load
+// included, and the sweep looked beautifully reproducible because it had
+// stopped measuring.
+//
+// Comparing consumed gas against credited gas catches all of that in one
+// assertion, so size the bodies past the old cliff and check it.
+TEST(Rv32GasCalibrationKernel, RunsTheWholeBodyAtEveryBodySize)
+{
+  HaltHost host;
+  for (const uint32_t slots :
+       {64U, 256U, 512U, 768U, 1024U, 1536U, 2048U, 4096U, 8192U}) {
+    KernelSpec spec;
+    spec.target = Op::kLw;
+    spec.working_set = WorkingSet::kPointerChase;
+    spec.body_slots = slots;
+    spec.trip_count = 8;
+    spec.target_slots = max_target_slots(slots, spec);
+
+    const auto kernel = build_kernel(spec);
+    // Refusing to build is a fine answer; building something that does not run
+    // is not.
+    if (!kernel.has_value()) {
+      continue;
+    }
+    auto program =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(program.has_value()) << "body_slots " << slots;
+
+    ThreadedMachine machine(*program, kGasLimit);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted)
+        << "body_slots " << slots << " did not halt (trap "
+        << static_cast<int>(outcome.trap) << ")";
+    EXPECT_EQ(outcome.trap, Trap::kNone) << "body_slots " << slots;
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
+        << "body_slots " << slots << " executed " << outcome.gas_consumed
+        << " gas but is credited with " << kernel.value().scheduled_gas
+        << " -- the loop is not running the whole body";
+  }
+}
+
 TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
 {
   HaltHost host;
@@ -580,9 +634,13 @@ TEST(Rv32GasCalibrationKernel, ScheduledGasMatchesTheProductionDecoder)
   ASSERT_TRUE(kernel.has_value());
   const auto decoded = scheduled_gas_for_code(kernel.value().code);
   ASSERT_TRUE(decoded.has_value());
-  // One trip: the whole program runs top to bottom exactly once, so the
-  // schedule's total over the code equals the run's charge.
-  EXPECT_EQ(decoded.value(), kernel.value().scheduled_gas);
+  // One trip runs every instruction except the JAL back to the body head: the
+  // loop exits by taking the skip branch, which jumps over it. So the
+  // schedule's static total over the code is the run's charge plus that one
+  // JAL. (Before the loop tail became beq-over-jal this was a plain equality,
+  // because every instruction in the program executed.)
+  EXPECT_EQ(decoded.value(),
+            kernel.value().scheduled_gas + scheduled_gas_for(Op::kJal));
 }
 
 } // namespace
