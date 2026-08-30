@@ -195,13 +195,6 @@ new bench host, whose ratios the committed reference does not describe, and to
 get schedule numbers off the machine class that runs the chain rather than off
 a development container. `check`, the default, gates.
 
-One thing to know before editing that schedule file: `hog_sched` delivers the
-job by typing it into a remote pty, and the pty drops whatever arrives past
-about 4 KiB before the shell has drained it. Past that the remote runs a
-truncated script and fails somewhere unrelated to the edit -- the symptom seen
-once here was an ssh-agent error in a line that was never sent. Keep the
-embedded script short and put the explanation here instead.
-
 ## Re-running after an interpreter change
 
 Every calibration JSON records two identifiers for the engine, because one is
