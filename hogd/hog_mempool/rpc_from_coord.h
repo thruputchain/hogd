@@ -9,8 +9,6 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -44,6 +42,7 @@
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
@@ -167,10 +166,9 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
-    info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocol());
-    if (std::string_view(card.protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    info("got {}, expected {}", protocol_text(card.protocol),
+         protocol_text(version::kHogdProtocol()));
+    if (card.protocol != version::kHogdProtocol()) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }

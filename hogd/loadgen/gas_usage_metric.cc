@@ -80,7 +80,8 @@ run_gas_usage_metric(uint32_t num_accounts)
   }
 
   SignedTransactionBatch work_txs;
-  parallel_batch_to_t(extend_result.value().work_txs, work_txs)();
+  parallel_batch_to_t(extend_result.value().work_txs, work_txs,
+                      kNoBatchSizeLimit)();
   if (work_txs.empty()) {
     throw std::runtime_error("No transactions generated from extend");
   }

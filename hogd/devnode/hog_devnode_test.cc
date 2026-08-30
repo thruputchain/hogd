@@ -72,6 +72,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
@@ -580,7 +581,8 @@ propose_and_commit(sched_coord_client_t &scheduler)
   }
   const SchedulerProposedBlock &proposed = proposal.proposed_block();
   SignedTransactionBatch proposed_txs;
-  EXPECT_TRUE(parallel_batch_to_t(proposed.txs, proposed_txs)());
+  EXPECT_TRUE(
+      parallel_batch_to_t(proposed.txs, proposed_txs, kNoBatchSizeLimit)());
   TransactionHashBatch tx_hashes;
   tx_hashes.reserve(proposed_txs.size());
   for (const SignedTransaction &tx : proposed_txs) {
@@ -937,7 +939,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
             "00000000000000000000000000000000000000000000000000000000000000aa");
     w.field("profile", "local-dev");
     if (include_protocol) {
-      w.field("protocol", version::kHogdProtocol());
+      w.field("protocol", protocol_text(version::kHogdProtocol()));
     }
     w.object_field("devWallet", [&](json::Writer &w) {
       w.field("profile", "hog-devnode-default");
@@ -1232,7 +1234,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(readiness.manifest_hash,
             hex_string(hash_string(read_file(readiness.manifest_path))));
   EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
-            version::kHogdProtocol());
+            protocol_text(version::kHogdProtocol()));
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
@@ -2603,7 +2605,8 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
 
   std::filesystem::rename(
       outbox_dir / IndexerOutboxStore::current_epoch_origin_filename(),
-      outbox_dir / IndexerOutboxStore::epoch_origin_filename("hogp/archival"));
+      outbox_dir / IndexerOutboxStore::epoch_origin_filename(
+                       protocol_from_text("hogp/archival")));
 
   expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
                           "0", "--dev-account-seed", "groundhog-dev-accounts",
@@ -2756,6 +2759,85 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
   // is retained for as long as the record lives.
   EXPECT_TRUE(std::filesystem::exists(EventBlockContext::final_events_filename(
       (data_dir / "events").string(), finalized.proposal_header.events_hash)));
+}
+
+// Graceful shutdown is an optimization. Same-volume recovery must still reopen
+// canonical state after SIGKILL and keep producing blocks.
+TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  initialize_persistent_data_dir(data_dir);
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--dev-accounts",
+        "1",
+        "--dev-account-seed",
+        "groundhog-dev-accounts",
+        "--dev-account-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    ASSERT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+    expect_killed_exit(process);
+  }
+
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--data-dir",
+      data_dir.string(),
+      "--dev-accounts",
+      "1",
+      "--dev-account-seed",
+      "groundhog-dev-accounts",
+      "--dev-account-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.chain_state, "recovered");
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 2);
+
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  AddressTransactionQuery query{};
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+  TransactionRefPage page;
+  while (std::chrono::steady_clock::now() < deadline) {
+    page = page_or_empty(reader.get_transactions_by_address(query)());
+    if (page.latest_block == 2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_EQ(page.latest_block, 2);
+
+  EXPECT_TRUE(submit_and_commit(scheduler, {}).empty());
+  tip = scheduler.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(tip.db_tip().value.proposal_header.block_height, 3);
+  expect_clean_exit(process);
 }
 
 TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
@@ -3516,8 +3598,9 @@ submit_and_propose_without_commit(sched_coord_client_t &scheduler,
     return {};
   }
   SignedTransactionBatch proposed_txs;
-  EXPECT_TRUE(
-      parallel_batch_to_t(proposal.proposed_block().txs, proposed_txs)());
+  // This node's own proposal, not a peer message.
+  EXPECT_TRUE(parallel_batch_to_t(proposal.proposed_block().txs, proposed_txs,
+                                  kNoBatchSizeLimit)());
   TransactionHashBatch tx_hashes;
   tx_hashes.reserve(proposed_txs.size());
   for (const SignedTransaction &tx : proposed_txs) {

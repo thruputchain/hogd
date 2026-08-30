@@ -1030,7 +1030,7 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
     return epoch_failure(IndexerEpochOutcome::IndexerEpochInternalFailure,
                          "indexer database is not open");
   }
-  if (origin.protocol.empty() || origin.first_height < 0) {
+  if (origin.protocol == ProtocolCommit{} || origin.first_height < 0) {
     return epoch_failure(IndexerEpochOutcome::IndexerEpochConflict,
                          "invalid outbox epoch origin");
   }
@@ -1569,7 +1569,8 @@ IndexDB::initialize_progress_from_db()
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  if (progress.origin.protocol.empty() || progress.origin.first_height < 0 ||
+  if (progress.origin.protocol == ProtocolCommit{} ||
+      progress.origin.first_height < 0 ||
       progress.contiguous_height < progress.origin.first_height - 1) {
     error("invalid durable indexer progress bounds");
     return IndexerError(IndexerErrorCode::kInternal);

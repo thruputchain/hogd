@@ -41,6 +41,7 @@
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "proposal.hh"
@@ -175,7 +176,7 @@ rewrite_outbox_protocol(std::string_view directory, std::string_view filename,
   x23::deserialize(&header_size, x23::BufView(bytes->data(), size_t{4}));
   IndexerOutboxRecordHeader header;
   x23::deserialize(&header, x23::BufView(bytes->data() + 4, header_size));
-  header.protocol = ProtocolCommit(protocol.data(), protocol.size());
+  header.protocol = protocol_from_text(protocol);
   x23::Buf header_bytes = x23::serialize(header);
   x23::Buf rewritten =
       x23::serialize(static_cast<uint32_t>(header_bytes.size()));
@@ -296,7 +297,7 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
       .epoch_sequence = epoch_sequence,
       .origin =
           IndexerOutboxOrigin{
-              .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+              .protocol = protocol_from_text(protocol),
               .epoch_sequence = epoch_sequence,
               .first_height = first_height,
               .first_prev_hash = first_prev_hash,
@@ -307,7 +308,7 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
       .epoch_sequence = epoch_sequence,
       .block_height = first_height,
-      .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+      .protocol = protocol_from_text(protocol),
       .payload_byte_length = payload.size(),
       .payload_digest = sha256(x23::BufView(payload)),
       .prev_hash = std::move(first_prev_hash),
@@ -320,7 +321,7 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
   bytes.append_range(payload);
   const std::filesystem::path path =
       std::filesystem::path(directory) / "indexer-outbox" /
-      IndexerOutboxStore::epoch_origin_filename(protocol);
+      IndexerOutboxStore::epoch_origin_filename(protocol_from_text(protocol));
   auto file = File::open(path.string(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
   ASSERT_TRUE(file.has_value());
   ASSERT_TRUE(write_full(*file, std::as_bytes(std::span(bytes))).has_value());
@@ -370,7 +371,7 @@ TEST_F(EventRpcTest, PullRejectsMismatchedProtocol)
   EventRPCContext ctx(temp_dir());
   EventIndexerRpc indexer_rpc(ctx);
   EventIndexerPullRequest request = pull_request();
-  request.protocol = "definitely-not-the-hogd-protocol";
+  request.protocol = protocol_from_text("definitely-not-the-hogd-protocol");
 
   EXPECT_EQ(indexer_rpc.event_indexer_pull_next(std::move(request))().outcome(),
             EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol);
@@ -474,7 +475,7 @@ TEST_F(EventRpcTest, ForgedAndUnknownProgressConflict)
       .last_consensus_hash = sha256(genesis),
   };
   IndexerProgress unknown = boundary;
-  unknown.initialized().origin.protocol = "hogp/unknown";
+  unknown.initialized().origin.protocol = protocol_from_text("hogp/unknown");
   EXPECT_EQ(ctx.pull_indexer_next(pull_request(unknown))().outcome(),
             EventIndexerPullOutcome::EventIndexerPullProgressConflict);
 
@@ -688,7 +689,7 @@ TEST_F(EventRpcTest, PullTransitionsFromRetainedToCurrentEpoch)
   progress.initialized() = {
       .origin =
           IndexerOutboxOrigin{
-              .protocol = "hogp/archival",
+              .protocol = protocol_from_text("hogp/archival"),
               .epoch_sequence = 0,
               .first_height = 20,
               .first_prev_hash = archival.consensus_value.prev_hash,
@@ -742,8 +743,8 @@ TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
   EventIndexerPullResult first = current.pull_indexer_next(pull_request())();
   ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock)
       << std::string_view(first.diagnostic());
-  EXPECT_EQ(std::string_view(first.pulled_block().origin.protocol),
-            "hogp/archival");
+  EXPECT_EQ(first.pulled_block().origin.protocol,
+            protocol_from_text("hogp/archival"));
   EXPECT_EQ(first.pulled_block().block.payload.consensus_value,
             archival.consensus_value);
 
@@ -753,8 +754,7 @@ TEST_F(EventRpcTest, FreshPullStartsAtOldestRetainedEpoch)
             EventIndexerPullOutcome::EventIndexerPullCaughtUp)
       << std::string_view(transitioned.diagnostic());
   EXPECT_EQ(transitioned.origin().epoch_sequence, 1UL);
-  EXPECT_EQ(std::string_view(transitioned.origin().protocol),
-            version::kHogdProtocol());
+  EXPECT_EQ(transitioned.origin().protocol, version::kHogdProtocol());
 }
 
 TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
@@ -774,7 +774,7 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
   EventIndexerPullResult epoch_a = current.pull_indexer_next(pull_request())();
   ASSERT_EQ(epoch_a.outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
-  EXPECT_EQ(std::string_view(epoch_a.origin().protocol), "hogp/a");
+  EXPECT_EQ(epoch_a.origin().protocol, protocol_from_text("hogp/a"));
 
   const auto boundary_progress = [&](const IndexerOutboxOrigin &origin) {
     IndexerProgress progress(IndexerProgressState::IndexerProgressInitialized);
@@ -790,14 +790,14 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
   ASSERT_EQ(epoch_b.outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp)
       << std::string_view(epoch_b.diagnostic());
-  EXPECT_EQ(std::string_view(epoch_b.origin().protocol), "hogp/b");
+  EXPECT_EQ(epoch_b.origin().protocol, protocol_from_text("hogp/b"));
 
   EventIndexerPullResult first_block = current.pull_indexer_next(
       pull_request(boundary_progress(epoch_b.origin())))();
   ASSERT_EQ(first_block.outcome(),
             EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(first_block.pulled_block().origin.epoch_sequence, 2UL);
-  EXPECT_EQ(std::string_view(first_block.pulled_block().origin.protocol),
+  EXPECT_EQ(first_block.pulled_block().origin.protocol,
             version::kHogdProtocol());
   EXPECT_EQ(first_block.pulled_block().block.payload.consensus_value, block);
 }
@@ -1852,7 +1852,7 @@ TEST_F(EventRpcTest, GenesisReconciliationContinuesEmptyArchivalOrigin)
   auto origins = restarted.indexer_outbox_store().enumerate_epoch_origins_raw();
   ASSERT_TRUE(origins.has_value()) << origins.error();
   ASSERT_EQ(origins->size(), 2UL);
-  EXPECT_EQ(origins->front().protocol, "hogp/competing");
+  EXPECT_EQ(origins->front().protocol, protocol_from_text("hogp/competing"));
 }
 
 TEST_F(EventRpcTest,
@@ -1885,7 +1885,7 @@ TEST_F(EventRpcTest,
     EXPECT_FALSE(origin->has_value());
 
     EventCard mismatched = card;
-    mismatched.protocol = "hogp/not-this-binary";
+    mismatched.protocol = protocol_from_text("hogp/not-this-binary");
     EXPECT_EQ(MempoolEventRpc::schedevent_prepare_event(mismatched).outcome(),
               EventPrepareOutcome::EventPrepareError);
 
@@ -2175,7 +2175,7 @@ TEST_F(EventRpcTest,
                             archival_first.consensus_value.prev_hash);
   replace_outbox_payload(temp_dir(),
                          IndexerOutboxStore::epoch_origin_filename(
-                             "hogp/archival_a"),
+                             protocol_from_text("hogp/archival_a")),
                          x23::Buf{0x80, 0x00, 0x00, 0x01});
 
   registration.publish_event_canonical_tip(EventCanonicalTip{
@@ -2231,9 +2231,9 @@ TEST_F(EventRpcTest,
       reconciled.indexer_outbox_store().enumerate_committed_records_raw();
   ASSERT_TRUE(records.has_value()) << records.error();
   ASSERT_EQ(records->size(), 3UL);
-  EXPECT_EQ((*records)[0].protocol, "hogp/archival_a");
-  EXPECT_EQ((*records)[1].protocol, "hogp/archival_a");
-  EXPECT_EQ((*records)[2].protocol, std::string(version::kHogdProtocol()));
+  EXPECT_EQ((*records)[0].protocol, protocol_from_text("hogp/archival_a"));
+  EXPECT_EQ((*records)[1].protocol, protocol_from_text("hogp/archival_a"));
+  EXPECT_EQ((*records)[2].protocol, version::kHogdProtocol());
 }
 
 TEST_F(EventRpcTest, EmptyArchivalEpochAllowsNextEpochCommitAndRestart)
@@ -2491,8 +2491,8 @@ TEST_F(EventRpcTest, ReconciliationLinksCurrentEpochToArchivalPrefixByHeader)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             archival.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 21,
-                            current.prev_hash, 1);
+  write_epoch_origin_header(temp_dir(), protocol_text(version::kHogdProtocol()),
+                            21, current.prev_hash, 1);
 
   EXPECT_TRUE(ctx.reconcile_outbox_tip(999, current)().has_value());
 }
@@ -2536,8 +2536,8 @@ TEST_F(EventRpcTest, ReconciliationRejectsDisconnectedArchivalPrefix)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             archival.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 21,
-                            current.prev_hash, 1);
+  write_epoch_origin_header(temp_dir(), protocol_text(version::kHogdProtocol()),
+                            21, current.prev_hash, 1);
 
   EXPECT_FALSE(ctx.reconcile_outbox_tip(323, current)().has_value());
 }
@@ -2602,8 +2602,8 @@ TEST_F(EventRpcTest, ReconciliationValidatesCompleteMultiRecordArchivalEpoch)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
-                            current.consensus_value.prev_hash, 1);
+  write_epoch_origin_header(temp_dir(), protocol_text(version::kHogdProtocol()),
+                            22, current.consensus_value.prev_hash, 1);
 
   EXPECT_TRUE(
       ctx.reconcile_outbox_tip(999, current.consensus_value)().has_value());
@@ -2643,8 +2643,8 @@ TEST_F(EventRpcTest, ReconciliationRejectsArchivalInternalDisconnect)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
-                            current.consensus_value.prev_hash, 1);
+  write_epoch_origin_header(temp_dir(), protocol_text(version::kHogdProtocol()),
+                            22, current.consensus_value.prev_hash, 1);
 
   EXPECT_FALSE(
       ctx.reconcile_outbox_tip(335, current.consensus_value)().has_value());
@@ -2674,8 +2674,8 @@ TEST_F(EventRpcTest, ReconciliationRejectsTruncatedArchivalEpochPrefix)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 19,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
-                            current.consensus_value.prev_hash, 1);
+  write_epoch_origin_header(temp_dir(), protocol_text(version::kHogdProtocol()),
+                            22, current.consensus_value.prev_hash, 1);
 
   EXPECT_FALSE(
       ctx.reconcile_outbox_tip(338, current.consensus_value)().has_value());
@@ -2815,6 +2815,52 @@ TEST_F(EventRpcTest, CloseDoesNotMakeEventsPullableBeforeCommit)
   EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(1).value());
   EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+}
+
+// Event exits before close returns: only a process-local temp file exists.
+// Restart must not invent a committed record or an event-root acknowledgement.
+TEST_F(EventRpcTest, CrashBeforeCloseLeavesNothingPullableAfterRestart)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  }
+
+  constexpr BlockID kUnclosedBlockId = 91;
+  ProposedTransaction stale_body = make_body(91);
+  x23::Buf stale;
+  x23::serialize_to(&stale, make_event(stale_body, 91));
+  x23::serialize_to(&stale, stale_body);
+  std::ofstream leftover(
+      EventBlockContext::temp_events_filename(temp_dir(), kUnclosedBlockId),
+      std::ios::binary | std::ios::trunc);
+  ASSERT_TRUE(leftover.write(reinterpret_cast<const char *>(stale.data()),
+                             static_cast<std::streamsize>(stale.size())));
+  leftover.close();
+  ASSERT_TRUE(std::filesystem::exists(
+      EventBlockContext::temp_events_filename(temp_dir(), kUnclosedBlockId)));
+
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(0, genesis)().has_value());
+  EXPECT_EQ(restarted.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_FALSE(restarted.indexer_outbox_store().has_committed(1).value());
+
+  EventMempoolRpc rpc(restarted);
+  constexpr BlockID kNextBlockId = 92;
+  ASSERT_EQ(rpc.eventsched_open_block(kNextBlockId)(), RPCError::kRPCNone);
+  EventBlockResult closed = rpc.eventsched_close_block(kNextBlockId, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+  value.prev_hash = sha256(genesis);
+  EXPECT_EQ(rpc.eventsched_commit_block(kNextBlockId, value)(),
+            RPCError::kRPCNone);
+  EventIndexerPullResult pulled = restarted.pull_indexer_next(pull_request())();
+  ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, value);
 }
 
 TEST_F(EventRpcTest, RecoveryPicksCanonicalEventsFileAmongCompetingBlocks)

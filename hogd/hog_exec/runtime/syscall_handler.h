@@ -140,14 +140,29 @@ public:
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
   // Admission checks a new invocation frame must pass, in the order their
-  // error codes take precedence: valid flags, no reentrance, then auth tokens
-  // owned by the caller. invoke() runs these before creating a child frame;
-  // the test FFI mock frame path enters at start_frame(), below invoke(), so
-  // it runs them itself (#3301). The Invoke syscall body runs them before it
-  // copies the caller's calldata, so a rejected invoke does no
-  // length-dependent host work (#2973). Failing is a no-op -- nothing here
-  // mutates the handler, so any of those callers may ask more than once.
-  [[nodiscard]] SyscallStatus<void>
+  // error codes take precedence, grouped by the question each answers:
+  //
+  //   can this frame make any such call -- valid flags, no reentrance, room
+  //   under the cross-invoke depth bound;
+  //   does this call hold up -- auth tokens owned by the caller.
+  //
+  // Reentrance and the depth bound are conditions of the calling frame, so
+  // they outrank the request's own validity: a reentrant or too-deep invoke
+  // reports that even when it also forwards a token it does not own (#2973
+  // established this for reentrance; the depth bound follows the same rule).
+  //
+  // invoke() runs these before creating a child frame; the test FFI mock frame
+  // path enters at start_frame(), below invoke(), so it runs them itself
+  // (#3301). The Invoke syscall body runs them before it copies the caller's
+  // calldata, so a rejected invoke does no length-dependent host work (#2973)
+  // -- which is why the depth bound is checked here and not further down in
+  // invoke(), where it would refuse only after that copy.
+  //
+  // Failing is a no-op -- nothing here mutates the handler, so any of those
+  // callers may ask more than once. Reading the depth bound off the tip can
+  // fail as a system error, which ends block execution rather than being
+  // reported to the caller.
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   validate_new_invocation(ContractAddress const &address, InvokeFlagSet flags,
                           std::span<uint32_t const> owned_auth_token_ids) const;
 

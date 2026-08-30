@@ -189,10 +189,16 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // copying first would be unpriced, length-proportional work a contract could
   // repeat at will (#2973). invoke() runs the same checks again below, which is
   // a pure query on the handler.
-  if (auto admitted = syscall_handler.validate_new_invocation(
-          input_address, input_inputs.flags, owned_auth_token_ids_vec);
-      !admitted.has_value()) {
-    return {admitted.error().code(), WrappedGasAmount{0}};
+  auto admitted =
+      syscall_handler.validate_new_invocation(input_address, input_inputs.flags,
+                                              owned_auth_token_ids_vec);
+  // Reading the depth bound off the tip failed: a SystemError, which ends
+  // execution of the whole block rather than being reported to the caller.
+  if (!admitted.has_value()) {
+    return {admitted.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+  if (!admitted->has_value()) {
+    return {admitted->error().code(), WrappedGasAmount{0}};
   }
 
   Calldata calldata;

@@ -33,7 +33,7 @@ public:
   static EventPrepareResult schedevent_prepare_event(const EventCard &card)
   {
     info("event server preparing registration");
-    if (std::string_view(card.protocol) != version::kHogdProtocol()) {
+    if (card.protocol != version::kHogdProtocol()) {
       return EventPrepareResult{EventPrepareOutcome::EventPrepareError};
     }
     return Registration::registration().prepare_event(card);

@@ -38,8 +38,10 @@
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/metrics/health.h"
 #include "hogd/version.h"
 #include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "network.hh"
 #include "proposal.hh"
@@ -167,7 +169,7 @@ rewrite_outbox_protocol(std::string_view directory, BlockHeight height,
   x23::deserialize(&header_size, x23::BufView(bytes->data(), std::size_t{4}));
   IndexerOutboxRecordHeader header;
   x23::deserialize(&header, x23::BufView(bytes->data() + 4, header_size));
-  header.protocol = ProtocolCommit(protocol.data(), protocol.size());
+  header.protocol = protocol_from_text(protocol);
   x23::Buf header_bytes = x23::serialize(header);
   x23::Buf rewritten =
       x23::serialize(static_cast<std::uint32_t>(header_bytes.size()));
@@ -191,7 +193,7 @@ write_epoch_origin(std::string_view directory, std::string_view protocol,
       .epoch_sequence = epoch_sequence,
       .origin =
           IndexerOutboxOrigin{
-              .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+              .protocol = protocol_from_text(protocol),
               .epoch_sequence = epoch_sequence,
               .first_height = first_height,
               .first_prev_hash = first_prev_hash,
@@ -202,7 +204,7 @@ write_epoch_origin(std::string_view directory, std::string_view protocol,
       .format_version = kIndexerOutboxEnvelopeFormatVersion,
       .epoch_sequence = epoch_sequence,
       .block_height = first_height,
-      .protocol = ProtocolCommit(protocol.data(), protocol.size()),
+      .protocol = protocol_from_text(protocol),
       .payload_byte_length = payload.size(),
       .payload_digest = sha256(x23::BufView(payload)),
       .prev_hash = std::move(first_prev_hash),
@@ -216,7 +218,7 @@ write_epoch_origin(std::string_view directory, std::string_view protocol,
   bytes.append_range(payload);
   const std::filesystem::path path =
       std::filesystem::path(directory) / "indexer-outbox" /
-      IndexerOutboxStore::epoch_origin_filename(protocol);
+      IndexerOutboxStore::epoch_origin_filename(protocol_from_text(protocol));
   auto file = File::open(path.string(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
   ASSERT_TRUE(file.has_value());
   ASSERT_TRUE(write_full(*file, std::as_bytes(std::span(bytes))).has_value());
@@ -406,7 +408,7 @@ TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
   const std::vector<EventIndexerPullRequest> requests =
       event_server.impl()->requests();
   ASSERT_GE(requests.size(), 3UL);
-  EXPECT_EQ(std::string_view(requests[0].protocol), version::kHogdProtocol());
+  EXPECT_EQ(requests[0].protocol, version::kHogdProtocol());
   EXPECT_EQ(requests[0].progress.state(),
             IndexerProgressState::IndexerProgressUninitialized);
   EXPECT_EQ(requests[1].progress.state(),
@@ -479,8 +481,7 @@ TEST(IndexerPullController,
               IndexerProgressState::IndexerProgressInitialized);
     EXPECT_EQ(progress.initialized().contiguous_height, 2);
     EXPECT_EQ(progress.initialized().origin.epoch_sequence, 1UL);
-    EXPECT_EQ(std::string_view(progress.initialized().origin.protocol),
-              version::kHogdProtocol());
+    EXPECT_EQ(progress.initialized().origin.protocol, version::kHogdProtocol());
     auto record = db->get_tx_record(sha256(archival_body.signed_tx.tx));
     ASSERT_TRUE(record.has_value()) << record.error();
     EXPECT_EQ(record->height, 1);
@@ -603,6 +604,8 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   options.rpc_timeout = std::chrono::seconds(1);
   IndexerPullController controller(event_addr, *db, failures, options);
   controller.wait_until_caught_up();
+  EXPECT_NE(Health::instance().dump_to_string()().find("\"status\":\"ok\""),
+            std::string::npos);
 
   event_server.reset();
   ASSERT_TRUE(wait_for_condition(
@@ -611,6 +614,13 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
             std::chrono::milliseconds(0));
       },
       std::chrono::seconds(5)));
+  ASSERT_TRUE(wait_for_condition(
+      [&] {
+        return Health::instance().dump_to_string()().find(
+                   "\"status\":\"error\"") != std::string::npos;
+      },
+      std::chrono::seconds(5)))
+      << Health::instance().dump_to_string()();
   ConsensusValue block_two = commit_block(event, 2, 2, sha256(block_one));
   event_server = std::make_unique<EventIndexerServer>(event);
   event_server->start_accepting(std::move(replacement_listener));
@@ -622,6 +632,8 @@ TEST(IndexerPullController, ReconnectsAfterEventServerTransportLoss)
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().last_consensus_hash, sha256(block_two));
   EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
+  EXPECT_NE(Health::instance().dump_to_string()().find("\"status\":\"ok\""),
+            std::string::npos);
 }
 
 TEST(IndexerPullController, RpcTimeoutReconnectsAfterBlockedPull)

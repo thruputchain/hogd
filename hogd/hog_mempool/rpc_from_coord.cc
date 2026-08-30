@@ -231,7 +231,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+        // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
+        // over-capacity batch up to the free slots rather than dropping it.
+        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
           info("submit_unvetted rejected malformed transaction batch");
@@ -415,7 +417,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+        // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
+        // over-capacity batch up to the free slots rather than dropping it.
+        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_vetted_rpc_count.increment();
           info("submit_vetted rejected malformed transaction batch");
@@ -1535,8 +1539,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
   }
   x23::XdrVec<SignedTransaction> txs;
-  if (!(co_await parallel_batch_to_t(request.transactions, txs)) ||
-      txs.size() > kMaxBlockSize) {
+  if (!(co_await parallel_batch_to_t(request.transactions, txs,
+                                     kMaxBlockSize))) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
   }
   for (const SignedTransaction &tx : txs) {
@@ -2120,11 +2124,16 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         cache.result_tx_hashes.reserve(kMaxBlockSize);
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
+        // The coordinator RPC runs with [kBulkRpcMaxMessageSize], so a peer
+        // can claim far more transactions than a block holds.  Each claimed
+        // hash costs an allocation and a [find_tx] lookup before anything
+        // rejects it, and any that resolve go on to the executors.
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                tx_nominations);
+                                tx_nominations, kMaxBlockSize);
         x23::Async<bool> tx_hash_handle =
-            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes);
+            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes,
+                                kMaxBlockSize);
 
         std::exception_ptr first_exception;
         bool decoded_tx_nominations = false;
