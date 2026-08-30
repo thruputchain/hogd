@@ -20,9 +20,10 @@
 # Regenerate on the machine class the check will run on -- the
 # calibration workflow's mode=reference does exactly that.
 #
-# Only cells at or above
-# 1.0x baseline are guarded: a cell cheaper than
-# the baseline instruction has no headroom worth watching.
+# Costs are relative to the median saturated cell of the same
+# run, not to a chosen opcode: one cell carrying every ratio is
+# one cell whose misbehaviour looks like the whole ISA moving.
+# Every usable cell is guarded.
 #
 # The tolerance is loose on purpose: this is a "something is
 # wildly out of whack" alarm, not a performance budget. A guarded
@@ -32,95 +33,113 @@
 # what it is for.
 
 engine_fingerprint 4e824b2a5e21faed
-engine_source_digest d9294212b03a77c6
+engine_source_digest 53b8ed56834c4d5f
 # generated from a Release build on hog10 (AMD EPYC 9554 64-Core Processor)
 tolerance 1.0
 
 # guard <op> <context> <cost relative to baseline> <current gas>
-guard ADD chain 1.032 1
-guard AND chain 1.001 1
-guard AND independent 1.001 1
-guard ANDI chain 1.005 1
-guard ANDI independent 1.007 1
-guard AUIPC chain 1.199 1
-guard AUIPC independent 1.199 1
-guard BEQ independent/not_taken 1.199 1
-guard BEQ independent/taken 1.698 1
-guard BGE independent/taken 1.680 1
-guard BGEU independent/taken 1.676 1
-guard BLT independent/not_taken 1.196 1
-guard BLT independent/taken 1.699 1
-guard BLTU independent/not_taken 1.199 1
-guard BLTU independent/taken 1.674 1
-guard BNE independent/not_taken 1.003 1
-guard BNE independent/taken 1.746 1
-guard DIV chain/large 2.378 8
-guard DIV independent/large 1.595 8
-guard DIV independent/small 1.614 8
-guard DIVU chain/large 2.377 8
-guard DIVU independent/large 1.196 8
-guard DIVU independent/small 1.199 8
-guard JALR chain 2.901 1
-guard JALR independent 2.914 1
-guard LB independent/chase 1.261 1
-guard LB independent/full_64k 1.200 1
-guard LB independent/l1_4k 1.198 1
-guard LBU independent/chase 1.201 1
-guard LBU independent/full_64k 1.199 1
-guard LBU independent/l1_4k 1.235 1
-guard LH independent/chase 3.184 1
-guard LH independent/full_64k 1.199 1
-guard LH independent/l1_4k 1.200 1
-guard LHU independent/chase 3.008 1
-guard LHU independent/full_64k 1.214 1
-guard LHU independent/l1_4k 1.206 1
-guard LW independent/chase 2.996 1
-guard LW independent/full_64k 1.199 1
-guard LW independent/l1_4k 1.199 1
-guard MUL chain 1.199 3
-guard MUL independent 1.199 3
-guard MULH chain 1.199 3
-guard MULH independent 1.202 3
-guard MULHSU chain 1.000 3
-guard ORI chain 1.007 1
-guard ORI independent 1.005 1
-guard REM chain/large 1.980 8
-guard REM independent/large 1.397 8
-guard REM independent/small 1.397 8
-guard REMU chain/large 1.980 8
-guard REMU independent/large 1.199 8
-guard REMU independent/small 1.200 8
-guard SB independent/full_64k 1.332 1
-guard SB independent/l1_4k 1.199 1
-guard SB independent/same_addr 1.200 1
-guard SH independent/full_64k 1.215 1
-guard SH independent/l1_4k 1.199 1
-guard SH independent/same_addr 1.199 1
-guard SLL chain 1.199 1
-guard SLL independent 1.199 1
-guard SLLI chain 1.007 1
-guard SLLI independent 1.004 1
-guard SLT chain 1.199 1
-guard SLT independent 1.199 1
+guard ADD chain 0.535 1
+guard ADD independent 0.505 1
+guard ADDI chain 0.851 1
+guard ADDI independent 0.836 1
+guard AND chain 0.998 1
+guard AND independent 1.014 1
+guard ANDI chain 0.834 1
+guard ANDI independent 0.835 1
+guard AUIPC chain 0.835 1
+guard AUIPC independent 0.835 1
+guard BEQ independent/not_taken 0.836 1
+guard BEQ independent/taken 1.378 1
+guard BGE independent/not_taken 1.000 1
+guard BGE independent/taken 1.415 1
+guard BGEU independent/not_taken 1.000 1
+guard BGEU independent/taken 1.415 1
+guard BLT independent/not_taken 0.834 1
+guard BLT independent/taken 1.417 1
+guard BLTU independent/not_taken 0.834 1
+guard BLTU independent/taken 1.417 1
+guard BNE independent/not_taken 0.836 1
+guard BNE independent/taken 1.417 1
+guard DIV chain/large 1.980 8
+guard DIV independent/large 1.000 8
+guard DIV independent/small 1.001 8
+guard DIVU chain/large 1.978 8
+guard DIVU independent/large 1.001 8
+guard DIVU independent/small 1.002 8
+guard JALR chain 2.607 1
+guard JALR independent 2.416 1
+guard LB independent/chase 0.999 1
+guard LB independent/full_64k 1.002 1
+guard LB independent/l1_4k 1.001 1
+guard LBU independent/chase 1.001 1
+guard LBU independent/full_64k 1.001 1
+guard LBU independent/l1_4k 1.001 1
+guard LH independent/chase 2.649 1
+guard LH independent/full_64k 1.000 1
+guard LH independent/l1_4k 1.019 1
+guard LHU independent/chase 2.501 1
+guard LHU independent/full_64k 1.003 1
+guard LHU independent/l1_4k 1.001 1
+guard LUI chain 0.998 1
+guard LUI independent 0.998 1
+guard LW independent/chase 2.492 1
+guard LW independent/full_64k 1.001 1
+guard LW independent/l1_4k 1.006 1
+guard MUL chain 0.835 3
+guard MUL independent 0.834 3
+guard MULH chain 0.835 3
+guard MULH independent 0.834 3
+guard MULHSU chain 0.835 3
+guard MULHSU independent 1.001 3
+guard MULHU chain 1.000 3
+guard MULHU independent 1.000 3
+guard OR chain 1.000 1
+guard OR independent 1.000 1
+guard ORI chain 0.836 1
+guard ORI independent 0.834 1
+guard REM chain/large 1.650 8
+guard REM independent/large 1.167 8
+guard REM independent/small 1.166 8
+guard REMU chain/large 1.649 8
+guard REMU independent/large 1.000 8
+guard REMU independent/small 1.000 8
+guard SB independent/full_64k 1.000 1
+guard SB independent/l1_4k 0.998 1
+guard SB independent/same_addr 0.998 1
+guard SH independent/full_64k 1.001 1
+guard SH independent/l1_4k 1.001 1
+guard SH independent/same_addr 1.000 1
+guard SLL chain 0.836 1
+guard SLL independent 0.834 1
+guard SLLI chain 0.998 1
+guard SLLI independent 1.000 1
+guard SLT chain 0.836 1
+guard SLT independent 0.836 1
+guard SLTI chain 1.000 1
 guard SLTI independent 1.001 1
-guard SLTIU chain 1.199 1
-guard SLTIU independent 1.199 1
-guard SLTU chain 1.002 1
-guard SLTU independent 1.001 1
-guard SRA chain 1.200 1
-guard SRA independent 1.199 1
-guard SRAI chain 1.196 1
-guard SRAI independent 1.196 1
-guard SRL chain 1.198 1
-guard SRL independent 1.198 1
-guard SRLI chain 1.197 1
-guard SRLI independent 1.199 1
+guard SLTIU chain 0.833 1
+guard SLTIU independent 0.833 1
+guard SLTU chain 1.000 1
+guard SLTU independent 1.000 1
+guard SRA chain 0.834 1
+guard SRA independent 0.835 1
+guard SRAI chain 0.834 1
+guard SRAI independent 0.835 1
+guard SRL chain 0.837 1
+guard SRL independent 0.836 1
+guard SRLI chain 0.834 1
+guard SRLI independent 0.834 1
 guard SUB chain 1.001 1
-guard SW independent/full_64k 1.334 1
-guard SW independent/l1_4k 1.199 1
-guard SW independent/same_addr 1.199 1
+guard SUB independent 1.000 1
+guard SW independent/full_64k 1.001 1
+guard SW independent/l1_4k 1.014 1
+guard SW independent/same_addr 1.001 1
+guard XOR chain 1.000 1
+guard XOR independent 0.998 1
+guard XORI chain 0.834 1
+guard XORI independent 0.836 1
 
 # Worst-over-best ns/gas across the validation workloads: how
 # much real capacity the current schedule gives away. Rising
 # means pricing got less even.
-workload_spread 5.106
+workload_spread 4.144
