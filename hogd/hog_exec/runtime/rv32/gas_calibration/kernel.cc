@@ -2,7 +2,15 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <span>
+#include <string>
+#include <vector>
 
+#include "hogd/hog_exec/runtime/rv32/program.h"
+#include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
 
 namespace hogd::rv32::gas_calibration {
@@ -202,19 +210,35 @@ branch_operands(Op op, bool taken)
   const int32_t offset = taken ? 4 : 8;
   switch (op) {
   case Op::kBeq:
-    return taken ? BranchOperands{kSrcLargeReg, kSrcLargeReg, offset}
-                 : BranchOperands{kSrcLargeReg, kSrcSmallReg, offset};
+    return taken ? BranchOperands{.rs1 = kSrcLargeReg,
+                                  .rs2 = kSrcLargeReg,
+                                  .offset = offset}
+                 : BranchOperands{.rs1 = kSrcLargeReg,
+                                  .rs2 = kSrcSmallReg,
+                                  .offset = offset};
   case Op::kBne:
-    return taken ? BranchOperands{kSrcLargeReg, kSrcSmallReg, offset}
-                 : BranchOperands{kSrcLargeReg, kSrcLargeReg, offset};
+    return taken ? BranchOperands{.rs1 = kSrcLargeReg,
+                                  .rs2 = kSrcSmallReg,
+                                  .offset = offset}
+                 : BranchOperands{.rs1 = kSrcLargeReg,
+                                  .rs2 = kSrcLargeReg,
+                                  .offset = offset};
   case Op::kBlt:
   case Op::kBltu:
-    return taken ? BranchOperands{kSrcSmallReg, kSrcLargeReg, offset}
-                 : BranchOperands{kSrcLargeReg, kSrcSmallReg, offset};
+    return taken ? BranchOperands{.rs1 = kSrcSmallReg,
+                                  .rs2 = kSrcLargeReg,
+                                  .offset = offset}
+                 : BranchOperands{.rs1 = kSrcLargeReg,
+                                  .rs2 = kSrcSmallReg,
+                                  .offset = offset};
   case Op::kBge:
   case Op::kBgeu:
-    return taken ? BranchOperands{kSrcLargeReg, kSrcSmallReg, offset}
-                 : BranchOperands{kSrcSmallReg, kSrcLargeReg, offset};
+    return taken ? BranchOperands{.rs1 = kSrcLargeReg,
+                                  .rs2 = kSrcSmallReg,
+                                  .offset = offset}
+                 : BranchOperands{.rs1 = kSrcSmallReg,
+                                  .rs2 = kSrcLargeReg,
+                                  .offset = offset};
   default:
     return {};
   }
@@ -239,13 +263,13 @@ struct MemoryOperand {
 MemoryOperand
 memory_operand(WorkingSet working_set, uint32_t index, uint32_t width)
 {
-  const uint8_t base_reg = static_cast<uint8_t>(
+  const auto base_reg = static_cast<uint8_t>(
       kAddressBankBase +
       (working_set == WorkingSet::kFullRange ? index % kAddressBankSize : 0));
   // Stride by 64 bytes so successive accesses land on successive cache lines
   // rather than repeatedly hitting one; wrap inside the +/-2048 immediate.
   const int32_t span = 4096;
-  const int32_t raw =
+  const auto raw =
       static_cast<int32_t>((index * 64U) % static_cast<uint32_t>(span));
   int32_t offset = raw - 2048;
   offset -= offset % static_cast<int32_t>(width); // keep accesses aligned
@@ -316,8 +340,7 @@ target_word(const KernelSpec &spec, uint32_t index)
     // Destination is drawn from a bank disjoint from the filler's operands, so
     // the following filler never consumes the loaded value and fuse_load_use
     // cannot pair them.
-    const uint8_t rd =
-        static_cast<uint8_t>(kLoadDstBase + (index % kLoadDstSize));
+    const auto rd = static_cast<uint8_t>(kLoadDstBase + (index % kLoadDstSize));
     return test_program::load(rd, encoding.funct3, operand.base_reg,
                               operand.offset);
   }
@@ -356,7 +379,7 @@ target_word(const KernelSpec &spec, uint32_t index)
   }
 
   if (is_shift_immediate(spec.target)) {
-    const int32_t shamt = static_cast<int32_t>(1 + (index % 30));
+    const auto shamt = static_cast<int32_t>(1 + (index % 30));
     const int32_t imm = spec.target == Op::kSrai ? (shamt | 0x400) : shamt;
     return test_program::i_type(encoding.opcode, rd, encoding.funct3, rs1, imm);
   }
@@ -379,11 +402,11 @@ target_word(const KernelSpec &spec, uint32_t index)
 
 } // namespace
 
-std::optional<uint32_t>
+std::expected<uint32_t, KernelError>
 canonical_instruction_word(Op op, uint8_t reg)
 {
   if (!is_measurable_target(op)) {
-    return std::nullopt;
+    return std::unexpected(KernelError::kUnsupportedTarget);
   }
   const Encoding encoding = encoding_for(op);
   if (op == Op::kLui || op == Op::kAuipc) {
@@ -414,7 +437,7 @@ canonical_instruction_word(Op op, uint8_t reg)
 uint32_t
 filler_instruction_word(uint32_t index)
 {
-  const uint8_t rd =
+  const auto rd =
       static_cast<uint8_t>(kFillerDstBase + (index % kFillerDstSize));
   return test_program::op(rd, kSrcLargeReg, kSrcSmallReg, 0, 0x00);
 }
@@ -471,22 +494,42 @@ emit_prologue(std::vector<uint32_t> &words, WorkingSet working_set,
   // only with addi or sll), which is what pins the prologue/body boundary.
 }
 
-std::optional<uint64_t>
+std::expected<uint64_t, KernelError>
 scheduled_gas_for_code(std::span<const uint8_t> code)
 {
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
-    return std::nullopt;
+    return std::unexpected(KernelError::kUndecodable);
   }
   uint64_t total = 0;
   for (size_t i = 0; i < program->instruction_count(); ++i) {
     const auto instruction = program->instruction_at(i);
     if (!instruction.has_value()) {
-      return std::nullopt;
+      return std::unexpected(KernelError::kUndecodable);
     }
     total += instruction->gas;
   }
   return total;
+}
+
+std::string
+kernel_error_name(KernelError error)
+{
+  switch (error) {
+  case KernelError::kUnsupportedTarget:
+    return "no body-slot encoding for this opcode";
+  case KernelError::kBodyTooSmall:
+    return "body too small for the fixed boundaries";
+  case KernelError::kZeroTripCount:
+    return "trip count is zero";
+  case KernelError::kTooManyTargets:
+    return "too many targets to keep them non-adjacent";
+  case KernelError::kCodeTooLarge:
+    return "generated code exceeds kMaxCodeBytes";
+  case KernelError::kUndecodable:
+    return "generated code did not decode";
+  }
+  return "unknown";
 }
 
 bool
@@ -539,7 +582,7 @@ is_branch_target(Op op)
 std::string
 op_name(Op op)
 {
-  const size_t index = static_cast<size_t>(op);
+  const auto index = static_cast<size_t>(op);
   if (index >= kInstructionGasSchedule.size()) {
     return "UNKNOWN";
   }
@@ -584,19 +627,24 @@ magnitude_name(OperandMagnitude magnitude)
 uint64_t
 scheduled_gas_for(Op op)
 {
-  const size_t index = static_cast<size_t>(op);
+  const auto index = static_cast<size_t>(op);
   if (index >= kInstructionGasSchedule.size()) {
     return 0;
   }
   return kInstructionGasSchedule[index].cost;
 }
 
-std::optional<Kernel>
+std::expected<Kernel, KernelError>
 build_kernel(const KernelSpec &spec)
 {
-  if (!is_measurable_target(spec.target) || spec.body_slots < 8 ||
-      spec.trip_count == 0) {
-    return std::nullopt;
+  if (!is_measurable_target(spec.target)) {
+    return std::unexpected(KernelError::kUnsupportedTarget);
+  }
+  if (spec.body_slots < 8) {
+    return std::unexpected(KernelError::kBodyTooSmall);
+  }
+  if (spec.trip_count == 0) {
+    return std::unexpected(KernelError::kZeroTripCount);
   }
   // Slot 0 and the last slot always hold the filler: that pins the two body
   // boundaries (prologue -> body, body -> loop control) to a fixed instruction
@@ -605,7 +653,7 @@ build_kernel(const KernelSpec &spec)
   // and capping them at half the interior keeps any two targets non-adjacent.
   const uint32_t interior_slots = spec.body_slots - 2;
   if (spec.target_slots > interior_slots / 2) {
-    return std::nullopt;
+    return std::unexpected(KernelError::kTooManyTargets);
   }
 
   std::vector<uint32_t> prologue;
@@ -640,7 +688,7 @@ build_kernel(const KernelSpec &spec)
   }
 
   std::vector<uint32_t> words = prologue;
-  const uint32_t body_start_index = static_cast<uint32_t>(words.size());
+  const auto body_start_index = static_cast<uint32_t>(words.size());
   words.insert(words.end(), body.begin(), body.end());
   // Loop control: decrement and branch back to the body head. This pair fuses
   // (fuse_alu_branch) into one slot, which is fine -- it is identical in every
@@ -652,7 +700,7 @@ build_kernel(const KernelSpec &spec)
   words.push_back(0x00000073U); // ecall: the halting host ends the run
 
   if (words.size() * kInstructionBytes > kMaxCodeBytes) {
-    return std::nullopt;
+    return std::unexpected(KernelError::kCodeTooLarge);
   }
 
   Kernel kernel;
@@ -678,9 +726,8 @@ build_kernel(const KernelSpec &spec)
 
   uint64_t body_gas = 0;
   for (uint32_t slot = 0; slot < spec.body_slots; ++slot) {
-    const bool is_target =
-        std::find(target_slot_indices.begin(), target_slot_indices.end(),
-                  slot) != target_slot_indices.end();
+    const bool is_target = std::ranges::find(target_slot_indices, slot) !=
+                           target_slot_indices.end();
     body_gas += is_target ? scheduled_gas_for(spec.target)
                           : scheduled_gas_for(Op::kAdd);
   }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -42,9 +43,9 @@ struct RunOutcome {
 // Picks a trip count that makes one run of `program` take at least
 // `target_ns`, so the measurement dominates clock resolution and per-run
 // constant overhead. Returns the multiplier to apply to a seed trip count.
-[[nodiscard]] uint32_t tune_trip_count(const ThreadedMachinePreInstantiation &,
-                                       uint32_t seed_trip_count,
-                                       double target_ns);
+[[nodiscard]] uint32_t
+tune_trip_count(const ThreadedMachinePreInstantiation & /*program*/,
+                uint32_t seed_trip_count, double target_ns);
 
 // One kernel in a sweep, with its independent-variable value and its samples.
 struct MeasurementPoint {

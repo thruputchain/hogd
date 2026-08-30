@@ -1,8 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
-#include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"

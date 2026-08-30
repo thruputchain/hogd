@@ -1,10 +1,17 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <unordered_map>
+#include <vector>
 
+#include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
 
 namespace hogd::rv32::gas_calibration {

@@ -1,13 +1,12 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
+#include <expected>
 #include <span>
 #include <string>
 #include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/program.h"
-#include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 
 // Deterministic kernel synthesis for gas calibration.
 //
@@ -160,6 +159,22 @@ struct Kernel {
   uint32_t body_start_pc = 0;
 };
 
+// Why a kernel could not be built. Reported rather than collapsed into an empty
+// optional so a rejected sweep says which constraint it hit -- and so the
+// harness matches the rest of runtime/rv32, where every fallible construction
+// (Program::create, ThreadedProgram::create, PreInstantiation::create) returns
+// std::expected with a named error.
+enum class KernelError {
+  kUnsupportedTarget, // no body-slot encoding for this opcode
+  kBodyTooSmall,      // fewer slots than the fixed boundaries need
+  kZeroTripCount,
+  kTooManyTargets, // would put two targets adjacent, exposing them to fusion
+  kCodeTooLarge,   // over kMaxCodeBytes
+  kUndecodable,    // generated code did not round-trip through the decoder
+};
+
+[[nodiscard]] std::string kernel_error_name(KernelError error);
+
 // True for opcodes this harness knows how to place in a body slot. Excluded:
 // control transfers whose target would have to be rewritten per slot (JAL,
 // JALR), the trapping/halting ops (ECALL, EBREAK, UNIMP), and FENCE, which the
@@ -186,7 +201,7 @@ struct Kernel {
 // Total gas the current schedule charges for `code`, decoded with the same
 // production decoder the engine uses. Returns nullopt if the code does not
 // decode.
-[[nodiscard]] std::optional<uint64_t>
+[[nodiscard]] std::expected<uint64_t, KernelError>
 scheduled_gas_for_code(std::span<const uint8_t> code);
 
 // The non-fusing filler instruction for body slot `index`: an R-type ADD whose
@@ -205,8 +220,8 @@ scheduled_gas_for_code(std::span<const uint8_t> code);
 //
 // Returns nullopt for opcodes with no register-uniform encoding
 // (JAL/JALR/FENCE/ECALL/EBREAK/UNIMP).
-[[nodiscard]] std::optional<uint32_t> canonical_instruction_word(Op op,
-                                                                 uint8_t reg);
+[[nodiscard]] std::expected<uint32_t, KernelError>
+canonical_instruction_word(Op op, uint8_t reg);
 
 // Materializes a 32-bit constant into `reg` (addi, or lui+addi when it does not
 // fit a 12-bit immediate).
@@ -220,8 +235,8 @@ void emit_load_immediate(std::vector<uint32_t> &words, uint8_t reg,
 void emit_prologue(std::vector<uint32_t> &words, WorkingSet working_set,
                    uint32_t trip_count);
 
-// Builds the kernel, or nullopt if the spec is not representable (unsupported
-// target, target_slots > body_slots/2, body too large for kMaxCodeBytes).
-[[nodiscard]] std::optional<Kernel> build_kernel(const KernelSpec &spec);
+// Builds the kernel, or the constraint the spec violated.
+[[nodiscard]] std::expected<Kernel, KernelError>
+build_kernel(const KernelSpec &spec);
 
 } // namespace hogd::rv32::gas_calibration

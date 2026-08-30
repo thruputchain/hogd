@@ -1,13 +1,19 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
 
-#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
@@ -35,8 +41,7 @@ alu_mix_body()
       {{0, 0x00}, {4, 0x00}, {7, 0x00}, {6, 0x00}, {0, 0x20}}};
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
     const auto [funct3, funct7] = ops[i % ops.size()];
-    const uint8_t rd =
-        static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+    const auto rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
     body.push_back(
         test_program::op(rd, kSrcLargeReg, kSrcSmallReg, funct3, funct7));
   }
@@ -49,8 +54,7 @@ address_math_body()
   // addi;addi pairs: the back-to-back address math the ALU-ALU rule targets.
   std::vector<uint32_t> body;
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
-    const uint8_t rd =
-        static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+    const auto rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
     body.push_back(test_program::addi(rd, kSrcLargeReg, 16));
     body.push_back(test_program::addi(rd, rd, 8));
   }
@@ -79,8 +83,7 @@ load_use_body()
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
     body.push_back(
         test_program::load(kLoadDstBase, 2, kAddressBankBase, walk_offset(i)));
-    const uint8_t rd =
-        static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+    const auto rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
     body.push_back(test_program::op(rd, kLoadDstBase, kSrcSmallReg, 0, 0x00));
   }
   return body;
@@ -93,8 +96,7 @@ branch_dense_body()
   // instructions. The engine's per-run entry cost is at its worst here.
   std::vector<uint32_t> body;
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
-    const uint8_t rd =
-        static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+    const auto rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
     body.push_back(test_program::addi(rd, rd, 1));
     body.push_back(test_program::branch(1, kSrcLargeReg, kSrcLargeReg, 8));
   }
@@ -106,8 +108,7 @@ multiply_mix_body()
 {
   std::vector<uint32_t> body;
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
-    const uint8_t rd =
-        static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+    const auto rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
     body.push_back(test_program::op(rd, kSrcLargeReg, kSrcSmallReg, 0, 0x01));
     body.push_back(test_program::op(rd, rd, kSrcSmallReg, 0, 0x00));
   }
@@ -119,8 +120,7 @@ divide_mix_body()
 {
   std::vector<uint32_t> body;
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
-    const uint8_t rd =
-        static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
+    const auto rd = static_cast<uint8_t>(kDataBankBase + (i % kDataBankSize));
     body.push_back(test_program::op(rd, kSrcLargeReg, kSrcSmallReg, 4, 0x01));
     body.push_back(test_program::op(rd, rd, kSrcSmallReg, 0, 0x00));
   }
@@ -188,7 +188,7 @@ build_workload(const Workload &workload, uint32_t trip_count)
   // Gas is charged per decoded instruction, before fusion, so the iteration's
   // charge is just the body's decoded gas plus the loop control's.
   const std::vector<uint8_t> body_code = test_program::code_from_words(body);
-  const std::optional<uint64_t> body_gas = scheduled_gas_for_code(body_code);
+  const auto body_gas = scheduled_gas_for_code(body_code);
   if (!body_gas.has_value()) {
     return std::nullopt;
   }
@@ -277,6 +277,7 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     ++index;
   }
 
+  points.reserve(programs.size());
   for (size_t i = 0; i < programs.size(); ++i) {
     points.push_back({.label = results[i].name,
                       .x = static_cast<double>(i),

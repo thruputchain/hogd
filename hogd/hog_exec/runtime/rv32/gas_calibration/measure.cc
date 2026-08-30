@@ -1,8 +1,16 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
+#include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <ratio>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace hogd::rv32::gas_calibration {
 
@@ -125,7 +133,7 @@ fit_line(std::span<const MeasurementPoint> points)
     sum_x += point.x;
     sum_y += point.median();
   }
-  const double n = static_cast<double>(points.size());
+  const auto n = static_cast<double>(points.size());
   const double mean_x = sum_x / n;
   const double mean_y = sum_y / n;
 

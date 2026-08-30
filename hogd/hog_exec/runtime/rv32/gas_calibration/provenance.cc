@@ -1,11 +1,13 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
 
-#include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <fstream>
-#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -55,7 +57,7 @@ fingerprint_corpus()
 {
   std::vector<uint32_t> words;
   for (size_t index = 0; index < kOpCount; ++index) {
-    const std::optional<uint32_t> word =
+    const auto word =
         canonical_instruction_word(static_cast<Op>(index), kDataBankBase);
     if (word.has_value()) {
       words.push_back(*word);
@@ -106,7 +108,7 @@ read_cpu_model()
       continue;
     }
     const std::string key = line.substr(0, line.find_first_of(" \t"));
-    if (key == "model" && line.find("model name") == 0) {
+    if (key == "model" && line.starts_with("model name")) {
       std::string value = line.substr(colon + 1);
       const size_t start = value.find_first_not_of(" \t");
       return start == std::string::npos ? std::string{} : value.substr(start);
@@ -118,9 +120,9 @@ read_cpu_model()
 std::string
 compiler_id()
 {
-#if defined(__clang__)
+#ifdef __clang__
   return "clang " __clang_version__;
-#elif defined(__GNUC__)
+#elifdef __GNUC__
   return "gcc " __VERSION__;
 #else
   return "unknown";
@@ -161,10 +163,7 @@ engine_fingerprint()
     }
   }
 
-  std::array<char, 17> text = {};
-  std::snprintf(text.data(), text.size(), "%016llx",
-                static_cast<unsigned long long>(hash));
-  return std::string(text.data());
+  return std::format("{:016x}", hash);
 }
 
 Provenance
@@ -182,16 +181,16 @@ collect_provenance()
   provenance.cpu_count = std::thread::hardware_concurrency();
 
   provenance.compiler = compiler_id();
-#if defined(RV32_GAS_BUILD_TYPE)
+#ifdef RV32_GAS_BUILD_TYPE
   provenance.build_type = RV32_GAS_BUILD_TYPE;
 #endif
-#if defined(RV32_GAS_CXX_FLAGS)
+#ifdef RV32_GAS_CXX_FLAGS
   provenance.cxx_flags = RV32_GAS_CXX_FLAGS;
 #endif
-#if defined(__OPTIMIZE__)
+#ifdef __OPTIMIZE__
   provenance.optimized = true;
 #endif
-#if !defined(NDEBUG)
+#ifndef NDEBUG
   provenance.assertions_enabled = true;
 #endif
 

@@ -1,5 +1,7 @@
+#include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -8,6 +10,8 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
+#include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
@@ -84,13 +88,14 @@ representative_specs()
 TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
 {
   for (const KernelSpec &spec : representative_specs()) {
-    const std::optional<Kernel> kernel = build_kernel(spec);
+    const auto kernel = build_kernel(spec);
     ASSERT_TRUE(kernel.has_value()) << op_name(spec.target);
-    ASSERT_FALSE(kernel->target_slot_pcs.empty()) << op_name(spec.target);
+    ASSERT_FALSE(kernel.value().target_slot_pcs.empty())
+        << op_name(spec.target);
 
-    const auto program = ThreadedProgram::create(kernel->code);
+    const auto program = ThreadedProgram::create(kernel.value().code);
     ASSERT_TRUE(program.has_value()) << op_name(spec.target);
-    for (const uint32_t pc : kernel->target_slot_pcs) {
+    for (const uint32_t pc : kernel.value().target_slot_pcs) {
       const auto decoded = program->instruction_at(pc / kInstructionBytes);
       ASSERT_TRUE(decoded.has_value()) << op_name(spec.target);
       EXPECT_EQ(decoded->op, spec.target)
@@ -103,16 +108,17 @@ TEST(Rv32GasCalibrationKernel, TargetSlotsEncodeTheRequestedOpcode)
 TEST(Rv32GasCalibrationKernel, PlacesRequestedTargetsNonAdjacentlyInTheInterior)
 {
   for (const KernelSpec &spec : representative_specs()) {
-    const std::optional<Kernel> kernel = build_kernel(spec);
+    const auto kernel = build_kernel(spec);
     ASSERT_TRUE(kernel.has_value()) << op_name(spec.target);
-    EXPECT_EQ(kernel->target_slot_pcs.size(), spec.target_slots)
+    EXPECT_EQ(kernel.value().target_slot_pcs.size(), spec.target_slots)
         << op_name(spec.target);
 
-    const uint32_t first_slot = kernel->body_start_pc / kInstructionBytes;
+    const uint32_t first_slot =
+        kernel.value().body_start_pc / kInstructionBytes;
     const uint32_t last_slot = first_slot + spec.body_slots - 1;
     uint32_t previous_slot = 0;
     bool have_previous = false;
-    for (const uint32_t pc : kernel->target_slot_pcs) {
+    for (const uint32_t pc : kernel.value().target_slot_pcs) {
       const uint32_t slot = pc / kInstructionBytes;
       // Slot 0 and the last slot stay filler so the prologue/body and
       // body/loop-control boundaries are the same instruction pair in every
@@ -141,17 +147,19 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
   spec.target_slots = kTestTargets;
   spec.trip_count = kTestTripCount;
 
-  const std::optional<Kernel> first = build_kernel(spec);
+  const auto first = build_kernel(spec);
   ASSERT_TRUE(first.has_value());
   bool saw_different_placement = false;
   for (uint32_t phase = 1; phase < 6; ++phase) {
     spec.placement_phase = phase;
-    const std::optional<Kernel> other = build_kernel(spec);
+    const auto other = build_kernel(spec);
     ASSERT_TRUE(other.has_value());
-    EXPECT_EQ(other->scheduled_gas, first->scheduled_gas);
-    EXPECT_EQ(other->dynamic_instructions, first->dynamic_instructions);
-    EXPECT_EQ(other->target_slot_pcs.size(), first->target_slot_pcs.size());
-    if (other->target_slot_pcs != first->target_slot_pcs) {
+    EXPECT_EQ(other.value().scheduled_gas, first.value().scheduled_gas);
+    EXPECT_EQ(other.value().dynamic_instructions,
+              first.value().dynamic_instructions);
+    EXPECT_EQ(other.value().target_slot_pcs.size(),
+              first.value().target_slot_pcs.size());
+    if (other.value().target_slot_pcs != first.value().target_slot_pcs) {
       saw_different_placement = true;
     }
   }
@@ -169,13 +177,13 @@ TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
 {
   HaltHost host;
   for (const KernelSpec &spec : representative_specs()) {
-    const std::optional<Kernel> kernel = build_kernel(spec);
+    const auto kernel = build_kernel(spec);
     ASSERT_TRUE(kernel.has_value()) << op_name(spec.target);
 
     auto program =
-        ThreadedMachinePreInstantiation::create(kernel->code,
-                                                kernel->initial_memory, 0,
-                                                kernel->memory_bytes,
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
                                                 /*trace=*/false);
     ASSERT_TRUE(program.has_value()) << op_name(spec.target);
 
@@ -185,7 +193,7 @@ TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
         << op_name(spec.target) << " trapped with "
         << static_cast<int>(outcome.trap);
     EXPECT_EQ(outcome.trap, Trap::kNone) << op_name(spec.target);
-    EXPECT_EQ(outcome.gas_consumed, kernel->scheduled_gas)
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
         << op_name(spec.target) << " (" << context_name(spec.context)
         << ") ran a different amount of work than the harness credits it with";
   }
@@ -197,9 +205,9 @@ TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
 TEST(Rv32GasCalibrationKernel, SweepBodiesLowerWithoutFusion)
 {
   for (const KernelSpec &spec : representative_specs()) {
-    const std::optional<Kernel> kernel = build_kernel(spec);
+    const auto kernel = build_kernel(spec);
     ASSERT_TRUE(kernel.has_value()) << op_name(spec.target);
-    const LoweringAudit audit = audit_kernel(*kernel, spec);
+    const LoweringAudit audit = audit_kernel(kernel.value(), spec);
     EXPECT_TRUE(audit.clean())
         << op_name(spec.target) << " (" << context_name(spec.context) << "/"
         << working_set_name(spec.working_set) << "): lowering rewrote "
@@ -244,18 +252,18 @@ TEST(Rv32GasCalibrationAudit, CountsOneRunPerBarrier)
   spec.body_slots = kTestBodySlots;
   spec.target_slots = kTestTargets;
   spec.trip_count = kTestTripCount;
-  const std::optional<Kernel> kernel = build_kernel(spec);
+  const auto kernel = build_kernel(spec);
   ASSERT_TRUE(kernel.has_value());
-  const LoweringAudit audit = audit_kernel(*kernel, spec);
+  const LoweringAudit audit = audit_kernel(kernel.value(), spec);
   // One run to start, plus one more after each branch in the body.
   EXPECT_EQ(audit.body_runs, kTestTargets + 1);
 
   KernelSpec straight_line = spec;
   straight_line.target = Op::kAdd;
   straight_line.branch_taken = false;
-  const std::optional<Kernel> straight = build_kernel(straight_line);
+  const auto straight = build_kernel(straight_line);
   ASSERT_TRUE(straight.has_value());
-  EXPECT_EQ(audit_kernel(*straight, straight_line).body_runs, 1U);
+  EXPECT_EQ(audit_kernel(straight.value(), straight_line).body_runs, 1U);
 }
 
 // The chase is only a latency test if its addresses are unpredictable and it
@@ -270,24 +278,24 @@ TEST(Rv32GasCalibrationKernel, PointerChaseVisitsEveryNodeExactlyOnce)
   spec.body_slots = kTestBodySlots;
   spec.target_slots = kTestTargets;
   spec.trip_count = kTestTripCount;
-  const std::optional<Kernel> kernel = build_kernel(spec);
+  const auto kernel = build_kernel(spec);
   ASSERT_TRUE(kernel.has_value());
 
   const auto read_word = [&](uint32_t address) {
-    return uint32_t{kernel->initial_memory[address]} |
-           (uint32_t{kernel->initial_memory[address + 1]} << 8) |
-           (uint32_t{kernel->initial_memory[address + 2]} << 16) |
-           (uint32_t{kernel->initial_memory[address + 3]} << 24);
+    return uint32_t{kernel.value().initial_memory[address]} |
+           (uint32_t{kernel.value().initial_memory[address + 1]} << 8) |
+           (uint32_t{kernel.value().initial_memory[address + 2]} << 16) |
+           (uint32_t{kernel.value().initial_memory[address + 3]} << 24);
   };
 
   constexpr uint32_t kStride = 64;
-  const uint32_t nodes = kernel->memory_bytes / kStride;
+  const uint32_t nodes = kernel.value().memory_bytes / kStride;
   std::vector<bool> visited(nodes, false);
   uint32_t address = 0;
   uint32_t steps = 0;
   uint32_t adjacent_hops = 0;
   for (; steps < nodes; ++steps) {
-    ASSERT_LT(address, kernel->memory_bytes);
+    ASSERT_LT(address, kernel.value().memory_bytes);
     ASSERT_EQ(address % kStride, 0U);
     const uint32_t node = address / kStride;
     ASSERT_FALSE(visited[node]) << "cycle closed early at node " << node;
@@ -325,16 +333,14 @@ TEST(Rv32GasCalibrationProvenance, EngineFingerprintIsStable)
 TEST(Rv32GasCalibrationProvenance, CanonicalCorpusCanFuse)
 {
   // lui rd, hi ; addi rd, rd, lo -- the same-register pair fuse_lui_addi wants.
-  const std::optional<uint32_t> lui =
-      canonical_instruction_word(Op::kLui, kDataBankBase);
-  const std::optional<uint32_t> addi =
-      canonical_instruction_word(Op::kAddi, kDataBankBase);
+  const auto lui = canonical_instruction_word(Op::kLui, kDataBankBase);
+  const auto addi = canonical_instruction_word(Op::kAddi, kDataBankBase);
   ASSERT_TRUE(lui.has_value());
   ASSERT_TRUE(addi.has_value());
 
-  const std::vector<uint8_t> paired =
-      test_program::code_from_words({filler_instruction_word(0), *lui, *addi,
-                                     filler_instruction_word(1), 0x00000073U});
+  const std::vector<uint8_t> paired = test_program::code_from_words(
+      {filler_instruction_word(0), lui.value(), addi.value(),
+       filler_instruction_word(1), 0x00000073U});
   const std::vector<uint8_t> memory(64, 0);
   const LoweringAudit audit = audit_body(paired, memory, 64, 1, 2);
   EXPECT_GT(audit.rewritten_slots, 0U)
@@ -350,9 +356,9 @@ TEST(Rv32GasCalibrationProvenance, CalibrationOperandsDoNotFuse)
   spec.body_slots = kTestBodySlots;
   spec.target_slots = kTestTargets;
   spec.trip_count = kTestTripCount;
-  const std::optional<Kernel> kernel = build_kernel(spec);
+  const auto kernel = build_kernel(spec);
   ASSERT_TRUE(kernel.has_value());
-  EXPECT_TRUE(audit_kernel(*kernel, spec).clean())
+  EXPECT_TRUE(audit_kernel(kernel.value(), spec).clean())
       << "ADDI is a fusion head in four rules; if the kernel's operands let "
          "any of them fire, its slope is not a per-instruction cost";
 }
@@ -429,13 +435,13 @@ TEST(Rv32GasCalibrationKernel, ScheduledGasMatchesTheProductionDecoder)
   spec.body_slots = kTestBodySlots;
   spec.target_slots = kTestTargets;
   spec.trip_count = 1;
-  const std::optional<Kernel> kernel = build_kernel(spec);
+  const auto kernel = build_kernel(spec);
   ASSERT_TRUE(kernel.has_value());
-  const std::optional<uint64_t> decoded = scheduled_gas_for_code(kernel->code);
+  const auto decoded = scheduled_gas_for_code(kernel.value().code);
   ASSERT_TRUE(decoded.has_value());
   // One trip: the whole program runs top to bottom exactly once, so the
   // schedule's total over the code equals the run's charge.
-  EXPECT_EQ(*decoded, kernel->scheduled_gas);
+  EXPECT_EQ(decoded.value(), kernel.value().scheduled_gas);
 }
 
 } // namespace

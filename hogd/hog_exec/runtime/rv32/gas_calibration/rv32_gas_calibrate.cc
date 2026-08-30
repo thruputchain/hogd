@@ -19,15 +19,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <exception>
+#include <expected>
 #include <memory>
-#include <optional>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/kernel.h"
@@ -35,6 +39,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
 namespace hogd::rv32::gas_calibration {
@@ -103,7 +108,7 @@ struct SweepKernels {
   std::vector<uint32_t> target_counts;
 };
 
-std::optional<SweepKernels>
+std::expected<SweepKernels, KernelError>
 build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
             uint32_t trip_count, uint32_t placements)
 {
@@ -120,9 +125,9 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
         continue;
       }
       spec.placement_phase = phase * 2;
-      std::optional<Kernel> kernel = build_kernel(spec);
+      auto kernel = build_kernel(spec);
       if (!kernel.has_value()) {
-        return std::nullopt;
+        return std::unexpected(kernel.error());
       }
       auto program =
           ThreadedMachinePreInstantiation::create(kernel->code,
@@ -130,7 +135,7 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
                                                   kernel->memory_bytes,
                                                   /*trace=*/false);
       if (!program.has_value()) {
-        return std::nullopt;
+        return std::unexpected(KernelError::kUndecodable);
       }
       sweep.kernels.push_back(std::move(*kernel));
       sweep.programs.push_back(
@@ -169,10 +174,10 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
 
   const std::vector<uint32_t> counts =
       sweep_counts(options.body_slots, options.quick);
-  std::optional<SweepKernels> sweep =
-      build_sweep(base, counts, 64, options.placements);
+  auto sweep = build_sweep(base, counts, 64, options.placements);
   if (!sweep.has_value()) {
-    result.rejected_because = "kernel not representable";
+    result.rejected_because =
+        "kernel not representable: " + kernel_error_name(sweep.error());
     return result;
   }
 
@@ -203,7 +208,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
       tune_trip_count(*sweep->programs.back(), 64, options.target_ns);
   sweep = build_sweep(base, counts, trip_count, options.placements);
   if (!sweep.has_value()) {
-    result.rejected_because = "kernel not representable at tuned trip count";
+    result.rejected_because = "kernel not representable at the tuned trip "
+                              "count: " +
+                              kernel_error_name(sweep.error());
     return result;
   }
 
@@ -263,7 +270,7 @@ run_baseline(const Options &options)
     spec.target_slots = 0; // all filler
     spec.body_slots = slots;
     spec.trip_count = 64;
-    std::optional<Kernel> kernel = build_kernel(spec);
+    auto kernel = build_kernel(spec);
     if (!kernel.has_value()) {
       return baseline;
     }
@@ -283,6 +290,7 @@ run_baseline(const Options &options)
   const uint32_t trip_count =
       tune_trip_count(*programs.back(), 64, options.target_ns);
   std::vector<MeasurementPoint> points;
+  points.reserve(programs.size());
   for (size_t i = 0; i < programs.size(); ++i) {
     points.push_back({.label = "baseline/" + std::to_string(body_sizes[i]),
                       .x = static_cast<double>(body_sizes[i]),
@@ -297,12 +305,18 @@ run_baseline(const Options &options)
     spec.target_slots = 0;
     spec.body_slots = body_sizes[i];
     spec.trip_count = trip_count;
-    std::optional<Kernel> kernel = build_kernel(spec);
+    auto kernel = build_kernel(spec);
+    if (!kernel.has_value()) {
+      return baseline;
+    }
     auto program =
         ThreadedMachinePreInstantiation::create(kernel->code,
                                                 kernel->initial_memory, 0,
                                                 kernel->memory_bytes,
                                                 /*trace=*/false);
+    if (!program.has_value()) {
+      return baseline;
+    }
     kernels[i] = std::move(*kernel);
     programs[i] =
         std::make_unique<ThreadedMachinePreInstantiation>(std::move(*program));
@@ -337,7 +351,7 @@ measure_noise_floor(const Options &options)
   spec.target_slots = 0;
   spec.body_slots = options.body_slots;
   spec.trip_count = 64;
-  std::optional<Kernel> kernel = build_kernel(spec);
+  auto kernel = build_kernel(spec);
   if (!kernel.has_value()) {
     return 0.0;
   }
@@ -351,6 +365,9 @@ measure_noise_floor(const Options &options)
   const uint32_t trip_count = tune_trip_count(*seed, 64, options.target_ns);
   spec.trip_count = trip_count;
   kernel = build_kernel(spec);
+  if (!kernel.has_value()) {
+    return 0.0;
+  }
 
   std::vector<std::unique_ptr<ThreadedMachinePreInstantiation>> programs;
   for (int i = 0; i < 2; ++i) {
@@ -470,101 +487,87 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
           const std::vector<SweepResult> &sweeps,
           const std::vector<WorkloadResult> &workloads)
 {
-  std::fprintf(out, "{\n");
-  std::fprintf(out, "  \"schema\": \"rv32-gas-calibration/1\",\n");
-  std::fprintf(out, "  \"engine\": \"ThreadedMachine\",\n");
-  std::fprintf(out, "  \"traced\": false,\n");
-  std::fprintf(out,
-               "  \"provenance\": {\"engine_fingerprint\": \"%s\", "
-               "\"host\": \"%s\", \"kernel\": \"%s\", "
-               "\"cpu_model\": \"%s\", \"cpu_count\": %u, "
-               "\"compiler\": \"%s\", \"build_type\": \"%s\", "
-               "\"cxx_flags\": \"%s\", \"optimized\": %s, "
-               "\"assertions_enabled\": %s, "
-               "\"production_build\": %s, "
-               "\"source_revision\": \"%s\"},\n",
-               escape_json(provenance.engine_fingerprint).c_str(),
-               escape_json(provenance.host).c_str(),
-               escape_json(provenance.kernel).c_str(),
-               escape_json(provenance.cpu_model).c_str(), provenance.cpu_count,
-               escape_json(provenance.compiler).c_str(),
-               escape_json(provenance.build_type).c_str(),
-               escape_json(provenance.cxx_flags).c_str(),
-               provenance.optimized ? "true" : "false",
-               provenance.assertions_enabled ? "true" : "false",
-               provenance.is_production_build() ? "true" : "false",
-               escape_json(provenance.source_revision).c_str());
-  std::fprintf(out,
-               "  \"config\": {\"body_slots\": %u, \"repeats\": %u, "
-               "\"warmup_runs\": %u, \"target_ns\": %.0f, \"placements\": %u, "
-               "\"quick\": %s},\n",
-               options.body_slots, options.repeats, options.warmup_runs,
-               options.target_ns, options.placements,
-               options.quick ? "true" : "false");
-  std::fprintf(out,
-               "  \"baseline\": {\"ns_per_filler_instruction\": %.6f, "
-               "\"r_squared\": %.6f, \"theil_sen_slope\": %.6f, "
-               "\"worst_relative_mad\": %.6f, \"usable\": %s},\n",
+  std::println(out, "{{");
+  std::println(out, R"(  "schema": "rv32-gas-calibration/1",)");
+  std::println(out, R"(  "engine": "ThreadedMachine",)");
+  std::println(out, R"(  "traced": false,)");
+  std::println(
+      out,
+      "  \"provenance\": {{\"engine_fingerprint\": \"{}\", \"host\": \"{}\", "
+      "\"kernel\": \"{}\", \"cpu_model\": \"{}\", \"cpu_count\": {}, "
+      "\"compiler\": \"{}\", \"build_type\": \"{}\", \"cxx_flags\": \"{}\", "
+      "\"optimized\": {}, \"assertions_enabled\": {}, \"production_build\": "
+      "{}, \"source_revision\": \"{}\"}},",
+      escape_json(provenance.engine_fingerprint), escape_json(provenance.host),
+      escape_json(provenance.kernel), escape_json(provenance.cpu_model),
+      provenance.cpu_count, escape_json(provenance.compiler),
+      escape_json(provenance.build_type), escape_json(provenance.cxx_flags),
+      provenance.optimized ? "true" : "false",
+      provenance.assertions_enabled ? "true" : "false",
+      provenance.is_production_build() ? "true" : "false",
+      escape_json(provenance.source_revision));
+  std::println(
+      out,
+      "  \"config\": {{\"body_slots\": {}, \"repeats\": {}, \"warmup_runs\": "
+      "{}, \"target_ns\": {:.0f}, \"placements\": {}, \"quick\": {}}},",
+      options.body_slots, options.repeats, options.warmup_runs,
+      options.target_ns, options.placements, options.quick ? "true" : "false");
+  std::println(out,
+               "  \"baseline\": {{\"ns_per_filler_instruction\": {:.6f}, "
+               "\"r_squared\": {:.6f}, \"theil_sen_slope\": {:.6f}, "
+               "\"worst_relative_mad\": {:.6f}, \"usable\": {}}},",
                baseline.ns_per_filler, baseline.fit.r_squared,
                baseline.fit.theil_sen_slope, baseline.worst_relative_mad,
                baseline.usable ? "true" : "false");
-  std::fprintf(out, "  \"noise_floor_ns_per_instruction\": %.6f,\n",
+  std::println(out, "  \"noise_floor_ns_per_instruction\": {:.6f},",
                noise_floor);
 
-  std::fprintf(out, "  \"opcodes\": [\n");
+  std::println(out, R"(  "opcodes": [)");
   for (size_t i = 0; i < sweeps.size(); ++i) {
     const SweepResult &sweep = sweeps[i];
-    std::fprintf(
+    std::println(
         out,
-        "    {\"op\": \"%s\", \"context\": \"%s\", \"working_set\": \"%s\", "
-        "\"magnitude\": \"%s\", \"branch_mode\": \"%s\", "
-        "\"scheduled_gas\": %llu, \"usable\": %s, "
-        "\"rejected_because\": \"%s\", \"slope_ns\": %.6f, "
-        "\"theil_sen_ns\": %.6f, \"r_squared\": %.6f, "
-        "\"slope_stderr_ns\": %.6f, \"points\": %zu, "
-        "\"ns_per_instruction\": %.6f, \"worst_relative_mad\": %.6f, "
-        "\"body_runs\": %zu, \"max_run_gas_seen\": %llu}%s\n",
-        escape_json(sweep.op).c_str(), escape_json(sweep.context).c_str(),
-        escape_json(sweep.working_set).c_str(),
-        escape_json(sweep.magnitude).c_str(),
-        escape_json(sweep.branch_mode).c_str(),
-        static_cast<unsigned long long>(sweep.scheduled_gas),
-        sweep.usable ? "true" : "false",
-        escape_json(sweep.rejected_because).c_str(), sweep.fit.slope,
-        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
-        sweep.measured_points, sweep.ns_per_instruction,
+        "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
+        "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"scheduled_gas\": "
+        "{}, \"usable\": {}, \"rejected_because\": \"{}\", \"slope_ns\": "
+        "{:.6f}, \"theil_sen_ns\": {:.6f}, \"r_squared\": {:.6f}, "
+        "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
+        "{:.6f}, \"worst_relative_mad\": {:.6f}, \"body_runs\": {}, "
+        "\"max_run_gas_seen\": {}}}{}",
+        escape_json(sweep.op), escape_json(sweep.context),
+        escape_json(sweep.working_set), escape_json(sweep.magnitude),
+        escape_json(sweep.branch_mode), sweep.scheduled_gas,
+        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
+        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
+        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
-        static_cast<unsigned long long>(sweep.audit.max_run_gas_seen),
-        i + 1 == sweeps.size() ? "" : ",");
+        sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }
-  std::fprintf(out, "  ],\n");
+  std::println(out, "  ],");
 
-  std::fprintf(out, "  \"workloads\": [\n");
+  std::println(out, R"(  "workloads": [)");
   for (size_t i = 0; i < workloads.size(); ++i) {
     const WorkloadResult &workload = workloads[i];
-    std::fprintf(
+    std::print(
         out,
-        "    {\"name\": \"%s\", \"ns_per_iteration\": %.6f, "
-        "\"scheduled_gas_per_iteration\": %llu, "
-        "\"instructions_per_iteration\": %llu, "
-        "\"ns_per_gas\": %.6f, \"relative_mad\": %.6f, "
-        "\"fused_slots\": %zu, \"shape\": \"%s\", "
-        "\"op_counts\": {",
-        escape_json(workload.name).c_str(), workload.ns_per_iteration,
-        static_cast<unsigned long long>(workload.scheduled_gas_per_iteration),
-        static_cast<unsigned long long>(workload.instructions_per_iteration),
-        workload.ns_per_gas, workload.relative_mad, workload.fused_slots,
-        escape_json(workload.shape).c_str());
+        "    {{\"name\": \"{}\", \"ns_per_iteration\": {:.6f}, "
+        "\"scheduled_gas_per_iteration\": {}, \"instructions_per_iteration\": "
+        "{}, \"ns_per_gas\": {:.6f}, \"relative_mad\": {:.6f}, "
+        "\"fused_slots\": {}, \"shape\": \"{}\", \"op_counts\": {{",
+        escape_json(workload.name), workload.ns_per_iteration,
+        workload.scheduled_gas_per_iteration,
+        workload.instructions_per_iteration, workload.ns_per_gas,
+        workload.relative_mad, workload.fused_slots,
+        escape_json(workload.shape));
     bool first = true;
     for (const auto &[op, count] : workload.op_counts) {
-      std::fprintf(out, "%s\"%s\": %llu", first ? "" : ", ",
-                   escape_json(op).c_str(),
-                   static_cast<unsigned long long>(count));
+      std::print(out, "{}\"{}\": {}", first ? "" : ", ", escape_json(op),
+                 count);
       first = false;
     }
-    std::fprintf(out, "}}%s\n", i + 1 == workloads.size() ? "" : ",");
+    std::println(out, "}}}}{}", i + 1 == workloads.size() ? "" : ",");
   }
-  std::fprintf(out, "  ]\n}\n");
+  std::println(out, "  ]\n}}");
 }
 
 int
@@ -598,7 +601,7 @@ main_impl(int argc, char **argv)
     else if (arg == "--fingerprint") {
       // No measurement, so this answers "did the engine change?" instantly and
       // deterministically, on any machine, without a tolerance.
-      std::printf("%s\n", engine_fingerprint().c_str());
+      std::println("{}", engine_fingerprint());
       return 0;
     }
     else if (arg.starts_with("--placements=")) {
@@ -608,60 +611,57 @@ main_impl(int argc, char **argv)
       options.only_op = argv[i] + 5;
     }
     else if (arg == "--help" || arg == "-h") {
-      std::fprintf(stderr, "usage: rv32_gas_calibrate [--quick] [--repeats=N] "
-                           "[--body-slots=N] [--target-ns=F] [--op=NAME] "
-                           "[--placements=N] [--out=PATH]\n");
+      std::println(
+          stderr,
+          "usage: rv32_gas_calibrate [--quick] [--repeats=N] [--body-slots=N]\n"
+          "                          [--target-ns=F] [--op=NAME] "
+          "[--placements=N]\n"
+          "                          [--out=PATH] [--allow-nonproduction]\n"
+          "       rv32_gas_calibrate --fingerprint");
       return 0;
     }
     else {
-      std::fprintf(stderr, "unknown argument: %.*s\n",
-                   static_cast<int>(arg.size()), arg.data());
+      std::println(stderr, "unknown argument: {}", arg);
       return 2;
     }
   }
 
   const Provenance provenance = collect_provenance();
-  std::fprintf(stderr, "engine fingerprint: %s\n",
-               provenance.engine_fingerprint.c_str());
-  std::fprintf(stderr, "host: %s (%s, %u cpus)\n", provenance.host.c_str(),
-               provenance.cpu_model.c_str(), provenance.cpu_count);
-  std::fprintf(stderr, "build: %s %s\n",
+  std::println(stderr, "engine fingerprint: {}", provenance.engine_fingerprint);
+  std::println(stderr, "host: {} ({}, {} cpus)", provenance.host,
+               provenance.cpu_model, provenance.cpu_count);
+  std::println(stderr, "build: {} {}",
                provenance.build_type.empty() ? "(non-CMake)"
                                              : provenance.build_type.c_str(),
-               provenance.cxx_flags.c_str());
+               provenance.cxx_flags);
   // Refuse rather than warn. The measured engine is the compiled interpreter,
   // and a Debug or ad-hoc build is a different one: its numbers look entirely
   // reasonable and are silently about the wrong thing, which is the failure
   // mode this harness exists to avoid. A warning at the top of a few minutes
   // of output gets scrolled past; an exit does not.
   if (!provenance.is_production_build() && !options.allow_nonproduction) {
-    std::fprintf(stderr,
-                 "\nrefusing to measure a non-Release build.\n"
-                 "  The gas costs describe the interpreter the node runs, and "
-                 "that is the one the\n"
-                 "  project's Release configuration produces (-O3, -march, "
-                 "libc++ under clang, LTO).\n"
-                 "  Build with: scripts/build.sh -t Release "
-                 "rv32_gas_calibrate\n"
-                 "  or use scripts/rv32_gas_calibrate.sh, which does that for "
-                 "you.\n"
-                 "  Pass --allow-nonproduction to override for harness "
-                 "development only.\n");
+    std::println(
+        stderr,
+        "\nrefusing to measure a non-Release build.\n  The gas costs describe "
+        "the interpreter the node runs, and that is the one the\n  project's "
+        "Release configuration produces (-O3, -march, libc++ under clang, "
+        "LTO).\n  Build with: scripts/build.sh -t Release rv32_gas_calibrate\n "
+        " or use scripts/rv32_gas_calibrate.sh, which does that for you.\n  "
+        "Pass --allow-nonproduction to override for harness development only.");
     return 2;
   }
 
-  std::fprintf(stderr, "measuring noise floor...\n");
+  std::println(stderr, "measuring noise floor...");
   const double noise_floor = measure_noise_floor(options);
-  std::fprintf(stderr, "  noise floor: %.4f ns/instruction\n", noise_floor);
+  std::println(stderr, "  noise floor: {:.4f} ns/instruction", noise_floor);
 
-  std::fprintf(stderr, "measuring filler baseline...\n");
+  std::println(stderr, "measuring filler baseline...");
   const BaselineResult baseline = run_baseline(options);
-  std::fprintf(stderr, "  ADD baseline: %.4f ns/instruction (R2=%.4f)\n",
+  std::println(stderr, "  ADD baseline: {:.4f} ns/instruction (R2={:.4f})",
                baseline.ns_per_filler, baseline.fit.r_squared);
   if (!baseline.usable) {
-    std::fprintf(stderr,
-                 "baseline sweep failed; per-opcode costs would have no "
-                 "absolute anchor\n");
+    std::println(stderr, "baseline sweep failed; per-opcode costs would have "
+                         "no absolute anchor");
     return 1;
   }
 
@@ -670,9 +670,8 @@ main_impl(int argc, char **argv)
   sweeps.reserve(plans.size());
   for (size_t i = 0; i < plans.size(); ++i) {
     const SweepPlan &plan = plans[i];
-    std::fprintf(stderr, "[%zu/%zu] %s %s%s%s%s\n", i + 1, plans.size(),
-                 op_name(plan.spec.target).c_str(),
-                 context_name(plan.spec.context).c_str(),
+    std::println(stderr, "[{}/{}] {} {}{}{}{}", i + 1, plans.size(),
+                 op_name(plan.spec.target), context_name(plan.spec.context),
                  plan.spec.working_set == WorkingSet::kNone
                      ? ""
                      : (" " + working_set_name(plan.spec.working_set)).c_str(),
@@ -685,18 +684,18 @@ main_impl(int argc, char **argv)
                                plan.branch_mode));
     const SweepResult &result = sweeps.back();
     if (result.usable) {
-      std::fprintf(stderr,
-                   "        %.4f ns/instr (slope %.4f +/- %.4f, R2=%.4f)\n",
-                   result.ns_per_instruction, result.fit.slope,
-                   result.fit.slope_stderr, result.fit.r_squared);
+      std::println(
+          stderr,
+          "        {:.4f} ns/instr (slope {:.4f} +/- {:.4f}, R2={:.4f})",
+          result.ns_per_instruction, result.fit.slope, result.fit.slope_stderr,
+          result.fit.r_squared);
     }
     else {
-      std::fprintf(stderr, "        rejected: %s\n",
-                   result.rejected_because.c_str());
+      std::println(stderr, "        rejected: {}", result.rejected_because);
     }
   }
 
-  std::fprintf(stderr, "measuring validation workloads...\n");
+  std::println(stderr, "measuring validation workloads...");
   const std::vector<WorkloadResult> workloads =
       measure_workloads(options.repeats, options.warmup_runs,
                         options.target_ns);
@@ -705,14 +704,14 @@ main_impl(int argc, char **argv)
   if (!options.out_path.empty()) {
     out = std::fopen(options.out_path.c_str(), "w");
     if (out == nullptr) {
-      std::fprintf(stderr, "cannot open %s\n", options.out_path.c_str());
+      std::println(stderr, "cannot open {}", options.out_path);
       return 1;
     }
   }
   emit_json(out, options, provenance, baseline, noise_floor, sweeps, workloads);
   if (out != stdout) {
     std::fclose(out);
-    std::fprintf(stderr, "wrote %s\n", options.out_path.c_str());
+    std::println(stderr, "wrote {}", options.out_path);
   }
   return 0;
 }
@@ -720,8 +719,20 @@ main_impl(int argc, char **argv)
 } // namespace
 } // namespace hogd::rv32::gas_calibration
 
+// The handlers below format, and so can themselves throw, which the check
+// counts as an escape. They still turn every other failure into a readable
+// line, which is what matters for a harness that runs unattended from a
+// periodic job.
 int
-main(int argc, char **argv)
+main(int argc, char **argv) // NOLINT(bugprone-exception-escape)
 {
-  return hogd::rv32::gas_calibration::main_impl(argc, argv);
+  try {
+    return hogd::rv32::gas_calibration::main_impl(argc, argv);
+  } catch (const std::exception &error) {
+    std::println(stderr, "rv32_gas_calibrate failed: {}", error.what());
+    return 1;
+  } catch (...) {
+    std::println(stderr, "rv32_gas_calibrate failed with an unknown exception");
+    return 1;
+  }
 }
