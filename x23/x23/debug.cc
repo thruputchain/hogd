@@ -248,7 +248,28 @@ dump_rusage(int fd)
   };
 }
 
-#ifndef NDEBUG
+#ifdef NDEBUG
+namespace detail {
+void
+do_panic_release(std::string_view fmt, std::format_args args) noexcept
+{
+  // Best-effort bounded fatal message, then a defined termination.  Formatting
+  // allocates and can throw (bad_alloc) on this cold path; never let that
+  // escape the noexcept fail-stop -- fall back to a fixed breadcrumb and still
+  // abort.
+  try {
+    std::string msg = getprogname();
+    msg += msg.empty() ? "PANIC: " : ":PANIC: ";
+    uvformat_to(&msg, fmt, args);
+    msg += '\n';
+    ::write(2, msg.data(), msg.size());
+  } catch (...) {
+    std::fputs("x23 PANIC (diagnostic message unavailable)\n", stderr);
+  }
+  std::abort();
+}
+} // namespace detail
+#else  // !NDEBUG
 std::atomic_bool panicking_flag{false};
 
 namespace detail {

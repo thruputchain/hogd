@@ -190,11 +190,21 @@ std::string stacktrace(unsigned indent = 2, std::string ret = {});
 
 #ifdef NDEBUG
 
+namespace detail {
+[[noreturn]] void do_panic_release(std::string_view fmt,
+                                   std::format_args args) noexcept;
+} // namespace detail
+
+// A release panic must be a defined fail-stop, not std::unreachable().  CHECK_*
+// failures are reachable at runtime (e.g. integrity checks on recovered or
+// tampered durable state), so reaching std::unreachable() there would be
+// undefined behavior -- and would also license the optimizer to delete the
+// very checks that guard those invariants.  Terminate loudly instead.
 template<typename... Args>
 [[noreturn]] inline void
-panic(std::format_string<Args...>, const Args &...args)
+panic(std::format_string<Args...> fmt, const Args &...args)
 {
-  std::unreachable();
+  detail::do_panic_release(fmt.get(), std::make_format_args(args...));
 }
 
 consteval bool
