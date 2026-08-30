@@ -2008,6 +2008,19 @@ IndexDB::get_events(EventQuery const &query) const
   Position last_emitted{};
   bool any_emitted = false;
 
+  // Per-query hydration memo.  The merge-walk visits positions in
+  // globally sorted (block, tx, seq) order, so every contract_index
+  // row that references the same transaction is contiguous.  Holding
+  // only the most recently hydrated transaction therefore collapses a
+  // run of same-tx rows to a single tx_index read + XDR decode.
+  // Without it, one committed transaction that emits many events for a
+  // single contract makes a max-limit get_events page re-read and
+  // re-decode that whole transaction record up to `limit` times (#3710).
+  SHA256Hash hydrated_tx{};
+  BlockHeight hydrated_block{};
+  TxEventLog hydrated_log;
+  bool have_hydrated = false;
+
   while (page.events.size() < limit) {
     // Find the winner — the valid iterator whose current position
     // leads in the requested direction.
@@ -2030,13 +2043,20 @@ IndexDB::get_events(EventQuery const &query) const
 
     Position const win_pos = winner->current();
 
-    // Hydrate.
-    auto tx_events = get_tx_events(win_pos.tx);
-    if (!tx_events) {
-      error("get_events: tx_index miss for tx {} at block {}",
-            HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block));
-      winner->advance(order);
-      continue;
+    // Hydrate, reusing the memo when this row shares the previous row's
+    // transaction (see above).
+    if (!have_hydrated || hydrated_tx != win_pos.tx) {
+      auto tx_events = get_tx_events(win_pos.tx);
+      if (!tx_events) {
+        error("get_events: tx_index miss for tx {} at block {}",
+              HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block));
+        winner->advance(order);
+        continue;
+      }
+      hydrated_tx = win_pos.tx;
+      hydrated_block = tx_events->first;
+      hydrated_log = std::move(tx_events->second);
+      have_hydrated = true;
     }
     // Index-integrity: a contract_index row and the tx_index receipt it
     // hydrates through are written by the same consume_events() call, so
@@ -2050,9 +2070,9 @@ IndexDB::get_events(EventQuery const &query) const
     // Queries are read-only, so no caller can drive the index into this
     // state; reaching it means the on-disk index is already corrupt, and
     // serving corrupt history is worse than dying loudly.
-    CHECK_EQ(tx_events->first, win_pos.block);
+    CHECK_EQ(hydrated_block, win_pos.block);
 
-    const TxEventLog &event_log = tx_events->second;
+    const TxEventLog &event_log = hydrated_log;
     if (win_pos.seq >= event_log.events.size()) {
       error("get_events: seq {} out of range ({}) for tx {}", win_pos.seq,
             event_log.events.size(), HexArray(win_pos.tx).str());
