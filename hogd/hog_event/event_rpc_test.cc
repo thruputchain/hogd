@@ -2173,10 +2173,13 @@ TEST_F(EventRpcTest,
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival_a", 20,
                             archival_first.consensus_value.prev_hash);
+  // Fixed-shape size, but opaque bytes: reconciliation enumerates the archival
+  // origin from its header and never decodes the payload.
   replace_outbox_payload(temp_dir(),
                          IndexerOutboxStore::epoch_origin_filename(
                              protocol_from_text("hogp/archival_a")),
-                         x23::Buf{0x80, 0x00, 0x00, 0x01});
+                         x23::Buf(x23::xdr_size(IndexerOutboxEpochOrigin{}),
+                                  static_cast<uint8_t>(0x80)));
 
   registration.publish_event_canonical_tip(EventCanonicalTip{
       .block_id = 701,

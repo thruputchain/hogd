@@ -1359,7 +1359,12 @@ TEST_F(IndexerOutboxTest, EnumerationKeepsOlderEpochOriginPayloadOpaque)
   TestOutboxFile origin =
       read_envelope(dir_, IndexerOutboxStore::current_epoch_origin_filename());
   origin.protocol = protocol_from_text("hogp/archival");
-  set_envelope_payload(origin, x23::Buf{0xff, 0xff, 0xff, 0xff});
+  // Fixed-shape size, but opaque bytes that are not a decodable epoch origin:
+  // enumeration validates the digest and the size, but never decodes the
+  // payload of an older-protocol origin.
+  set_envelope_payload(origin,
+                       x23::Buf(x23::xdr_size(IndexerOutboxEpochOrigin{}),
+                                static_cast<uint8_t>(0xff)));
   write_envelope(dir_,
                  IndexerOutboxStore::epoch_origin_filename(
                      protocol_from_text("hogp/archival")),
@@ -1401,23 +1406,31 @@ TEST_F(IndexerOutboxTest, EnumerationReadsOnlyCommittedHeaders)
   EXPECT_EQ(records->front().protocol, protocol_from_text("hogp/archival"));
 }
 
-TEST_F(IndexerOutboxTest, CurrentEpochOriginPayloadSizeMustMatchFixedShape)
+TEST_F(IndexerOutboxTest, EpochOriginPayloadSizeMustMatchFixedShape)
 {
-  // A current-protocol epoch origin is the fixed-size IndexerOutboxEpochOrigin
-  // struct. A tampered file can declare a payload up to the generic outbox cap
-  // with a matching digest; recovery must reject the size mismatch from the
-  // header alone -- before enumeration hashes or load materializes the declared
-  // payload.
+  // Every epoch origin -- current or archival -- is the fixed-size
+  // IndexerOutboxEpochOrigin struct. A tampered file can declare a payload up
+  // to the generic outbox cap with a matching digest; recovery must reject the
+  // size mismatch from the header alone, before enumeration hashes or load
+  // materializes the declared payload.
   IndexerOutboxStore store = open_store(dir_);
   auto committed = make_committed(152, {}, {});
   initialize_test_origin(store, committed);
-  const std::string filename =
+  const std::string current_name =
       IndexerOutboxStore::current_epoch_origin_filename();
-
-  TestOutboxFile origin = read_envelope(dir_, filename);
   constexpr uint64_t kSparsePayloadBytes = 512ULL * 1024 * 1024;
   static_assert(kSparsePayloadBytes < kMaxIndexerOutboxPayloadBytes);
-  write_sparse_record(dir_, filename, std::move(origin), kSparsePayloadBytes);
+
+  // An archival (non-current-protocol) origin is bound the same way -- there is
+  // no backwards-compat exemption. Enumeration reaches it and must reject the
+  // oversized declaration before validate_payload_digest() streams the bytes.
+  const std::string archival_name = IndexerOutboxStore::epoch_origin_filename(
+      protocol_from_text("hogp/archival"));
+  TestOutboxFile archival = read_envelope(dir_, current_name);
+  archival.protocol = protocol_from_text("hogp/archival");
+  write_envelope(dir_, archival_name, archival);
+  write_sparse_record(dir_, archival_name, std::move(archival),
+                      kSparsePayloadBytes);
 
   auto origins = store.enumerate_epoch_origins_raw();
   ASSERT_FALSE(origins.has_value());
@@ -1425,6 +1438,10 @@ TEST_F(IndexerOutboxTest, CurrentEpochOriginPayloadSizeMustMatchFixedShape)
             std::string::npos)
       << origins.error();
 
+  // The current origin is bound on the load path too.
+  TestOutboxFile current = read_envelope(dir_, current_name);
+  write_sparse_record(dir_, current_name, std::move(current),
+                      kSparsePayloadBytes);
   auto loaded = store.load_current_epoch_origin();
   ASSERT_FALSE(loaded.has_value());
   EXPECT_NE(loaded.error().find("epoch origin payload size mismatch"),

@@ -294,8 +294,8 @@ make_header(const IndexerOutboxEpochOrigin &payload, size_t payload_size,
 
 // The protocol commit is a fixed-width token, so every IndexerOutboxEpochOrigin
 // field is fixed-width and its encoded payload size is a constant, independent
-// of field values. Recovery uses this to reject a current-protocol origin whose
-// declared payload is not exactly this size before hashing or materializing it.
+// of field values. Recovery uses this to reject any epoch origin whose declared
+// payload is not exactly this size before hashing or materializing it.
 uint64_t
 epoch_origin_payload_byte_length()
 {
@@ -1934,15 +1934,12 @@ IndexerOutboxStore::load_header(std::string_view filename) const
       header.payload_byte_length != file_size - 4 - header_size) {
     return std::unexpected("indexer outbox header/file size mismatch");
   }
-  // A current-protocol epoch-origin payload is the fixed-size
-  // IndexerOutboxEpochOrigin struct, so require its declared size to match
-  // exactly here -- before enumeration hashes the declared payload or load
-  // materializes it -- rather than letting the generic outbox payload cap
-  // apply. Older-protocol origins are intentionally opaque (their encoding can
-  // predate this shape), so they keep the generic bound. See #3691.
+  // An epoch-origin payload is the fixed-size IndexerOutboxEpochOrigin struct
+  // for every protocol, so require its declared size to match exactly here --
+  // before enumeration hashes the declared payload or load materializes it --
+  // rather than letting the generic outbox payload cap apply. See #3691.
   if (header.record_identity.kind() ==
           IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
-      header.protocol == version::kHogdProtocol() &&
       header.payload_byte_length != epoch_origin_payload_byte_length()) {
     return std::unexpected("epoch origin payload size mismatch");
   }
