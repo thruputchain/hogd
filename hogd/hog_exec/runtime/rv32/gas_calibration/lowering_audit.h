@@ -59,13 +59,19 @@ struct LoweringAudit {
 // Lowers `code` (untraced, exactly as production would) and compares each of
 // the `body_slots` slots starting at `body_start_index` against an isolated
 // lowering of the same encoded word.
-[[nodiscard]] LoweringAudit
-audit_body(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-           uint32_t memory_bytes, size_t body_start_index, size_t body_slots);
+//
+// `fuse` must match how the measured program was lowered: auditing a
+// fusion-enabled lowering of a body that was timed with fusion off would
+// report rewrites that the measurement never executed.
+[[nodiscard]] LoweringAudit audit_body(std::span<const uint8_t> code,
+                                       std::span<const uint8_t> memory,
+                                       uint32_t memory_bytes,
+                                       size_t body_start_index,
+                                       size_t body_slots, bool fuse = true);
 
 // audit_body over a calibration kernel's body. A calibration kernel is
 // expected to come back clean; a validation workload deliberately is not.
-[[nodiscard]] LoweringAudit audit_kernel(const Kernel &kernel,
-                                         const KernelSpec &spec);
+[[nodiscard]] LoweringAudit
+audit_kernel(const Kernel &kernel, const KernelSpec &spec, bool fuse = true);
 
 } // namespace hogd::rv32::gas_calibration

@@ -380,6 +380,15 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   {
     KernelSpec sat = base;
     sat.saturated = true;
+    // A body of one repeated instruction is precisely the shape a fusion rule
+    // matches, so for a single target lower it with fusion off and measure the
+    // unfused cost directly. That is also the cost the schedule charges:
+    // fusion is a saving the engine may or may not get, and worst-case pricing
+    // cannot assume it.
+    //
+    // A pair row is the opposite -- auipc;jalr exists to measure the fused
+    // form -- so those keep it on.
+    const bool sat_fuse = base.pair != PairKind::kNone;
     sat.body_slots = options.body_slots;
     sat.target_slots = max_target_slots(options.body_slots, sat);
     sat.placement_phase = 0;
@@ -390,11 +399,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                               kernel_error_name(probe.error());
     }
     else {
-      auto seed =
-          ThreadedMachinePreInstantiation::create(probe->code,
-                                                  probe->initial_memory, 0,
-                                                  probe->memory_bytes,
-                                                  /*trace=*/false);
+      auto seed = ThreadedMachinePreInstantiation::create(
+          probe->code, probe->initial_memory, 0, probe->memory_bytes,
+          /*trace=*/false, kMaxRunGas, sat_fuse);
       if (!seed.has_value()) {
         result.saturated_note = "saturated probe would not instantiate";
       }
@@ -407,7 +414,7 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                                   kernel_error_name(kernel.error());
         }
         else {
-          const LoweringAudit audit = audit_kernel(*kernel, sat);
+          const LoweringAudit audit = audit_kernel(*kernel, sat, sat_fuse);
           // Same intent test as the sweep audit above, and for the same reason:
           // a pair chosen *because* the engine fuses it has to fuse, and
           // audit.clean() asks the opposite question. Requiring clean() here
@@ -435,11 +442,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                           "so a program cannot be made of it unfused";
           }
           else {
-            auto program =
-                ThreadedMachinePreInstantiation::create(kernel->code,
-                                                        kernel->initial_memory,
-                                                        0, kernel->memory_bytes,
-                                                        false);
+            auto program = ThreadedMachinePreInstantiation::create(
+                kernel->code, kernel->initial_memory, 0, kernel->memory_bytes,
+                false, kMaxRunGas, sat_fuse);
             if (!program.has_value()) {
               result.saturated_note = "saturated kernel would not instantiate";
             }

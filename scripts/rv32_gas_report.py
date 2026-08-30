@@ -21,6 +21,7 @@ Usage:
 import argparse
 import json
 import math
+import statistics
 import signal
 import sys
 
@@ -88,8 +89,14 @@ EXTREME_HEADROOM = 0.60
 # cheap cells included, against a tolerance of 100%. The cheap population is no
 # longer the noisy one, so excluding it now discards coverage for a reason that
 # has stopped being true -- on the bench host the 1.5x floor left 9 guards out
-# of 100 measured cells. Guard everything at or above the baseline instead.
-GUARD_MIN_RATIO = 1.0
+# of 100 measured cells.
+#
+# Now zero, because ratios are against the median cell rather than against ADD.
+# "At or above the baseline" excluded cells cheaper than one chosen opcode;
+# against a median it would exclude half the ISA by construction. Nothing is
+# excluded: a cell reproducing to a tenth of a percent has plenty of headroom
+# under a tolerance that only fires when it doubles.
+GUARD_MIN_RATIO = 0.0
 
 # How far a cell has to sit from the baseline before the per-opcode table will
 # call it cheaper or dearer than ADD, rather than the same. Two runs of one
@@ -261,9 +268,21 @@ def cost_ns(cell):
 def baseline_ns(data):
     """The cost every other cost is expressed relative to.
 
-    The saturated ADD body, when there is one -- the same kind of measurement
-    as every cell it normalizes, taken in the same run, so the two move
-    together when the machine's speed does.
+    The median saturated cell -- the same kind of measurement as every cell it
+    normalizes, from the same run, so the two move together when the machine's
+    speed does.
+
+    The median rather than a chosen opcode's cost. This used to divide by the
+    saturated ADD body, and one cell carrying every ratio is one cell whose
+    misbehaviour is indistinguishable from the whole ISA moving. On the bench
+    host it did exactly that: between two runs every guarded ratio scaled by
+    2.015, and renormalizing the same two runs against any other cell brought
+    them back into agreement at 0.1% median and 2.4% p90. The opcodes were
+    reproducible to a tenth of a percent; the divisor had halved.
+
+    A median over ~100 cells cannot be moved by one of them, and it degrades
+    gracefully: it takes most of the ISA shifting together -- which is a real
+    change in the engine, and what the gate is for -- before it moves at all.
 
     The recorded `baseline` is a different kind of measurement: a fit over
     kernels of varying body size with an all-filler body. On a quiet host the
@@ -277,20 +296,12 @@ def baseline_ns(data):
     Falls back to the recorded baseline for runs that predate the saturated
     estimator.
     """
-    for cell in data["opcodes"]:
-        if is_baseline_cell(cell) and cell.get("ns_saturated", 0.0) > 0.0:
-            return cell["ns_saturated"]
+    costs = sorted(c["ns_saturated"] for c in data["opcodes"]
+                   if c.get("usable") and not c.get("pair")
+                   and c.get("ns_saturated", 0.0) > 0.0)
+    if costs:
+        return statistics.median(costs)
     return data["baseline"]["ns_per_filler_instruction"]
-
-
-def is_baseline_cell(cell):
-    """Is this the cell whose saturated cost every ratio is taken against?
-
-    Its ratio to itself is 1.000 by construction, so anything that treats a
-    ratio as evidence -- a guard above all -- has to know to skip it.
-    """
-    return (cell.get("usable") and cell["op"] == "ADD"
-            and cell.get("context") == "independent")
 
 
 def pair_ops(cell):
@@ -435,10 +446,8 @@ def print_table(data):
           f"{prov.get('cxx_flags', '')}")
     if prov.get("source_revision"):
         print(f"source: {prov['source_revision']}")
-    print(
-        f"baseline ADD: {baseline:.4f} ns/instr "
-        f"(R2={data['baseline']['r_squared']:.4f})"
-    )
+    print(f"normalizer:   {baseline:.4f} ns/instr "
+          f"(median saturated cell; every ratio below is against this)")
     print(f"noise floor:  {noise_floor:.4f} ns/instr")
     print()
     ow = op_width(cell["op"] for cell in data["opcodes"])
@@ -1010,8 +1019,8 @@ def print_comparison(before, after):
         before["noise_floor_ns_per_instruction"],
         after["noise_floor_ns_per_instruction"],
     )
-    print(f"baseline ADD: {before['baseline']['ns_per_filler_instruction']:.4f}"
-          f" -> {after['baseline']['ns_per_filler_instruction']:.4f} ns")
+    print(f"normalizer:   {baseline_ns(before):.4f}"
+          f" -> {baseline_ns(after):.4f} ns  (median saturated cell)")
     print(f"noise floor (max of the two runs): {floor:.4f} ns/instr")
     print()
     ow = op_width(key[0] for key in before_cells.keys() & after_cells.keys())
@@ -1094,12 +1103,6 @@ def emit_reference(data):
                        key=lambda c: (c["op"], context_label(c))):
         ratio = relative_cost(cell, baseline)
         if ratio < GUARD_MIN_RATIO or not resolved(cell):
-            continue
-        # The cell that *defines* the baseline divides by itself, so its ratio
-        # is 1.000 on every host and every run and the guard can never fire.
-        # Emitting it reports coverage the gate structurally cannot provide,
-        # and it was counted in the "guards: N" line offered as evidence of it.
-        if is_baseline_cell(cell):
             continue
         print(f"guard {cell['op']} {context_label(cell)} {ratio:.3f} "
               f"{cell['scheduled_gas']}")

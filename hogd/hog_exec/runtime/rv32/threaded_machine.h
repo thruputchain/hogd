@@ -127,7 +127,7 @@ public:
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
          uint32_t memory_start, uint32_t total_memory_size, bool trace,
-         uint32_t max_run_gas = kMaxRunGas);
+         uint32_t max_run_gas = kMaxRunGas, bool fuse = true);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -1865,7 +1865,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
                                         uint32_t memory_start,
                                         uint32_t total_memory_size, bool trace,
-                                        uint32_t max_run_gas)
+                                        uint32_t max_run_gas, bool fuse)
 {
   max_run_gas = std::clamp<uint32_t>(max_run_gas,
                                      static_cast<uint32_t>(kDivInstructionGas),
@@ -2001,7 +2001,16 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     }
 
     // EXPERIMENT(fuse): collapse this slot and its successor into one fused
-    // handler when (head, tail) match a rule, saving a dispatch. Only when i+1
+    // handler when (head, tail) match a rule, saving a dispatch.
+    //
+    // `fuse` defaults true and production never passes anything else. The
+    // calibration harness turns it off to price a single opcode: a body made
+    // entirely of one instruction is exactly the shape that trips a rule, so
+    // without the knob the harness has to detect fusion after the fact and
+    // discard the measurement, and a rule it fails to notice is reported as
+    // the unfused cost. Fusion is behavior-preserving and never changes gas,
+    // so the two lowerings agree on everything except how many dispatches
+    // they execute -- which is the quantity being measured. Only when i+1
     // is a real instruction (not the fall-off sentinel) and was not itself
     // consumed as a fusion tail (`next_fused`) -- a slot belongs to at most one
     // pair. The tail slot keeps its standalone handler and gas_to_run as the
@@ -2011,7 +2020,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // intervening enter_run, so a pair may not straddle a break carrier
     // (either as the pair's head or its tail). Break carriers are
     // astronomically rare, so this costs no measurable coverage.
-    if (i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
+    if (fuse && i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =
