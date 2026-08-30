@@ -813,9 +813,15 @@ def print_prediction(data):
             print(f"  {name}: {measured:.2f} ns vs a {ceiling:.2f} ns bound "
                   f"({measured / ceiling:.2f}x)")
         print("Pricing each opcode at its own worst case does not bound these.")
-        print("That is a failure of the method, not an imprecise number: it "
-              "needs an")
-        print("interaction term, or a blanket margin large enough to cover it.")
+        print("That is a failure of the method, not an imprecise number.")
+        print("The fix keeps the schedule a flat per-instruction table: the")
+        print("participating opcodes have a worse context than the sweep "
+              "found, so")
+        print("raise their cost, or widen the whole schedule by a margin. "
+              "Charging")
+        print("per-pair would make gas depend on which instructions sit next "
+              "to each")
+        print("other, which is a different and much harder accounting model.")
     else:
         print("No workload exceeds the sum of its opcodes' individual worst")
         print("cases, so pricing each opcode at its worst measured context "
@@ -1127,8 +1133,10 @@ def check_against_reference(data, reference_path):
                 f"({' + '.join(ops)}) worst cases imply.\n"
                 "  Pricing each opcode at its own worst case does not bound "
                 "programs that\n"
-                "  use them together -- the method needs an interaction term "
-                "or a margin."
+                "  use them together. Raise the participating opcodes' cost "
+                "or widen the\n"
+                "  schedule by a margin -- both keep the flat per-instruction "
+                "table."
             )
 
     rates = [w["ns_per_gas"] for w in data.get("workloads") or []

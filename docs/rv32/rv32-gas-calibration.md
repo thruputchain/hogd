@@ -233,6 +233,39 @@ dispatched once. That is the safe direction -- fusion can only make real cost
 lower than charged cost -- and the workload rows show it is worth roughly 20-30%
 on fusible code.
 
+## The charging model stays a flat per-instruction table
+
+Everything below is measurement. None of it changes the shape of what the
+engine charges, and it is not meant to.
+
+`kInstructionGasSchedule` is one cost per opcode, charged per decoded
+instruction. That is the model, and the calibration exists to put better
+numbers in it -- not to replace it with something that prices pairs, contexts,
+or fusion at charge time. Context-sensitive or pair-sensitive gas would make a
+program's cost depend on which instructions sit next to each other, which is a
+substantially harder accounting model to implement, to audit, and to keep
+deterministic across engine versions. It is not on the table.
+
+Two consequences follow, and they are why a flat table is defensible here:
+
+- **Fusion is never priced, and never needs to be.** Gas is charged per decoded
+  instruction, before fusion, so a fused pair is charged for two and dispatched
+  once. Fusion can only make real cost *lower* than charged cost, so ignoring
+  it is the safe direction. It costs capacity -- roughly 20-30% on fusible code
+  -- and buys a model that does not have to know the fusion rules at all.
+- **The pair sweeps are a check on the flat model, not an extension of it.**
+  Charging each opcode its individual worst case bounds a program only if no
+  combination is *superadditive* -- costing more than its parts. That is the one
+  way a flat table could be unsafe, so it is measured directly rather than
+  assumed. Everything measured so far is strongly subadditive (56-82% headroom),
+  which is the evidence that the flat table holds.
+
+If a pair ever did exceed its parts, the remedy stays inside the flat table:
+the participating opcodes have a worse context than the sweep found, so raise
+their cost, or widen the whole schedule by a margin. Adding an interaction term
+would be a change to the accounting model and should be argued for on its own,
+not adopted as a bug fix.
+
 ## Do the costs add up?
 
 Every cost is measured by substituting one opcode into an otherwise fixed body,
@@ -296,13 +329,15 @@ away, and it is where a cheaper context would pay for itself.
   gas units, which keeps rounding loss bounded, at the cost of scaling every
   number in the table -- including block gas limits and the syscall costs in
   `gas_cost_table.h`, which have to scale with it.
-- Price `JAL`, `JALR`, `FENCE`, and the trapping opcodes. The substitution
-  design cannot hold them constant, so they are unmeasured and would keep
-  placeholder costs.
+- Price `JAL`, `FENCE`, and the trapping opcodes. The substitution design
+  cannot hold them constant, so they are unmeasured and would keep placeholder
+  costs. (`JALR` was in this list until a fall-through kernel shape made it
+  measurable.)
 - Extend the pair sweep to other suspected interactions. The mechanism is in
   place and store-to-load forwarding is measured; the same shape would let the
-  harness price fusion's benefit directly instead of inferring it from a slot
-  count.
+  harness *measure* fusion's benefit directly instead of inferring it from a
+  slot count. That is a better number for the report, not a new term in the
+  schedule -- see the note on the charging model below.
 - Regenerate `reference.txt` on the bench pool. The committed one was taken on a
   development container and will not hold there.
 - Re-run after interpreter changes, not only before schedule changes. A new
