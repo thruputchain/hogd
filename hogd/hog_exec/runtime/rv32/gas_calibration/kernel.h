@@ -4,6 +4,7 @@
 #include <expected>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -246,6 +247,17 @@ enum class KernelError {
 // else. Either way the audit checks the lowering against intent; only the
 // direction of the expectation changes.
 [[nodiscard]] bool pair_expects_fusion(PairKind pair);
+
+// The two opcodes a pair substitution actually places.
+//
+// Every consumer that reasons about a pair in terms of its parts -- the gas it
+// should be credited with, and the worst-case ceiling its interaction has to
+// respect -- needs this, and each one hardcoding a guess is how the bound came
+// to be checked against the wrong opcodes: the ceiling was written as SW+LW
+// back when both pairs were a store and a load, and auipc;jalr inherited it
+// silently. Derive it here so a new PairKind cannot be added without saying
+// what it is made of.
+[[nodiscard]] std::pair<Op, Op> pair_components(PairKind pair);
 
 // Instructions one substitution places: 2 for a pair, 1 otherwise.
 [[nodiscard]] uint32_t slots_per_target(const KernelSpec &spec);

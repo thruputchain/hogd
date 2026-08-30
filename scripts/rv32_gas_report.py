@@ -212,6 +212,18 @@ def pair_cells(data):
             if cell["usable"] and cell.get("pair")]
 
 
+def pair_ops(cell):
+    """The two opcodes a pair row places, as the calibrator recorded them.
+
+    The ceiling a pair's interaction has to respect is built from its OWN two
+    opcodes' worst cases. Older runs predate the field; there is no safe guess
+    for them, so they return None and the caller skips the bound rather than
+    checking it against opcodes the pair does not contain.
+    """
+    ops = cell.get("pair_ops") or []
+    return tuple(ops) if len(ops) == 2 else None
+
+
 def measured_ops(data):
     return {cell["op"] for cell in usable_cells(data)}
 
@@ -599,7 +611,12 @@ def print_pair_bounds(data):
     worst = cost_model(data, worst_case=True)
     baseline = data["baseline"]["ns_per_filler_instruction"]
 
-    absent = missing_ops(data, {"SW", "LW"})
+    needed = set()
+    for cell in pairs:
+        ops = pair_ops(cell)
+        if ops:
+            needed.update(ops)
+    absent = missing_ops(data, needed)
     if absent:
         print("interaction bounds: skipped -- this run did not measure "
               + ", ".join(absent))
@@ -615,9 +632,16 @@ def print_pair_bounds(data):
     print("-" * len(header))
     violations = []
     for cell in sorted(pairs, key=lambda c: c["op"]):
-        # Both pair kinds are a store plus a load, so the bound they must
-        # respect is a worst-case SW plus a worst-case LW.
-        ceiling = worst.get("SW", baseline) + worst.get("LW", baseline)
+        # The bound a pair must respect is built from its OWN two opcodes'
+        # worst cases. This used to read SW + LW for every pair, which was
+        # right only while every pair was a store and a load; auipc;jalr
+        # inherited a ceiling belonging to two opcodes it does not contain.
+        ops = pair_ops(cell)
+        if not ops:
+            print(f"{cell['op']:<18}{'--':>10}{'--':>11}{'--':>10}"
+                  f"{'--':>9}  (run predates pair_ops; no bound)")
+            continue
+        ceiling = sum(worst.get(op, baseline) for op in ops)
         measured = cell["ns_per_instruction"]
         headroom = (ceiling - measured) / ceiling if ceiling else 0.0
         if headroom < -BOUND_VIOLATION_MARGIN:
@@ -1092,15 +1116,15 @@ def check_against_reference(data, reference_path):
     baseline_ns = data["baseline"]["ns_per_filler_instruction"]
     worst_costs = cost_model(data, worst_case=True)
     for cell in pair_cells(data):
-        ceiling = (worst_costs.get("SW", baseline_ns)
-                   + worst_costs.get("LW", baseline_ns))
-        if missing_ops(data, {"SW", "LW"}):
+        ops = pair_ops(cell)
+        if not ops or missing_ops(data, set(ops)):
             continue
+        ceiling = sum(worst_costs.get(op, baseline_ns) for op in ops)
         if cell["ns_per_instruction"] > ceiling * (1.0 + BOUND_VIOLATION_MARGIN):
             failures.append(
                 f"{cell['op']}: {cell['ns_per_instruction']:.2f} ns exceeds "
-                f"the {ceiling:.2f} ns bound its two opcodes' worst cases "
-                f"imply.\n"
+                f"the {ceiling:.2f} ns bound its two opcodes "
+                f"({' + '.join(ops)}) worst cases imply.\n"
                 "  Pricing each opcode at its own worst case does not bound "
                 "programs that\n"
                 "  use them together -- the method needs an interaction term "

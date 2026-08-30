@@ -8,6 +8,7 @@
 #include <expected>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -563,6 +564,20 @@ max_target_slots(uint32_t body_slots, const KernelSpec &spec)
   // the cap from the same span the placement walks is what keeps the minimum
   // gap at or above that period.
   return placeable / (per_target + 1);
+}
+
+std::pair<Op, Op>
+pair_components(PairKind pair)
+{
+  switch (pair) {
+  case PairKind::kStoreLoadForward:
+  case PairKind::kStoreLoadDistinct:
+    return {Op::kSw, Op::kLw};
+  case PairKind::kAuipcJalr:
+    return {Op::kAuipc, Op::kJalr};
+  default:
+    return {Op::kAdd, Op::kAdd};
+  }
 }
 
 std::string

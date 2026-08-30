@@ -412,6 +412,52 @@ TEST(Rv32GasCalibrationKernel, PairsStayApartAndUnfused)
   }
 }
 
+// pair_components must name the opcodes the kernel actually places.
+//
+// Every consumer that reasons about a pair in terms of its parts trusts this:
+// the gas it is credited with, and the worst-case ceiling its interaction is
+// checked against. Both of those used to be written as a literal SW + LW,
+// which was correct until auipc;jalr arrived and silently inherited a bound
+// belonging to two opcodes it does not contain. The four opcodes involved all
+// cost the same gas today, so the accounting test could not see the error --
+// only decoding the body can. Assert it against the same decoder the engine
+// uses, so a new PairKind cannot be added without this being right.
+TEST(Rv32GasCalibrationKernel, PairComponentsMatchTheEmittedBody)
+{
+  for (const PairKind kind :
+       {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct,
+        PairKind::kAuipcJalr}) {
+    KernelSpec spec;
+    spec.pair = kind;
+    spec.working_set = WorkingSet::kL1Region;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(kTestBodySlots, spec);
+    ASSERT_GT(spec.target_slots, 0U) << pair_name(kind);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << pair_name(kind);
+    const auto program = ThreadedProgram::create(kernel.value().code);
+    ASSERT_TRUE(program.has_value()) << pair_name(kind);
+
+    const auto [first, second] = pair_components(kind);
+    const std::vector<uint32_t> &pcs = kernel.value().target_slot_pcs;
+    ASSERT_EQ(pcs.size() % 2, 0U) << pair_name(kind);
+    for (size_t i = 0; i + 1 < pcs.size(); i += 2) {
+      const auto head = program->instruction_at(pcs[i] / kInstructionBytes);
+      const auto tail = program->instruction_at(pcs[i + 1] / kInstructionBytes);
+      ASSERT_TRUE(head.has_value()) << pair_name(kind);
+      ASSERT_TRUE(tail.has_value()) << pair_name(kind);
+      EXPECT_EQ(head->op, first)
+          << pair_name(kind) << " head decoded as " << op_name(head->op)
+          << " but pair_components says " << op_name(first);
+      EXPECT_EQ(tail->op, second)
+          << pair_name(kind) << " tail decoded as " << op_name(tail->op)
+          << " but pair_components says " << op_name(second);
+    }
+  }
+}
+
 // One more target than the cap allows must be refused, not silently placed
 // somewhere that fuses.
 TEST(Rv32GasCalibrationKernel, PairCapIsEnforced)

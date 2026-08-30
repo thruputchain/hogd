@@ -77,6 +77,10 @@ struct SweepResult {
   // A pair row measures an interaction, not an opcode, so it must never feed
   // the per-opcode schedule -- only the superadditivity analysis.
   bool is_pair = false;
+  // For a pair row, the two opcodes it places, so a consumer can build the
+  // ceiling this interaction has to respect out of the right worst cases.
+  // Empty for a single-opcode row.
+  std::vector<std::string> pair_ops;
   uint64_t scheduled_gas = 0;
   LinearFit fit;
   double worst_relative_mad = 0.0;
@@ -99,6 +103,22 @@ escape_json(std::string_view text)
     }
     out.push_back(character);
   }
+  return out;
+}
+
+std::string
+json_string_array(std::span<const std::string> items)
+{
+  std::string out = "[";
+  for (size_t i = 0; i < items.size(); ++i) {
+    out += '"';
+    out += escape_json(items[i]);
+    out += '"';
+    if (i + 1 < items.size()) {
+      out += ", ";
+    }
+  }
+  out += ']';
   return out;
 }
 
@@ -188,10 +208,17 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   result.magnitude = magnitude_name(base.magnitude);
   result.branch_mode = branch_mode;
   // What the current schedule charges for one substitution: both halves of a
-  // pair, or the single opcode.
-  result.scheduled_gas =
-      result.is_pair ? scheduled_gas_for(Op::kSw) + scheduled_gas_for(Op::kLw)
-                     : scheduled_gas_for(base.target);
+  // pair, or the single opcode. The halves come from pair_components rather
+  // than a literal SW+LW, which was correct only while every pair happened to
+  // be a store and a load.
+  if (result.is_pair) {
+    const auto [first, second] = pair_components(base.pair);
+    result.pair_ops = {op_name(first), op_name(second)};
+    result.scheduled_gas = scheduled_gas_for(first) + scheduled_gas_for(second);
+  }
+  else {
+    result.scheduled_gas = scheduled_gas_for(base.target);
+  }
 
   const std::vector<uint32_t> counts =
       sweep_counts(options.body_slots, options.quick, base);
@@ -599,7 +626,7 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         out,
         "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
-        "\"scheduled_gas\": "
+        "\"pair_ops\": {}, \"scheduled_gas\": "
         "{}, \"usable\": {}, \"rejected_because\": \"{}\", \"slope_ns\": "
         "{:.6f}, \"theil_sen_ns\": {:.6f}, \"r_squared\": {:.6f}, "
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
@@ -608,10 +635,10 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         escape_json(sweep.op), escape_json(sweep.context),
         escape_json(sweep.working_set), escape_json(sweep.magnitude),
         escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
-        sweep.scheduled_gas, sweep.usable ? "true" : "false",
-        escape_json(sweep.rejected_because), sweep.fit.slope,
-        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
-        sweep.measured_points, sweep.ns_per_instruction,
+        json_string_array(sweep.pair_ops), sweep.scheduled_gas,
+        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
+        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
+        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }
