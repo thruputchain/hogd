@@ -43,6 +43,7 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
@@ -2786,6 +2787,60 @@ TEST(Mempool, MultiSignerSigningsShareATransactionHash)
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{ordered})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// [FailedSignatureCache] is a public-gateway admission throttle. Transactions
+// arriving for a nomination must bypass it: a cached verdict can go stale,
+// because authentication reads account keys and weights that a later block can
+// change, and dropping a body on that path would keep this node from ever
+// obtaining what it needs to validate the block that referenced it.
+//
+// Both halves are observable through the auth-failure counter: a cached
+// rejection never reaches authentication, and a vetted submission always does.
+TEST(Mempool, VettedSubmissionsBypassTheFailedSignatureCache)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  Transaction &tx = txs[0].tx;
+  const SecretKey sk = register_single_signer(server, tx);
+
+  SignedTransaction poisoned_tx = txs[0];
+  DecoratedSignature bad_signature =
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  bad_signature.signature.ed25519()[0] ^= 0xff;
+  poisoned_tx.signatures.push_back(bad_signature);
+
+  auto submit_over_gateway = [&] {
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  };
+  auto auth_failures = [] {
+    return MempoolMetrics::instance().auth_failed_tx_count.value();
+  };
+
+  // The first gateway submission reaches authentication and is turned down.
+  const ssize_t before_first = auth_failures();
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  const ssize_t after_first = auth_failures();
+  ASSERT_EQ(after_first, before_first + 1);
+
+  // The second is answered from the cache, so authentication never sees it.
+  // This is what the cache exists for.
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_EQ(auth_failures(), after_first);
+
+  // The same bytes arriving for a nomination are authenticated regardless of
+  // that cached verdict.
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id,
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  EXPECT_EQ(auth_failures(), after_first + 1);
 }
 
 // The rejected-signature cache spares us reverifying bytes authentication has
