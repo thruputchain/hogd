@@ -648,8 +648,12 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   // takes its place is the confusion the fixed width does allow: a short token
   // padded out to the array, sharing a prefix with the real one. Rejecting it
   // is what makes the padding part of the token's identity rather than filler.
-  const std::string_view current_protocol =
-      protocol_text(version::kHogdProtocol());
+  // protocol_text borrows its argument, so the token has to be named here:
+  // taking the view straight off kHogdProtocol() would leave it pointing at a
+  // temporary that dies at the end of that statement (ASan: stack-use-after-
+  // scope, hogd issue #3718).
+  const ProtocolCommit current_token = version::kHogdProtocol();
+  const std::string_view current_protocol = protocol_text(current_token);
   AuthCard padded_prefix_card =
       AuthCard{.protocol = protocol_from_text(current_protocol.substr(0, 12)),
                .upid = {},
