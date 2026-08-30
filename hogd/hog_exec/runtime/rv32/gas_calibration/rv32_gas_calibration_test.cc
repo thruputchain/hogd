@@ -182,6 +182,51 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
 // slot actually holds the target, and the kernel actually executes all of it.
 // Check both against the production decoder and the engine's own gas
 // accounting, for every opcode that can be saturated.
+TEST(Rv32GasCalibrationKernel, NoBodySlotEncodesAnImmediateItCannotReach)
+{
+  // Every body-slot encoder masks its immediate to the field width, so an
+  // out-of-range offset does not fail -- it encodes a different instruction
+  // that runs and halts cleanly. That is how the loop back edge truncated
+  // silently; JALR has the same shape, because its base register is fixed at
+  // the body midpoint and the immediate carries the whole per-slot offset.
+  //
+  // Build every target at every body size the harness allows. A kernel must
+  // either come out correct or be refused by name -- never come out wrong.
+  HaltHost host;
+  size_t refused = 0;
+  for (const uint32_t body_slots : {8U, 64U, 512U, 1024U, 2048U, 8192U}) {
+    for (size_t index = 0; index < kOpCount; ++index) {
+      const Op op = static_cast<Op>(index);
+      if (!is_measurable_target(op)) {
+        continue;
+      }
+      KernelSpec spec;
+      spec.target = op;
+      spec.saturated = true;
+      spec.body_slots = body_slots;
+      spec.trip_count = kTestTripCount;
+      spec.target_slots = max_target_slots(body_slots, spec);
+
+      const auto kernel = build_kernel(spec);
+      if (!kernel.has_value()) {
+        // Refusal is the acceptable outcome; a wrong encoding is not.
+        ++refused;
+        continue;
+      }
+      const auto program = ThreadedProgram::create(kernel.value().code);
+      ASSERT_TRUE(program.has_value()) << op_name(op) << " @ " << body_slots;
+      for (const uint32_t pc : kernel.value().target_slot_pcs) {
+        const auto decoded = program->instruction_at(pc / kInstructionBytes);
+        ASSERT_TRUE(decoded.has_value()) << op_name(op) << " @ " << body_slots;
+        EXPECT_EQ(decoded->op, op) << op_name(op) << " @ " << body_slots;
+      }
+    }
+  }
+  // JALR above 1024 slots is the case that motivated this; if nothing is ever
+  // refused the loop is not reaching the range it exists to probe.
+  EXPECT_GT(refused, 0U);
+}
+
 TEST(Rv32GasCalibrationKernel, SaturatedPairsTileWithoutOverlapping)
 {
   // A saturated pair body has to be the pair repeated -- sw lw sw lw -- not a

@@ -733,6 +733,8 @@ kernel_error_name(KernelError error)
     return "trip count is zero";
   case KernelError::kTooManyTargets:
     return "too many targets to keep them non-adjacent";
+  case KernelError::kTargetImmediateOutOfRange:
+    return "target immediate out of range";
   case KernelError::kCodeTooLarge:
     return "generated code exceeds kMaxCodeBytes";
   case KernelError::kUndecodable:
@@ -877,6 +879,26 @@ build_kernel(const KernelSpec &spec)
 
   std::vector<uint32_t> prologue;
   emit_prologue(prologue, spec.working_set, spec.trip_count);
+
+  // JALR's target is rs1 + imm with rs1 fixed at the body midpoint, so the
+  // immediate carries the whole per-slot offset and its 12-bit signed field
+  // decides how large a body this target can fill. The encoder masks rather
+  // than refuses, so without this the kernel would build, decode and run --
+  // jumping somewhere inside the body instead of to the next slot, exactly the
+  // silent truncation the loop back edge used to suffer.
+  if (spec.target == Op::kJalr && spec.body_slots >= 4) {
+    const auto midpoint = static_cast<int32_t>(spec.body_slots / 2);
+    const auto offset = [&](uint32_t slot) {
+      return (static_cast<int32_t>(slot) + 1 - midpoint) *
+             static_cast<int32_t>(kInstructionBytes);
+    };
+    constexpr int32_t kJalrImmediateLimit = 1 << 11;
+    const int32_t lowest = offset(1);
+    const int32_t highest = offset(spec.body_slots - 2);
+    if (lowest < -kJalrImmediateLimit || highest >= kJalrImmediateLimit) {
+      return std::unexpected(KernelError::kTargetImmediateOutOfRange);
+    }
+  }
 
   std::vector<uint32_t> body(spec.body_slots);
   for (uint32_t slot = 0; slot < spec.body_slots; ++slot) {

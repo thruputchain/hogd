@@ -91,6 +91,12 @@ EXTREME_HEADROOM = 0.60
 # of 100 measured cells. Guard everything at or above the baseline instead.
 GUARD_MIN_RATIO = 1.0
 
+# How far a cell has to sit from the baseline before the per-opcode table will
+# call it cheaper or dearer than ADD, rather than the same. Two runs of one
+# binary move the guarded population by a few percent, so a narrower band would
+# make the verdict column report noise.
+VERDICT_MARGIN = 0.05
+
 # How much a guarded cell may rise before --check calls it a regression.
 #
 # Deliberately loose. This is a "something is wildly out of whack" alarm, not a
@@ -272,11 +278,19 @@ def baseline_ns(data):
     estimator.
     """
     for cell in data["opcodes"]:
-        if (cell.get("usable") and cell["op"] == "ADD"
-                and cell["context"] == "independent"
-                and cell.get("ns_saturated", 0.0) > 0.0):
+        if is_baseline_cell(cell) and cell.get("ns_saturated", 0.0) > 0.0:
             return cell["ns_saturated"]
     return data["baseline"]["ns_per_filler_instruction"]
+
+
+def is_baseline_cell(cell):
+    """Is this the cell whose saturated cost every ratio is taken against?
+
+    Its ratio to itself is 1.000 by construction, so anything that treats a
+    ratio as evidence -- a guard above all -- has to know to skip it.
+    """
+    return (cell.get("usable") and cell["op"] == "ADD"
+            and cell.get("context") == "independent")
 
 
 def pair_ops(cell):
@@ -439,8 +453,19 @@ def print_table(data):
                   f"{cell['scheduled_gas']:>5}"
                   f"  rejected: {cell['rejected_because']}")
             continue
-        verdict = "costs more than ADD" if resolved(cell) and cell["slope_ns"] > 0 else (
-            "costs less than ADD" if resolved(cell) else "same as ADD")
+        # From the cost this row actually prints, not from the contrast
+        # slope. Keying the verdict off slope_ns meant a cell measured at 3x
+        # baseline printed "costs less than ADD" whenever its contrast came
+        # out negative -- which, on the host this work exists for, was about
+        # a third of them.
+        cost = cost_ns(cell)
+        floor = baseline_ns(data)
+        if cost > floor * (1.0 + VERDICT_MARGIN):
+            verdict = "costs more than ADD"
+        elif cost < floor * (1.0 - VERDICT_MARGIN):
+            verdict = "costs less than ADD"
+        else:
+            verdict = "same as ADD"
         print(
             f"{cell['op']:<{ow}}{context_label(cell):<26}"
             f"{cost_ns(cell):>10.4f}"
@@ -1069,6 +1094,12 @@ def emit_reference(data):
                        key=lambda c: (c["op"], context_label(c))):
         ratio = relative_cost(cell, baseline)
         if ratio < GUARD_MIN_RATIO or not resolved(cell):
+            continue
+        # The cell that *defines* the baseline divides by itself, so its ratio
+        # is 1.000 on every host and every run and the guard can never fire.
+        # Emitting it reports coverage the gate structurally cannot provide,
+        # and it was counted in the "guards: N" line offered as evidence of it.
+        if is_baseline_cell(cell):
             continue
         print(f"guard {cell['op']} {context_label(cell)} {ratio:.3f} "
               f"{cell['scheduled_gas']}")

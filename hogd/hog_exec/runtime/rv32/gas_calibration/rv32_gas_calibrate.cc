@@ -312,9 +312,15 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   result.fit = fit_line(points);
   result.measured_points = points.size();
   // The slope is the cost of a target *minus* the filler it displaced; adding
-  // the filler's own measured absolute cost back gives an absolute per
-  // instruction number.
-  result.ns_per_instruction = filler_ns + result.fit.slope;
+  // the filler's own measured absolute cost back gives an absolute number.
+  //
+  // A pair displaces two filler slots, so its slope is c_pair - 2*c_filler and
+  // two have to come back. Adding one understated every pair row by a filler,
+  // which is the difference between a pair clearing the "no usable cost"
+  // rejection below and not.
+  result.ns_per_instruction =
+      (static_cast<double>(slots_per_target(base)) * filler_ns) +
+      result.fit.slope;
 
   // An absolute upper bound, which is what a gas schedule actually needs.
   //
@@ -391,66 +397,84 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                                                   /*trace=*/false);
       if (!seed.has_value()) {
         result.saturated_note = "saturated probe would not instantiate";
-        result.usable = true;
-        return result;
-      }
-      sat.trip_count = tune_trip_count(*seed, 64, options.target_ns);
-      auto kernel = build_kernel(sat);
-      if (!kernel.has_value()) {
-        result.saturated_note = "saturated kernel not representable at the "
-                                "tuned trip count: " +
-                                kernel_error_name(kernel.error());
       }
       else {
-        const LoweringAudit audit = audit_kernel(*kernel, sat);
-        if (!audit.clean()) {
-          result.saturated_note =
-              "saturated body fused " + std::to_string(audit.rewritten_slots) +
-              " slot(s) (first at " +
-              std::to_string(audit.first_rewritten_slot) +
-              "); adjacent copies of this opcode are a fusion rule, so a "
-              "program cannot be made of it unfused";
+        sat.trip_count = tune_trip_count(*seed, 64, options.target_ns);
+        auto kernel = build_kernel(sat);
+        if (!kernel.has_value()) {
+          result.saturated_note = "saturated kernel not representable at the "
+                                  "tuned trip count: " +
+                                  kernel_error_name(kernel.error());
         }
         else {
-          auto program =
-              ThreadedMachinePreInstantiation::create(kernel->code,
-                                                      kernel->initial_memory, 0,
-                                                      kernel->memory_bytes,
-                                                      false);
-          if (!program.has_value()) {
-            result.saturated_note = "saturated kernel would not instantiate";
+          const LoweringAudit audit = audit_kernel(*kernel, sat);
+          // Same intent test as the sweep audit above, and for the same reason:
+          // a pair chosen *because* the engine fuses it has to fuse, and
+          // audit.clean() asks the opposite question. Requiring clean() here
+          // denied auipc;jalr the primary estimator permanently -- the one pair
+          // whose whole purpose is the fused form -- and blamed it on "adjacent
+          // copies of this opcode are a fusion rule", which is not what
+          // happened.
+          const bool expects_fusion = pair_expects_fusion(sat.pair);
+          const bool matched = expects_fusion
+                                   ? audit.rewritten_slots >= sat.target_slots
+                                   : audit.clean();
+          if (!matched) {
+            result.saturated_note =
+                expects_fusion
+                    ? "saturated body fused only " +
+                          std::to_string(audit.rewritten_slots) + " of " +
+                          std::to_string(sat.target_slots) +
+                          " pairs; this row exists to measure the fused form"
+                    : "saturated body fused " +
+                          std::to_string(audit.rewritten_slots) +
+                          " slot(s) (first at " +
+                          std::to_string(audit.first_rewritten_slot) +
+                          "); adjacent copies of this opcode are a fusion "
+                          "rule, "
+                          "so a program cannot be made of it unfused";
           }
           else {
-            std::vector<MeasurementPoint> one{
-                {.label = result.op + "/saturated",
-                 .x = 0.0,
-                 .program = &*program,
-                 .trip_count = sat.trip_count}};
-            measure_interleaved(one, {.repeats = options.repeats,
-                                      .warmup_runs = options.warmup_runs});
-            if (!one[0].ran_clean) {
-              result.saturated_note = "saturated kernel did not halt cleanly";
+            auto program =
+                ThreadedMachinePreInstantiation::create(kernel->code,
+                                                        kernel->initial_memory,
+                                                        0, kernel->memory_bytes,
+                                                        false);
+            if (!program.has_value()) {
+              result.saturated_note = "saturated kernel would not instantiate";
             }
             else {
-              // Divide by the substitutions placed, not by the instructions
-              // retired. Two reasons, and they point the same way.
-              //
-              // Units: a pair's cost is quoted per pair, because that is what
-              // the report compares against its ceiling (the two opcodes'
-              // costs summed). Per-instruction would read half of it.
-              //
-              // Direction: the iteration also runs the two boundary fillers
-              // and three loop-control instructions, and their time is in the
-              // numerator either way. Dividing by the instruction count
-              // spreads it over them too, which averages the target *down*
-              // toward the filler -- an understatement, and understating is
-              // the one direction worst-case pricing cannot tolerate.
-              // Attributing all of it to the targets makes this an upper
-              // bound on the target's own cost instead. The looseness is the
-              // scaffolding over the target count: about 0.1% at the body
-              // sizes used here, and always in the safe direction.
-              result.ns_saturated =
-                  one[0].median() / static_cast<double>(kernel->target_units);
+              std::vector<MeasurementPoint> one{
+                  {.label = result.op + "/saturated",
+                   .x = 0.0,
+                   .program = &*program,
+                   .trip_count = sat.trip_count}};
+              measure_interleaved(one, {.repeats = options.repeats,
+                                        .warmup_runs = options.warmup_runs});
+              if (!one[0].ran_clean) {
+                result.saturated_note = "saturated kernel did not halt cleanly";
+              }
+              else {
+                // Divide by the substitutions placed, not by the instructions
+                // retired. Two reasons, and they point the same way.
+                //
+                // Units: a pair's cost is quoted per pair, because that is what
+                // the report compares against its ceiling (the two opcodes'
+                // costs summed). Per-instruction would read half of it.
+                //
+                // Direction: the iteration also runs the two boundary fillers
+                // and three loop-control instructions, and their time is in the
+                // numerator either way. Dividing by the instruction count
+                // spreads it over them too, which averages the target *down*
+                // toward the filler -- an understatement, and understating is
+                // the one direction worst-case pricing cannot tolerate.
+                // Attributing all of it to the targets makes this an upper
+                // bound on the target's own cost instead. The looseness is the
+                // scaffolding over the target count: about 0.1% at the body
+                // sizes used here, and always in the safe direction.
+                result.ns_saturated =
+                    one[0].median() / static_cast<double>(kernel->target_units);
+              }
             }
           }
         }
@@ -458,11 +482,19 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     }
   }
 
-  // A cell with no saturated measurement and a negative contrast has no cost a
-  // schedule could use. Report that rather than passing a negative number
-  // downstream: worst-case pricing would sort it to the bottom and quietly
-  // treat the opcode as free.
-  if (result.ns_saturated <= 0.0 && result.ns_per_instruction <= 0.0) {
+  // A cell with no cost at all has nothing a schedule could use. Report that
+  // rather than passing a negative number downstream: worst-case pricing would
+  // sort it to the bottom and quietly treat the opcode as free.
+  //
+  // All three estimators have to be consulted, in the same order the report's
+  // cost_ns() tries them. This used to test only the saturated level and the
+  // contrast, which predates the bound landing as the middle rung: a cell that
+  // cannot saturate (ADDI, a fusion rule) and whose contrast went negative was
+  // rejected while holding a perfectly good non-negative bound, and the guard
+  // for it then failed the gate as "not measured in this run" rather than
+  // being checked.
+  if (result.ns_saturated <= 0.0 && result.ns_upper_bound <= 0.0 &&
+      result.ns_per_instruction <= 0.0) {
     result.rejected_because =
         "no usable cost: " +
         (result.saturated_note.empty() ? std::string("no saturated body")

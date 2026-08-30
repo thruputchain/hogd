@@ -235,7 +235,11 @@ enum class KernelError {
   kZeroTripCount,
   kTooManyTargets, // would put two targets adjacent, exposing them to fusion
   kCodeTooLarge,   // over kMaxCodeBytes
-  kUndecodable,    // generated code did not round-trip through the decoder
+  // A body slot's own immediate does not reach. JALR carries the whole
+  // per-slot offset from a base anchored at the body midpoint, so its 12-bit
+  // signed field caps how large a body it can fill.
+  kTargetImmediateOutOfRange,
+  kUndecodable, // generated code did not round-trip through the decoder
 };
 
 [[nodiscard]] std::string kernel_error_name(KernelError error);

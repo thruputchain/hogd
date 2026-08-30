@@ -81,9 +81,13 @@ if [ "{{ .mode }}" = "reference" ]; then
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
     --schedule
 
+  # Take the file, not the text below. This log is JSON-encoded on its way
+  # out, so a copy-paste of the printed block arrives with \u003e for > and
+  # \" for " -- which parses (comments are stripped) but leaves the
+  # regeneration command the file documents literally wrong.
   echo '===== proposed reference.txt for this host ====='
-  echo 'To adopt: copy the block below over'
-  echo 'hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
+  echo 'To adopt: copy ${HOG_DUMP_DIR}/rv32-gas-reference.txt from this host'
+  echo 'over hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
     --emit-reference | tee ${HOG_DUMP_DIR}/rv32-gas-reference.txt
 

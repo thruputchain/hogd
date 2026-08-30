@@ -612,10 +612,15 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
 TEST(Rv32Threaded, branchBadTargetTakenTrapsBadPc)
 {
   using test_program::branch;
-  // beq x0,x0,+4096: target is out of range, so op_branch_bad_target (baked
-  // with beq_cmp) handles it; the comparison is equal, so the taken path traps
-  // kBadPc rather than falling through.
-  const std::vector<uint32_t> words = {branch(0, 0, 0, 4096)};
+  // beq x0,x0,+4094: target is past the end of this one-instruction program,
+  // so op_branch_bad_target (baked with beq_cmp) handles it; the comparison is
+  // equal, so the taken path traps kBadPc rather than falling through.
+  //
+  // 4094 is the largest offset a B-type immediate encodes. This used to say
+  // 4096, which does not fit and was silently truncated to -4096 by the
+  // builder -- also out of the program, so the test passed for a reason it did
+  // not state.
+  const std::vector<uint32_t> words = {branch(0, 0, 0, 4094)};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
@@ -626,11 +631,12 @@ TEST(Rv32Threaded, branchBadTargetTakenTrapsBadPc)
 TEST(Rv32Threaded, branchBadTargetNotTakenFallsThrough)
 {
   using test_program::branch;
-  // x1=1, x2=2; beq x1,x2,+4096 has an out-of-range target (bad_target handler,
-  // beq_cmp), but 1 != 2 so the branch is not taken: it falls through to the
-  // addi, which runs (x3=99). Exercises the not-taken path's baked Cmp.
+  // x1=1, x2=2; beq x1,x2,+4094 targets past the end of the program
+  // (bad_target handler, beq_cmp), but 1 != 2 so the branch is not taken: it
+  // falls through to the addi, which runs (x3=99). Exercises the not-taken
+  // path's baked Cmp. 4094 rather than 4096 for the reason above.
   const std::vector<uint32_t> words = {addi(1, 0, 1), addi(2, 0, 2),
-                                       branch(0, 1, 2, 4096), addi(3, 0, 99)};
+                                       branch(0, 1, 2, 4094), addi(3, 0, 99)};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   RecordingHost host;
@@ -2209,7 +2215,7 @@ TEST(Rv32ThreadedTrapGas, deficitTakenBranchToBadTargetReportsOutOfGas)
   // kOutOfGas, not kBadPc.
   const std::vector<uint32_t> words = {
       addi(5, 0, 1),         // x5 = 1
-      branch(0, 0, 0, 4096), // beq taken to OOB target, speculative
+      branch(0, 0, 0, 4094), // beq taken to OOB target, speculative
   };
   expect_trap_gas_parity(words, Trap::kOutOfGas,
                          /*expected_gas_remaining=*/0, /*check_pc=*/false,
@@ -2308,7 +2314,7 @@ TEST(Rv32ThreadedTrapGas, takenBranchToBadTargetGasParity)
   // Charged: addi, beq = 2 -> 98. (Trap pcs are not part of the invariant.)
   const std::vector<uint32_t> words = {
       addi(5, 0, 1),         // x5 = 1
-      branch(0, 0, 0, 4096), // beq x0, x0, +4096 -> taken, target OOB
+      branch(0, 0, 0, 4094), // beq x0, x0, +4094 -> taken, target OOB
   };
   expect_trap_gas_parity(words, Trap::kBadPc,
                          /*expected_gas_remaining=*/98, /*check_pc=*/false);

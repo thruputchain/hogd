@@ -21,6 +21,21 @@ require_valid_field(bool condition)
   }
 }
 
+// Every encoder below masks its immediate to the field width. Without a range
+// check that mask is a silent truncation: the instruction encodes, decodes and
+// runs, just with a different immediate than the caller asked for, so the
+// program does something plausible rather than failing. A branch built that way
+// jumped into the middle of its own loop body and still reported a clean halt.
+//
+// Signed immediates only. u_type takes a full 32-bit value and keeps its top
+// 20 bits by definition, so there is nothing to truncate there.
+inline void
+require_immediate_fits(int32_t imm, int bits)
+{
+  const int32_t limit = int32_t{1} << (bits - 1);
+  require_valid_field(imm >= -limit && imm < limit);
+}
+
 inline void
 append_u32(std::vector<uint8_t> &code, uint32_t word)
 {
@@ -90,6 +105,7 @@ i_type(uint32_t opcode, uint8_t rd, uint8_t funct3, uint8_t rs1, int32_t imm)
   require_valid_field(rd < kRegisterCount);
   require_valid_field(funct3 < 8);
   require_valid_field(rs1 < kRegisterCount);
+  require_immediate_fits(imm, 12);
   return (static_cast<uint32_t>(imm) & 0xfffU) << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | uint32_t{rd} << 7 | opcode;
 }
@@ -100,6 +116,7 @@ s_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
   require_valid_field(funct3 < 8);
   require_valid_field(rs1 < kRegisterCount);
   require_valid_field(rs2 < kRegisterCount);
+  require_immediate_fits(imm, 12);
   const uint32_t uimm = static_cast<uint32_t>(imm) & 0xfffU;
   return (uimm >> 5) << 25 | uint32_t{rs2} << 20 | uint32_t{rs1} << 15 |
          uint32_t{funct3} << 12 | (uimm & 0x1fU) << 7 | 0x23U;
@@ -112,6 +129,7 @@ b_type(uint8_t funct3, uint8_t rs1, uint8_t rs2, int32_t imm)
   require_valid_field(rs1 < kRegisterCount);
   require_valid_field(rs2 < kRegisterCount);
   require_valid_field((imm & 0x1) == 0);
+  require_immediate_fits(imm, 13);
   const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffU;
   return ((uimm >> 12) & 0x1U) << 31 | ((uimm >> 5) & 0x3fU) << 25 |
          uint32_t{rs2} << 20 | uint32_t{rs1} << 15 | uint32_t{funct3} << 12 |
@@ -131,6 +149,7 @@ j_type(uint8_t rd, int32_t imm)
 {
   require_valid_field(rd < kRegisterCount);
   require_valid_field((imm & 0x1) == 0);
+  require_immediate_fits(imm, 21);
   const uint32_t uimm = static_cast<uint32_t>(imm) & 0x1fffffU;
   return ((uimm >> 20) & 0x1U) << 31 | ((uimm >> 1) & 0x3ffU) << 21 |
          ((uimm >> 11) & 0x1U) << 20 | ((uimm >> 12) & 0xffU) << 12 |

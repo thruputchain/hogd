@@ -2,8 +2,8 @@
 #
 # Regenerate with:
 #   scripts/rv32_gas_calibrate.sh BUILD_DIR --out /tmp/gas.json
-#   scripts/rv32_gas_report.py /tmp/gas.json --emit-reference \\
-#     \u003e hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt
+#   scripts/rv32_gas_report.py /tmp/gas.json --emit-reference \
+#     > hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt
 #
 # Or run the RV32 Gas Calibration workflow with mode=reference,
 # which prints this block from the bench host.
@@ -24,8 +24,8 @@
 # 1.0x baseline are guarded: a cell cheaper than
 # the baseline instruction has no headroom worth watching.
 #
-# The tolerance is loose on purpose: this is a \"something is
-# wildly out of whack\" alarm, not a performance budget. A guarded
+# The tolerance is loose on purpose: this is a "something is
+# wildly out of whack" alarm, not a performance budget. A guarded
 # cell has to double relative to the baseline before it fires.
 #
 # Regenerating this file to make a failure go away hides exactly
@@ -36,9 +36,8 @@ engine_source_digest d9294212b03a77c6
 # generated from a Release build on hog10 (AMD EPYC 9554 64-Core Processor)
 tolerance 1.0
 
-# guard \u003cop\u003e \u003ccontext\u003e \u003ccost relative to baseline\u003e \u003ccurrent gas\u003e
+# guard <op> <context> <cost relative to baseline> <current gas>
 guard ADD chain 1.032 1
-guard ADD independent 1.000 1
 guard AND chain 1.001 1
 guard AND independent 1.001 1
 guard ANDI chain 1.005 1
