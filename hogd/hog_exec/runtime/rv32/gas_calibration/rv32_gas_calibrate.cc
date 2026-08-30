@@ -26,6 +26,7 @@
 #include <ctime>
 #include <exception>
 #include <expected>
+#include <format>
 #include <memory>
 #include <print>
 #include <span>
@@ -439,6 +440,20 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
         }
       }
     }
+  }
+
+  // A cell with no saturated measurement and a negative contrast has no cost a
+  // schedule could use. Report that rather than passing a negative number
+  // downstream: worst-case pricing would sort it to the bottom and quietly
+  // treat the opcode as free.
+  if (result.ns_saturated <= 0.0 && result.ns_per_instruction <= 0.0) {
+    result.rejected_because =
+        "no usable cost: " +
+        (result.saturated_note.empty() ? std::string("no saturated body")
+                                       : result.saturated_note) +
+        ", and the contrast fallback measured " +
+        std::format("{:.4f}", result.ns_per_instruction) + " ns";
+    return result;
   }
 
   result.usable = true;

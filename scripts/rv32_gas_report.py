@@ -80,7 +80,16 @@ EXTREME_HEADROOM = 0.60
 # would fail on the near-baseline population most nights and be muted within a
 # week. Guarding only cells with something real to measure is what makes a
 # nightly run worth reading.
-GUARD_MIN_RATIO = 1.5
+#
+# That reasoning was about the *contrast* estimator, whose near-baseline cells
+# were a small difference between large timings and moved by 60% run to run.
+# The saturated measurement is an absolute level: three back-to-back runs put
+# its relative spread at 12.5% median and 16.8% at p90 across the whole ISA,
+# cheap cells included, against a tolerance of 100%. The cheap population is no
+# longer the noisy one, so excluding it now discards coverage for a reason that
+# has stopped being true -- on the bench host the 1.5x floor left 9 guards out
+# of 100 measured cells. Guard everything at or above the baseline instead.
+GUARD_MIN_RATIO = 1.0
 
 # How much a guarded cell may rise before --check calls it a regression.
 #
@@ -978,8 +987,8 @@ def emit_reference(data):
     print("# calibration workflow's mode=reference does exactly that.")
     print("#")
     print("# Only cells at or above")
-    print(f"# {GUARD_MIN_RATIO}x baseline are guarded: cheaper ones do not")
-    print("# reproduce tightly enough to gate on.")
+    print(f"# {GUARD_MIN_RATIO}x baseline are guarded: a cell cheaper than")
+    print("# the baseline instruction has no headroom worth watching.")
     print("#")
     print("# The tolerance is loose on purpose: this is a \"something is")
     print("# wildly out of whack\" alarm, not a performance budget. A guarded")
