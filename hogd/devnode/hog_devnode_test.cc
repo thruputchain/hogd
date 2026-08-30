@@ -72,6 +72,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
@@ -2606,7 +2607,8 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
 
   std::filesystem::rename(
       outbox_dir / IndexerOutboxStore::current_epoch_origin_filename(),
-      outbox_dir / IndexerOutboxStore::epoch_origin_filename("hogp/archival"));
+      outbox_dir / IndexerOutboxStore::epoch_origin_filename(
+                       protocol_from_text("hogp/archival")));
 
   expect_startup_failure({"--data-dir", data_dir.string(), "--dev-accounts",
                           "0", "--dev-account-seed", "groundhog-dev-accounts",

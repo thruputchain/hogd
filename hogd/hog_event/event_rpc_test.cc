@@ -321,7 +321,7 @@ write_epoch_origin_header(std::string_view directory, std::string_view protocol,
   bytes.append_range(payload);
   const std::filesystem::path path =
       std::filesystem::path(directory) / "indexer-outbox" /
-      IndexerOutboxStore::epoch_origin_filename(protocol);
+      IndexerOutboxStore::epoch_origin_filename(protocol_from_text(protocol));
   auto file = File::open(path.string(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
   ASSERT_TRUE(file.has_value());
   ASSERT_TRUE(write_full(*file, std::as_bytes(std::span(bytes))).has_value());
@@ -2175,7 +2175,7 @@ TEST_F(EventRpcTest,
                             archival_first.consensus_value.prev_hash);
   replace_outbox_payload(temp_dir(),
                          IndexerOutboxStore::epoch_origin_filename(
-                             "hogp/archival_a"),
+                             protocol_from_text("hogp/archival_a")),
                          x23::Buf{0x80, 0x00, 0x00, 0x01});
 
   registration.publish_event_canonical_tip(EventCanonicalTip{

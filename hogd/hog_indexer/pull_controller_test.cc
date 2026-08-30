@@ -218,7 +218,7 @@ write_epoch_origin(std::string_view directory, std::string_view protocol,
   bytes.append_range(payload);
   const std::filesystem::path path =
       std::filesystem::path(directory) / "indexer-outbox" /
-      IndexerOutboxStore::epoch_origin_filename(protocol);
+      IndexerOutboxStore::epoch_origin_filename(protocol_from_text(protocol));
   auto file = File::open(path.string(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
   ASSERT_TRUE(file.has_value());
   ASSERT_TRUE(write_full(*file, std::as_bytes(std::span(bytes))).has_value());

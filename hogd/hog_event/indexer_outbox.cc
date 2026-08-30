@@ -557,9 +557,9 @@ IndexerOutboxStore::committed_filename(BlockHeight block_height)
 }
 
 std::string
-IndexerOutboxStore::epoch_origin_filename(std::string_view protocol)
+IndexerOutboxStore::epoch_origin_filename(const ProtocolCommit &protocol)
 {
-  std::string identity(protocol);
+  std::string identity(protocol_text(protocol));
   for (char &c : identity) {
     const bool alphanumeric = (c >= 'a' && c <= 'z') ||
                               (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
@@ -568,12 +568,6 @@ IndexerOutboxStore::epoch_origin_filename(std::string_view protocol)
     }
   }
   return std::format("{}{}{}", kEpochOriginPrefix, identity, kOutboxSuffix);
-}
-
-std::string
-IndexerOutboxStore::epoch_origin_filename(const ProtocolCommit &protocol)
-{
-  return epoch_origin_filename(protocol_text(protocol));
 }
 
 std::string

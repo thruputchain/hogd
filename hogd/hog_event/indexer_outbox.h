@@ -137,7 +137,10 @@ public:
 
   static std::string candidate_filename(BlockID block_id);
   static std::string committed_filename(BlockHeight block_height);
-  static std::string epoch_origin_filename(std::string_view protocol);
+  // The token is the file's identity, so it has exactly one spelling here:
+  // the full fixed-width array, padding included. Taking text instead would
+  // let a caller name a file from an unpadded token and then fail to match it
+  // against the padded one its own header round-trips back.
   static std::string epoch_origin_filename(const ProtocolCommit &protocol);
   static std::string current_epoch_origin_filename();
   x23::Async<IndexerOutboxStatus<void>>
