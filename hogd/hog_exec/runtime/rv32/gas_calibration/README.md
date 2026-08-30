@@ -82,22 +82,42 @@ whatever opcodes appear in every program.
 
 ## What this harness does instead
 
-**Synthesize the design; do not fit one.** For each opcode, build a family of
-kernels that are byte-for-byte identical except for how many body slots hold
-that opcode instead of a filler instruction. Same body slot count, same code
-size, same trip count, same register plan, same boundaries. Fit time against
-the target count and the slope is the cost difference between the target and
-the filler, in nanoseconds, directly. There is no design matrix to condition
-and nothing to be collinear with, because only one thing varies. All the fixed
-overhead lands in the intercept and cancels.
+**Measure a level, not a difference.** For each opcode and context, build one
+kernel whose body is *entirely* that opcode, time it, and divide by the
+instruction count. That is the per-instruction cost of a program made of that
+instruction, measured absolutely.
 
-**Anchor the slopes.** A separate sweep varies the body slot count with an
-all-filler body, giving the filler's own absolute cost. Adding it back turns
-each relative slope into absolute nanoseconds per instruction.
+This is the part that took two attempts. The harness originally measured the
+*marginal* cost: a family of kernels identical except for how many body slots
+held the target instead of a filler, with time fitted against target count so
+the slope was the target's cost minus the filler's. That design is sound in
+principle and unusable in practice -- a contrast between two large timings
+absorbs whatever per-kernel layout bias differs between them, and once that
+bias rivals the effect the slope goes negative. Roughly a third of sweeps
+priced below zero, on two different microarchitectures. An instruction cannot
+cost less than nothing, and averaging does not fix a sign.
 
-**Suppress fusion, and check that you did.** Targets are placed non-adjacently
-and separated by an R-type `add` filler on private registers, which no fusion
-rule matches in either position. That is a claim about the lowering, so
+A saturated body has nothing to subtract. There is no filler in it, so the
+answer does not depend on what the filler costs; there is no fit, so there is
+no bias to absorb; and there is no difference, so the result cannot be
+negative. It is also the question worst-case pricing asks directly: if a block
+is filled with this instruction, what does each one cost?
+
+The sweep is still built and still reported, as a diagnostic column and as the
+fallback for the few opcodes that cannot be saturated.
+
+**Suppress fusion, and check that you did.** A saturated body puts copies of
+the target next to each other, which is exactly the arrangement a fusion rule
+can match -- so the audit is load-bearing rather than a formality. It rejects a
+body whose slots did not each stay one instruction, because a fused body
+executes fewer dispatches than it has instructions and dividing its time by the
+instruction count would report the fused cost as the unfused one. Across the
+ISA, three cells decline on those grounds: `ADDI` in both contexts and the
+`auipc;jalr` pair, all of which are fusion rules by design.
+
+In the contrast sweep, targets are instead placed non-adjacently and separated
+by an R-type `add` filler on private registers, which no fusion rule matches in
+either position. That is a claim about the lowering, so
 `lowering_audit.h` verifies it: it lowers each kernel exactly as production
 would, and compares every body slot's baked handler against the handler the
 same encoded word gets when lowered in isolation. Any fusion or run split shows

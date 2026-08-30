@@ -49,9 +49,27 @@ and not enough to price the small ones.
 ## What is measured
 
 `ThreadedMachine`, tracing off, built optimized with LTO: the engine and the
-codegen the node runs. Per opcode, the harness measures the marginal cost of
-one more instance of that opcode in a body of otherwise identical filler, in
-several operand contexts, and reports the worst.
+codegen the node runs. Per opcode and operand context, the harness times a loop
+body made **entirely of that opcode** and divides by the instruction count. The
+result is what a program consisting of that instruction costs per instruction.
+It reports the worst context.
+
+That is a level, not a difference, and the distinction is the whole method. The
+harness used to measure the *marginal* cost of one more instance of an opcode
+against a body of filler -- a contrast. A contrast between two large timings
+goes negative as soon as layout noise rivals the effect, and it did: about a
+third of sweeps priced below zero, which is not a cost a gas schedule can use.
+Dividing one absolute timing by one instruction count cannot produce a negative,
+does not depend on what the filler costs, and asks the question pricing actually
+cares about -- if a block is filled with this instruction, what does each one
+cost?
+
+Saturating a body means adjacent copies of the opcode, which can fuse. The
+lowering audit rejects a body whose slots did not each stay one instruction,
+rather than reporting the fused cost as the unfused one. Across the ISA exactly
+three cells decline on those grounds -- `ADDI` in both contexts and the
+`auipc;jalr` pair, all of which genuinely are fusion rules -- and they fall back
+to the old contrast estimate, marked.
 
 The contexts are the load-bearing part. An opcode does not have one cost, and
 which end of its range applies is the guest author's choice, so gas has to
