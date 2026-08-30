@@ -68,6 +68,19 @@ if [ "{{ .mode }}" = "reference" ]; then
   echo '===== additivity: do the per-opcode costs predict real programs? ====='
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --predict
 
+  # The point of the whole harness. Gas costs have to come from the machine
+  # class that runs the chain, not from whatever laptop or container generated
+  # them, so print the proposal here where it is measured on bench hardware.
+  #
+  # One run: the report says so itself, and says which distinctions not to
+  # trust because of it. Dispatch this workflow a few times and pass the
+  # collected JSON to --schedule together before adopting anything -- it merges
+  # runs, takes the highest cost each context reached, and marks the cells that
+  # did not reproduce.
+  echo '===== proposed gas schedule from this host ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+    --schedule
+
   echo '===== proposed reference.txt for this host ====='
   echo 'To adopt: copy the block below over'
   echo 'hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'

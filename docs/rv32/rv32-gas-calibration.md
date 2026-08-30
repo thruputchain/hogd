@@ -362,6 +362,11 @@ away, and it is where a cheaper context would pay for itself.
 
 ## Before changing the schedule
 
+- Take the numbers from the bench pool, not from wherever you happen to be
+  working. The calibration workflow's `mode=reference` prints the proposal
+  under `===== proposed gas schedule from this host =====`, measured on the
+  machine class that runs the chain. A schedule read off a development
+  container is measuring the wrong computer.
 - Re-run on the slowest supported validator class, not a development host. The
   schedule is a protocol constant and has to hold on the slowest machine that
   must keep up.
