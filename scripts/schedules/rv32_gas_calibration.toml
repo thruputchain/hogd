@@ -1,0 +1,120 @@
+name = "rv32_gas_calibration"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git checkout -q {{ .git_commit }}
+
+source ./scripts/ci/configure_git_cache.sh
+
+# Only what a configure needs. The rv32_gas_calibrate target itself links just
+# the RV32 ISA core, but CMake configures the whole project before it can build
+# anything.
+git submodule update --init --recursive \
+   protocol \
+   external/rocksdb \
+   external/model-checker \
+   external/googletest \
+   external/benchmark \
+   external/crc32c \
+   external/blake3 \
+   external/corrosion \
+   built_contracts/integration_test_contracts
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+
+# Configure Release with an explicitly pinned compiler. Both halves matter.
+#
+# Release because the measured engine is the *compiled* interpreter: -O3,
+# -march, and LTO across the interpreter's translation units all reach the hot
+# path, and rv32_gas_calibrate refuses to measure anything else.
+#
+# Pinned compiler because the costs are a property of the generated code. The
+# engine fingerprint is deliberately compiler-independent, so it will not catch
+# a compiler change -- only the numbers move, silently. Every run recording the
+# same compiler is what makes them comparable over time.
+echo 'configure release'
+./scripts/build.sh -d build/release -t Release -c gcc -x "-DBUILD_BENCHMARKS=OFF" -n \
+  > configure.log 2>&1 || (cat configure.log && exit 1)
+
+echo 'build rv32_gas_calibrate'
+cmake --build build/release --parallel "$(nproc)" --target rv32_gas_calibrate \
+  > build.log 2>&1 || (cat build.log && exit 1)
+
+mkdir -p ${HOG_DUMP_DIR}
+
+# `reference` produces the numbers and prints a reference file without gating;
+# that is how a new host is bootstrapped, since the committed reference holds
+# costs as ratios measured somewhere else. `check` (the default) gates.
+if [ "{{ .mode }}" = "reference" ]; then
+
+  echo 'running calibration (reference mode, not gating)'
+  ./scripts/rv32_gas_calibrate.sh build/release \
+    --out ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+
+  echo '===== per-opcode costs ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+
+  echo '===== validation workloads ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --workloads
+
+  echo '===== additivity: do the per-opcode costs predict real programs? ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --predict
+
+  echo '===== proposed reference.txt for this host ====='
+  echo 'To adopt: copy the block below over'
+  echo 'hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+    --emit-reference | tee ${HOG_DUMP_DIR}/rv32-gas-reference.txt
+
+else
+
+  echo 'running calibration and checking it against the committed reference'
+  CHECK_RESULT=0
+  ./scripts/rv32_gas_check.sh build/release \
+    --out ${HOG_DUMP_DIR}/rv32-gas-calibration.json > check.log 2>&1 \
+    || CHECK_RESULT=$?
+  cat check.log
+
+  if [ $CHECK_RESULT -ne 0 ]; then
+    # A failure here is one of two things, and the check output says which: the
+    # engine fingerprint moved (a fusion rule, gas cost, or run limit changed,
+    # so the calibration behind the current gas costs describes a different
+    # interpreter), or a guarded worst-case cost doubled relative to the
+    # baseline. Neither is fixed by regenerating the reference.
+    echo '===== per-opcode costs from the failing run ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json || true
+    echo '===== validation workloads ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+      --workloads || true
+    echo '===== additivity ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+      --predict || true
+    exit $CHECK_RESULT
+  fi
+
+fi
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+
+# Any bench host: they are the same hardware, so pinning one would only
+# constrain scheduling without making the numbers more comparable. What keeps
+# runs comparable across machines is that the reference holds costs as ratios to
+# the baseline instruction measured in the same run, not as nanoseconds.
+[jobs.host]
+bench_1 = "?"

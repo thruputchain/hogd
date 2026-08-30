@@ -1,0 +1,99 @@
+# RV32 gas calibration reference.
+#
+# Regenerate with:
+#   scripts/rv32_gas_calibrate.sh BUILD_DIR --out /tmp/gas.json
+#   scripts/rv32_gas_report.py /tmp/gas.json --emit-reference \
+#     > hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt
+#
+# Or run the RV32 Gas Calibration workflow with mode=reference,
+# which prints this block from the bench host.
+#
+# Checked by scripts/rv32_gas_check.sh. Costs are multiples of the
+# baseline instruction measured in the same run, not nanoseconds.
+#
+# That makes the file portable across IDENTICAL hardware, and not
+# across microarchitectures. Measured: a reference taken on one
+# cloud host failed 3 of 18 guards on another with the same engine
+# fingerprint. The baseline is dispatch-bound and scales with core
+# width and clock; a chained multiply or a pointer-chased load is
+# latency-bound and does not, so their ratio is not invariant.
+# Regenerate on the machine class the check will run on -- the
+# calibration workflow's mode=reference does exactly that.
+#
+# Only cells at or above
+# 1.5x baseline are guarded: cheaper ones do not
+# reproduce tightly enough to gate on.
+#
+# The tolerance is loose on purpose: this is a "something is
+# wildly out of whack" alarm, not a performance budget. A guarded
+# cell has to double relative to the baseline before it fires.
+#
+# Regenerating this file to make a failure go away hides exactly
+# what it is for.
+
+engine_fingerprint 4e824b2a5e21faed
+engine_source_digest d9294212b03a77c6
+# generated from a Release build on vm (Intel(R) Xeon(R) Processor @ 2.10GHz)
+tolerance 1.0
+
+# guard <op> <context> <cost relative to baseline> <current gas>
+guard ADD chain 2.185 1
+guard ADDI chain 2.369 1
+guard AND chain 2.239 1
+guard ANDI chain 2.514 1
+guard BEQ independent/taken 4.030 1
+guard BGE independent/taken 3.823 1
+guard BGEU independent/taken 4.313 1
+guard BLT independent/taken 3.901 1
+guard BLTU independent/taken 4.248 1
+guard BNE independent/not_taken 1.505 1
+guard BNE independent/taken 3.739 1
+guard DIV chain/large 8.055 8
+guard DIV independent/large 1.756 8
+guard DIV independent/small 1.987 8
+guard DIVU chain/large 8.806 8
+guard DIVU independent/large 1.870 8
+guard DIVU independent/small 1.741 8
+guard JALR chain 7.653 1
+guard JALR independent 7.187 1
+guard LB independent/chase 5.441 1
+guard LB independent/l1_4k 1.694 1
+guard LBU independent/chase 4.549 1
+guard LH independent/chase 5.172 1
+guard LHU independent/chase 9.911 1
+guard LHU independent/full_64k 1.581 1
+guard LW independent/chase 9.937 1
+guard MUL chain 2.761 3
+guard MUL independent 1.622 3
+guard MULH chain 4.016 3
+guard MULHSU chain 4.016 3
+guard MULHU chain 3.391 3
+guard OR chain 2.271 1
+guard ORI chain 1.943 1
+guard REM chain/large 9.815 8
+guard REM independent/large 2.265 8
+guard REM independent/small 2.113 8
+guard REMU chain/large 9.800 8
+guard REMU independent/large 1.793 8
+guard REMU independent/small 1.592 8
+guard SLL chain 2.409 1
+guard SLLI chain 2.217 1
+guard SLT chain 2.991 1
+guard SLTI chain 2.541 1
+guard SLTIU chain 2.723 1
+guard SLTIU independent 1.528 1
+guard SLTU chain 3.012 1
+guard SRA chain 2.425 1
+guard SRAI chain 2.394 1
+guard SRL chain 2.195 1
+guard SRLI chain 2.110 1
+guard SUB chain 2.269 1
+guard SW independent/l1_4k 1.544 1
+guard SW independent/same_addr 1.507 1
+guard XOR chain 2.106 1
+guard XORI chain 2.384 1
+
+# Worst-over-best ns/gas across the validation workloads: how
+# much real capacity the current schedule gives away. Rising
+# means pricing got less even.
+workload_spread 6.933
