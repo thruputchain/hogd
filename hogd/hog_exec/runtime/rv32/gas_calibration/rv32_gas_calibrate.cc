@@ -214,13 +214,26 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     if (i == sweep->kernels.size() - 1) {
       result.audit = audit;
     }
-    if (!audit.clean()) {
+    // Check the lowering against intent. For almost every sweep that means no
+    // slot was rewritten; for a pair chosen because the engine fuses it, it
+    // means the opposite, and a sweep that failed to fuse would be measuring
+    // the unfused sequence while claiming to measure the fused one.
+    const bool expects_fusion = pair_expects_fusion(base.pair);
+    const bool matched = expects_fusion
+                             ? audit.rewritten_slots >= sweep->target_counts[i]
+                             : audit.clean();
+    if (!matched && sweep->target_counts[i] > 0) {
       result.audit = audit;
       result.rejected_because =
-          "lowering rewrote " + std::to_string(audit.rewritten_slots) +
-          " body slot(s) of the " + std::to_string(sweep->target_counts[i]) +
-          "-target kernel (first at " +
-          std::to_string(audit.first_rewritten_slot) + ")";
+          expects_fusion
+              ? "lowering fused only " + std::to_string(audit.rewritten_slots) +
+                    " of " + std::to_string(sweep->target_counts[i]) +
+                    " pairs; this sweep exists to measure the fused form"
+              : "lowering rewrote " + std::to_string(audit.rewritten_slots) +
+                    " body slot(s) of the " +
+                    std::to_string(sweep->target_counts[i]) +
+                    "-target kernel (first at " +
+                    std::to_string(audit.first_rewritten_slot) + ")";
       return result;
     }
   }
@@ -470,10 +483,21 @@ plan_sweeps(const Options &options)
       KernelSpec spread = base;
       spread.working_set = WorkingSet::kFullRange;
       plans.push_back({spread, ""});
-      if (op == Op::kLw) {
+      if (is_load_target(op)) {
+        // Every load can chase, not just LW: the node just has to fit the
+        // loaded width. This is the latency axis, and without it a load is
+        // priced from throughput alone while every ALU op is priced from a
+        // dependency chain -- an asymmetry that understates loads.
         KernelSpec chase = base;
         chase.working_set = WorkingSet::kPointerChase;
         plans.push_back({chase, ""});
+      }
+      else {
+        // A store has no result to chain through; contending on one address is
+        // the nearest measurable worst case.
+        KernelSpec contended = base;
+        contended.working_set = WorkingSet::kSameAddress;
+        plans.push_back({contended, ""});
       }
       continue;
     }
@@ -517,6 +541,9 @@ plan_sweeps(const Options &options)
     KernelSpec distinct = forward;
     distinct.pair = PairKind::kStoreLoadDistinct;
     plans.push_back({distinct, ""});
+    KernelSpec call = forward;
+    call.pair = PairKind::kAuipcJalr;
+    plans.push_back({call, ""});
   }
   return plans;
 }

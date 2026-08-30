@@ -31,62 +31,69 @@
 # Regenerating this file to make a failure go away hides exactly
 # what it is for.
 
-engine_fingerprint 71e9993b420be26b
+engine_fingerprint 4e824b2a5e21faed
 engine_source_digest d9294212b03a77c6
 # generated from a Release build on vm (Intel(R) Xeon(R) Processor @ 2.10GHz)
 tolerance 1.0
 
 # guard <op> <context> <cost relative to baseline> <current gas>
-guard ADD chain 2.283 1
-guard ADDI chain 2.477 1
-guard AND chain 2.231 1
-guard AND independent 1.587 1
-guard ANDI chain 2.373 1
-guard BEQ independent/taken 3.751 1
-guard BGE independent/taken 3.912 1
-guard BGEU independent/taken 3.893 1
-guard BLT independent/taken 3.970 1
-guard BLTU independent/taken 3.793 1
-guard BNE independent/taken 4.027 1
-guard DIV chain/large 8.432 8
-guard DIV independent/large 1.957 8
-guard DIV independent/small 1.981 8
-guard DIVU chain/large 9.185 8
-guard DIVU independent/large 1.839 8
-guard DIVU independent/small 2.061 8
-guard LHU independent/l1_4k 1.525 1
-guard LW independent/chase_64k 10.991 1
-guard LW independent/l1_4k 1.534 1
-guard MUL chain 2.912 3
-guard MULH chain 4.262 3
-guard MULHSU chain 4.343 3
-guard MULHU chain 3.455 3
-guard OR chain 2.208 1
-guard ORI chain 2.164 1
-guard REM chain/large 9.837 8
-guard REM independent/large 1.953 8
-guard REM independent/small 2.107 8
-guard REMU chain/large 10.046 8
-guard REMU independent/large 1.758 8
-guard REMU independent/small 1.755 8
-guard SB independent/full_64k 1.611 1
-guard SB independent/l1_4k 1.523 1
-guard SLL chain 2.333 1
-guard SLLI chain 2.267 1
-guard SLT chain 3.074 1
-guard SLTI chain 2.420 1
-guard SLTIU chain 2.861 1
-guard SLTU chain 3.029 1
-guard SRA chain 2.451 1
-guard SRAI chain 2.406 1
-guard SRL chain 2.396 1
-guard SRLI chain 2.003 1
-guard SUB chain 2.289 1
-guard SW independent/l1_4k 1.665 1
-guard XOR chain 2.271 1
-guard XORI chain 2.344 1
+guard ADD chain 2.185 1
+guard ADDI chain 2.369 1
+guard AND chain 2.239 1
+guard ANDI chain 2.514 1
+guard BEQ independent/taken 4.030 1
+guard BGE independent/taken 3.823 1
+guard BGEU independent/taken 4.313 1
+guard BLT independent/taken 3.901 1
+guard BLTU independent/taken 4.248 1
+guard BNE independent/not_taken 1.505 1
+guard BNE independent/taken 3.739 1
+guard DIV chain/large 8.055 8
+guard DIV independent/large 1.756 8
+guard DIV independent/small 1.987 8
+guard DIVU chain/large 8.806 8
+guard DIVU independent/large 1.870 8
+guard DIVU independent/small 1.741 8
+guard JALR chain 7.653 1
+guard JALR independent 7.187 1
+guard LB independent/chase 5.441 1
+guard LB independent/l1_4k 1.694 1
+guard LBU independent/chase 4.549 1
+guard LH independent/chase 5.172 1
+guard LHU independent/chase 9.911 1
+guard LHU independent/full_64k 1.581 1
+guard LW independent/chase 9.937 1
+guard MUL chain 2.761 3
+guard MUL independent 1.622 3
+guard MULH chain 4.016 3
+guard MULHSU chain 4.016 3
+guard MULHU chain 3.391 3
+guard OR chain 2.271 1
+guard ORI chain 1.943 1
+guard REM chain/large 9.815 8
+guard REM independent/large 2.265 8
+guard REM independent/small 2.113 8
+guard REMU chain/large 9.800 8
+guard REMU independent/large 1.793 8
+guard REMU independent/small 1.592 8
+guard SLL chain 2.409 1
+guard SLLI chain 2.217 1
+guard SLT chain 2.991 1
+guard SLTI chain 2.541 1
+guard SLTIU chain 2.723 1
+guard SLTIU independent 1.528 1
+guard SLTU chain 3.012 1
+guard SRA chain 2.425 1
+guard SRAI chain 2.394 1
+guard SRL chain 2.195 1
+guard SRLI chain 2.110 1
+guard SUB chain 2.269 1
+guard SW independent/l1_4k 1.544 1
+guard SW independent/same_addr 1.507 1
+guard XOR chain 2.106 1
+guard XORI chain 2.384 1
 
 # Worst-over-best ns/gas across the validation workloads: how
 # much real capacity the current schedule gives away. Rising
 # means pricing got less even.
-workload_spread 6.883
+workload_spread 6.933

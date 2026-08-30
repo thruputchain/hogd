@@ -264,6 +264,13 @@ struct MemoryOperand {
 MemoryOperand
 memory_operand(WorkingSet working_set, uint32_t index, uint32_t width)
 {
+  if (working_set == WorkingSet::kSameAddress) {
+    // Every access to one address. A store has no result to chain through, so
+    // this is the closest a single-opcode sweep gets to a dependent store:
+    // successive stores contend for the same store-buffer entry instead of
+    // draining independently.
+    return {.base_reg = kAddressBankBase, .offset = 0};
+  }
   const auto base_reg = static_cast<uint8_t>(
       kAddressBankBase +
       (working_set == WorkingSet::kFullRange ? index % kAddressBankSize : 0));
@@ -277,16 +284,56 @@ memory_operand(WorkingSet working_set, uint32_t index, uint32_t width)
   return {.base_reg = base_reg, .offset = offset};
 }
 
-// Writes a single shuffled cycle through every kChaseStride-aligned node of
-// `memory`: the word at node i holds the address of node next(i). A shuffle
-// rather than a fixed stride is the point -- a strided walk is prefetchable, so
-// it would measure the prefetcher rather than the load latency the chase is
-// there to expose. The permutation is a fixed-seed LCG so two runs of the
-// harness walk the same cycle and their numbers are comparable.
-void
-seed_pointer_chase(std::vector<uint8_t> &memory)
+// The address range a pointer chase can cover with `width`-byte loads, and the
+// node stride inside it.
+//
+// A chase node has to hold the address of the next node, so a narrow load can
+// only chase as far as its loaded value reaches -- and for the sign-extending
+// loads (LB, LH) only half of that, since a negative value is not an address.
+// LW reaches all of guest memory; LHU reaches all of it too; LH half; LBU and
+// LB only the first 256 and 128 bytes. The narrow ones therefore measure
+// load-use *latency* without cache pressure, which is still the thing a
+// single-opcode throughput sweep cannot see.
+struct ChaseGeometry {
+  uint32_t range = 0;  // addresses live in [0, range)
+  uint32_t stride = 0; // bytes between nodes
+};
+
+ChaseGeometry
+chase_geometry(Op op, uint32_t memory_bytes)
 {
-  const uint32_t nodes = static_cast<uint32_t>(memory.size()) / kChaseStride;
+  switch (op) {
+  case Op::kLw:
+    return {.range = memory_bytes, .stride = kChaseStride};
+  case Op::kLhu:
+    return {.range = std::min<uint32_t>(memory_bytes, 0x10000),
+            .stride = kChaseStride};
+  case Op::kLh:
+    return {.range = std::min<uint32_t>(memory_bytes, 0x8000),
+            .stride = kChaseStride};
+  case Op::kLbu:
+    return {.range = 256, .stride = 4};
+  case Op::kLb:
+    return {.range = 128, .stride = 4};
+  default:
+    return {};
+  }
+}
+
+// Writes a single shuffled cycle through the chase nodes: the value at node i
+// is the address of node next(i), stored in `width` bytes. A shuffle rather
+// than a fixed stride is the point -- a strided walk is prefetchable, so it
+// would measure the prefetcher rather than the load latency the chase exists to
+// expose. The permutation is a fixed-seed LCG so two runs walk the same cycle
+// and their numbers are comparable.
+void
+seed_pointer_chase(std::vector<uint8_t> &memory, const ChaseGeometry &geometry,
+                   uint32_t width)
+{
+  if (geometry.stride == 0 || geometry.range > memory.size()) {
+    return;
+  }
+  const uint32_t nodes = geometry.range / geometry.stride;
   if (nodes < 2) {
     return;
   }
@@ -303,12 +350,11 @@ seed_pointer_chase(std::vector<uint8_t> &memory)
     std::swap(order[i], order[j]);
   }
   for (uint32_t i = 0; i < nodes; ++i) {
-    const uint32_t from = order[i] * kChaseStride;
-    const uint32_t to = order[(i + 1) % nodes] * kChaseStride;
-    memory[from] = static_cast<uint8_t>(to);
-    memory[from + 1] = static_cast<uint8_t>(to >> 8);
-    memory[from + 2] = static_cast<uint8_t>(to >> 16);
-    memory[from + 3] = static_cast<uint8_t>(to >> 24);
+    const uint32_t from = order[i] * geometry.stride;
+    const uint32_t to = order[(i + 1) % nodes] * geometry.stride;
+    for (uint32_t byte = 0; byte < width; ++byte) {
+      memory[from + byte] = static_cast<uint8_t>(to >> (byte * 8));
+    }
   }
 }
 
@@ -324,7 +370,7 @@ address_base_value(WorkingSet working_set, uint32_t index)
 // Encodes one target instance. `index` is the target's ordinal within the body,
 // which drives the rotating destination bank and the memory address walk.
 uint32_t
-target_word(const KernelSpec &spec, uint32_t index)
+target_word(const KernelSpec &spec, uint32_t index, uint32_t slot)
 {
   const Encoding encoding = encoding_for(spec.target);
   const bool chain = spec.context == OperandContext::kChain;
@@ -357,6 +403,31 @@ target_word(const KernelSpec &spec, uint32_t index)
         chain ? kChainReg
               : static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
     return test_program::u_type(encoding.opcode, rd, 0x0002F000U);
+  }
+  if (spec.target == Op::kJalr) {
+    // A JALR that lands on the instruction after itself: a real indirect
+    // control transfer that leaves the retired instruction sequence unchanged,
+    // which is what lets it sit in a body slot at all. Same idea as the
+    // taken-branch form.
+    //
+    // The target is rs1 + imm with the low bit cleared. rs1 holds a fixed base
+    // (the body's midpoint, staged by the prologue), so the immediate carries
+    // the whole per-slot offset: imm = (this slot's pc + 4) - base. A 12-bit
+    // signed immediate reaches +/-2048 bytes, and anchoring at the midpoint
+    // puts every slot of a 512-instruction body inside that -- which is why
+    // the base is the midpoint and not the start.
+    //
+    // rd rotates over the data bank so the link writes do not serialize.
+    const uint8_t rd =
+        chain ? kChainReg
+              : static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
+    // Both the slot after this one and the base are offsets from the same
+    // origin, so the origin cancels and the immediate is purely relative.
+    const auto midpoint = static_cast<int32_t>(spec.body_slots / 2);
+    const auto imm =
+        static_cast<int32_t>((static_cast<int32_t>(slot) + 1 - midpoint) *
+                             static_cast<int32_t>(kInstructionBytes));
+    return test_program::jalr(rd, kJalrBaseReg, imm);
   }
   if (is_branch_target(spec.target)) {
     const BranchOperands operands =
@@ -442,6 +513,16 @@ target_word(const KernelSpec &spec, uint32_t index)
 std::array<uint32_t, 2>
 pair_words(const KernelSpec &spec, uint32_t index)
 {
+  if (spec.pair == PairKind::kAuipcJalr) {
+    // `auipc rX, 0` puts its own pc in rX; the jalr then targets rX + 8, which
+    // is the instruction after the jalr. Control lands where it would have
+    // anyway, so the retired sequence is unchanged, and the pair is the exact
+    // shape fuse_auipc_jalr matches.
+    const auto link =
+        static_cast<uint8_t>(kDataBankBase + (index % kDataBankSize));
+    return {test_program::u_type(0x17U, kChainReg, 0),
+            test_program::jalr(link, kChainReg, 2 * kInstructionBytes)};
+  }
   constexpr uint8_t kWordFunct3 = 2; // sw / lw
   const auto store_offset =
       static_cast<int32_t>((index * 64U) % 2048U); // aligned, line-strided
@@ -455,6 +536,12 @@ pair_words(const KernelSpec &spec, uint32_t index)
 }
 
 } // namespace
+
+bool
+pair_expects_fusion(PairKind pair)
+{
+  return pair == PairKind::kAuipcJalr;
+}
 
 uint32_t
 slots_per_target(const KernelSpec &spec)
@@ -486,6 +573,8 @@ pair_name(PairKind pair)
     return "sw;lw forward";
   case PairKind::kStoreLoadDistinct:
     return "sw;lw distinct";
+  case PairKind::kAuipcJalr:
+    return "auipc;jalr";
   default:
     return "none";
   }
@@ -578,9 +667,14 @@ emit_prologue(std::vector<uint32_t> &words, WorkingSet working_set,
                         static_cast<int32_t>(
                             address_base_value(working_set, i)));
   }
-  // The last instruction emitted is an addi from emit_load_immediate. An
-  // R-type filler placed after it cannot fuse (the ALU-ALU rule pairs addi
-  // only with addi or sll), which is what pins the prologue/body boundary.
+  // The JALR base, always a two-word lui+addi so its length does not depend on
+  // the value, and always last so a caller can patch it at a known index once
+  // it knows where the body landed (build_kernel does). It also ends the
+  // prologue on an `addi`: an R-type filler placed after it cannot fuse, since
+  // the ALU-ALU rule pairs addi only with addi or sll, which is what pins the
+  // prologue/body boundary.
+  words.push_back(test_program::u_type(0x37U, kJalrBaseReg, 0));
+  words.push_back(test_program::addi(kJalrBaseReg, kJalrBaseReg, 0));
 }
 
 std::expected<uint64_t, KernelError>
@@ -625,10 +719,10 @@ bool
 is_measurable_target(Op op)
 {
   switch (op) {
-  // Excluded by construction: JAL/JALR need a per-slot rewritten target,
-  // ECALL/EBREAK/UNIMP end the run, and FENCE is not a body-shaped op.
+  // Excluded by construction: JAL's target is encoded in the instruction and
+  // would have to be rewritten per slot, ECALL/EBREAK/UNIMP end the run, and
+  // FENCE is not a body-shaped op. JALR is measurable -- see target_word.
   case Op::kJal:
-  case Op::kJalr:
   case Op::kFence:
   case Op::kEcall:
   case Op::kEbreak:
@@ -644,6 +738,12 @@ bool
 is_memory_target(Op op)
 {
   return is_load(op) || is_store(op);
+}
+
+bool
+is_load_target(Op op)
+{
+  return is_load(op);
 }
 
 bool
@@ -694,7 +794,9 @@ working_set_name(WorkingSet working_set)
   case WorkingSet::kFullRange:
     return "full_64k";
   case WorkingSet::kPointerChase:
-    return "chase_64k";
+    return "chase";
+  case WorkingSet::kSameAddress:
+    return "same_addr";
   default:
     return "none";
   }
@@ -777,7 +879,7 @@ build_kernel(const KernelSpec &spec)
   for (uint32_t ordinal = 0; ordinal < target_slot_indices.size(); ++ordinal) {
     const uint32_t slot = target_slot_indices[ordinal];
     if (spec.pair == PairKind::kNone) {
-      body[slot] = target_word(spec, ordinal);
+      body[slot] = target_word(spec, ordinal, slot);
       continue;
     }
     const std::array<uint32_t, 2> words = pair_words(spec, ordinal);
@@ -787,6 +889,19 @@ build_kernel(const KernelSpec &spec)
 
   std::vector<uint32_t> words = prologue;
   const auto body_start_index = static_cast<uint32_t>(words.size());
+  // Patch the JALR base now that the body's address is known; emit_prologue
+  // left the two words that materialize it at the end of the prologue.
+  // Anchoring at the body's midpoint is what keeps every slot's immediate
+  // inside JALR's 12-bit signed reach.
+  {
+    const uint32_t base_address =
+        (body_start_index + (spec.body_slots / 2)) * kInstructionBytes;
+    const int32_t lo = static_cast<int32_t>(base_address << 20) >> 20;
+    const uint32_t hi = base_address - static_cast<uint32_t>(lo);
+    words[body_start_index - 2] = test_program::u_type(0x37U, kJalrBaseReg, hi);
+    words[body_start_index - 1] =
+        test_program::addi(kJalrBaseReg, kJalrBaseReg, lo);
+  }
   words.insert(words.end(), body.begin(), body.end());
   // Loop control: decrement and branch back to the body head. This pair fuses
   // (fuse_alu_branch) into one slot, which is fine -- it is identical in every
@@ -809,7 +924,9 @@ build_kernel(const KernelSpec &spec)
   kernel.memory_bytes = kMaxMemoryBytes;
   kernel.initial_memory.assign(kMaxMemoryBytes, 0);
   if (spec.working_set == WorkingSet::kPointerChase) {
-    seed_pointer_chase(kernel.initial_memory);
+    seed_pointer_chase(kernel.initial_memory,
+                       chase_geometry(spec.target, kernel.memory_bytes),
+                       memory_access_width(spec.target));
   }
   kernel.body_start_pc = body_start_index * kInstructionBytes;
   for (const uint32_t slot : target_slot_indices) {

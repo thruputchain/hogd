@@ -54,6 +54,8 @@ inline constexpr uint8_t kChainReg = 13;
 // Rotating filler destinations.
 inline constexpr uint8_t kFillerDstBase = 14;
 inline constexpr uint8_t kFillerDstSize = 4; // x14..x17
+// Holds the address a JALR's immediate is measured from; see target_word.
+inline constexpr uint8_t kJalrBaseReg = 31;
 // Address bases for memory targets, spread over the working set.
 inline constexpr uint8_t kAddressBankBase = 18;
 inline constexpr uint8_t kAddressBankSize = 8; // x18..x25
@@ -98,6 +100,11 @@ enum class WorkingSet : uint8_t {
   // the schedule has to be able to afford. LW only -- a narrower load cannot
   // carry a pointer.
   kPointerChase,
+  // Every store to one address. A store produces no value, so it cannot chain
+  // through its result the way a load can -- but repeatedly hitting one address
+  // contends for the same store-buffer entry, which is the arrangement that
+  // costs a store the most and which an independent-address sweep cannot see.
+  kSameAddress,
 };
 
 // Operand magnitude class for the variable-latency M-extension ops. x86 integer
@@ -135,6 +142,10 @@ enum class PairKind : uint8_t {
   // sw rX, off(base) ; lw rX, off'(base) -- stores and loads use disjoint
   // regions, so nothing forwards. The control.
   kStoreLoadDistinct,
+  // auipc rX, 0 ; jalr rY, rX, 8 -- the pc-relative call idiom, and the pair
+  // fuse_auipc_jalr exists for. The jalr lands on the instruction after itself,
+  // so the retired sequence is unchanged.
+  kAuipcJalr,
 };
 
 struct KernelSpec {
@@ -212,6 +223,9 @@ enum class KernelError {
 // True if the op reads or writes guest memory.
 [[nodiscard]] bool is_memory_target(Op op);
 
+// True if the op reads memory.
+[[nodiscard]] bool is_load_target(Op op);
+
 // True if the op is a conditional branch (a run barrier in the threaded
 // lowering, so its marginal cost includes one extra enter_run).
 [[nodiscard]] bool is_branch_target(Op op);
@@ -221,6 +235,17 @@ enum class KernelError {
 [[nodiscard]] std::string working_set_name(WorkingSet working_set);
 [[nodiscard]] std::string magnitude_name(OperandMagnitude magnitude);
 [[nodiscard]] std::string pair_name(PairKind pair);
+
+// True when the lowering is *expected* to fuse this pair, so the audit should
+// require that it did rather than that it did not.
+//
+// Most substitutions must lower one slot per instruction, or the slope is not a
+// per-instruction cost. A pair chosen precisely because the engine fuses it --
+// auipc;jalr, the pc-relative call idiom -- inverts that: fusion is the thing
+// being measured, and its absence would mean the sweep is measuring something
+// else. Either way the audit checks the lowering against intent; only the
+// direction of the expectation changes.
+[[nodiscard]] bool pair_expects_fusion(PairKind pair);
 
 // Instructions one substitution places: 2 for a pair, 1 otherwise.
 [[nodiscard]] uint32_t slots_per_target(const KernelSpec &spec);
