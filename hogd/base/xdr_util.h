@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <span>
 #include <type_traits>
 #include <vector>
@@ -25,7 +24,6 @@
 #include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
-#include "x23/x23.h"
 
 namespace hogd {
 
@@ -427,70 +425,7 @@ show_byte_array(const std::array<uint8_t, N> &array)
 #endif
 }
 
-// [x23::Ptr<T>] serializes as an XDR optional -- a 4-byte presence tag
-// followed by the object -- and its value constructor takes the object *by
-// value*.  Building a reply out of [x23::Ptr] is therefore a deep copy of
-// whatever it points at, which is pure waste when the object is already live
-// and owned somewhere else.
-//
-// [XdrSharedPtr] writes those same bytes from a [std::shared_ptr], so a
-// handler can answer with a pointer *into* live state instead of a copy of
-// it.  The shared_ptr keeps that state alive for exactly as long as it has to
-// be: x23 serializes a handler's return value while it is still in scope (see
-// the [make_record] calls in x23/rpc.h), so the reply holds a reference until
-// the bytes have been written.
-//
-// The caller is responsible for the one thing a copy would have given it for
-// free: the pointee must not be mutated while a reply holding it is in
-// flight.  Point it at state that is immutable once published.
-template<typename T> struct XdrSharedPtr : std::shared_ptr<const T> {
-  using super = std::shared_ptr<const T>;
-  using value_type = T;
-
-  using super::super;
-
-  XdrSharedPtr() = default;
-  explicit XdrSharedPtr(super p) : super(std::move(p)) {}
-};
-
-// [x23::xdr_size] is qualified here on purpose: [T] lives in namespace [hogd]
-// too, so unqualified lookup would find only this overload set and never
-// x23's.
-template<typename T>
-inline size_t
-xdr_size(const XdrSharedPtr<T> &p)
-{
-  if (p) {
-    return 4UZ + x23::xdr_size(*p);
-  }
-  return 4UZ;
-}
-
-template<typename T>
-inline void
-xdr_serialize(auto &serializer, const XdrSharedPtr<T> &p)
-{
-  if (p) {
-    serializer.put32(1);
-    serializer(*p);
-  }
-  else {
-    serializer.put32(0);
-  }
-}
-
 } // namespace hogd
-
-namespace x23 {
-
-// Declares that an [XdrSharedPtr<X>] may stand in wherever the wire type is
-// [Ptr<X>].  x23 composes this itself for vectors, arrays and pointers, so
-// declaring it for the element type is enough to let an [XdrVec<XdrSharedPtr>]
-// answer an RPC whose declared return is a vector of optionals.
-template<typename X>
-struct serialize_equiv<Ptr<X>, hogd::XdrSharedPtr<X>> : std::true_type {};
-
-} // namespace x23
 
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept

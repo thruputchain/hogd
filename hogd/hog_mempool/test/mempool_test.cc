@@ -985,6 +985,37 @@ TEST(Mempool, SubmitVettedMalformedBatchDoesNotCrash)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
+// [LookupTransactionsReply] exists to change who owns the bytes, not what the
+// bytes are.  Pin that against the wire type the RPC actually declares.
+static_assert(
+    x23::serializes_like<LookupTransactionsReply, OptSignedTransactionBatch>);
+
+TEST(Mempool, LookupReplySerializesLikeTheDeclaredWireType)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  const auto first = std::make_shared<const SignedTransaction>(txs[0]);
+  const auto second = std::make_shared<const SignedTransaction>(txs[1]);
+
+  // Present / absent / present, so the presence tags are exercised in the
+  // shape a lookup reply actually produces them.
+  LookupTransactionsReply borrowed;
+  const SignedTransaction *first_slot = borrowed.pin(first);
+  const SignedTransaction *second_slot = borrowed.pin(second);
+  borrowed.push_back(first_slot);
+  borrowed.push_back(nullptr);
+  borrowed.push_back(second_slot);
+
+  OptSignedTransactionBatch owned;
+  owned.push_back(x23::Ptr<SignedTransaction>(txs[0]));
+  owned.push_back(nullptr);
+  owned.push_back(x23::Ptr<SignedTransaction>(txs[1]));
+
+  EXPECT_EQ(xdr_size(borrowed), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(borrowed), x23::serialize(owned));
+}
+
 TEST(Mempool, LookupPreservesPositionsForMissingHashes)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1039,21 +1070,20 @@ TEST(Mempool, LookupAnswersRepeatedHashWithoutCopyingTheTransaction)
       server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
 
   ASSERT_EQ(result.size(), kRepeats);
-  for (const XdrSharedPtr<SignedTransaction> &tx : result) {
-    ASSERT_TRUE(tx);
-    EXPECT_EQ(*tx, txs[0]);
+  for (size_t i = 0; i < result.size(); i++) {
+    ASSERT_NE(result[i].get(), nullptr);
+    EXPECT_EQ(*result[i], txs[0]);
   }
 
-  // Every slot points at the *same* transaction the scheduler holds -- this
-  // is the regression guard against reintroducing a per-slot deep copy, which
-  // is what made a repeated hash a memory-amplification primitive.
-  const SignedTransaction *first = &*result[0];
-  for (const XdrSharedPtr<SignedTransaction> &tx : result) {
-    EXPECT_EQ(&*tx, first);
+  // Every slot points at the *same* transaction the scheduler holds.  This is
+  // the regression guard against reintroducing a per-slot deep copy, which is
+  // what made a repeated hash a memory-amplification primitive.
+  const SignedTransaction *scheduled =
+      server.mempool_coord_rpc().scheduler()->find_tx(sha256(txs[0].tx)).get();
+  ASSERT_NE(scheduled, nullptr);
+  for (size_t i = 0; i < result.size(); i++) {
+    EXPECT_EQ(result[i].get(), scheduled);
   }
-  EXPECT_EQ(
-      &*result[0],
-      server.mempool_coord_rpc().scheduler()->find_tx(sha256(txs[0].tx)).get());
 }
 
 TEST(Mempool, LookupRejectsBatchThatWouldOverrunTheReplyBudget)

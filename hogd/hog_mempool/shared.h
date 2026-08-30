@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <sys/socket.h>
@@ -32,6 +33,7 @@
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -84,6 +86,79 @@ create_client(const std::string &host, uint16_t port, bool retry = false,
 {
   x23::HostPort host_port{host.c_str(), port};
   return create_client<T>(host_port, retry, max_message_size);
+}
+
+// The reply to [schedcoord_lookup_transactions] / [schedgateway_lookup_tx].
+//
+// This serializes exactly like the [OptSignedTransactionBatch] those RPCs
+// declare -- one optional [SignedTransaction] per requested hash -- but a slot
+// is an [x23::BorrowedPtr] into a transaction the scheduler still owns, not a
+// copy of one.  [x23::Ptr]'s value constructor takes its argument *by value*,
+// so building the reply out of [x23::Ptr] deep-copied every transaction it
+// resolved; a borrowed slot is eight bytes, and a repeated hash costs eight
+// bytes again rather than another transaction.
+//
+// x23 serializes a handler's return value while it is still in scope (the
+// [make_record] calls in x23/rpc.h), so the reply only has to outlive itself:
+// [pins_] holds one reference per *distinct* resolved transaction, which keeps
+// every borrowed pointee valid until the bytes are written.  That is not
+// theoretical -- [Scheduler::txs_] entries are erased concurrently by the
+// expiry sweep, by [schedule()], and by [remove_from_scheduler].
+//
+// Borrowing is safe without holding the scheduler's shard lock because a
+// transaction is immutable once in [txs_]: [add_txs_helper] writes it through
+// [find_or_insert] and nothing modifies it afterwards.
+class LookupTransactionsReply {
+public:
+  using slot_type = x23::BorrowedPtr<const SignedTransaction>;
+
+  void reserve(size_t slots) { slots_.reserve(slots); }
+  size_t size() const { return slots_.size(); }
+  slot_type operator[](size_t i) const { return slots_[i]; }
+
+  void clear()
+  {
+    slots_.clear();
+    pins_.clear();
+  }
+
+  // Takes a reference to [tx] for the life of the reply and returns the
+  // pointer that slots should borrow.  Call once per distinct transaction; a
+  // null [tx] pins nothing and yields an absent slot.
+  const SignedTransaction *pin(std::shared_ptr<const SignedTransaction> tx)
+  {
+    if (!tx) {
+      return nullptr;
+    }
+    const SignedTransaction *ret = tx.get();
+    pins_.push_back(std::move(tx));
+    return ret;
+  }
+
+  // Appends one slot borrowing [tx], which must have come from [pin] (or be
+  // null, for a hash that did not resolve).
+  void push_back(const SignedTransaction *tx) { slots_.push_back(tx); }
+
+  const x23::XdrVec<slot_type> &slots() const { return slots_; }
+
+private:
+  x23::XdrVec<slot_type> slots_;
+  std::vector<std::shared_ptr<const SignedTransaction>> pins_;
+};
+
+// Serialization forwards to [slots_]; x23 already knows that a vector of
+// [BorrowedPtr] serializes like a vector of [Ptr], so there is no new wire
+// encoding here, only a different owner for the bytes' backing store.
+inline size_t
+xdr_size(const LookupTransactionsReply &reply)
+{
+  return x23::xdr_size(reply.slots());
+}
+
+inline void
+xdr_serialize(auto &serializer, const LookupTransactionsReply &reply)
+{
+  serializer(reply.slots());
 }
 
 class MempoolMetrics {
@@ -307,3 +382,14 @@ MempoolMetrics::init()
 }
 
 } // namespace hogd
+
+namespace x23 {
+
+// Lets [LookupTransactionsReply] stand in wherever the declared wire type is
+// [OptSignedTransactionBatch], which is what allows the lookup RPCs to return
+// it directly.
+template<>
+struct serialize_equiv<hogd::OptSignedTransactionBatch,
+                       hogd::LookupTransactionsReply> : std::true_type {};
+
+} // namespace x23
