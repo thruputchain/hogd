@@ -2307,7 +2307,7 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
-TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
+TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -2353,12 +2353,17 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
     return res_validate;
   };
 
-  for (size_t blocks_elapsed = 0;
-       blocks_elapsed <
-       MempoolCoordinatorRpc::kFailedAuthenticationTxsBlockExpiryDelta;
-       blocks_elapsed++) {
-    expect_validation_outcome(
-        SchedulerValidationResult::SchedulerValidationInvalid);
+  // A local auth failure says nothing about the signatures a proposer holds.
+  // [TransactionHash] covers [Transaction] and deliberately excludes
+  // signatures, so a transaction we could not authenticate may be correctly
+  // signed elsewhere on the network. Validation must ask the coordinator for
+  // the authoritative [SignedTransaction] instead of voting the block invalid,
+  // and must keep doing so however many blocks elapse.
+  for (size_t blocks_elapsed = 0; blocks_elapsed < 5; blocks_elapsed++) {
+    SchedulerValidationResult res_missing = expect_validation_outcome(
+        SchedulerValidationResult::SchedulerValidationMissingTxs);
+    ASSERT_EQ(res_missing.missing_tx_hashes().size(), 1UL);
+    EXPECT_EQ(res_missing.missing_tx_hashes()[0], tx_hash);
 
     // Now commit an empty block.
     SchedulerGetTipResult get_tip =
@@ -2379,6 +2384,110 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
       SchedulerValidationResult::SchedulerValidationMissingTxs);
   ASSERT_EQ(res_validate.missing_tx_hashes().size(), 1UL);
   EXPECT_EQ(res_validate.missing_tx_hashes()[0], tx_hash);
+}
+
+// [TransactionHash] hashes [Transaction] and deliberately excludes signatures
+// so that a third party cannot change an in-flight transaction's identity. A
+// failed authentication is therefore a verdict about particular signature
+// bytes, while the hash naming it covers every signing of that transaction.
+// An attacker who takes a validly signed transaction, corrupts its signatures
+// and submits the result must not be able to move this node's verdict on a
+// block carrying the genuine transaction.
+TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+
+  // The genuine transaction, correctly signed.
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(
+      sk, tx, /*public_key_id=*/0, MempoolTestInfra::kNetworkHash));
+
+  // The attacker's copy: identical [Transaction], corrupted signature bytes.
+  // The two share a [TransactionHash], which is what makes the attack possible.
+  SignedTransaction poisoned_tx = txs[0];
+  DecoratedSignature bad_signature = make_signature(
+      sk, tx, /*public_key_id=*/0, MempoolTestInfra::kNetworkHash);
+  bad_signature.signature.ed25519()[0] ^= 0xff;
+  poisoned_tx.signatures.push_back(bad_signature);
+
+  const TransactionHash tx_hash = sha256(tx);
+  ASSERT_EQ(sha256(poisoned_tx.tx), tx_hash);
+
+  // The attacker submits the corrupted copy over the unauthenticated path. It
+  // must fail authentication and must not be admitted.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  // A proposal carrying the genuine transaction must come back as MissingTxs,
+  // so the coordinator is asked for the authoritative [SignedTransaction].
+  // Voting Invalid here would reject a perfectly good block on the strength of
+  // signature bytes this node was handed by an anonymous submitter.
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  TransactionHashBatch tx_hashes{tx_hash};
+  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+      NondeterministicProposalData{}};
+  Proposal poisoned_proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height =
+                     get_tip.db_tip().value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .nondeterministic_data =
+                           t_to_parallel_batch(tx_nondeterministic_data)()}};
+
+  SchedulerValidationResult res_poisoned =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, poisoned_proposal)();
+  ASSERT_EQ(res_poisoned.outcome(),
+            SchedulerValidationResult::SchedulerValidationMissingTxs);
+  ASSERT_EQ(res_poisoned.missing_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_poisoned.missing_tx_hashes()[0], tx_hash);
+
+  // Once the genuine transaction arrives the same hash validates normally: the
+  // earlier authentication failure left no residue behind.
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal good_proposal = res_nominate.proposed_block().proposal;
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+
+  SchedulerValidationResult res_good =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, good_proposal)();
+  EXPECT_EQ(res_good.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
 }
 
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)
