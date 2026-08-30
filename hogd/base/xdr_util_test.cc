@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <random>
 #include <span>
 #include <type_traits>
@@ -17,6 +18,7 @@
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -308,6 +310,95 @@ TEST(ParallelBatchToTTest, RejectsBoundedVectorLengthError)
 
   x23::XdrVec<BoundedUint32Vec> parsed;
   EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+}
+
+namespace {
+
+SignedTransaction
+make_test_transaction(std::uint64_t nonce, size_t calldata_bytes)
+{
+  SignedTransaction tx{};
+  tx.tx.uniquifier.nonce = nonce;
+  tx.tx.invocation.gas_limit = 1234;
+  tx.tx.invocation.calldata.resize(calldata_bytes);
+  for (size_t i = 0; i < calldata_bytes; i++) {
+    tx.tx.invocation.calldata[i] = static_cast<std::uint8_t>(i + nonce);
+  }
+  return tx;
+}
+
+} // namespace
+
+// The whole point of [XdrSharedPtr] is that it is wire-indistinguishable from
+// the [x23::Ptr] an RPC's declared return type names, so pin that rather than
+// trusting the type system to have meant it.
+TEST(XdrSharedPtrTest, SerializesByteForByteLikeXdrPtr)
+{
+  const SignedTransaction tx = make_test_transaction(/*nonce=*/7,
+                                                     /*calldata_bytes=*/37);
+
+  const x23::Ptr<SignedTransaction> owned(tx);
+  const XdrSharedPtr<SignedTransaction> borrowed(
+      std::make_shared<const SignedTransaction>(tx));
+
+  EXPECT_EQ(xdr_size(borrowed), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(borrowed), x23::serialize(owned));
+}
+
+TEST(XdrSharedPtrTest, NullSerializesLikeNullXdrPtr)
+{
+  const x23::Ptr<SignedTransaction> owned(nullptr);
+  const XdrSharedPtr<SignedTransaction> borrowed;
+
+  EXPECT_FALSE(borrowed);
+  EXPECT_EQ(xdr_size(borrowed), 4UL);
+  EXPECT_EQ(xdr_size(borrowed), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(borrowed), x23::serialize(owned));
+}
+
+TEST(XdrSharedPtrTest, VectorOfBorrowedPointersMatchesVectorOfXdrPtrs)
+{
+  const SignedTransaction first = make_test_transaction(/*nonce=*/1,
+                                                        /*calldata_bytes=*/0);
+  const SignedTransaction second = make_test_transaction(/*nonce=*/2,
+                                                         /*calldata_bytes=*/64);
+
+  // A present/absent/present mix, so the presence tags are exercised in the
+  // position the lookup reply actually produces them.
+  x23::XdrVec<x23::Ptr<SignedTransaction>> owned;
+  owned.push_back(x23::Ptr<SignedTransaction>(first));
+  owned.push_back(nullptr);
+  owned.push_back(x23::Ptr<SignedTransaction>(second));
+
+  x23::XdrVec<XdrSharedPtr<SignedTransaction>> borrowed;
+  borrowed.push_back(XdrSharedPtr<SignedTransaction>(
+      std::make_shared<const SignedTransaction>(first)));
+  borrowed.push_back({});
+  borrowed.push_back(XdrSharedPtr<SignedTransaction>(
+      std::make_shared<const SignedTransaction>(second)));
+
+  EXPECT_EQ(x23::xdr_size(borrowed), x23::xdr_size(owned));
+  EXPECT_EQ(x23::serialize(borrowed), x23::serialize(owned));
+}
+
+// [XdrSharedPtr] must be accepted anywhere the wire type is a [Ptr], which is
+// what lets a handler return it from an RPC declared to return optionals.
+static_assert(
+    x23::serializes_like<x23::XdrVec<XdrSharedPtr<SignedTransaction>>,
+                         x23::Vec<x23::Ptr<SignedTransaction>, 0xffffffff>>);
+
+// Borrowing must not copy: the pointee address the reply serializes is the one
+// the caller handed in.
+TEST(XdrSharedPtrTest, PointsAtTheOriginalObjectRatherThanACopy)
+{
+  const std::shared_ptr<const SignedTransaction> tx =
+      std::make_shared<const SignedTransaction>(
+          make_test_transaction(/*nonce=*/3, /*calldata_bytes=*/16));
+
+  const XdrSharedPtr<SignedTransaction> borrowed(tx);
+
+  EXPECT_EQ(&*borrowed, tx.get());
+  EXPECT_EQ(tx.use_count(), 2L);
 }
 
 } // namespace hogd

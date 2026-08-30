@@ -91,14 +91,14 @@ public:
   // runs one [Scheduler::find_tx] per hash without ever suspending, pinning a
   // worker from the pool that also serves nomination and validation.
   //
-  // [kMaxLookupTransactionsReplyBytes] bounds the reply: each resolved hash
-  // is copied into the reply through [x23::Ptr]'s value constructor, which
-  // takes its argument by value, so it is a full deep copy of a transaction
-  // whose [Calldata] is unbounded on the wire.  Nothing de-duplicates the
-  // request, so N copies of one hash cost N copies of that transaction --
-  // 524,288 repetitions of a 1 MB transaction is ~500 GB of heap demanded
-  // before a single byte is serialized.  The count limit alone does not close
-  // that, because the per-transaction size is itself unbounded.
+  // [kMaxLookupTransactionsReplyBytes] bounds the reply.  The handler borrows
+  // rather than copies (see [XdrSharedPtr]), so a resolved hash costs a
+  // refcount rather than a transaction -- but the serialized reply is still
+  // built whole in memory by [make_record], and a [SignedTransaction]'s
+  // [Calldata] is unbounded on the wire.  Nothing de-duplicates the request,
+  // so one hash repeated N times still serializes N copies of that
+  // transaction.  The count limit alone does not bound that, because the
+  // per-transaction size is itself unbounded.
   static constexpr size_t kMaxLookupTransactionsBatchSize = 4'096;
   static constexpr size_t kMaxLookupTransactionsReplyBytes = 0x100'0000;
 
@@ -332,10 +332,18 @@ public:
   // empty vector, which is how a caller tells the two apart.  This surface is
   // reachable unauthenticated, so see [kMaxLookupTransactionsBatchSize] and
   // [kMaxLookupTransactionsReplyBytes] for what "rejected" covers.
-  x23::Async<x23::XdrVec<x23::Ptr<SignedTransaction>>>
+  //
+  // The reply borrows the scheduler's transactions rather than copying them.
+  // [XdrSharedPtr] writes the same bytes as the [x23::Ptr] the wire type
+  // declares, and each element holds a reference to the transaction it points
+  // at, so nothing can free it out from under x23's serializer -- which is
+  // what a copy was protecting against.  Transactions are immutable once in
+  // [Scheduler::txs_] (written once by [add_txs_helper]'s [find_or_insert] and
+  // never modified), so borrowing one is safe without holding the shard lock.
+  x23::Async<x23::XdrVec<XdrSharedPtr<SignedTransaction>>>
   schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
   {
-    x23::XdrVec<x23::Ptr<SignedTransaction>> ret;
+    x23::XdrVec<XdrSharedPtr<SignedTransaction>> ret;
 
     // Checked before [ready()] so that the pre-ready reply, which is sized to
     // the request, is bounded too.
@@ -355,35 +363,29 @@ public:
     }
     ret.reserve(tx_hashes.size());
 
-    // [Scheduler::find_tx] takes a shard lock of [txs_] and a batch is free to
-    // repeat a hash, so resolve each distinct hash once.  The reply still
-    // carries one slot per requested hash: [x23::Ptr] is a [std::unique_ptr],
-    // so repeated hashes cannot share a copy, which is why the byte budget
-    // below -- not this map -- is what bounds a duplicate-heavy request.
+    // [Scheduler::find_tx] takes a shard lock of [txs_], and a batch is free
+    // to repeat a hash, so resolve each distinct hash once.  Without this, a
+    // batch of one hash repeated [kMaxLookupTransactionsBatchSize] times takes
+    // the same shard mutex that many times, contending with the admission and
+    // removal paths that also hold it.
     std::unordered_map<TransactionHash,
                        std::shared_ptr<const SignedTransaction>,
                        SipHash24Hasher>
         resolved;
-    size_t reply_bytes = 0;
+
+    // The exact size of the reply x23 will build: the vector's length prefix,
+    // plus each element as [XdrSharedPtr] serializes it.  Charged as we go so
+    // an oversize reply is refused before [make_record] allocates it whole.
+    size_t reply_bytes = 4;
 
     for (const TransactionHash &tx_hash : tx_hashes) {
       auto [resolved_it, inserted] = resolved.try_emplace(tx_hash);
       if (inserted) {
         resolved_it->second = scheduler_->find_tx(tx_hash);
       }
-      const std::shared_ptr<const SignedTransaction> &tx = resolved_it->second;
-      if (!tx) {
-        ret.push_back(nullptr);
-        continue;
-      }
+      XdrSharedPtr<SignedTransaction> tx(resolved_it->second);
 
-      // Charge the copy against the reply budget *before* making it: x23's own
-      // reply-size check runs in [make_record], which is after the whole reply
-      // has been materialized, so it rejects an oversize reply only once the
-      // memory it was supposed to prevent has already been committed.  The
-      // per-element pointer tag and the vector length prefix are not counted;
-      // the budget carries enough slack for them.
-      reply_bytes += x23::xdr_size(*tx);
+      reply_bytes += xdr_size(tx);
       if (reply_bytes > kMaxLookupTransactionsReplyBytes) {
         MempoolMetrics::instance()
             .rejected_oversize_lookup_rpc_count.increment();
@@ -394,18 +396,7 @@ public:
         ret.clear();
         break;
       }
-
-      // This is a bit awkward, but I need to copy [tx] into an [x23::Ptr]
-      // using [x23::Ptr]'s value constructor rather than just use the
-      // existing [tx] pointer. This avoids the issue where [tx] is freed from
-      // the scheduler by another thread before we can serialize and return
-      // the tx from this RPC.
-      //
-      // Even if we hold [scheduler_->global_lock_] to protect the txs rather
-      // than copy them into [tx_store], the lock is released at the end of
-      // this function, which is *before* the txs are accessed and serialized
-      // by x23. So that is still not safe.
-      ret.push_back(x23::Ptr<SignedTransaction>(*tx));
+      ret.push_back(std::move(tx));
     }
 
     co_return ret;

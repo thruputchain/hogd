@@ -1020,7 +1020,7 @@ TEST(Mempool, LookupPreservesPositionsForMissingHashes)
   EXPECT_EQ(*result[3], txs[0]);
 }
 
-TEST(Mempool, LookupAnswersRepeatedHashWithOneCopyPerSlot)
+TEST(Mempool, LookupAnswersRepeatedHashWithoutCopyingTheTransaction)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
@@ -1038,13 +1038,22 @@ TEST(Mempool, LookupAnswersRepeatedHashWithOneCopyPerSlot)
   auto result =
       server.mempool_coord_rpc().schedcoord_lookup_transactions(hashes)();
 
-  // One [find_tx] serves all [kRepeats] slots, but each slot owns its own
-  // copy: [x23::Ptr] is a [std::unique_ptr], so they cannot be shared.
   ASSERT_EQ(result.size(), kRepeats);
-  for (const x23::Ptr<SignedTransaction> &tx : result) {
+  for (const XdrSharedPtr<SignedTransaction> &tx : result) {
     ASSERT_TRUE(tx);
     EXPECT_EQ(*tx, txs[0]);
   }
+
+  // Every slot points at the *same* transaction the scheduler holds -- this
+  // is the regression guard against reintroducing a per-slot deep copy, which
+  // is what made a repeated hash a memory-amplification primitive.
+  const SignedTransaction *first = &*result[0];
+  for (const XdrSharedPtr<SignedTransaction> &tx : result) {
+    EXPECT_EQ(&*tx, first);
+  }
+  EXPECT_EQ(
+      &*result[0],
+      server.mempool_coord_rpc().scheduler()->find_tx(sha256(txs[0].tx)).get());
 }
 
 TEST(Mempool, LookupRejectsBatchThatWouldOverrunTheReplyBudget)
@@ -1053,8 +1062,9 @@ TEST(Mempool, LookupRejectsBatchThatWouldOverrunTheReplyBudget)
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
 
   // [Calldata] is unbounded on the wire and nothing caps a transaction's size
-  // at admission, so the batch limit alone does not bound the reply: a
-  // handful of copies of one big transaction is all it takes.
+  // at admission, so the batch limit alone does not bound the reply: the
+  // handler borrows rather than copies, but the serialized bytes still
+  // multiply by the number of slots.
   constexpr size_t kCalldataBytes = 1UL << 20;
   txs[0].tx.invocation.calldata.resize(kCalldataBytes);
 
@@ -1064,10 +1074,13 @@ TEST(Mempool, LookupRejectsBatchThatWouldOverrunTheReplyBudget)
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
-  const size_t tx_bytes = x23::xdr_size(txs[0]);
-  ASSERT_GT(tx_bytes, 0UL);
+  // Mirror the handler's accounting exactly: a 4-byte vector length prefix,
+  // then per slot a 4-byte presence tag plus the transaction itself.  If the
+  // handler miscounts by even one word, the boundary below moves and this
+  // test fails.
+  const size_t per_slot = 4 + x23::xdr_size(txs[0]);
   const size_t served =
-      MempoolCoordinatorRpc::kMaxLookupTransactionsReplyBytes / tx_bytes;
+      (MempoolCoordinatorRpc::kMaxLookupTransactionsReplyBytes - 4) / per_slot;
   ASSERT_GT(served, 0UL);
   ASSERT_LT(served + 1, MempoolCoordinatorRpc::kMaxLookupTransactionsBatchSize);
 
