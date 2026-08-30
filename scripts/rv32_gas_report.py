@@ -251,6 +251,7 @@ def merge_runs(runs):
     ones.
     """
     merged = {}
+    total_runs = len(runs)
     for data in runs:
         baseline = data["baseline"]["ns_per_filler_instruction"]
         for cell in usable_cells(data):
@@ -273,6 +274,13 @@ def merge_runs(runs):
             entry["ns_per_instruction"] = max(entry["ns_per_instruction"], cost)
             entry["resolved"] = entry["resolved"] and cell_resolved
             entry["runs"] += 1
+    # Unanimity has to mean every run, not every run that happened to contain
+    # the cell. A context missing from one run -- a filtered run, or a sweep the
+    # audit rejected -- would otherwise keep an earlier run's `resolved` and be
+    # treated as reproduced by inputs that never saw it.
+    for entry in merged.values():
+        if entry["runs"] < total_runs:
+            entry["resolved"] = False
     return merged
 
 
@@ -915,6 +923,8 @@ def emit_reference(data):
     print("# what it is for.")
     print()
     print(f"engine_fingerprint {prov.get('engine_fingerprint', 'unknown')}")
+    print(f"engine_source_digest "
+          f"{prov.get('engine_source_digest') or 'unknown'}")
     print(f"# generated from a {prov.get('build_type', 'unknown')} build on "
           f"{describe_run(data)}")
     print(f"tolerance {GUARD_TOLERANCE}")
@@ -939,8 +949,8 @@ def emit_reference(data):
 
 
 def load_reference(path):
-    reference = {"guards": {}, "fingerprint": None, "spread": None,
-                 "tolerance": GUARD_TOLERANCE}
+    reference = {"guards": {}, "fingerprint": None, "source_digest": None,
+                 "spread": None, "tolerance": GUARD_TOLERANCE}
     with open(path) as handle:
         for line in handle:
             line = line.split("#", 1)[0].strip()
@@ -949,6 +959,8 @@ def load_reference(path):
             fields = line.split()
             if fields[0] == "engine_fingerprint" and len(fields) == 2:
                 reference["fingerprint"] = fields[1]
+            elif fields[0] == "engine_source_digest" and len(fields) == 2:
+                reference["source_digest"] = fields[1]
             elif fields[0] == "tolerance" and len(fields) == 2:
                 reference["tolerance"] = float(fields[1])
             elif fields[0] == "workload_spread" and len(fields) == 2:
@@ -996,6 +1008,27 @@ def check_against_reference(data, reference_path):
             "regenerating the reference."
         )
 
+    # A changed source digest warns rather than fails, and the split is
+    # deliberate. A changed behavioural fingerprint means the lowering's
+    # decisions moved -- fusion, gas, limits -- so the old numbers are
+    # definitely about a different engine. A changed source digest only means
+    # the interpreter was edited: the numbers may be fine, or may not. Failing
+    # on every edit would leave the periodic job red through normal development
+    # until somebody regenerated the reference, and a job that is always red is
+    # a job nobody reads.
+    source_digest = prov.get("engine_source_digest")
+    if (reference["source_digest"] and source_digest
+            and source_digest != reference["source_digest"]):
+        warnings.append(
+            f"interpreter source changed since the reference "
+            f"({reference['source_digest']} -> {source_digest}). Fusion, gas "
+            "and limits are\n"
+            "  unchanged, so the guards below still apply, but a handler or "
+            "dispatch edit\n"
+            "  can move costs without moving them. Review and regenerate if "
+            "they did."
+        )
+
     measured = {}
     for cell in usable_cells(data):
         measured[(cell["op"], context_label(cell))] = cell
@@ -1004,7 +1037,17 @@ def check_against_reference(data, reference_path):
     for key, guard in sorted(reference["guards"].items()):
         cell = measured.get(key)
         if cell is None:
-            warnings.append(f"{key[0]} {key[1]}: not measured in this run")
+            # Not a warning. A guard that was not measured was not checked, and
+            # a gate that passes without checking its guards is worse than no
+            # gate: it reports coverage it did not provide. A partial run
+            # (--op=X) or a sweep the audit rejected both land here.
+            failures.append(
+                f"{key[0]} {key[1]}: not measured in this run, so this guard "
+                "was not checked.\n"
+                "  Either the run was filtered (--op=...) or the sweep was "
+                "rejected; either way\n"
+                "  the gate cannot vouch for this cost."
+            )
             continue
         ratio = relative_cost(cell, baseline)
         limit = guard["ratio"] * (1.0 + tolerance)
@@ -1063,6 +1106,7 @@ def check_against_reference(data, reference_path):
 
     print(f"checked {data['_path']} against {reference_path}")
     print(f"  host:        {describe_run(data)}")
+    print(f"  source:      {source_digest or 'unknown'}")
     print(f"  fingerprint: {fingerprint} "
           f"({'matches' if fingerprint == reference['fingerprint'] else 'DIFFERS FROM'}"
           f" reference)")

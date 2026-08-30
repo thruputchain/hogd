@@ -196,7 +196,18 @@ It checks two things.
 **The engine fingerprint.** Pure equality, no timing, so it cannot flake. This
 catches the likeliest failure: a fusion rule or a gas cost is edited and the
 calibration behind the current schedule silently keeps describing the old
-interpreter.
+interpreter. A mismatch fails the check -- the lowering's decisions moved, so
+the old numbers are definitely about a different engine.
+
+**The engine source digest.** The fingerprint records what the lowering
+*decides*; it says nothing about how it does it. Rewrite a handler body, change
+the dispatch path, reorder a slot, and the fusion matrix, gas table and limits
+are all identical while the timings move -- a false negative in the direction
+that matters, since the stale calibration keeps looking current. So CMake also
+hashes the interpreter's sources into the binary. A mismatch *warns* rather than
+fails: unlike a fingerprint change it does not prove the numbers moved, and
+failing on every edit would leave a periodic job red through normal development
+until somebody regenerated the reference, which is how a job stops being read.
 
 **The guarded costs.** How expensive the worst cases are relative to the
 baseline instruction *measured in the same run*. Only cells at or above 1.5x

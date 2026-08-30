@@ -147,12 +147,25 @@ elsewhere.
 
 ## Re-running after an interpreter change
 
-Every calibration JSON records an engine fingerprint: a hash of the gas
-schedule, the engine's structural limits, and which instruction pairs the
-lowering fuses, probed from the engine itself rather than hashed from source
-text. It is stable across compilers, optimization levels, and hosts, and moves
-when the lowering's behaviour moves -- disabling a single fusion rule changes
-it.
+Every calibration JSON records two identifiers for the engine, because one is
+not enough.
+
+The **engine fingerprint** is a hash of the gas schedule, the structural limits,
+and which instruction pairs the lowering fuses, probed from the engine itself
+rather than hashed from source text. It is stable across compilers,
+optimization levels, and hosts, and moves when the lowering's behaviour moves --
+disabling a single fusion rule changes it. A mismatch fails the check.
+
+It has one blind spot, and it is a real one: it records what the lowering
+*decides*, not how it does it. A rewritten handler body or a changed dispatch
+path moves timings while leaving the fusion matrix, gas table and limits
+identical, so the fingerprint sits still and a stale calibration keeps looking
+current. The **engine source digest** covers that -- CMake hashes the
+interpreter's sources into the binary. Verified: bumping one hot-path constant
+in `threaded_machine.h` leaves the fingerprint at `71e9993b` and moves the
+digest. A mismatch warns rather than fails, since unlike a fingerprint change it
+does not prove the numbers moved, and a check that goes red on every interpreter
+edit stops being read.
 
 That makes the check after a `threaded_machine.h` change mechanical:
 

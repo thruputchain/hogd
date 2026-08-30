@@ -33,11 +33,45 @@ target_include_directories(
 # ways that reach the hot path -- -O3, -march, libc++ under clang, LTO. A JSON
 # that does not record the flags cannot be compared with one built differently,
 # and rv32_gas_calibrate refuses to measure a non-Release build outright.
+# Digest of the interpreter's own source. The behavioural fingerprint probes
+# which instruction pairs the lowering fuses, which catches a fusion rule, a gas
+# cost, or a run limit changing -- and misses a change to a handler body, the
+# dispatch path, or the slot layout, all of which move the numbers while leaving
+# the fusion matrix identical. That is a false negative in the direction that
+# matters: an old calibration would keep looking current.
+#
+# Hashing the sources catches those. It is deliberately blunt -- a comment-only
+# edit moves it too -- because the cost of a spurious "re-run the calibration"
+# is a few minutes and the cost of a missed one is a schedule calibrated against
+# an interpreter that no longer exists.
+set(HOGD_RV32_ENGINE_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/../threaded_machine.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../threaded_program.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../isa_ops.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../program.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../program.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../machine.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/../machine.cc
+)
+set(HOGD_RV32_ENGINE_DIGEST_INPUT "")
+foreach(engine_source ${HOGD_RV32_ENGINE_SOURCES})
+  file(SHA256 "${engine_source}" engine_source_hash)
+  string(APPEND HOGD_RV32_ENGINE_DIGEST_INPUT "${engine_source_hash}")
+endforeach()
+string(SHA256 HOGD_RV32_ENGINE_SOURCE_DIGEST
+  "${HOGD_RV32_ENGINE_DIGEST_INPUT}")
+string(SUBSTRING "${HOGD_RV32_ENGINE_SOURCE_DIGEST}" 0 16
+  HOGD_RV32_ENGINE_SOURCE_DIGEST)
+# Re-run CMake when any of them changes, so the digest cannot go stale.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${HOGD_RV32_ENGINE_SOURCES})
+
 string(TOUPPER "${CMAKE_BUILD_TYPE}" HOGD_RV32_GAS_BUILD_TYPE_UPPER)
 target_compile_definitions(
   rv32_gas_calibration
   PUBLIC
   RV32_GAS_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
+  RV32_GAS_ENGINE_SOURCE_DIGEST="${HOGD_RV32_ENGINE_SOURCE_DIGEST}"
   RV32_GAS_CXX_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${HOGD_RV32_GAS_BUILD_TYPE_UPPER}}"
 )
 

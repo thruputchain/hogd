@@ -43,9 +43,14 @@ struct Provenance {
   std::string source_revision;
 
   // Behavioural fingerprint of the engine under measurement: see
-  // engine_fingerprint() below. This is the field that answers "is this number
-  // still about the interpreter I have now".
+  // engine_fingerprint() below.
   std::string engine_fingerprint;
+  // Digest of the interpreter's source, stamped in by CMake. The behavioural
+  // fingerprint catches what the lowering *does* differently; this catches an
+  // edit that changes how it does it -- a handler body, the dispatch path, the
+  // slot layout -- which moves timings while leaving the fusion matrix, gas
+  // table and limits identical. Empty outside CMake.
+  std::string engine_source_digest;
 };
 
 // A hash over what the production lowering *does*, not over its source text.
@@ -67,6 +72,11 @@ struct Provenance {
 // never a handler address -- so the same engine fingerprints identically across
 // hosts, compilers, and ASLR. That is what lets it distinguish "different
 // machine" from "different engine" when comparing two runs.
+//
+// What it does NOT catch is an edit that changes how the lowering does its
+// work without changing what it decides: a rewritten handler body, a different
+// dispatch path, a reordered slot. Those move timings and leave this value
+// alone, so Provenance::engine_source_digest covers them separately.
 [[nodiscard]] std::string engine_fingerprint();
 
 [[nodiscard]] Provenance collect_provenance();

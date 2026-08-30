@@ -187,6 +187,9 @@ collect_provenance()
 #ifdef RV32_GAS_CXX_FLAGS
   provenance.cxx_flags = RV32_GAS_CXX_FLAGS;
 #endif
+#ifdef RV32_GAS_ENGINE_SOURCE_DIGEST
+  provenance.engine_source_digest = RV32_GAS_ENGINE_SOURCE_DIGEST;
+#endif
 #ifdef __OPTIMIZE__
   provenance.optimized = true;
 #endif

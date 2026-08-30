@@ -371,10 +371,36 @@ target_word(const KernelSpec &spec, uint32_t index)
   const uint8_t rs1 = chain ? kChainReg : kSrcLargeReg;
 
   if (chain && is_divide_target(spec.target)) {
-    // Divide by one so the chained dividend keeps its magnitude for the whole
-    // run. Every slot then waits on the previous divide's result, which is the
-    // arrangement a guest author would use to force divider latency rather
-    // than divider throughput -- and so the arrangement gas has to price.
+    // Chain through the dividend: `op x13, x13, one`. Every slot waits on the
+    // previous result, which is the arrangement that forces divider latency
+    // rather than throughput, and so the one gas has to price.
+    //
+    // The operands degenerate, and that is worth stating plainly because it
+    // looks like a bug. DIV keeps its dividend (x / 1 == x), but REM and REMU
+    // go to zero on their first instruction and every later one computes
+    // 0 % 1. A reviewer flagged that as understating the worst remainder
+    // input, which is the natural reading. It is not what happens.
+    //
+    // Measured, both ways, on the same host: this shape puts chained REM at
+    // 9.8x the baseline instruction -- about 14 cycles, a plausible divider
+    // latency. Chaining the divisor instead (`op x13, x28, x13`, which does
+    // keep a full-width dividend) drops it to 2.4x, about 3 cycles, which is
+    // too fast to be a division at all: `large % large` has quotient 1 and
+    // `large % 0` returns the dividend by definition, so that arrangement
+    // early-outs and breaks the very dependency it was built to expose.
+    //
+    // So the degenerate operands cost nothing here: the divider pays its
+    // latency regardless, and this is the more conservative of the two
+    // measurable shapes. Worst-case pricing wants that. What no single
+    // remainder instruction can do is feed itself hard operands indefinitely --
+    // `a % x` contracts -- so a sustained hard-operand dependent remainder
+    // needs a second instruction to refresh the divisor, making it a pair
+    // rather than a substitution. The independent context (`large % 3`, a
+    // genuine full-width remainder every time) is measured alongside this one
+    // and the schedule prices whichever is worse.
+    //
+    // Nothing here can trap: RISC-V defines division by zero as -1, remainder
+    // by zero as the dividend, and signed overflow as INT_MIN.
     return test_program::op(kChainReg, kChainReg, kOneReg, encoding.funct3,
                             encoding.funct7);
   }

@@ -116,7 +116,15 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
             uint32_t trip_count, uint32_t placements)
 {
   SweepKernels sweep;
+  // Placements already emitted for the current target count. Phases are meant
+  // to average layout bias, which they only do if they actually produce
+  // different layouts -- and at the densest point the spacing can be small
+  // enough that several phases coincide. Rather than assume distinctness,
+  // check it: a repeated layout adds no information and would weight one
+  // kernel's luck several times in the fit.
+  std::vector<std::vector<uint32_t>> seen_placements;
   for (const uint32_t count : target_counts) {
+    seen_placements.clear();
     for (uint32_t phase = 0; phase < placements; ++phase) {
       KernelSpec spec = base;
       spec.target_slots = count;
@@ -127,11 +135,16 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
       if (count == 0 && phase > 0) {
         continue;
       }
-      spec.placement_phase = phase * 2;
+      spec.placement_phase = phase;
       auto kernel = build_kernel(spec);
       if (!kernel.has_value()) {
         return std::unexpected(kernel.error());
       }
+      if (std::ranges::find(seen_placements, kernel->target_slot_pcs) !=
+          seen_placements.end()) {
+        continue;
+      }
+      seen_placements.push_back(kernel->target_slot_pcs);
       auto program =
           ThreadedMachinePreInstantiation::create(kernel->code,
                                                   kernel->initial_memory, 0,
@@ -520,15 +533,18 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
   std::println(out, R"(  "traced": false,)");
   std::println(
       out,
-      "  \"provenance\": {{\"engine_fingerprint\": \"{}\", \"host\": \"{}\", "
+      "  \"provenance\": {{\"engine_fingerprint\": \"{}\", "
+      "\"engine_source_digest\": \"{}\", \"host\": \"{}\", "
       "\"kernel\": \"{}\", \"cpu_model\": \"{}\", \"cpu_count\": {}, "
       "\"compiler\": \"{}\", \"build_type\": \"{}\", \"cxx_flags\": \"{}\", "
       "\"optimized\": {}, \"assertions_enabled\": {}, \"production_build\": "
       "{}, \"source_revision\": \"{}\"}},",
-      escape_json(provenance.engine_fingerprint), escape_json(provenance.host),
-      escape_json(provenance.kernel), escape_json(provenance.cpu_model),
-      provenance.cpu_count, escape_json(provenance.compiler),
-      escape_json(provenance.build_type), escape_json(provenance.cxx_flags),
+      escape_json(provenance.engine_fingerprint),
+      escape_json(provenance.engine_source_digest),
+      escape_json(provenance.host), escape_json(provenance.kernel),
+      escape_json(provenance.cpu_model), provenance.cpu_count,
+      escape_json(provenance.compiler), escape_json(provenance.build_type),
+      escape_json(provenance.cxx_flags),
       provenance.optimized ? "true" : "false",
       provenance.assertions_enabled ? "true" : "false",
       provenance.is_production_build() ? "true" : "false",
