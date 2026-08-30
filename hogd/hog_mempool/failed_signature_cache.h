@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "hogd/base/os.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
@@ -102,14 +101,9 @@ struct FailedSignatureBucket {
 // treat a hit and a miss alike as advisory.
 class FailedSignatureCache {
 public:
-  // Shard count for the map itself, following the [SynchronizedMap] pattern
-  // but at a lower base order than its default: this holds a bounded number of
-  // buckets rather than growing with the workload.
-  static constexpr int kShardBaseOrder = 4;
-
   // 8192 buckets of 16 is 128k signings, a few MB once warm.
   explicit FailedSignatureCache(size_t num_buckets = 8192)
-    : num_buckets_(num_buckets), buckets_(scalable_shard_size(kShardBaseOrder))
+    : num_buckets_(num_buckets)
   {}
 
   bool contains(const SHA256Hash &signed_tx_hash)
