@@ -371,7 +371,7 @@ TEST_F(EventRpcTest, PullRejectsMismatchedProtocol)
   EventRPCContext ctx(temp_dir());
   EventIndexerRpc indexer_rpc(ctx);
   EventIndexerPullRequest request = pull_request();
-  request.protocol = "definitely-not-the-hogd-protocol";
+  request.protocol = protocol_from_text("definitely-not-the-hogd-protocol");
 
   EXPECT_EQ(indexer_rpc.event_indexer_pull_next(std::move(request))().outcome(),
             EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol);
@@ -2491,7 +2491,7 @@ TEST_F(EventRpcTest, ReconciliationLinksCurrentEpochToArchivalPrefixByHeader)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             archival.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 21,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 21,
                             current.prev_hash, 1);
 
   EXPECT_TRUE(ctx.reconcile_outbox_tip(999, current)().has_value());
@@ -2536,7 +2536,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsDisconnectedArchivalPrefix)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             archival.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 21,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 21,
                             current.prev_hash, 1);
 
   EXPECT_FALSE(ctx.reconcile_outbox_tip(323, current)().has_value());
@@ -2602,7 +2602,7 @@ TEST_F(EventRpcTest, ReconciliationValidatesCompleteMultiRecordArchivalEpoch)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 22,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
                             current.consensus_value.prev_hash, 1);
 
   EXPECT_TRUE(
@@ -2643,7 +2643,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsArchivalInternalDisconnect)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 20,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 22,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
                             current.consensus_value.prev_hash, 1);
 
   EXPECT_FALSE(
@@ -2674,7 +2674,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsTruncatedArchivalEpochPrefix)
       IndexerOutboxStore::current_epoch_origin_filename()));
   write_epoch_origin_header(temp_dir(), "hogp/archival", 19,
                             first.consensus_value.prev_hash);
-  write_epoch_origin_header(temp_dir(), version::kHogdProtocolCommit(), 22,
+  write_epoch_origin_header(temp_dir(), version::kHogdProtocol(), 22,
                             current.consensus_value.prev_hash, 1);
 
   EXPECT_FALSE(

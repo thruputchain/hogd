@@ -15,6 +15,7 @@
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -64,8 +65,8 @@ public:
 
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
-    info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocolCommit());
+    info("got {}, expected {}", protocol_text(card.protocol),
+         version::kHogdProtocol());
     if (card.protocol != version::kHogdProtocolCommit()) {
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }

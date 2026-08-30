@@ -45,7 +45,7 @@ template<typename T> using IndexerOutboxStatus = std::expected<T, std::string>;
 
 struct IndexerOutboxCommittedRecordInfo {
   BlockHeight block_height;
-  std::string protocol;
+  ProtocolCommit protocol;
   uint64_t payload_byte_length;
   ConsensusValueHash consensus_hash;
   ConsensusValueHash prev_hash;
@@ -58,7 +58,7 @@ struct IndexerOutboxCommittedRecordInfo {
 struct IndexerOutboxCandidateRecordInfo {
   BlockID block_id;
   BlockHeight block_height;
-  std::string protocol;
+  ProtocolCommit protocol;
   uint64_t payload_byte_length;
   SHA256Hash payload_digest;
   EventsHash event_root;

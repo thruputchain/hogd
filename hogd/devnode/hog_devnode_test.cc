@@ -1233,7 +1233,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(readiness.manifest_hash,
             hex_string(hash_string(read_file(readiness.manifest_path))));
   EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
-            version::kHogdProtocolCommit());
+            version::kHogdProtocol());
   const json::Value *producer = readiness.manifest.find("producer");
   ASSERT_NE(producer, nullptr);
   EXPECT_EQ(require_string_field(*producer, "binary", ""), "hog-devnode");
