@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -47,6 +48,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -641,11 +643,14 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
 
-  std::string nul_suffixed(version::kHogdProtocol());
-  nul_suffixed.push_back('\0');
-  nul_suffixed += "suffix";
-  AuthCard nul_protocol_card =
-      AuthCard{.protocol = protocol_from_text(nul_suffixed),
+  // A fixed-width token has no room past its 20 bytes, so this case used to be
+  // "the real token, a NUL, then junk" and is now simply the real token. What
+  // takes its place is the confusion the fixed width does allow: a short token
+  // padded out to the array, sharing a prefix with the real one. Rejecting it
+  // is what makes the padding part of the token's identity rather than filler.
+  const std::string_view current_protocol = version::kHogdProtocol();
+  AuthCard padded_prefix_card =
+      AuthCard{.protocol = protocol_from_text(current_protocol.substr(0, 12)),
                .upid = {},
                .address_for_db = auth_card_.address_for_db,
                .address_for_mempool = ""};
@@ -659,8 +664,8 @@ TEST_F(AuthSubscriptionTest, MalformedProtocolAuthCardIsRejected)
   DBAuthIntroResult wrong_result = rpc.dbauth_intro(wrong_protocol_card)();
   EXPECT_EQ(wrong_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
-  DBAuthIntroResult nul_result = rpc.dbauth_intro(nul_protocol_card)();
-  EXPECT_EQ(nul_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
+  DBAuthIntroResult padded_result = rpc.dbauth_intro(padded_prefix_card)();
+  EXPECT_EQ(padded_result.outcome(), DBAuthIntroOutcome::kIntroFailure);
 
   DBAuthIntroResult valid_result = rpc.dbauth_intro(auth_card_)();
   EXPECT_EQ(valid_result.outcome(), DBAuthIntroOutcome::kIntroSuccess);

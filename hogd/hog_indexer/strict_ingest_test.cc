@@ -30,7 +30,6 @@
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
-#include "network.hh"
 #include "pagination.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
