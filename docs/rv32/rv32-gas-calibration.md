@@ -64,12 +64,34 @@ does not depend on what the filler costs, and asks the question pricing actually
 cares about -- if a block is filled with this instruction, what does each one
 cost?
 
-Saturating a body means adjacent copies of the opcode, which can fuse. The
-lowering audit rejects a body whose slots did not each stay one instruction,
-rather than reporting the fused cost as the unfused one. Across the ISA exactly
-three cells decline on those grounds -- `ADDI` in both contexts and the
-`auipc;jalr` pair, all of which genuinely are fusion rules -- and they fall back
-to the old contrast estimate, marked.
+Saturating a body means adjacent copies of the opcode, which is exactly the
+shape a fusion rule matches. The harness lowers those bodies with fusion turned
+off (`PreInstantiation::create`'s `fuse` flag, defaulted true and untouched by
+production) and measures the unfused cost directly. That is also the cost the
+schedule charges: fusion is a saving the engine may or may not get, and
+worst-case pricing cannot assume it.
+
+Detecting fusion after the fact was the earlier approach and it has a blind
+spot the flag removes. The audit compares each body slot against the same word
+lowered *in isolation* -- but the isolated probe is `filler, target, filler`,
+and the filler is an `ADD`, so for target `ADD` the probe fuses exactly like
+the body does, both sides match, and the audit reports clean. The one cell the
+whole reference used to divide by was the one cell the audit structurally could
+not check. With the flag, all 100 single-target cells saturate rather than 98:
+`ADDI` is measurable for the first time, having declined only because
+`addi;addi` is a rule.
+
+A pair row is the opposite -- `auipc;jalr` exists to measure the fused form --
+so those keep fusion on, and their audit requires the rule to fire.
+
+Ratios are taken against the **median** saturated cell, not against `ADD`. One
+cell carrying every ratio is one cell whose misbehaviour is indistinguishable
+from the whole ISA moving, and on the bench host that is what happened: between
+two runs every guarded ratio scaled by 2.015 while the opcodes themselves held
+to 0.1%. `ADD` was both the divisor and, on that microarchitecture, genuinely
+about twice as fast as `AND` -- a property of the generated code there, not
+present on a Xeon. A median over ~100 cells cannot be moved by one of them, and
+still moves when most of the ISA does, which is what the gate is for.
 
 The contexts are the load-bearing part. An opcode does not have one cost, and
 which end of its range applies is the guest author's choice, so gas has to
@@ -78,28 +100,33 @@ price the end an adversary can force.
 ## How reproducible is it
 
 Two back-to-back runs on the bench host (`hog10`, AMD EPYC 9554, Release built
-with gcc), comparing the saturated measurement against the contrast it
-replaced, as a relative difference between the two runs:
+with gcc), as a relative difference between the two runs across the 95 cells
+both measured:
 
-| | median | p90 | negative costs |
+| | median | p90 | max |
 |---|---:|---:|---:|
-| saturated | **0.5%** | **1.9%** | 0 of 101 |
-| contrast | 3.0% | 253% | 26 of 101 |
+| saturated, fusion off, median-normalized | **0.12%** | **1.22%** | **2.90%** |
+
+No cell moves more than 3%, against a gate tolerance of 100%. For contrast, the
+same two-run comparison before fusion was disabled and while ratios were taken
+against `ADD` had *every* cell scaling by 2.015x -- the gate would have failed
+wholesale on a machine that had not changed.
 
 The expensive cells agree between runs to within a few tenths of a percent:
 
 ```
-              run 1 / run 2   (x baseline)
-LH   chase      3.77 / 3.75
-JALR            3.71 / 3.69
-LW   chase      3.55 / 3.54
-DIV  chain      2.82 / 2.81
+                    run 1 / run 2   (x the median cell)
+LH   chase           2.648 / 2.651
+JALR chain           2.607 / 2.610
+LW   chase           2.491 / 2.496
+DIV  chain           1.979 / 1.980
+REM  chain           1.648 / 1.651
+BNE  taken           1.416 / 1.416
 ```
 
 That host is the one that made the contrast unusable -- back-to-back runs there
 moved `SUB` by 6.3 ns and priced 28% of the ISA below zero. The same machine,
-the same binary, and the same sweeps reproduce to under 2% once the estimator
-stops taking a difference.
+the same binary and the same sweeps now agree to a tenth of a percent.
 
 ## First results
 

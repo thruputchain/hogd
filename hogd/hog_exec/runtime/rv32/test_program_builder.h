@@ -27,13 +27,21 @@ require_valid_field(bool condition)
 // program does something plausible rather than failing. A branch built that way
 // jumped into the middle of its own loop body and still reported a clean halt.
 //
-// Signed immediates only. u_type takes a full 32-bit value and keeps its top
-// 20 bits by definition, so there is nothing to truncate there.
+// Callers spell an immediate either way -- as the signed offset it means, or
+// as the raw field bits (the conformance vectors pass 0x800 for -2048) -- and
+// the encoder cannot tell which was intended. So this rejects only values that
+// fit neither: outside [-2^(bits-1), 2^bits), no reading of them survives the
+// mask. Where the signed reading is the only valid one, the caller knows that
+// and checks it there; build_kernel does exactly that for JALR's body-slot
+// offset.
+//
+// u_type takes a full 32-bit value and keeps its top 20 bits by definition, so
+// there is nothing to truncate there.
 inline void
 require_immediate_fits(int32_t imm, int bits)
 {
-  const int32_t limit = int32_t{1} << (bits - 1);
-  require_valid_field(imm >= -limit && imm < limit);
+  require_valid_field(imm >= -(int32_t{1} << (bits - 1)) &&
+                      imm < (int32_t{1} << bits));
 }
 
 inline void

@@ -235,17 +235,23 @@ def pair_cells(data):
 
 
 def cost_ns(cell):
-    """This cell's per-instruction cost in nanoseconds.
+    """This cell's cost in nanoseconds: per instruction, or per pair for a
+    pair row, which is the unit its ceiling is built in.
 
     The saturated measurement when there is one: a body made entirely of this
-    opcode, timed and divided by its instruction count. Absolute, so it cannot
-    be negative, and it does not depend on what the filler costs.
+    target, timed and divided by the substitutions placed. Absolute, so it
+    cannot be negative, and it does not depend on what the filler costs. Single
+    targets are lowered with fusion off, so this is the ordinary path and every
+    cell reaches it.
 
-    Falls back to the contrast estimate (baseline + slope) when a saturated
-    body could not be built -- which happens only when adjacent copies of the
-    opcode are a fusion rule, so no program can contain a run of them unfused.
-    `saturated_note` says which. The contrast is what produced negative costs
-    for about a third of sweeps, so a fallback cell is the one to distrust.
+    Two fallbacks, in order, for a cell with no saturated body. First the
+    densest alternating kernel's time over its target count -- non-adjacent by
+    construction, still one absolute timing over one count, so it cannot go
+    negative either; it over-attributes the fillers, reading up to about 2x
+    high, which is loose in the safe direction. Only then the contrast
+    (baseline + slope), which is the estimator this work replaced for producing
+    negative and unstable costs. `saturated_note` says why a cell fell back,
+    and a cell reaching the contrast is one to distrust.
     """
     saturated = cell.get("ns_saturated", 0.0)
     if saturated > 0.0:
