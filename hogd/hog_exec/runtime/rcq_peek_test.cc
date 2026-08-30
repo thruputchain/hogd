@@ -645,6 +645,110 @@ TEST_F(SyscallRcqPeekTest,
   EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
+// #3531: peeking more than kMaxConcurrentRcqReadsPerTx distinct keys whose
+// entries live in committed (past) blocks must return
+// kSyscallErrorCodeRetrocausalQueueReadLimitReached once the cap is reached,
+// rather than pinning an unbounded number of full decoded blocks in the
+// snapshot cache with zero direct host gas. Past-block reads previously
+// bypassed the per-tx cap.
+TEST_F(SyscallRcqPeekTest, PastBlockReadCapReturnsSyscallErrorAtLimit)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  // A couple of reads past the cap, so the contract keeps issuing distinct-key
+  // past-block reads after the limit is reached -- exercising that those reads
+  // short-circuit (no further block is loaded into the snapshot cache) and
+  // still return the handleable error rather than growing the cache.
+  constexpr uint32_t kReadCount = kMaxConcurrentRcqReadsPerTx + 2;
+
+  NativeContractBuilder builder;
+  // method 8: insert one entry into each of `count` distinct queue keys.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      8, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < count; ++i) {
+          auto payload = static_cast<uint8_t>(i);
+          auto status = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+          if (!status.has_value() ||
+              status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+  // method 9: peek-len `count` keys. The first kMaxConcurrentRcqReadsPerTx read
+  // one past-block entry each (len == 1); every read at or beyond the cap
+  // returns RetrocausalQueueReadLimitReached.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      9, [](NativeSyscallContext &ctx, uint32_t count) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < count; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+              make_obs_cap_key(i), len);
+          if (!status.has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (i < kMaxConcurrentRcqReadsPerTx) {
+            if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                len != 1) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          else if (status.value() !=
+                   SyscallErrorCode::
+                       kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto make_tx = [&](uint32_t method, Calldata calldata) {
+    return SignedTransaction{
+        .tx = Transaction{.invocation =
+                              Invocation{.invoked_address = contract_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = std::move(calldata)},
+                          .uniquifier = make_new_uniquifier()}};
+  };
+
+  // Commit the inserts, then advance the block so the entries become
+  // committed past blocks that the peeking tx reads via the past-block path.
+  auto insert_calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kReadCount);
+  ASSERT_TRUE(insert_calldata.has_value());
+  auto insert_handler =
+      make_new_system_call_handler(make_tx(8, insert_calldata.value()),
+                                   *context);
+  ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
+  ASSERT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  advance_block();
+
+  // The cap-plus-one past-block read returns RetrocausalQueueReadLimitReached;
+  // the process stays alive and the contract (which handles the error) commits.
+  auto peek_calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kReadCount);
+  ASSERT_TRUE(peek_calldata.has_value());
+  auto peek_handler =
+      make_new_system_call_handler(make_tx(9, peek_calldata.value()), *context);
+  ASSERT_TRUE(peek_handler.root_invoke().is_root_success());
+  EXPECT_EQ(peek_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
 // #3043: A destructive concurrent RCQ consume that crosses the per-tx
 // observation cap must not persist the cap-crossing consume. Proposal mode
 // previously appended the cap-crossing entry to the consume delta before

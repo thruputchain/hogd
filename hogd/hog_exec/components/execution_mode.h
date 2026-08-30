@@ -97,11 +97,39 @@ public:
   // overflowing the bounded observed_queue_entry_sequence (#2894).
   bool observation_cap_exceeded() const { return observation_cap_exceeded_; }
 
+  // Records a past-block RCQ read against the per-tx cap. A past-block
+  // peek/consume pins a full decoded block (up to ~64 KiB) in the shared,
+  // block-lifetime snapshot cache while charging zero direct host gas, and the
+  // past-block read path bypasses the concurrent-observation cap; bounding the
+  // count keeps a transaction from turning many cheap distinct-key reads into
+  // unbounded host memory (#3531). Past-block reads are deterministic
+  // committed-state reads, so the count matches in proposal and validation
+  // without any observation logging -- this reuses kMaxConcurrentRcqReadsPerTx
+  // and the existing RetrocausalQueueReadLimitReached resource-limit error.
+  // Returns true (and counts the read) while under the cap; once the cap is
+  // reached it sets the exceeded flag and returns false so the caller applies
+  // no consume, keeping proposal and validation in lockstep.
+  bool record_past_block_rcq_read()
+  {
+    if (past_block_rcq_read_count_ >= kMaxConcurrentRcqReadsPerTx) {
+      past_block_rcq_read_cap_exceeded_ = true;
+      return false;
+    }
+    ++past_block_rcq_read_count_;
+    return true;
+  }
+  bool past_block_rcq_read_cap_exceeded() const
+  {
+    return past_block_rcq_read_cap_exceeded_;
+  }
+
 private:
   // Proposal data containing nondeterministic choices made during execution
   NondeterministicProposalData proposal_data_{};
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
   bool observation_cap_exceeded_ = false;
+  uint32_t past_block_rcq_read_count_ = 0;
+  bool past_block_rcq_read_cap_exceeded_ = false;
 };
 
 // Data structure for validation mode execution that validates nondeterministic
@@ -160,6 +188,23 @@ public:
   // validation failure.
   bool observation_cap_exceeded() const { return observation_cap_exceeded_; }
 
+  // See ProposalModeData::record_past_block_rcq_read. Past-block reads are
+  // deterministic, so validation replays the same count and hits the cap at the
+  // same read as the proposer did (#3531).
+  bool record_past_block_rcq_read()
+  {
+    if (past_block_rcq_read_count_ >= kMaxConcurrentRcqReadsPerTx) {
+      past_block_rcq_read_cap_exceeded_ = true;
+      return false;
+    }
+    ++past_block_rcq_read_count_;
+    return true;
+  }
+  bool past_block_rcq_read_cap_exceeded() const
+  {
+    return past_block_rcq_read_cap_exceeded_;
+  }
+
 private:
   // Proposal data containing expected nondeterministic choices
   const NondeterministicProposalData proposal_data_;
@@ -170,6 +215,8 @@ private:
   uint32_t next_queue_entry_index_ = 0;
   std::map<AddressAndKey, std::vector<QueueEntry>> queue_entry_observations_;
   bool observation_cap_exceeded_ = false;
+  uint32_t past_block_rcq_read_count_ = 0;
+  bool past_block_rcq_read_cap_exceeded_ = false;
 };
 
 class ViewingModeData {
@@ -238,6 +285,15 @@ public:
     return partial_validation_data_.observation_cap_exceeded();
   }
 
+  bool record_past_block_rcq_read()
+  {
+    return partial_validation_data_.record_past_block_rcq_read();
+  }
+  bool past_block_rcq_read_cap_exceeded() const
+  {
+    return partial_validation_data_.past_block_rcq_read_cap_exceeded();
+  }
+
 private:
   ValidationModeData partial_validation_data_;
 };
@@ -253,6 +309,26 @@ observation_cap_exceeded(ExecutionModeData const &mode)
 {
   return std::visit(
       [](auto const &data) { return data.observation_cap_exceeded(); }, mode);
+}
+
+// Records a past-block RCQ read against the current mode's per-tx cap; returns
+// false once the cap is reached (see
+// ProposalModeData::record_past_block_rcq_read). (#3531)
+inline bool
+record_past_block_rcq_read(ExecutionModeData &mode)
+{
+  return std::visit(
+      [](auto &data) { return data.record_past_block_rcq_read(); }, mode);
+}
+
+// True once a past-block RCQ read has been rejected for exceeding
+// kMaxConcurrentRcqReadsPerTx in the current mode (#3531).
+inline bool
+past_block_rcq_read_cap_exceeded(ExecutionModeData const &mode)
+{
+  return std::visit(
+      [](auto const &data) { return data.past_block_rcq_read_cap_exceeded(); },
+      mode);
 }
 
 using ExecutionModeCtor =
