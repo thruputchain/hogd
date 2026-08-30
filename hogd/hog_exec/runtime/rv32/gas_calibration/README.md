@@ -260,12 +260,25 @@ The other rows are expected to miss, and how they miss is the point:
 Fusion can only remove dispatches, so something the per-opcode model cannot see
 is dominating -- here, a store-to-load chain, since each store writes the
 address the next load reads. **The harness has no context that measures
-store-to-load forwarding.** It is not a pricing hole today, because loads are
-priced from the pointer chase and that is expensive enough to bound this case
-(the `headroom` column shows by how much), but it is a real gap, and dropping
-the chase context without replacing it would open one. The report flags any
-fused workload that overshoots, so this class of gap announces itself rather
-than waiting to be noticed.
+store-to-load forwarding.**
+
+That is a gap in the model. Whether it is a gap in the *pricing* is a different
+question with a different yardstick, and the two are easy to run together. The
+residual is measured against costs in the arrangement the workload uses, so it
+says the model does not explain the program. What worst-case pricing actually
+promises is the `headroom` column: that a program costs no more than the sum of
+its opcodes' *individual worst cases*. On this host the pair measures 3.35 ns
+against 5.71 + 1.21 = 6.92 ns for a worst-case `LW` plus a worst-case `SW` --
+subadditive, 52% under. So the bound holds, and it holds by the method rather
+than by luck.
+
+What is *not* established is that every interaction behaves that way. If some
+pair were **superadditive** -- costing more than its opcodes' individual worst
+cases sum to -- then per-opcode worst-case pricing would be unsound as a method,
+not merely imprecise. This axis has one measured point, not a sweep. The report
+flags any fused workload that overshoots, so the class of gap announces itself,
+and a `headroom` that ever goes negative is the signal that the method itself
+needs an interaction term or a blanket margin.
 
 `--workloads` is the check that matters most for pricing. It runs realistic loop bodies,
 including deliberately fusible ones, and reports nanoseconds of real work per

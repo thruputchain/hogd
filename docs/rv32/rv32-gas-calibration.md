@@ -230,11 +230,19 @@ outside the per-opcode model is dominating: each store writes the address the
 next load reads, so the pair serializes on store-to-load forwarding. **No
 context in the harness measures that.**
 
-It is not a pricing hole today -- loads are priced from the pointer chase, which
-is expensive enough to bound the store-forward case with room to spare -- but it
-is a real gap, and it would become a hole if the chase context were ever dropped
-as unrealistic. The report now flags any fused workload that overshoots, so this
-class of gap reports itself.
+Whether that is also a *pricing* problem is a separate question, and the two
+numbers in the table answer different things. The residual is against costs in
+the arrangement the workload uses -- a model-fit diagnostic. What worst-case
+pricing promises is the `headroom` column: that a program costs no more than the
+sum of its opcodes' individual worst cases. Here the pair measures 3.35 ns
+against 6.92 ns for a worst-case `LW` plus a worst-case `SW`, so it is
+subadditive by 52% and the bound holds by the method rather than by coincidence.
+
+The open question is sharper than "is 69% a lot". It is whether any interaction
+can be **superadditive** -- cost more than its opcodes' individual worst cases
+sum to. If one can, per-opcode worst-case pricing is unsound as a method and
+needs an interaction term or a blanket margin. Nothing measured so far is, but
+this axis has exactly one point. A negative `headroom` is the tripwire.
 
 ## Before changing the schedule
 
@@ -253,9 +261,11 @@ class of gap reports itself.
 - Price `JAL`, `JALR`, `FENCE`, and the trapping opcodes. The substitution
   design cannot hold them constant, so they are unmeasured and would keep
   placeholder costs.
-- Decide whether store-to-load forwarding needs its own context. `--predict`
-  shows the current schedule bounds it via the load pointer-chase price, but
-  nothing measures it directly.
+- Sweep store-to-load forwarding as its own context, rather than relying on one
+  observed point being subadditive. The general form is a *pair* substitution --
+  substituting two adjacent slots instead of one -- which would also let the
+  harness measure fusion's benefit directly instead of inferring it, and would
+  turn "no interaction is superadditive" from an assumption into a measurement.
 - Re-run after interpreter changes, not only before schedule changes. A new
   fusion rule or a dispatch change moves these numbers, and a schedule
   calibrated against the old engine silently loses its margin. The engine
