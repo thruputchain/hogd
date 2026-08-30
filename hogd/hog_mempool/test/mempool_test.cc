@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
