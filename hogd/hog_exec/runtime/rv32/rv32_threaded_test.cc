@@ -1686,7 +1686,7 @@ TEST(Rv32ThreadedTrapGas, plainLoadFaultMidRunChargesExecutedPrefix)
             (&op_load<false, 4, false>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/100 -
-                             (2 * kBaseInstructionGas + kWideLoadGas));
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, plainStoreFaultMidRunChargesExecutedPrefix)
@@ -1795,7 +1795,7 @@ TEST(Rv32ThreadedTrapGas, fusedLoadRrHeadFault)
             (&op_load_rr<false, 4, false, true, add_op>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/100 -
-                             (2 * kBaseInstructionGas + kWideLoadGas));
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedLoadRiHeadFault)
@@ -1815,7 +1815,7 @@ TEST(Rv32ThreadedTrapGas, fusedLoadRiHeadFault)
             (&op_load_ri<false, 4, false, add_op>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/100 -
-                             (2 * kBaseInstructionGas + kWideLoadGas));
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedAluLoadTailFault)
@@ -1835,7 +1835,7 @@ TEST(Rv32ThreadedTrapGas, fusedAluLoadTailFault)
             alu_load_handler<false>(Op::kAddi, Op::kLw));
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/100 -
-                             (2 * kBaseInstructionGas + kWideLoadGas));
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedAluStoreTailFault)
@@ -1948,9 +1948,9 @@ TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
   //     fault's refund cannot clear the deficit.
   //
   // Charged through and including the faulting lw:
-  constexpr uint64_t kPrefixGas = 2 * kBaseInstructionGas + kWideLoadGas;
+  constexpr uint64_t kPrefixGas = (2 * kBaseInstructionGas) + kWideLoadGas;
   // The whole run: that prefix plus the two adds it never reaches.
-  constexpr uint64_t kRunGas = kPrefixGas + 2 * kBaseInstructionGas;
+  constexpr uint64_t kRunGas = kPrefixGas + (2 * kBaseInstructionGas);
   const std::vector<uint32_t> words = {
       addi(1, 0, 1024),  // x1 = 1024 (OOB base)
       addi(6, 0, 5),     // x6 = 5
