@@ -1,7 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <condition_variable>
 #include <cstddef>
 #include <utility>
 
@@ -16,7 +14,6 @@
 #include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
 #include "x23/x23/corosync.h"
 
 namespace hogd {
@@ -40,6 +37,8 @@ public:
 
     CHECK(!callback_.has_value());
     callback_ = std::move(callback);
+    callback_set_.store(true);
+    callback_set_.broadcast(&default_threadpool());
     std::forward<OnRegistered>(on_registered)();
   }
 
@@ -52,10 +51,12 @@ public:
     co_await cg(callback_lock_);
 
     callback_.reset();
+    callback_set_.store(false);
     while (true) {
-      if (callbacks_in_flight_) {
+      size_t callbacks_in_flight = callbacks_in_flight_.load();
+      if (callbacks_in_flight) {
         cg.reset();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        co_await callbacks_in_flight_.wait(callbacks_in_flight);
         co_await cg(callback_lock_);
         continue;
       }
@@ -97,11 +98,12 @@ public:
              "initialization; discarding {} key changes for an empty "
              "scheduler",
              height, key_changes.size());
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        cg.reset();
+        co_await callback_set_.wait(false);
         continue;
       }
       callback = callback_;
-      ++callbacks_in_flight_;
+      callbacks_in_flight_.rmw([](size_t &count) { ++count; });
       break;
     }
 
@@ -111,8 +113,11 @@ public:
       x23::CoroGuard cg;
       co_await cg(callback_lock_);
 
-      CHECK_GT(callbacks_in_flight_, size_t{0});
-      --callbacks_in_flight_;
+      callbacks_in_flight_.rmw([](size_t &count) {
+        CHECK_GT(count, size_t{0});
+        --count;
+      });
+      callbacks_in_flight_.broadcast(&default_threadpool());
     }
   }
 
@@ -133,7 +138,8 @@ public:
 private:
   x23::CoroLock callback_lock_;
   std::optional<auth_data_callback> callback_;
-  size_t callbacks_in_flight_ = 0;
+  x23::CoroFutex<bool> callback_set_{false};
+  x23::CoroFutex<size_t> callbacks_in_flight_{0};
 };
 
 static_assert(is_MempoolAuth1<MempoolAuthRpc *, x23::Async>);

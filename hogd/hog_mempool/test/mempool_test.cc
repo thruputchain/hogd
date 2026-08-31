@@ -66,6 +66,7 @@
 #include "validator.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/corosync.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -549,6 +550,7 @@ TEST(MempoolAuthRpc, StartupUpdatesDoNotCoalesce)
   MempoolAuthRpc auth_rpc;
   constexpr BlockHeight kDbTip = 4;
   std::unordered_set<BlockHeight> callback_height;
+  x23::CoroLock callback_height_lock;
   std::latch updates_finished(2);
 
   // We run [auth_rpc.mempoolauth_auth_data_changed()] in separate threads as
@@ -568,8 +570,12 @@ TEST(MempoolAuthRpc, StartupUpdatesDoNotCoalesce)
   EXPECT_TRUE(callback_height.empty());
 
   auth_rpc.register_callback(
-      [&callback_height](BlockHeight height,
-                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+      [&callback_height, &callback_height_lock](BlockHeight height,
+                                                KeyChangeBatch /*key_changes*/)
+          -> x23::Async<void> {
+        x23::CoroGuard cg;
+        co_await cg(callback_height_lock);
+
         EXPECT_TRUE(callback_height.insert(height).second);
         co_return;
       },
