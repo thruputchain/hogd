@@ -18,6 +18,15 @@ scripts/rv32_gas_calibrate.sh $B -- --op=DIV --repeats=25 # one opcode, hard
 scripts/rv32_gas_calibrate.sh $B -- --syscalls-only       # just the ecall seam
 ```
 
+Syscalls proper are a separate binary, for the dependency reason above -- see
+`scripts/rv32_syscall_bench.sh` and `scripts/rv32_syscall_report.py`. It takes
+this harness's JSON as its gas unit:
+
+```sh
+scripts/rv32_syscall_bench.sh $B --out /tmp/sys.json
+scripts/rv32_syscall_report.py /tmp/sys.json --gas /tmp/gas.json --schedule
+```
+
 The build directory is required. It is not searched for and there is no
 default: which tree the binary comes from decides what is measured, and a
 benchmark that picks that for you can measure something other than what you

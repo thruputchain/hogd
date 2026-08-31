@@ -573,20 +573,119 @@ can be billed the same, or the same syscall billed 47x differently depending on
 an argument the caller chooses, and a block limit has to be sized for the worst
 of it.
 
+### Setting the costs
+
+```sh
+B=build-release-ccache-tmp   # your Release build tree
+
+# The opcode calibration first: it supplies the gas unit.
+scripts/rv32_gas_calibrate.sh $B --out /tmp/gas.json
+
+# Then the syscalls, on the same host and the same engine.
+scripts/rv32_syscall_bench.sh $B --out /tmp/sys.json
+
+scripts/rv32_syscall_report.py /tmp/sys.json                    # what it costs
+scripts/rv32_syscall_report.py /tmp/sys.json --gas /tmp/gas.json --schedule
+scripts/rv32_syscall_report.py before.json after.json           # what moved
+```
+
+`--schedule` refuses without `--gas`, and refuses a `--gas` file whose engine
+fingerprint or host does not match the benchmark's. That is not ceremony. Gas is
+one currency: a syscall's price has to be in the same unit as an instruction's,
+that unit is the baseline instruction the opcode calibration measured, and
+joining two hosts' numbers produces a complete, plausible schedule that is wrong
+by whatever the two machines differ by. The check is the only thing standing
+between a careful measurement and a confidently mispriced one.
+
+The **RV32 Gas Calibration** workflow runs both binaries on the bench pool and
+prints the proposal there, which is where a schedule that becomes a protocol
+constant should come from rather than from a development container. Both JSONs
+are filed to metrics history, separately, joined at read time by fingerprint --
+so a syscall run can be compared against an opcode calibration from a different
+night on the same silicon.
+
+### What the proposal says
+
+From this container, at resolution 1:
+
+```
+gas unit: 1.6014 ns (1/1 of the 1.6014 ns baseline instruction)
+
+syscall                        ns/call  gas now  gas proposed
+GetBlockHeight                   105.2        0            68
+GetCalldataLen                   104.4        0            68
+GetCurrentAddress                105.1        0            68
+GetMsgSender                     109.0        0            68
+GetSourceTransactionHash         106.5        0            68
+
+constexpr static uint64_t kSyscallBaseCost = 68;
+constexpr static uint64_t kSHA256HashBaseCost = 37;   // was 500
+constexpr static uint64_t kSHA256HashByteCost = 1;    // was 100
+```
+
+Three decisions are baked into those numbers, and each is arguable on its own.
+
+**One shared base, not one constant per syscall.** The stateless reads land
+within a few percent of each other, so what is being priced is the crossing and
+not the handler; thirty constants would be thirty ways to say the same number.
+`kSyscallBaseCost` is new, and adding it means adding an entry to
+`kSyscallGasCostSchedule`.
+
+**The base comes from the dearest measured syscall, and from the `vm` row.**
+`vm` is what a guest actually causes -- crossing included -- and worst-case
+pricing is the rule the opcode schedule already follows. One gas of it is
+already charged as the `ecall` instruction, so the proposal subtracts it rather
+than billing the crossing twice.
+
+**SHA256's base is its excess over the crossing, not its total.** The 168 ns
+here is the fit's intercept over the whole size sweep, not the 173 ns measured
+at zero bytes in the table above -- they are different quantities and agree to
+3%. Of it, about 109 ns is the crossing every syscall already pays; charging
+SHA256's full base as well would bill that twice.
+
+A caveat on all the absolute numbers: this is a shared container, and two runs
+half an hour apart moved individual syscalls by up to 11% (the proposal moved
+68 gas to 67). The shape -- one crossing cost, a small SHA256 excess, a per-byte
+term well under a gas unit -- is stable; the last digit is not. Take the numbers
+that set the schedule from the bench pool.
+
+### The resolution problem, and it is a real one
+
+SHA256's per-byte cost is **0.73 ns**. A gas unit at resolution 1 is 1.60 ns. So
+the smallest representable non-zero per-byte charge overcharges by **2.2x**, and
+the report says so rather than printing a number that looks fine:
+
+```
+WARNING: the per-byte term is 0.7261 ns against a 1.6014 ns gas unit, so
+rounding it up to 1 gas overcharges by 2.2x.
+```
+
+At `--resolution 4` it becomes 2 gas and the overcharge falls to 1.10x. That is
+the argument for a finer resolution, and it has to be made *jointly* with the
+opcode schedule -- `--resolution` scales every number in both tables, block gas
+limits included, and the two cannot be denominated differently. Deciding it is
+the one thing here that is not a measurement.
+
 ### What follows
 
-- **The zero-gas reads are the urgent one.** A loop of `GetBlockHeight` burns
-  90 ns per iteration and is charged only for the handful of instructions that
-  set up the call -- roughly 5 gas against 90 ns of real work, an order of
-  magnitude worse per gas than the worst opcode the calibration found. Every
-  syscall wants a base cost, and the seam plus entry measurement says what it
-  is: about 105 ns end to end, one number that covers all of them.
-- **`SHA256HashCost`'s two constants should be re-derived from the slope**, not
-  scaled. The measured base-to-per-byte ratio is 240:1 (173 ns : 0.72 ns); the
-  charged ratio is 5:1 (500 : 100). No single multiplier fixes both.
+- **The zero-gas reads are the urgent item.** A loop of `GetBlockHeight` burns
+  ~105 ns per iteration and is charged for the handful of instructions that set
+  the call up -- roughly 5 gas against 105 ns of real work, an order of magnitude
+  worse per gas than the worst opcode the calibration found.
+- **`SHA256HashCost`'s two constants need re-deriving, not scaling.** The
+  measured base-to-per-byte ratio is 230:1 (168 ns : 0.73 ns); the charged ratio
+  is 5:1 (500 : 100). No single multiplier fixes both.
+- Take the numbers from the bench pool, not from a container, and from more than
+  one run -- the same rules the opcode schedule is under. Absolute nanoseconds
+  are host-specific; the ordering and the ratios are the finding.
 - Both are gas-schedule changes: `kSyscallGasCostSchedule` is folded into
   `rv32::kGasScheduleDigest`, so they move with the pinned digest in
   `artifact.h` and every committed artifact, exactly as the opcode schedule did.
+- Syscall costs are measured on every workflow run but **not gated**. There is
+  no committed reference for them yet, and inventing one from a single run of a
+  new benchmark would be a gate that describes nothing. The JSON is filed from
+  the first run, so the history is there by the time there is something to
+  compare against.
 - The engine fingerprint should cover the syscall path. It hashes the
   instruction schedule, the structural limits and the fusion matrix;
   `kSyscallGasCostSchedule` is already in `kGasScheduleDigest` so the input
@@ -594,7 +693,7 @@ of it.
   rewrite of `syscall_entry_outer.h` moves these numbers with nothing saying so.
 - Stateful syscalls remain unmeasured and are the harder half: their worst case
   is a snapshot-cache miss, which is a DB cost rather than a syscall cost and is
-  not reproducible the way these are. Note that even the stateless set has a
-  cold path -- the first `GetBlockHeight` in a block fetches the db tip through
-  the proxy, and every later one reads an atomic. The 90 ns above is the steady
-  state, which is what a contract making more than one syscall sees.
+  not reproducible the way these are. Even the stateless set has a cold path --
+  the first `GetBlockHeight` in a block fetches the db tip through the proxy and
+  every later one reads an atomic. The numbers above are the steady state, which
+  is what a contract making more than one syscall sees.

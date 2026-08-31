@@ -9,6 +9,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
+#include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
@@ -489,6 +491,69 @@ register_benchmarks()
                                sha256_call(1024));
 }
 
+// Everything needed to know whether this run is comparable with another one,
+// and with an opcode calibration.
+//
+// The last part is the point. A syscall's price has to be expressed in the same
+// gas unit as an instruction's, so rv32_syscall_report.py converts these
+// nanoseconds through an opcode calibration's baseline -- and that is only
+// legitimate if the two runs measured the same engine on the same host. Both
+// binaries record the same engine fingerprint and the same build identity, so
+// the report can refuse rather than silently mixing two machines' nanoseconds.
+void
+add_provenance_context()
+{
+  const rv32::gas_calibration::Provenance provenance =
+      rv32::gas_calibration::collect_provenance();
+  benchmark::AddCustomContext("engine_fingerprint",
+                              provenance.engine_fingerprint);
+  benchmark::AddCustomContext("engine_source_digest",
+                              provenance.engine_source_digest);
+  benchmark::AddCustomContext("hogd_host", provenance.host);
+  benchmark::AddCustomContext("hogd_kernel", provenance.kernel);
+  benchmark::AddCustomContext("hogd_cpu_model", provenance.cpu_model);
+  benchmark::AddCustomContext("hogd_compiler", provenance.compiler);
+  benchmark::AddCustomContext("hogd_build_type", provenance.build_type);
+  benchmark::AddCustomContext("hogd_cxx_flags", provenance.cxx_flags);
+  benchmark::AddCustomContext("hogd_source_revision",
+                              provenance.source_revision);
+  benchmark::AddCustomContext("hogd_production_build",
+                              provenance.is_production_build() ? "true"
+                                                               : "false");
+}
+
+// Refuse a non-Release build rather than warn about it.
+//
+// The same rule the gas calibration enforces, for the same reason: what is
+// being measured is the compiled syscall path, and a Debug or ad-hoc -O2 build
+// is a different one whose numbers look entirely reasonable and are silently
+// about the wrong thing. A warning at the top of a benchmark run gets scrolled
+// past; an exit does not. --allow-nonproduction overrides, for working on the
+// benchmark itself and nothing else.
+bool
+refuse_nonproduction_build(bool allow)
+{
+  const rv32::gas_calibration::Provenance provenance =
+      rv32::gas_calibration::collect_provenance();
+  if (provenance.is_production_build() || allow) {
+    return false;
+  }
+  std::println(
+      stderr,
+      "refusing to measure a non-Release build ({}, flags: {}).\n"
+      "  Syscall costs describe the path the node runs, and that is the one "
+      "the\n"
+      "  project's Release configuration produces. Build with:\n"
+      "    scripts/build.sh -t Release rv32_syscall_entry_bench\n"
+      "  or use scripts/rv32_syscall_bench.sh, which does that for you.\n"
+      "  Pass --allow-nonproduction to override for benchmark development "
+      "only.",
+      provenance.build_type.empty() ? "(non-CMake)"
+                                    : provenance.build_type.c_str(),
+      provenance.cxx_flags);
+  return true;
+}
+
 } // namespace
 } // namespace hogd
 
@@ -504,7 +569,24 @@ main(int argc, char **argv)
   }
   hogd::init_hog_exec_metrics();
 
+  // Consumed here rather than by Google Benchmark, which would reject it.
+  bool allow_nonproduction = false;
+  for (int i = 1; i < argc; ++i) {
+    if (std::string_view(argv[i]) == "--allow-nonproduction") {
+      allow_nonproduction = true;
+      for (int j = i; j + 1 < argc; ++j) {
+        argv[j] = argv[j + 1];
+      }
+      --argc;
+      break;
+    }
+  }
+  if (hogd::refuse_nonproduction_build(allow_nonproduction)) {
+    return 2;
+  }
+
   benchmark::Initialize(&argc, argv);
+  hogd::add_provenance_context();
   hogd::register_benchmarks();
   if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
     return 1;

@@ -261,6 +261,7 @@ if(BUILD_BENCHMARKS)
     model_checker
     contract_loader
     genesis
+    rv32_gas_calibration
     benchmark::benchmark
   )
 
@@ -271,6 +272,14 @@ if(BUILD_BENCHMARKS)
     ${CMAKE_BINARY_DIR}/hogd/xdr
   )
 
+
+  # rv32_gas_calibration is linked for provenance.h alone: the engine
+  # fingerprint and the build identity, recorded in the same form the gas
+  # calibration records them. That is what lets rv32_syscall_report.py join a
+  # syscall run to an opcode calibration and refuse the join when the two
+  # describe different engines or different hosts -- a syscall priced in gas
+  # units taken from another machine's baseline is not priced at all.
+  #
   # Optimized with LTO across the interpreter and the syscall bridge, matching
   # how the node is built. A syscall measured through a non-LTO build is a
   # different syscall.

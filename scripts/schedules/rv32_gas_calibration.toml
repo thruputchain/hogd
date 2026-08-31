@@ -41,12 +41,24 @@ source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.lo
 # a compiler change -- only the numbers move, silently. Every run recording the
 # same compiler is what makes them comparable over time.
 echo 'configure release'
-./scripts/build.sh -d build/release -t Release -c gcc -x "-DBUILD_BENCHMARKS=OFF" -n \
+#
+# Benchmarks on, because the syscall half of the measurement is a Google
+# Benchmark binary. Only the two targets below are built, so this costs the
+# configure and nothing else.
+./scripts/build.sh -d build/release -t Release -c gcc -x "-DBUILD_BENCHMARKS=ON" -n \
   > configure.log 2>&1 || (cat configure.log && exit 1)
 
 echo 'build rv32_gas_calibrate'
 cmake --build build/release --parallel "$(nproc)" --target rv32_gas_calibrate \
   > build.log 2>&1 || (cat build.log && exit 1)
+
+# The syscall path is measured by a second binary, because it needs the
+# protocol XDR, the DB proxy and the snapshot cache and the calibration
+# harness deliberately links none of them.
+echo 'build rv32_syscall_entry_bench'
+cmake --build build/release --parallel "$(nproc)" \
+  --target rv32_syscall_entry_bench \
+  > build_syscall.log 2>&1 || (cat build_syscall.log && exit 1)
 
 mkdir -p ${HOG_DUMP_DIR}
 
@@ -94,6 +106,24 @@ if [ "{{ .mode }}" = "reference" ]; then
   # out, so a copy-paste of the printed block arrives with \u003e for > and
   # \" for " -- which parses (comments are stripped) but leaves the
   # regeneration command the file documents literally wrong.
+  # Syscalls. Run after the opcode calibration so the two JSONs describe the
+  # same host and the same engine, which is what lets the report join them:
+  # nanoseconds come from the benchmark and the gas unit from the calibration's
+  # baseline instruction, and a join across hosts would produce a complete,
+  # plausible, wrong schedule.
+  echo '===== syscall costs on the production entry path ====='
+  ./scripts/rv32_syscall_bench.sh build/release \
+    --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
+    || cat syscall_bench.log
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json
+
+  # The point of running this here rather than on a laptop: syscall gas is a
+  # protocol constant and has to come from the machine class that runs the
+  # chain.
+  echo '===== proposed syscall gas costs from this host ====='
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule
+
   echo '===== proposed reference.txt for this host ====='
   echo 'To adopt: copy ${HOG_DUMP_DIR}/rv32-gas-reference.txt from this host'
   echo 'over hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
@@ -127,6 +157,20 @@ else
       --predict || true
   fi
 
+  # Syscall costs are measured on every run, gating or not, and never fail the
+  # job. They are not gated yet: there is no committed reference for them, and
+  # inventing one from a single run of a new benchmark would be a gate that
+  # describes nothing. The JSON is filed either way, so the history exists by
+  # the time there is something to compare against.
+  echo '===== syscall costs on the production entry path ====='
+  ./scripts/rv32_syscall_bench.sh build/release \
+    --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
+    || cat syscall_bench.log
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    || true
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule || true
+
 fi
 
 # File the measurement before acting on the check. A run that failed the gate is
@@ -157,6 +201,22 @@ file_measurement() {
   echo 'log the calibration'
   ./scripts/log_metric.sh rv32-gas-calibration \
     ${HOG_DUMP_DIR}/rv32-gas-calibration.json || return $?
+
+  # The syscall run alongside it. Filed separately because it is a separate
+  # binary measuring a separate thing, and joined at read time by engine
+  # fingerprint rather than by being stapled into one file -- which is what
+  # lets a syscall run be compared against an opcode calibration from a
+  # different night on the same silicon.
+  #
+  # Absent when the benchmark failed rather than the calibration; that is not a
+  # filing failure, so it does not return non-zero.
+  if [ -s ${HOG_DUMP_DIR}/rv32-syscall-bench.json ]; then
+    echo 'log the syscall benchmark'
+    ./scripts/log_metric.sh rv32-syscall-bench \
+      ${HOG_DUMP_DIR}/rv32-syscall-bench.json || return $?
+  else
+    echo 'no syscall benchmark output to file'
+  fi
 
   echo 'commit metrics'
   ./scripts/commit_metrics.sh
