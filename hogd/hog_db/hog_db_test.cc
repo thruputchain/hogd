@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <functional>
@@ -11,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -3438,6 +3442,55 @@ TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
     auto [value, lock] = map.find(key);
     EXPECT_EQ(value, nullptr);
   }
+}
+
+// commit_and_snapshot() lets ramdb's disk cleanup reclaim WAL that plain
+// commit() never can: snapshot coverage advances and the covered log files
+// are deleted (#3704).
+TEST(HogDbDaoSnapshotTest, CommitAndSnapshotReclaimsWal)
+{
+  // small WAL files so the snapshot recommendation floor is a few hundred
+  // KiB instead of kDiskLogCleanupRatio full-size files.
+  constexpr size_t kSmallLogFileThreshold = 64 * 1024;
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), Database::estimate_heap_size(10_MiB), 0,
+                     kSmallLogFileThreshold);
+  ASSERT_TRUE(db);
+  HogDbDAO dao{RAMDB(std::move(*db))};
+
+  EXPECT_FALSE(dao.snapshot_recommended());
+
+  // ~1 MiB of writes, past the floor.
+  RAMDB &ramdb = dao.get_ramdb();
+  const std::string value(256, 'v');
+  for (int i = 0; i < 4096; ++i) {
+    std::string key = "wal-key-" + std::to_string(i);
+    ASSERT_TRUE(ramdb.put(std::as_bytes(std::span(key)), 0,
+                          std::as_bytes(std::span(value))));
+  }
+  ASSERT_TRUE(dao.commit());
+  ASSERT_TRUE(dao.snapshot_recommended());
+
+  HogDbStatus<uint64_t> lsn = dao.commit_and_snapshot();
+  ASSERT_TRUE(lsn);
+  EXPECT_EQ(*lsn, 2U);
+
+  // the snapshot completes in the background; once durable, coverage
+  // advances and the next cleanup deletes the covered log files.
+  auto wait_until = [](auto &&pred) {
+    for (int i = 0; i < 500; ++i) {
+      if (pred())
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  };
+  EXPECT_TRUE(wait_until([&dao] { return !dao.snapshot_recommended(); }));
+  EXPECT_TRUE(wait_until(
+      [&dir] { return !dir->openat("0.log", O_RDONLY).has_value(); }));
 }
 
 // Tests that the fresh-balance guard in BalanceLock::try_atomic_change_lock
