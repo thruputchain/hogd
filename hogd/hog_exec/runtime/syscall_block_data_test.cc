@@ -254,6 +254,121 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
+// The timepoint comes from the BlockExecutionContext the block was opened
+// with, not from the db tip -- the tip is the parent block, whose timepoint
+// belongs to the previous block. This framework builds a snapshot cache
+// directly, so the test installs the context the way an executor would.
+TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  constexpr TimePoint kExpectedTimepoint = 1'724'000'000;
+  get_storage_snapshot_cache()->set_block_execution_context(
+      BlockExecutionContext{.block_height = 1,
+                            .block_timepoint = kExpectedTimepoint});
+
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [](NativeSyscallContext &ctx,
+         TimePoint expected_timepoint) -> InvokeStatus<void> {
+        TimePoint block_timepoint = 0;
+        auto status =
+            ctx.syscall<SyscallNo::kGetBlockTimepoint>(block_timepoint);
+
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (block_timepoint != expected_timepoint) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto calldata =
+      Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize(
+          kExpectedTimepoint);
+  ASSERT_TRUE(calldata.has_value());
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata.value()},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+
+  auto root_res = handler.root_invoke();
+  ASSERT_TRUE(root_res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// A scheduler that supplies a height disagreeing with the tip is executing
+// against a different block than the one it is building. GetBlockHeight must
+// fail rather than serve either value: the point of carrying the height is
+// that the disagreement is caught here instead of reaching consensus.
+TEST_F(SyscallBlockDataTest, GetBlockHeightRejectsContextMismatchedWithTip)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // The tip implies executing height 1 (see GetBlockHeightSuccess above).
+  get_storage_snapshot_cache()->set_block_execution_context(
+      BlockExecutionContext{.block_height = 99, .block_timepoint = 1});
+
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        BlockHeight block_height = 0;
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        // Reaching here at all means the mismatch was not caught. Report
+        // success only if the syscall refused.
+        if (status.has_value() &&
+            status.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto native_contract = builder.build();
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+
+  // The mismatch surfaces as an unrecoverable host-function error, which
+  // fails the invocation outright rather than returning a height.
+  ASSERT_FALSE(handler.root_invoke().is_root_success());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
