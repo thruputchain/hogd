@@ -372,7 +372,10 @@ make_random_case(uint64_t seed, size_t instruction_count)
         random_instruction(rng, i, instruction_count));
   }
   test_case.instructions.push_back(spec(0x00000073U, Op::kEcall));
-  test_case.gas_limit = (instruction_count * kDivInstructionGas) + 10;
+  // Enough for every instruction to execute whatever it turned out to be:
+  // kMaxInstructionGas is the priciest one, which kDivInstructionGas only
+  // happened to be under an older schedule.
+  test_case.gas_limit = (instruction_count * kMaxInstructionGas) + 10;
   return test_case;
 }
 

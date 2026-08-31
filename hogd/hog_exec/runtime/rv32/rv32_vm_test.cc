@@ -830,11 +830,11 @@ TEST(Rv32DecodeTest, decodes_representative_instruction_families)
       {j_type(7, -2048), InstructionKind::kJal, Op::kJal, 7, -1, -1, -2048,
        kBaseInstructionGas},
       {jalr(8, 9, 12), InstructionKind::kJalr, Op::kJalr, 8, 9, 12, 12,
-       kBaseInstructionGas},
+       kIndirectJumpGas},
       {b_type(0, 1, 2, -16), InstructionKind::kBranch, Op::kBeq, -1, 1, 2, -16,
-       kBaseInstructionGas},
+       kBranchInstructionGas},
       {load(3, 2, 4, 20), InstructionKind::kLoad, Op::kLw, 3, 4, 20, 20,
-       kBaseInstructionGas},
+       kWideLoadGas},
       {s_type(2, 5, 6, -12), InstructionKind::kStore, Op::kSw, -1, 5, 6, -12,
        kBaseInstructionGas},
       {addi(10, 11, -1), InstructionKind::kOpImm, Op::kAddi, 10, 11, 31, -1,
@@ -888,13 +888,13 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   const std::array<ExpectedGasEntry, kOpCount> expected = {{
       {Op::kLui, u8"LUI", 1},     {Op::kAuipc, u8"AUIPC", 1},
-      {Op::kJal, u8"JAL", 1},     {Op::kJalr, u8"JALR", 1},
-      {Op::kBeq, u8"BEQ", 1},     {Op::kBne, u8"BNE", 1},
-      {Op::kBlt, u8"BLT", 1},     {Op::kBge, u8"BGE", 1},
-      {Op::kBltu, u8"BLTU", 1},   {Op::kBgeu, u8"BGEU", 1},
-      {Op::kLb, u8"LB", 1},       {Op::kLh, u8"LH", 1},
-      {Op::kLw, u8"LW", 1},       {Op::kLbu, u8"LBU", 1},
-      {Op::kLhu, u8"LHU", 1},     {Op::kSb, u8"SB", 1},
+      {Op::kJal, u8"JAL", 1},     {Op::kJalr, u8"JALR", 3},
+      {Op::kBeq, u8"BEQ", 2},     {Op::kBne, u8"BNE", 2},
+      {Op::kBlt, u8"BLT", 2},     {Op::kBge, u8"BGE", 2},
+      {Op::kBltu, u8"BLTU", 2},   {Op::kBgeu, u8"BGEU", 2},
+      {Op::kLb, u8"LB", 1},       {Op::kLh, u8"LH", 3},
+      {Op::kLw, u8"LW", 3},       {Op::kLbu, u8"LBU", 1},
+      {Op::kLhu, u8"LHU", 3},     {Op::kSb, u8"SB", 1},
       {Op::kSh, u8"SH", 1},       {Op::kSw, u8"SW", 1},
       {Op::kAddi, u8"ADDI", 1},   {Op::kSlti, u8"SLTI", 1},
       {Op::kSltiu, u8"SLTIU", 1}, {Op::kXori, u8"XORI", 1},
@@ -905,11 +905,11 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kSlt, u8"SLT", 1},     {Op::kSltu, u8"SLTU", 1},
       {Op::kXor, u8"XOR", 1},     {Op::kSrl, u8"SRL", 1},
       {Op::kSra, u8"SRA", 1},     {Op::kOr, u8"OR", 1},
-      {Op::kAnd, u8"AND", 1},     {Op::kMul, u8"MUL", 3},
-      {Op::kMulh, u8"MULH", 3},   {Op::kMulhsu, u8"MULHSU", 3},
-      {Op::kMulhu, u8"MULHU", 3}, {Op::kDiv, u8"DIV", 8},
-      {Op::kDivu, u8"DIVU", 8},   {Op::kRem, u8"REM", 8},
-      {Op::kRemu, u8"REMU", 8},   {Op::kFence, u8"FENCE", 1},
+      {Op::kAnd, u8"AND", 1},     {Op::kMul, u8"MUL", 1},
+      {Op::kMulh, u8"MULH", 1},   {Op::kMulhsu, u8"MULHSU", 1},
+      {Op::kMulhu, u8"MULHU", 1}, {Op::kDiv, u8"DIV", 2},
+      {Op::kDivu, u8"DIVU", 2},   {Op::kRem, u8"REM", 2},
+      {Op::kRemu, u8"REMU", 2},   {Op::kFence, u8"FENCE", 1},
       {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
       {Op::kUnimp, u8"UNIMP", 1},
   }};
@@ -921,8 +921,8 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
   }};
 
   EXPECT_EQ(kOpCount, 49U);
-  EXPECT_EQ(kGasTableVersion, 3U);
-  EXPECT_EQ(kGasScheduleDigest, 0x918317c21c46bb60ULL);
+  EXPECT_EQ(kGasTableVersion, 4U);
+  EXPECT_EQ(kGasScheduleDigest, 0xac8aefb00a997407ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
@@ -1329,21 +1329,26 @@ TEST(Rv32ExecutionTest, load_store_traps_debit_gas_without_state_mutation)
     uint8_t funct3;
     uint32_t address;
     Trap trap;
+    // Budget exactly this load's own gas, so gas_remaining() reaching zero
+    // means the trapping instruction was charged and nothing more. Budgeting a
+    // flat one instruction would make the wide loads trap kOutOfGas before the
+    // bounds check and stop testing what this case is named for.
+    uint64_t gas;
   };
 
   const std::array<LoadTrapCase, 5> load_cases = {{
-      {"lb_bad_memory", 0, 16, Trap::kBadMemory},
-      {"lh_bad_memory", 1, 16, Trap::kBadMemory},
-      {"lw_bad_memory", 2, 16, Trap::kBadMemory},
+      {"lb_bad_memory", 0, 16, Trap::kBadMemory, kBaseInstructionGas},
+      {"lh_bad_memory", 1, 16, Trap::kBadMemory, kWideLoadGas},
+      {"lw_bad_memory", 2, 16, Trap::kBadMemory, kWideLoadGas},
       // End-overlap: address in bounds but address+width exceeds memory size.
-      {"lh_end_overlap", 1, 15, Trap::kBadMemory}, // 15+2=17 > 16
-      {"lw_end_overlap", 2, 13, Trap::kBadMemory}, // 13+4=17 > 16
+      {"lh_end_overlap", 1, 15, Trap::kBadMemory, kWideLoadGas}, // 15+2=17 > 16
+      {"lw_end_overlap", 2, 13, Trap::kBadMemory, kWideLoadGas}, // 13+4=17 > 16
   }};
 
   for (const auto &test_case : load_cases) {
     SCOPED_TRACE(test_case.name);
     const auto program = make_program({load(1, test_case.funct3, 2, 0)});
-    Machine machine(program, 16, kBaseInstructionGas);
+    Machine machine(program, 16, test_case.gas);
     MachineTestPeer::set_reg(machine, 1, 99);
     MachineTestPeer::set_reg(machine, 2, test_case.address);
     EXPECT_EQ(machine.step(), StepResult::kTrap);
@@ -1455,8 +1460,10 @@ TEST(Rv32ExecutionTest, debits_gas_before_later_traps_and_mutation)
   }
   {
     // Unaligned OOB lw: gas debited before trap (kBadMemory, no writeback).
+    // Budget the load's own gas, so reaching zero means it was charged exactly
+    // once -- a flat one instruction would trap kOutOfGas first.
     const auto program = make_program({load(1, 2, 2, 0)});
-    Machine machine(program, 16, kBaseInstructionGas);
+    Machine machine(program, 16, kWideLoadGas);
     MachineTestPeer::set_reg(machine, 2, 13);
     EXPECT_EQ(machine.step(), StepResult::kTrap);
     EXPECT_EQ(machine.trap(), Trap::kBadMemory);
@@ -1508,10 +1515,10 @@ TEST(Rv32GasTest, charges_mul_and_div_costs_before_mutation)
   };
 
   const std::array<Case, 8> cases = {{
-      {"mul", 0, kMulInstructionGas, 252},
-      {"mulh", 1, kMulInstructionGas, 0},
-      {"mulhsu", 2, kMulInstructionGas, 0},
-      {"mulhu", 3, kMulInstructionGas, 0},
+      {"mul", 0, kBaseInstructionGas, 252},
+      {"mulh", 1, kBaseInstructionGas, 0},
+      {"mulhsu", 2, kBaseInstructionGas, 0},
+      {"mulhu", 3, kBaseInstructionGas, 0},
       {"div", 4, kDivInstructionGas, 7},
       {"divu", 5, kDivInstructionGas, 7},
       {"rem", 6, kDivInstructionGas, 0},
