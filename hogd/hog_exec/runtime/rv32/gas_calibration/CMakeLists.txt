@@ -13,6 +13,7 @@ add_library(
   lowering_audit.cc
   measure.cc
   provenance.cc
+  syscall_kernel.cc
   workloads.cc
 )
 

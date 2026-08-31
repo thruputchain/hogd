@@ -11,6 +11,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
+#include "hogd/hog_exec/runtime/rv32/gas_calibration/syscall_kernel.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
@@ -712,6 +713,279 @@ TEST(Rv32GasCalibrationKernel, PairKernelsRunTheWorkTheyAreCreditedWith)
     EXPECT_EQ(outcome.trap, Trap::kNone) << pair_name(kind);
     EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
         << pair_name(kind);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Syscall seam kernels.
+//
+// The seam measurement's denominator is a count of host calls, and nothing
+// about a wrong count looks wrong: a body that placed fewer ecalls than it was
+// asked for still runs, still halts, and still produces a confident ns/call --
+// for a call rate it never achieved. So the properties the estimator rests on
+// are asserted here: the calls are placed, they are all reached, the lowering
+// leaves them alone, and each one really is its own straight-line run.
+
+constexpr uint32_t kSyscallTestBodySlots = 64;
+constexpr uint32_t kSyscallTestTripCount = 4;
+
+// Every body slot that should hold an ecall does, decoded by the production
+// decoder rather than by trusting the encoder that wrote it.
+TEST(Rv32GasCalibrationSyscall, PlacesTheCallsItClaims)
+{
+  for (const SyscallShape shape : kAllSyscallShapes) {
+    for (const uint32_t groups :
+         {0U, 1U, 7U, max_call_groups(kSyscallTestBodySlots, shape)}) {
+      SyscallKernelSpec spec;
+      spec.shape = shape;
+      spec.body_slots = kSyscallTestBodySlots;
+      spec.call_groups = groups;
+      spec.trip_count = kSyscallTestTripCount;
+      const auto kernel = build_syscall_kernel(spec);
+      ASSERT_TRUE(kernel.has_value()) << syscall_shape_name(shape);
+      EXPECT_EQ(kernel.value().calls_per_iteration, groups)
+          << syscall_shape_name(shape);
+
+      const auto program = ThreadedProgram::create(kernel.value().code);
+      ASSERT_TRUE(program.has_value()) << syscall_shape_name(shape);
+      const size_t body_start =
+          kernel.value().body_start_pc / kInstructionBytes;
+      size_t ecalls = 0;
+      for (size_t slot = 0; slot < spec.body_slots; ++slot) {
+        const auto decoded = program->instruction_at(body_start + slot);
+        ASSERT_TRUE(decoded.has_value()) << syscall_shape_name(shape);
+        if (decoded->op == Op::kEcall) {
+          ++ecalls;
+        }
+      }
+      EXPECT_EQ(ecalls, groups)
+          << syscall_shape_name(shape) << " body holds " << ecalls
+          << " ecalls but is credited with " << groups << " calls";
+    }
+  }
+}
+
+// The saturated body is the primary estimator, so it has to be genuinely full:
+// a body one group short would be timed against a denominator it never ran.
+TEST(Rv32GasCalibrationSyscall, SaturatedBodiesFillTheInterior)
+{
+  for (const SyscallShape shape : kAllSyscallShapes) {
+    SyscallKernelSpec spec;
+    spec.shape = shape;
+    spec.body_slots = kSyscallTestBodySlots;
+    spec.saturated = true;
+    spec.trip_count = kSyscallTestTripCount;
+    const auto kernel = build_syscall_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << syscall_shape_name(shape);
+    const uint32_t cap = max_call_groups(kSyscallTestBodySlots, shape);
+    EXPECT_EQ(kernel.value().calls_per_iteration, cap)
+        << syscall_shape_name(shape);
+    // The interior is every slot but the two fixed filler boundaries, and a
+    // saturated body leaves none of it unused.
+    EXPECT_EQ(cap * syscall_shape_slots(shape), kSyscallTestBodySlots - 2)
+        << syscall_shape_name(shape);
+  }
+}
+
+// The count the harness divides by has to be the count the run actually made.
+// This is the check that would have caught a group silently overwriting its
+// neighbour's ecall, and it is exact rather than statistical.
+TEST(Rv32GasCalibrationSyscall, MakesExactlyTheCallsItIsCreditedWith)
+{
+  for (const SyscallShape shape : kAllSyscallShapes) {
+    SyscallKernelSpec spec;
+    spec.shape = shape;
+    spec.body_slots = kSyscallTestBodySlots;
+    spec.saturated = true;
+    spec.trip_count = kSyscallTestTripCount;
+    const auto kernel = build_syscall_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << syscall_shape_name(shape);
+
+    auto program =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(program.has_value()) << syscall_shape_name(shape);
+
+    ThreadedMachine machine(*program, kGasLimit);
+    SyscallDispatchHost host(shape);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted)
+        << syscall_shape_name(shape) << " trapped with "
+        << static_cast<int>(outcome.trap);
+    EXPECT_EQ(host.calls(), kernel.value().expected_host_calls)
+        << syscall_shape_name(shape);
+    EXPECT_FALSE(host.faulted())
+        << syscall_shape_name(shape)
+        << ": an out-pointer write fell outside guest memory, so the host did "
+           "less work than the shape claims";
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
+        << syscall_shape_name(shape)
+        << " ran a different amount of work than the harness credits it with";
+  }
+}
+
+// A selector wider than addi's signed 12-bit immediate encodes as a negative
+// number, the host never matches it, and the kernel runs off the end of its
+// code -- with the call count still looking right, because the terminal call
+// was made. static_asserts in the header pin the constants; this pins the
+// behaviour they exist to protect, so the run is known to end at the ecall
+// rather than at a trap that happens to stop it.
+TEST(Rv32GasCalibrationSyscall, TerminalCallHaltsRatherThanTrapping)
+{
+  SyscallKernelSpec spec;
+  spec.shape = SyscallShape::kSeam;
+  spec.body_slots = kSyscallTestBodySlots;
+  spec.call_groups = 4;
+  spec.trip_count = kSyscallTestTripCount;
+  const auto kernel = build_syscall_kernel(spec);
+  ASSERT_TRUE(kernel.has_value());
+
+  auto program =
+      ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                              kernel.value().initial_memory, 0,
+                                              kernel.value().memory_bytes,
+                                              /*trace=*/false);
+  ASSERT_TRUE(program.has_value());
+
+  ThreadedMachine machine(*program, kGasLimit);
+  SyscallDispatchHost host(SyscallShape::kSeam);
+  const RunOutcome outcome = run_once(machine, host);
+  EXPECT_EQ(outcome.result, StepResult::kHalted);
+  EXPECT_EQ(outcome.trap, Trap::kNone);
+}
+
+// Each ecall is a run barrier, so a body of N call groups must lower to N + 1
+// straight-line runs. That is the structural statement behind the per-call
+// cost: what is being priced is a crossing, and the crossing is what ends a
+// run. A body that lowered to fewer runs than calls would mean some slot the
+// harness counts as a call is not one.
+TEST(Rv32GasCalibrationSyscall, EachCallIsItsOwnRunAndNothingFuses)
+{
+  for (const SyscallShape shape : kAllSyscallShapes) {
+    for (const uint32_t groups :
+         {0U, 5U, max_call_groups(kSyscallTestBodySlots, shape)}) {
+      SyscallKernelSpec spec;
+      spec.shape = shape;
+      spec.body_slots = kSyscallTestBodySlots;
+      spec.call_groups = groups;
+      spec.trip_count = kSyscallTestTripCount;
+      const auto kernel = build_syscall_kernel(spec);
+      ASSERT_TRUE(kernel.has_value()) << syscall_shape_name(shape);
+
+      const LoweringAudit audit =
+          audit_body(kernel.value().code, kernel.value().initial_memory,
+                     kernel.value().memory_bytes,
+                     kernel.value().body_start_pc / kInstructionBytes,
+                     spec.body_slots);
+      EXPECT_TRUE(audit.clean())
+          << syscall_shape_name(shape) << " at " << groups
+          << " calls: lowering rewrote " << audit.rewritten_slots
+          << " slot(s), first at " << audit.first_rewritten_slot;
+      EXPECT_EQ(audit.body_runs, size_t{groups} + 1)
+          << syscall_shape_name(shape) << " at " << groups << " calls";
+    }
+  }
+}
+
+// The seam kernels cannot borrow the opcode kernels' register plan: the syscall
+// ABI is a0-a7 = x10-x17 and the opcode filler rotates over x14-x17, so an
+// opcode filler between two calls would rewrite a4-a7 and the arguments the
+// host sees would depend on how many filler slots preceded the call. Pin the
+// disjointness rather than leave it to a comment.
+TEST(Rv32GasCalibrationSyscall, FillerNeverWritesAnArgumentRegister)
+{
+  for (uint8_t reg = kSyscallFillerDstBase;
+       reg < kSyscallFillerDstBase + kSyscallFillerDstSize; ++reg) {
+    EXPECT_TRUE(reg < kSyscallArgBase ||
+                reg >= kSyscallArgBase + kSyscallArgCount)
+        << "filler destination x" << static_cast<int>(reg)
+        << " aliases a syscall argument register";
+  }
+  EXPECT_TRUE(kSyscallLoopCounterReg < kSyscallArgBase ||
+              kSyscallLoopCounterReg >= kSyscallArgBase + kSyscallArgCount);
+  EXPECT_TRUE(kSyscallFillerSrcA < kSyscallArgBase ||
+              kSyscallFillerSrcA >= kSyscallArgBase + kSyscallArgCount);
+  EXPECT_TRUE(kSyscallFillerSrcB < kSyscallArgBase ||
+              kSyscallFillerSrcB >= kSyscallArgBase + kSyscallArgCount);
+
+  // And the emitted filler really does write where the plan says.
+  SyscallKernelSpec spec;
+  spec.shape = SyscallShape::kSelectorReload;
+  spec.body_slots = kSyscallTestBodySlots;
+  spec.call_groups = 0; // all filler
+  spec.trip_count = kSyscallTestTripCount;
+  const auto kernel = build_syscall_kernel(spec);
+  ASSERT_TRUE(kernel.has_value());
+  const auto program = ThreadedProgram::create(kernel.value().code);
+  ASSERT_TRUE(program.has_value());
+  const size_t body_start = kernel.value().body_start_pc / kInstructionBytes;
+  for (size_t slot = 0; slot < spec.body_slots; ++slot) {
+    const auto decoded = program->instruction_at(body_start + slot);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->op, Op::kAdd);
+    EXPECT_TRUE(decoded->rd < kSyscallArgBase ||
+                decoded->rd >= kSyscallArgBase + kSyscallArgCount)
+        << "filler at slot " << slot << " writes x"
+        << static_cast<int>(decoded->rd);
+  }
+}
+
+// Out-pointer shapes are only measuring host work if the write lands. A write
+// that faults is cheaper than one that does not and would be reported as a
+// fast call, so the addresses the prologue loads have to be inside guest
+// memory with room for the payload.
+TEST(Rv32GasCalibrationSyscall, OutPointersAddressRealGuestMemory)
+{
+  EXPECT_LE(kSyscallOutPointerA + 32U, kMaxMemoryBytes);
+  EXPECT_LE(kSyscallOutPointerB + 32U, kMaxMemoryBytes);
+  EXPECT_NE(kSyscallOutPointerA, kSyscallOutPointerB);
+
+  for (const SyscallShape shape : kAllSyscallShapes) {
+    if (syscall_shape_output_bytes(shape) == 0) {
+      continue;
+    }
+    SyscallKernelSpec spec;
+    spec.shape = shape;
+    spec.body_slots = kSyscallTestBodySlots;
+    spec.saturated = true;
+    spec.trip_count = kSyscallTestTripCount;
+    const auto kernel = build_syscall_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << syscall_shape_name(shape);
+    auto program =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(program.has_value()) << syscall_shape_name(shape);
+    ThreadedMachine machine(*program, kGasLimit);
+    SyscallDispatchHost host(shape);
+    const RunOutcome outcome = run_once(machine, host);
+    ASSERT_EQ(outcome.result, StepResult::kHalted) << syscall_shape_name(shape);
+    EXPECT_FALSE(host.faulted()) << syscall_shape_name(shape);
+    // The host writes a payload derived from its call counter, so guest memory
+    // at the out pointer must have changed from the zero image it started at.
+    EXPECT_NE(machine.memory()[kSyscallOutPointerA], 0)
+        << syscall_shape_name(shape) << " wrote nothing through a1";
+  }
+}
+
+// A request for more call groups than the body can hold is refused rather than
+// quietly truncated. Truncation would place fewer calls than the denominator
+// says, which is the one failure mode a timing cannot reveal.
+TEST(Rv32GasCalibrationSyscall, RefusesMoreCallsThanTheBodyHolds)
+{
+  for (const SyscallShape shape : kAllSyscallShapes) {
+    SyscallKernelSpec spec;
+    spec.shape = shape;
+    spec.body_slots = kSyscallTestBodySlots;
+    spec.call_groups = max_call_groups(kSyscallTestBodySlots, shape) + 1;
+    spec.trip_count = kSyscallTestTripCount;
+    const auto kernel = build_syscall_kernel(spec);
+    ASSERT_FALSE(kernel.has_value()) << syscall_shape_name(shape);
+    EXPECT_EQ(kernel.error(), KernelError::kTooManyTargets)
+        << syscall_shape_name(shape);
   }
 }
 

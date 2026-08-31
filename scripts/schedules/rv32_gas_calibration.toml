@@ -64,6 +64,13 @@ if [ "{{ .mode }}" = "reference" ]; then
   echo '===== per-opcode costs ====='
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json
 
+  echo '===== syscall dispatch (the ecall seam) ====='
+  # The crossing every syscall pays, measured on bench hardware rather than a
+  # container. Not a syscall: the production syscall path is not linked into
+  # this harness, so this is the floor under a syscall's fixed cost and not the
+  # cost itself.
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --syscalls
+
   echo '===== validation workloads ====='
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --workloads
 
@@ -109,6 +116,9 @@ else
     # baseline. Neither is fixed by regenerating the reference.
     echo '===== per-opcode costs from the failing run ====='
     ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json || true
+    echo '===== syscall dispatch (the ecall seam) ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+      --syscalls || true
     echo '===== validation workloads ====='
     ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
       --workloads || true
