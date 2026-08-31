@@ -123,9 +123,9 @@ struct AcceptedGasSchedule {
 };
 
 inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
-    {kGasTableVersion, kGasScheduleDigest},
+    {.version = kGasTableVersion, .digest = kGasScheduleDigest},
     // groundhog-cli <= 0.10.2. Remove once the lowerer stamps v4.
-    {3, 0x918317c21c46bb60ULL},
+    {.version = 3, .digest = 0x918317c21c46bb60ULL},
 }};
 
 constexpr uint64_t
