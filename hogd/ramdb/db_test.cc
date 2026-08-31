@@ -548,6 +548,71 @@ TEST_F(DatabaseTest, SnapshotRejectsOverlapping)
   check_integrity();
 }
 
+// snapshot_recommended turns on once the WAL beyond snapshot coverage passes
+// the floor, off when a snapshot covers it, and on again after another
+// live-set's-worth of WAL accumulates.
+TEST_F(DatabaseTest, SnapshotRecommendedTracksCoverage)
+{
+  // small WAL files so the floor (kDiskLogCleanupRatio files) is small.
+  constexpr size_t kSmallFileThreshold = 64 * 1024;
+  db_.reset();
+  ASSERT_TRUE(dir_.unlink_all());
+  ASSERT_TRUE(static_cast<bool>(
+      open_db(std::numeric_limits<uint64_t>::max(), kSmallFileThreshold)));
+
+  EXPECT_FALSE(db_->snapshot_recommended());
+
+  // ~10 MiB of inserts, far past the 256 KiB floor.
+  insert_n(kInsertions);
+  ASSERT_TRUE(db_->sync());
+  EXPECT_TRUE(db_->snapshot_recommended());
+
+  // false whether the snapshot is still in flight or already covering.
+  auto snap = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap);
+  EXPECT_FALSE(db_->snapshot_recommended());
+  ASSERT_TRUE(snap->second.get());
+  EXPECT_FALSE(db_->snapshot_recommended());
+
+  // a fresh live-set's-worth of WAL is not enough by itself: the threshold
+  // is now the last snapshot's size, so overwrite the live set twice for a
+  // deterministic margin.
+  for (int round = 0; round < 2; ++round) {
+    for (const auto &[key, value] : oracle_) {
+      ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                           std::as_bytes(std::span(value))));
+    }
+  }
+  ASSERT_TRUE(db_->sync());
+  EXPECT_TRUE(db_->snapshot_recommended());
+}
+
+// snapshot_recommended counts WAL that predates this process: after a
+// restart with no snapshot on disk, the recovered WAL alone recommends one.
+TEST_F(DatabaseTest, SnapshotRecommendedCountsRecoveredWal)
+{
+  constexpr size_t kSmallFileThreshold = 64 * 1024;
+  db_.reset();
+  ASSERT_TRUE(dir_.unlink_all());
+  ASSERT_TRUE(static_cast<bool>(
+      open_db(std::numeric_limits<uint64_t>::max(), kSmallFileThreshold)));
+
+  insert_n(kInsertions);
+  ASSERT_TRUE(db_->sync());
+
+  // reopen: nothing has been written this incarnation, but the WAL on disk
+  // is far past the floor and no snapshot covers it.
+  ASSERT_TRUE(static_cast<bool>(
+      open_db(std::numeric_limits<uint64_t>::max(), kSmallFileThreshold)));
+  EXPECT_TRUE(db_->snapshot_recommended());
+
+  auto snap = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snap);
+  ASSERT_TRUE(snap->second.get());
+  EXPECT_FALSE(db_->snapshot_recommended());
+  check_integrity();
+}
+
 TEST_F(DatabaseTest, SnapshotOngoingPuts)
 {
   auto rand = rand_; // snapshot rng state.
