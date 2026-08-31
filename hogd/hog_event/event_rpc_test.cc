@@ -3262,6 +3262,27 @@ TEST_F(EventRpcTest, OversizedEventsFileIsRejectedBeforeAllocation)
             std::string::npos);
 }
 
+TEST_F(EventRpcTest, SparseEventsFileAtSizeLimitIsRejectedBeforeAllocation)
+{
+  // A sparse file resized to exactly the replay cap passes the size check but
+  // is not a genuine events file: it costs an attacker no storage yet reads
+  // back as a near-2-GiB run of zeros.  Recovery must reject it from its
+  // unbacked blocks, before reading its full length into memory.
+  const SHA256Hash root{};
+  const std::string name =
+      EventBlockContext::final_events_filename(temp_dir(), root);
+  {
+    std::ofstream sparse(name, std::ios::binary);
+    ASSERT_TRUE(sparse.good());
+  }
+  std::filesystem::resize_file(name, kMaxIndexerOutboxPayloadBytes);
+
+  auto pairs = read_final_events_file(temp_dir(), root);
+  ASSERT_FALSE(pairs.has_value());
+  EXPECT_NE(pairs.error().find("is sparse"), std::string::npos)
+      << pairs.error();
+}
+
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
 {
   EventRPCContext ctx(temp_dir());

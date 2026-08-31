@@ -18,6 +18,7 @@
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -513,11 +514,27 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
   }
   // A block's pairs were bounded to the pull RPC's replay limit at
   // publication, so a larger file cannot be a valid events file.  Rejecting
-  // before the allocation keeps a corrupt or sparse file a clean fail-closed
-  // error instead of an unbounded allocation.
+  // before the allocation keeps a corrupt or oversized file a clean fail-closed
+  // error instead of a file-sized allocation.
   if (std::cmp_greater(size, kMaxIndexerOutboxPayloadBytes)) {
     return std::unexpected(
         std::format("events file {} exceeds replayable payload size", name));
+  }
+  // A genuine events file is streamed to disk in full and fsynced before it is
+  // published, so every byte it claims is backed by an allocated block.  A
+  // sparse file is cheap to forge at the accepted size limit -- it costs no
+  // real storage yet reads back as an equally large run of zeros -- so reject a
+  // file whose allocated blocks cannot cover its length before allocating a
+  // buffer for the hole.  (st_blocks counts 512-byte units; events files share
+  // the node's uncompressed durable storage, so a fully-written file is never
+  // under-allocated.)
+  struct stat st{};
+  if (::stat(name.c_str(), &st) != 0) {
+    return std::unexpected(std::format("failed to size events file {}", name));
+  }
+  if (std::cmp_less(static_cast<uint64_t>(st.st_blocks) * 512U,
+                    static_cast<uint64_t>(size))) {
+    return std::unexpected(std::format("events file {} is sparse", name));
   }
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
   file.seekg(0);
