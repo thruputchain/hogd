@@ -437,7 +437,8 @@ TEST_F(StrictIndexerTest, ShortPersistedTxValueYieldsRecoverableLookupError)
 
   std::string tx_key;
   IndexerKeyFormat::make_tx_key(tx_key, tx_hash);
-  for (const std::string short_value : {std::string(), std::string(7, '\x7f')}) {
+  for (const std::string short_value :
+       {std::string(), std::string(7, '\x7f')}) {
     SCOPED_TRACE(::testing::Message() << "short length=" << short_value.size());
     overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily,
                             tx_key, short_value);
