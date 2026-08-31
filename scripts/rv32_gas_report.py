@@ -720,8 +720,21 @@ def cost_model(data, worst_case=False):
         cost = cost_ns(cell) if resolved(cell) else baseline
         op = cell["op"]
         if worst_case:
-            if op not in best or cost > best[op]:
-                best[op] = cost
+            # Floored at the baseline, exactly as build_schedule floors it and
+            # for the same reason: an opcode measuring under one dispatch has
+            # not found a cheaper dispatch, it is the estimator straining. The
+            # floor has to be applied in both places or this vector is not the
+            # one the schedule prices at, and the bound check is checking a
+            # schedule nobody proposed. On hog10 sixteen opcodes measure at
+            # 0.83x a dispatch, which put four workloads' bounds below what the
+            # schedule would actually charge them.
+            #
+            # Only the worst-case vector. The workload-matched vector below is
+            # testing whether the decomposition predicts real time, and
+            # flooring that one would bias the very quantity under test.
+            floored = max(cost, baseline)
+            if op not in best or floored > best[op]:
+                best[op] = floored
             continue
         rank = (_context_distance(cell), -cost)
         if op not in best or rank < best[op][0]:
