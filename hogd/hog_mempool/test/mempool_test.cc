@@ -506,55 +506,75 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
-TEST(MempoolAuthRpc, StartupWatermarkMustNotExceedRecoveredDbTip)
+TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 {
   MempoolAuthRpc auth_rpc;
   constexpr BlockHeight kDbTip = 4;
-  std::optional<BlockHeight> callback_height;
-  bool registration_completed = false;
+  std::vector<BlockHeight> callback_height;
+  std::atomic<bool> registration_completed = false;
 
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
-
-  // TODO(jhumphri): This should hang... fix the test.
-  auth_rpc.register_callback(
-      [&callback_height](BlockHeight height,
-                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
-        callback_height = height;
-        co_return;
-      },
-      [&registration_completed] { registration_completed = true; });
-  EXPECT_EQ(callback_height, std::nullopt);
+  // We run [auth_rpc.mempoolauth_auth_data_changed()] in a separate thread as
+  // it blocks until a callback is registered.
+  [&auth_rpc]() -> x23::Detached {
+    co_await default_threadpool().bg();
+    auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
+  }();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(callback_height.empty());
   EXPECT_FALSE(registration_completed);
 
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
   auth_rpc.register_callback(
       [&callback_height](BlockHeight height,
                          KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
-        callback_height = height;
+        callback_height.push_back(height);
         co_return;
       },
-      [&registration_completed] { registration_completed = true; });
-  EXPECT_TRUE(registration_completed);
+      [&registration_completed] { registration_completed = true; })();
 
   auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
-  EXPECT_EQ(callback_height, kDbTip + 1);
+  while (!registration_completed) {
+  }
+  EXPECT_TRUE(registration_completed);
+  EXPECT_EQ(callback_height.size(), 2);
+  EXPECT_EQ(callback_height[0], kDbTip);
+  EXPECT_EQ(callback_height[1], kDbTip + 1);
 }
 
-TEST(MempoolAuthRpc, StartupUpdatesCoalesceToHighestWatermark)
+TEST(MempoolAuthRpc, StartupUpdatesDoNotCoalesce)
 {
   MempoolAuthRpc auth_rpc;
   constexpr BlockHeight kDbTip = 4;
+  std::vector<BlockHeight> callback_height;
+  std::atomic<bool> registration_completed = false;
 
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip - 1, KeyChangeBatch{})();
+  // We run [auth_rpc.mempoolauth_auth_data_changed()] in separate threads as
+  // they block until a callback is registered.
+  [&auth_rpc]() -> x23::Detached {
+    co_await default_threadpool().bg();
+    auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
+  }();
+  [&auth_rpc]() -> x23::Detached {
+    co_await default_threadpool().bg();
+    auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  }();
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(callback_height.empty());
+  EXPECT_FALSE(registration_completed);
 
-  // TODO(jhumphri): This first [register_callback] should hang... fix the test.
-  auth_rpc.register_callback([](BlockHeight, KeyChangeBatch)
-                                 -> x23::Async<void> { co_return; },
-                             [] {});
-  auth_rpc.register_callback([](BlockHeight, KeyChangeBatch)
-                                 -> x23::Async<void> { co_return; },
-                             [] {});
+  auth_rpc.register_callback(
+      [&callback_height](BlockHeight height,
+                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+        callback_height.push_back(height);
+        co_return;
+      },
+      [&registration_completed] { registration_completed = true; })();
+
+  while (!registration_completed) {
+  }
+  EXPECT_TRUE(registration_completed);
+  EXPECT_EQ(callback_height.size(), 2);
+  EXPECT_EQ(callback_height[0], kDbTip);
+  EXPECT_EQ(callback_height[1], kDbTip + 1);
 }
 
 TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
@@ -573,7 +593,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
         allow_callback_finish.wait();
         co_return;
       },
-      [] {});
+      [] {})();
 
   std::thread callback_thread([&] {
     auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
@@ -584,7 +604,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   std::future<void> unregistered = unregister_result.get_future();
   std::thread unregister_thread([&] {
     unregister_started.count_down();
-    auth_rpc.unregister_callback();
+    auth_rpc.unregister_callback()();
     unregister_result.set_value();
   });
   unregister_started.wait();
@@ -602,7 +622,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   // TODO(jhumphri): This should hang... fix the test.
   auth_rpc.register_callback([](BlockHeight, KeyChangeBatch)
                                  -> x23::Async<void> { co_return; },
-                             [] {});
+                             [] {})();
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)

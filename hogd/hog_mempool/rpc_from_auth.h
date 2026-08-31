@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstddef>
-#include <mutex>
 #include <utility>
 
 #include "auth_card.hh"
@@ -18,6 +17,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/x23/corosync.h"
 
 namespace hogd {
 
@@ -32,10 +32,12 @@ public:
   // A fresh scheduler has no cached transactions, so auth updates received
   // before coordinator initialization only contribute a height watermark.
   template<typename OnRegistered>
-  void register_callback(auth_data_callback &&callback,
-                         OnRegistered &&on_registered)
+  x23::Async<void> register_callback(auth_data_callback &&callback,
+                                     OnRegistered &&on_registered)
   {
-    const std::lock_guard lock(callback_mutex_);
+    x23::CoroGuard cg;
+    co_await cg(callback_lock_);
+
     CHECK(!callback_.has_value());
     callback_ = std::move(callback);
     std::forward<OnRegistered>(on_registered)();
@@ -44,11 +46,19 @@ public:
   // Stop admitting callbacks that can touch coordinator state, then wait for
   // callbacks admitted before the close to finish. The coordinator calls this
   // before destroying members captured by [callback_].
-  void unregister_callback()
+  x23::Async<void> unregister_callback()
   {
-    std::unique_lock lock(callback_mutex_);
+    x23::CoroGuard cg;
+    co_await cg(callback_lock_);
+
     callback_.reset();
-    callback_drained_.wait(lock, [this] { return callbacks_in_flight_ == 0; });
+    while (true) {
+      if (callbacks_in_flight_) {
+        cg.reset();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        co_await cg(callback_lock_);
+      }
+    }
   }
 
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
@@ -77,7 +87,9 @@ public:
   {
     std::optional<auth_data_callback> callback;
     while (true) {
-      const std::lock_guard lock(callback_mutex_);
+      x23::CoroGuard cg;
+      co_await cg(callback_lock_);
+
       if (!callback_) {
         info("Recording auth-data watermark {} before mempool coordinator "
              "initialization; discarding {} key changes for an empty "
@@ -90,15 +102,16 @@ public:
       ++callbacks_in_flight_;
       break;
     }
-    x23::Defer release_callback([this] {
-      const std::lock_guard lock(callback_mutex_);
+
+    co_await (*callback)(height, std::move(key_changes));
+
+    {
+      x23::CoroGuard cg;
+      co_await cg(callback_lock_);
+
       CHECK_GT(callbacks_in_flight_, size_t{0});
       --callbacks_in_flight_;
-      if (callbacks_in_flight_ == 0) {
-        callback_drained_.notify_all();
-      }
-    });
-    co_await (*callback)(height, std::move(key_changes));
+    }
   }
 
   static x23::Async<auth_sched_client_t> get_client()
@@ -116,8 +129,7 @@ public:
   }
 
 private:
-  std::mutex callback_mutex_;
-  std::condition_variable callback_drained_;
+  x23::CoroLock callback_lock_;
   std::optional<auth_data_callback> callback_;
   size_t callbacks_in_flight_ = 0;
 };
