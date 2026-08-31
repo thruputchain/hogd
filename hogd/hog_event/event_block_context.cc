@@ -11,13 +11,11 @@
 #include <cstdio>
 #include <cstring>
 #include <expected>
+#include <fcntl.h>
 #include <format>
-#include <fstream>
-#include <ios>
 #include <memory>
 #include <span>
 #include <string_view>
-#include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <type_traits>
 #include <unistd.h>
@@ -504,14 +502,17 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
 {
   const std::string name =
       EventBlockContext::final_events_filename(work_directory, hash);
-  std::ifstream file(name, std::ios::binary | std::ios::ate);
-  if (!file) {
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  int raw_fd = open(name.c_str(), O_RDONLY | O_CLOEXEC);
+  if (raw_fd == -1) {
     return std::unexpected(std::format("failed to open events file {}", name));
   }
-  const std::streamoff size = file.tellg();
-  if (size < 0) {
+  x23::UniqueFd fd(raw_fd);
+  struct stat file_stat{};
+  if (fstat(fd.get(), &file_stat) != 0 || file_stat.st_size < 0) {
     return std::unexpected(std::format("failed to size events file {}", name));
   }
+  const off_t size = file_stat.st_size;
   // A block's pairs were bounded to the pull RPC's replay limit at
   // publication, so a larger file cannot be a valid events file.  Rejecting
   // before the allocation keeps a corrupt or oversized file a clean fail-closed
@@ -528,18 +529,27 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
   // buffer for the hole.  (st_blocks counts 512-byte units; events files share
   // the node's uncompressed durable storage, so a fully-written file is never
   // under-allocated.)
-  struct stat st{};
-  if (::stat(name.c_str(), &st) != 0) {
-    return std::unexpected(std::format("failed to size events file {}", name));
-  }
-  if (std::cmp_less(static_cast<uint64_t>(st.st_blocks) * 512U,
-                    static_cast<uint64_t>(size))) {
+  if (file_stat.st_blocks * 512 < size) {
     return std::unexpected(std::format("events file {} is sparse", name));
   }
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
-  file.seekg(0);
-  if (size > 0 && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {
-    return std::unexpected(std::format("failed to read events file {}", name));
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const ssize_t read_size =
+        pread(fd.get(), bytes.data() + offset, bytes.size() - offset,
+              static_cast<off_t>(offset));
+    if (read_size < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return std::unexpected(
+          std::format("failed to read events file {}", name));
+    }
+    if (read_size == 0) {
+      return std::unexpected(
+          std::format("failed to read events file {}", name));
+    }
+    offset += static_cast<size_t>(read_size);
   }
   return parse_events_file_pairs(bytes, name);
 }
