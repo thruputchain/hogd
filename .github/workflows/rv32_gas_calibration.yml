@@ -1,11 +1,11 @@
 name: RV32 Gas Calibration
 
-# Manual dispatch only for now. The natural home for this is a periodic
-# schedule -- the check exists to catch a calibration that has quietly stopped
-# describing the engine, which is a thing that happens over weeks, not per PR --
-# but it wants a settled reference on the bench host first. Adding a `schedule:`
-# trigger later is a one-line change.
+# Nightly, because a calibration stops describing the engine over weeks, not
+# per PR. Every run files its JSON to metrics_history whether the check passes
+# or fails, so the costs are a time series and not just a pass/fail.
 on:
+    schedule:
+        - cron: "0 17 * * *" # Daily at 10am PDT/9am PST
     workflow_dispatch:
         inputs:
             mode:
@@ -60,11 +60,16 @@ jobs:
             - uses: actions/checkout@v6
             - name: Run hog schedule
               run: |
+                  BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+                  # `inputs` is empty on a scheduled run.
+                  MODE="${{ inputs.mode || 'check' }}"
+                  echo "Branch name: $BRANCH_NAME, mode: $MODE"
                   hog_sched \
                     --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_commit --value=${{ github.sha }} \
-                    --key=mode --value=${{ inputs.mode }} \
+                    --key=git_branch --value=$BRANCH_NAME \
+                    --key=mode --value=$MODE \
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                     --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     --timeout-sec=2400 \
