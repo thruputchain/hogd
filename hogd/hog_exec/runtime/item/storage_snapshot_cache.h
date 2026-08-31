@@ -69,12 +69,6 @@ public:
 
   SystemStatus<const DbTip *> try_get_db_tip();
 
-  // Consensus-critical execution parameters the chain runs under. Served off
-  // the same lock-free tip cache as the block height: the first read of the
-  // block fetches the tip, every later one is an atomic load.
-  SystemStatus<uint32_t> try_get_max_sha256_buffers();
-  SystemStatus<uint32_t> try_get_max_cross_invoke_depth();
-
   // The executing block's own facts, supplied by the scheduler when the block
   // was opened. Distinct from everything above, which is read from the db tip
   // -- and the tip, for an open block, is the *parent*. The height is

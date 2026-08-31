@@ -188,7 +188,8 @@ protected:
     ASSERT_TRUE(db_.write_address_metadata(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
-                             .contract_size = 10}));
+                             .contract_size = 10,
+                             .contract_type = ContractType::kRv32}));
   }
 };
 
@@ -415,8 +416,9 @@ TEST_F(HogDbTest, DataAccessObject)
   uint32_t contract_size = test_code.size();
   SHA256Hash hash = sha256(std::as_bytes(std::span(test_code)));
   EXPECT_TRUE(db_.write_address_metadata(
-      addr,
-      DeployedContractHash{.hash = hash, .contract_size = contract_size}));
+      addr, DeployedContractHash{.hash = hash,
+                                 .contract_size = contract_size,
+                                 .contract_type = ContractType::kRv32}));
   auto rhash = db_.read_address_metadata(addr);
   EXPECT_TRUE(rhash);
   if (rhash) {
@@ -607,10 +609,10 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
   contract.native_contract_id() =
       static_cast<HogexecPrecompiledNativeContracts>(1);
 
-  ASSERT_TRUE(
-      db_.write_address_metadata(addr,
-                                 DeployedContractHash{.hash = sha256(contract),
-                                                      .contract_size = 10}));
+  ASSERT_TRUE(db_.write_address_metadata(
+      addr, DeployedContractHash{.hash = sha256(contract),
+                                 .contract_size = 10,
+                                 .contract_type = ContractType::kRv32}));
   ASSERT_TRUE(db_.write_address_balance(addr, 1000000));
 
   BlockHeight height = 1;
@@ -623,7 +625,9 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
 
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr2,
-      DeployedContractHash{.hash = sha256(contract), .contract_size = 10},
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32},
       std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr), -100000,
@@ -633,7 +637,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
                                  std::to_underlying(StorageDeltaFlags::None)));
 
   DeployedContractHash deployed_hash{.hash = sha256(contract),
-                                     .contract_size = 10};
+                                     .contract_size = 10,
+                                     .contract_type = ContractType::kRv32};
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr3, deployed_hash, std::to_underlying(StorageDeltaFlags::None)));
   int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
@@ -1470,7 +1475,8 @@ TEST_F(HogDbTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_deploy_contract(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
-                             .contract_size = 15},
+                             .contract_size = 15,
+                             .contract_type = ContractType::kRv32},
         std::to_underlying(StorageDeltaFlags::None)));
   });
 }
@@ -1525,7 +1531,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("x"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Create RCQ with entries across multiple blocks
   // Each block gets kEntriesPerBlock entries
@@ -1622,7 +1629,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("consume"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1709,7 +1717,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1803,7 +1812,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1897,7 +1907,8 @@ TEST_F(HogDbTest,
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1991,7 +2002,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -2081,9 +2093,11 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
   // Setup contract on db_
   ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
   ASSERT_TRUE(db_.write_address_metadata(
-      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
-                                              std::span("rcq_consumed"))),
-                                          .contract_size = 10}));
+      contract_addr,
+      DeployedContractHash{.hash =
+                               sha256(std::as_bytes(std::span("rcq_consumed"))),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Create second database with identical base state
   ErrnoStatus<Directory> dir2 = Directory::open_temporary();
@@ -2096,9 +2110,11 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
 
   ASSERT_TRUE(db2.write_address_balance(contract_addr, 10'000'000));
   ASSERT_TRUE(db2.write_address_metadata(
-      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
-                                              std::span("rcq_consumed"))),
-                                          .contract_size = 10}));
+      contract_addr,
+      DeployedContractHash{.hash =
+                               sha256(std::as_bytes(std::span("rcq_consumed"))),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Insert RCQ entries on db_ over several blocks
   constexpr size_t kNumBlocks = 3;
@@ -4218,7 +4234,8 @@ TEST_F(HogDbTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
   ASSERT_TRUE(db_.write_address_metadata(
       addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("stale"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   PerThreadARC<BlockTX> block_a(
       db_, cost_model_, background_commit_worker_, 1,

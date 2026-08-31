@@ -56,7 +56,6 @@ struct StorageCostModel {
       // Native and mock contracts carry no deployable blob (contract_size is
       // always 0), so deployment is free.
       return 0;
-    case ContractType::kWasmi:
     case ContractType::kRv32:
       // User-deployed contracts with a real ContractBlob payload are priced by
       // their on-chain size.

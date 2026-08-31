@@ -675,7 +675,7 @@ TEST(Rv32Threaded, outOfGasMidRunSettlesAtNextSeam)
 
 TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
 {
-  using test_program::branch;
+  using test_program::j_type;
   // The block-granular charger bills a whole run at its head in one check. For
   // a run of 1-gas instructions, that must be indistinguishable from debiting
   // one gas per instruction: under every budget, the gas left at termination --
@@ -683,11 +683,13 @@ TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
   //
   // Two programs do the same kWork units of 1-gas work, then fall off the end:
   //   fused:     kWork back-to-back addi nops -> ONE run of run_gas == kWork.
-  //   per_instr: (kWork-1) always-taken beq(+4), each landing on the next, then
-  //              a trailing addi nop -> kWork single-instruction runs (run_gas
-  //              1 each). beq and addi both cost kBaseInstructionGas (1), so
-  //              this is literal one-gas-at-a-time accounting -- the ground
-  //              truth.
+  //   per_instr: (kWork-1) jal(+4), each landing on the next, then a trailing
+  //              addi nop -> kWork single-instruction runs (run_gas 1 each).
+  //              jal is a barrier that still costs kBaseInstructionGas, so this
+  //              is literal one-gas-at-a-time accounting -- the ground truth.
+  //              A taken branch would also end each run, but branches cost more
+  //              than one gas, which would make the two programs do different
+  //              amounts of work and the comparison meaningless.
   // Block metering must match it for all budgets, so on OOG the fused run head
   // debits the whole (unaffordable) run -- saturating gas_remaining to 0 --
   // exactly as the per-instruction program drains to 0 before it traps.
@@ -703,10 +705,10 @@ TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
   std::vector<uint32_t> per_instr_words;
   per_instr_words.reserve(kWork);
   for (uint32_t i = 0; i + 1 < kWork; ++i) {
-    per_instr_words.push_back(branch(0, 0, 0, 4)); // beq x0,x0,+4 -> next instr
+    per_instr_words.push_back(j_type(0, 4)); // jal x0,+4 -> next instruction
   }
   per_instr_words.push_back(
-      addi(0, 0, 0)); // trailing nop the last branch lands on
+      addi(0, 0, 0)); // trailing nop the last jump lands on
   auto per_instr_program = threaded_from_words(per_instr_words);
 
   // Sweep every budget from starved through comfortably past the work.
@@ -1621,14 +1623,18 @@ TEST(Rv32ThreadedTrapGas, misalignedControlFlowTargetsTrapLikeCanonical)
   {
     const std::vector<uint32_t> words = {branch(0, 0, 0, 6), addi(1, 0, 1)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/99, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 -
+                               kBranchInstructionGas,
+                           /*check_pc=*/false);
   }
   {
     // jalr clears bit 0 (target 7 -> 6) and must still reject 2 mod 4.
     const std::vector<uint32_t> words = {addi(1, 0, 7), jalr(0, 1, 0),
                                          addi(3, 0, 9)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 -
+                               (kBaseInstructionGas + kIndirectJumpGas),
+                           /*check_pc=*/false);
   }
 }
 
@@ -1647,7 +1653,9 @@ TEST(Rv32ThreadedTrapGas, jumpToExactCodeEndTrapsLikeCanonical)
   {
     const std::vector<uint32_t> words = {addi(1, 0, 8), jalr(0, 1, 0)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 -
+                               (kBaseInstructionGas + kIndirectJumpGas),
+                           /*check_pc=*/false);
   }
 }
 
@@ -1661,8 +1669,8 @@ TEST(Rv32ThreadedTrapGas, emptyCodeTrapsBadPcLikeCanonical)
 TEST(Rv32ThreadedTrapGas, plainLoadFaultMidRunChargesExecutedPrefix)
 {
   using test_program::load;
-  // One straight-line run of 5 one-gas instructions; the plain lw (slot 2)
-  // faults OOB. Charged: addi, addi, lw = 3 -> 97 left. The run's unexecuted
+  // One straight-line run of 5 instructions; the plain lw (slot 2) faults OOB.
+  // Charged: addi, addi, lw. The run's unexecuted
   // suffix (the two adds) must not stay charged. Slots 0+1 fuse (addi;addi),
   // so the lw's predecessor cannot absorb it; the add after it neither reads
   // x4 nor is a store, so the lw stays a plain op_load.
@@ -1677,7 +1685,8 @@ TEST(Rv32ThreadedTrapGas, plainLoadFaultMidRunChargesExecutedPrefix)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 2),
             (&op_load<false, 4, false>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/97);
+                         /*expected_gas_remaining=*/100 -
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, plainStoreFaultMidRunChargesExecutedPrefix)
@@ -1703,28 +1712,29 @@ TEST(Rv32ThreadedTrapGas, loadFaultAtProgramEntryRunHead)
 {
   using test_program::load;
   // The very first instruction of the entry run faults: only the lw itself is
-  // charged (99 left); the whole rest of the run is unexecuted suffix.
+  // charged; the whole rest of the run is unexecuted suffix.
   const std::vector<uint32_t> words = {
       load(4, 2, 0, 2047), // lw x4, 2047(x0) -> FAULT (2047 >= 256)
       op(7, 6, 6, 0, 0),   // add x7, x6, x6 (never runs)
       op(8, 6, 6, 0, 0),   // add x8, x6, x6 (never runs)
   };
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/99);
+                         /*expected_gas_remaining=*/100 - kWideLoadGas);
 }
 
 TEST(Rv32ThreadedTrapGas, loadFaultJustBeforeBarrierRefundsBarrierGas)
 {
   using test_program::load;
   // The faulting lw is the last body instruction; the unexecuted suffix is
-  // exactly the run-terminating barrier (ecall). Charged: add, lw = 2 -> 98.
+  // exactly the run-terminating barrier (ecall). Charged: add, lw.
   const std::vector<uint32_t> words = {
       op(6, 0, 0, 0, 0),   // add x6, x0, x0
       load(4, 2, 0, 2047), // lw x4, 2047(x0) -> FAULT
       kEcallWord,          // barrier (never runs)
   };
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/98);
+                         /*expected_gas_remaining=*/100 -
+                             (kBaseInstructionGas + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, loadFaultOnLastInstructionHasNoSuffix)
@@ -1732,13 +1742,14 @@ TEST(Rv32ThreadedTrapGas, loadFaultOnLastInstructionHasNoSuffix)
   using test_program::load;
   // Boundary pin: the faulting lw is the final real instruction, so the
   // refundable suffix is the fall-off sentinel's zero gas. Already exact
-  // today; must stay exact with the refund in place. Charged: add, lw = 2.
+  // today; must stay exact with the refund in place. Charged: add, lw.
   const std::vector<uint32_t> words = {
       op(6, 0, 0, 0, 0),   // add x6, x0, x0
       load(4, 2, 0, 2047), // lw x4, 2047(x0) -> FAULT
   };
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/98);
+                         /*expected_gas_remaining=*/100 -
+                             (kBaseInstructionGas + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, branchIntoMidRunLoadFaultChargesFromBranchInPoint)
@@ -1748,7 +1759,7 @@ TEST(Rv32ThreadedTrapGas, branchIntoMidRunLoadFaultChargesFromBranchInPoint)
   // A taken branch lands directly on the lw at slot 2 -- which is also the
   // preserved standalone tail of an alu_load fusion (slots 1+2) -- so
   // enter_run charges gas_to_run[2] (lw + both adds). Charged: beq, lw = 2 ->
-  // 98; the two adds are unexecuted suffix.
+  // the two adds are unexecuted suffix.
   const std::vector<uint32_t> words = {
       branch(0, 0, 0, 8),  // beq x0, x0, +8 -> lands on the lw
       addi(6, 0, 1),       // skipped (fuses alu_load with the lw)
@@ -1762,7 +1773,8 @@ TEST(Rv32ThreadedTrapGas, branchIntoMidRunLoadFaultChargesFromBranchInPoint)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 2),
             (&op_load<false, 4, false>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/98);
+                         /*expected_gas_remaining=*/100 -
+                             (kBranchInstructionGas + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedLoadRrHeadFault)
@@ -1770,7 +1782,7 @@ TEST(Rv32ThreadedTrapGas, fusedLoadRrHeadFault)
   using test_program::load;
   // lw;add with the loaded register as the add's rs1 -> op_load_rr installed
   // on the lw's slot. The fused head faults; the consumed add tail and the
-  // trailing add are unexecuted suffix. Charged: addi, addi, lw = 3 -> 97.
+  // trailing add are unexecuted suffix. Charged: addi, addi, lw.
   const std::vector<uint32_t> words = {
       addi(1, 0, 1024),  // x1 = 1024 (OOB base)
       addi(6, 0, 5),     // x6 = 5
@@ -1782,14 +1794,15 @@ TEST(Rv32ThreadedTrapGas, fusedLoadRrHeadFault)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 2),
             (&op_load_rr<false, 4, false, true, add_op>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/97);
+                         /*expected_gas_remaining=*/100 -
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedLoadRiHeadFault)
 {
   using test_program::load;
   // lw;addi consuming the loaded register -> op_load_ri on the lw's slot.
-  // Charged: addi, addi, lw = 3 -> 97.
+  // Charged: addi, addi, lw.
   const std::vector<uint32_t> words = {
       addi(1, 0, 1024),  // x1 = 1024 (OOB base)
       addi(6, 0, 5),     // x6 = 5
@@ -1801,14 +1814,15 @@ TEST(Rv32ThreadedTrapGas, fusedLoadRiHeadFault)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 2),
             (&op_load_ri<false, 4, false, add_op>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/97);
+                         /*expected_gas_remaining=*/100 -
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedAluLoadTailFault)
 {
   using test_program::load;
   // addi;lw -> op_alu_load on the addi's slot; the *tail* lw faults at its
-  // own pc after the addi retired. Charged: add, addi, lw = 3 -> 97.
+  // own pc after the addi retired. Charged: add, addi, lw.
   const std::vector<uint32_t> words = {
       op(6, 0, 0, 0, 0), // add x6, x0, x0
       addi(1, 0, 1024),  // x1 = 1024 (fused head, retires)
@@ -1820,7 +1834,8 @@ TEST(Rv32ThreadedTrapGas, fusedAluLoadTailFault)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1),
             alu_load_handler<false>(Op::kAddi, Op::kLw));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/97);
+                         /*expected_gas_remaining=*/100 -
+                             ((2 * kBaseInstructionGas) + kWideLoadGas));
 }
 
 TEST(Rv32ThreadedTrapGas, fusedAluStoreTailFault)
@@ -1867,7 +1882,7 @@ TEST(Rv32ThreadedTrapGas, fusedLoadStoreHeadLoadFault)
   using test_program::load;
   using test_program::store;
   // lw;sw -> op_load_store on the lw's slot; the head lw faults before the sw
-  // tail runs. Charged: lw = 1 -> 99.
+  // tail runs. Charged: lw.
   const std::vector<uint32_t> words = {
       load(4, 2, 0, 2047), // lw x4, 2047(x0) -> FAULT (fused head)
       store(0, 4, 0, 2),   // sw x4, 0(x0) (fused tail, never runs)
@@ -1878,7 +1893,7 @@ TEST(Rv32ThreadedTrapGas, fusedLoadStoreHeadLoadFault)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 0),
             (&op_load_store<false, 4, false, 4>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/99);
+                         /*expected_gas_remaining=*/100 - kWideLoadGas);
 }
 
 TEST(Rv32ThreadedTrapGas, fusedLoadStoreTailStoreFault)
@@ -1886,7 +1901,7 @@ TEST(Rv32ThreadedTrapGas, fusedLoadStoreTailStoreFault)
   using test_program::load;
   using test_program::store;
   // lw;sw where the in-bounds lw succeeds and the tail sw faults at its own
-  // pc. Charged: lw, sw = 2 -> 98.
+  // pc. Charged: lw, sw.
   const std::vector<uint32_t> words = {
       load(4, 2, 0, 4),     // lw x4, 4(x0) (in bounds, succeeds)
       store(0, 4, 2044, 2), // sw x4, 2044(x0) -> FAULT (fused tail)
@@ -1897,7 +1912,8 @@ TEST(Rv32ThreadedTrapGas, fusedLoadStoreTailStoreFault)
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 0),
             (&op_load_store<false, 4, false, 4>));
   expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/98);
+                         /*expected_gas_remaining=*/100 -
+                             (kWideLoadGas + kBaseInstructionGas));
 }
 
 TEST(Rv32ThreadedTrapGas, endOverlapStoreFaultMidRun)
@@ -1919,16 +1935,22 @@ TEST(Rv32ThreadedTrapGas, endOverlapStoreFaultMidRun)
 TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
 {
   using test_program::load;
-  // The plain-load program: one 5-gas run, fault after 3 gas of prefix. The
-  // visible pair (trap classification, gas_remaining) must match the
-  // canonical Machine at EVERY budget:
-  //   gas >= 3 (fault affordable): both engines fault kBadMemory with the
-  //     executed prefix charged -> gas - 3 left. For 3 <= gas < 5 the run
-  //     does not fit, so threaded reaches the fault in deficit and the
-  //     suffix refund brings the balance back to the canonical value.
-  //   gas < 3 (fault not affordable): both engines OOG with zero left --
+  // The plain-load program: one run, faulting partway in. The visible pair
+  // (trap classification, gas_remaining) must match the canonical Machine at
+  // EVERY budget:
+  //   gas >= prefix (fault affordable): both engines fault kBadMemory with the
+  //     executed prefix charged -> gas - prefix left. Between the prefix and
+  //     the whole run the run does not fit, so threaded reaches the fault in
+  //     deficit and the suffix refund brings the balance back to the canonical
+  //     value.
+  //   gas < prefix (fault not affordable): both engines OOG with zero left --
   //     canonical at the first unpayable instruction, threaded when the
   //     fault's refund cannot clear the deficit.
+  //
+  // Charged through and including the faulting lw:
+  constexpr uint64_t kPrefixGas = (2 * kBaseInstructionGas) + kWideLoadGas;
+  // The whole run: that prefix plus the two adds it never reaches.
+  constexpr uint64_t kRunGas = kPrefixGas + (2 * kBaseInstructionGas);
   const std::vector<uint32_t> words = {
       addi(1, 0, 1024),  // x1 = 1024 (OOB base)
       addi(6, 0, 5),     // x6 = 5
@@ -1940,7 +1962,7 @@ TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
   ASSERT_NE(canonical, nullptr);
   auto threaded = threaded_from_words(words);
 
-  for (uint64_t gas = 0; gas <= 8; ++gas) {
+  for (uint64_t gas = 0; gas <= kRunGas + 3; ++gas) {
     Machine cmachine(canonical, 256, gas);
     RecordingHost chost;
     EXPECT_EQ(cmachine.run(chost), StepResult::kTrap) << "gas budget " << gas;
@@ -1949,8 +1971,9 @@ TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
     RecordingHost thost;
     EXPECT_EQ(tmachine.run(thost), StepResult::kTrap) << "gas budget " << gas;
 
-    const Trap expected_trap = gas >= 3 ? Trap::kBadMemory : Trap::kOutOfGas;
-    const uint64_t expected_gas = gas >= 3 ? gas - 3 : 0;
+    const Trap expected_trap =
+        gas >= kPrefixGas ? Trap::kBadMemory : Trap::kOutOfGas;
+    const uint64_t expected_gas = gas >= kPrefixGas ? gas - kPrefixGas : 0;
     EXPECT_EQ(cmachine.trap(), expected_trap) << "gas budget " << gas;
     EXPECT_EQ(tmachine.trap(), expected_trap) << "gas budget " << gas;
     EXPECT_EQ(cmachine.gas_remaining(), expected_gas) << "gas budget " << gas;
@@ -2305,13 +2328,15 @@ TEST(Rv32ThreadedTrapGas, takenBranchToBadTargetGasParity)
 {
   using test_program::branch;
   // The branch is a barrier: its run charge already ends at the branch.
-  // Charged: addi, beq = 2 -> 98. (Trap pcs are not part of the invariant.)
+  // Charged: addi, beq. (Trap pcs are not part of the invariant.)
   const std::vector<uint32_t> words = {
       addi(5, 0, 1),         // x5 = 1
       branch(0, 0, 0, 4096), // beq x0, x0, +4096 -> taken, target OOB
   };
   expect_trap_gas_parity(words, Trap::kBadPc,
-                         /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                         /*expected_gas_remaining=*/100 -
+                             (kBaseInstructionGas + kBranchInstructionGas),
+                         /*check_pc=*/false);
 }
 
 TEST(Rv32ThreadedTrapGas, jalOutOfRangeGasParity)
@@ -2524,18 +2549,17 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
 {
   using test_program::load;
   using test_program::op;
-  // Make a faulting lw the break carrier of its chunk. 1249 divs (9992 gas)
-  // then a faulting lw (gas 1) form a 9993-gas chunk; a FULL kMaxRunGas chunk
-  // (1250 divs = 10000) follows. The lowering places breaks greedily from the
-  // tail: the trailing 1250 divs fill one chunk, and the lw cannot fold into it
-  // (1 + 10000 > kMaxRunGas), so the lw at slot 1249 becomes the break carrier.
-  // Slots 0..1248 (divs) execute; the lw at 1249 faults. Canonical charges
-  // slots 0..1249 = 9993; the threaded break-variant lw must refund NO suffix
-  // (its successor heads the next, uncharged chunk), leaving the same 9993
-  // charged. A non-Brk refund would credit the next chunk's 10000 gas.
-  constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
-  constexpr size_t kTrailDivs =
-      kMaxRunGas / kDivInstructionGas;                          // 1250 -> 10000
+  // Make a faulting lw the break carrier of its chunk. As many divs as fit
+  // alongside one lw, then that faulting lw, form the lead chunk; a FULL
+  // kMaxRunGas chunk of divs follows. The lowering places breaks greedily from
+  // the tail: the trailing divs fill one chunk exactly, and the lw cannot fold
+  // into it (its own gas + kMaxRunGas > kMaxRunGas), so the lw becomes the
+  // break carrier. Every lead div executes; the lw faults. Canonical charges
+  // the lead chunk in full; the threaded break-variant lw must refund NO suffix
+  // (its successor heads the next, uncharged chunk), leaving the same amount
+  // charged. A non-Brk refund would credit the next chunk's whole kMaxRunGas.
+  constexpr size_t kLeadDivs = (kMaxRunGas - kWideLoadGas) / kDivInstructionGas;
+  constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
   words.push_back(
       load(4, 2, 0,
@@ -2548,7 +2572,7 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
                                                                 kLeadDivs),
             (&op_load<false, 4, false, true>));
 
-  const uint64_t charged = (kLeadDivs * kDivInstructionGas) + 1; // 9993
+  const uint64_t charged = (kLeadDivs * kDivInstructionGas) + kWideLoadGas;
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/20000 - charged,
                          /*check_pc=*/true, /*gas_limit=*/20000);
@@ -2559,13 +2583,13 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   using test_program::op;
   using test_program::store;
   // As above, but the break carrier is a faulting sw. Same chunk arithmetic:
-  // 1249 divs (9992) + sw (gas 1 -> chunk 9993), then a FULL kMaxRunGas chunk
-  // (1250 divs) the tail-greedy lowering cannot fold the sw into, so the sw at
-  // slot 1249 is the break carrier. Charged 0..1249 = 9993; the break-variant
-  // sw refunds no suffix.
-  constexpr size_t kLeadDivs = (kMaxRunGas / kDivInstructionGas) - 1; // 1249
-  constexpr size_t kTrailDivs =
-      kMaxRunGas / kDivInstructionGas;                          // 1250 -> 10000
+  // as many divs as fit alongside one store, then that store, then a FULL
+  // kMaxRunGas chunk the tail-greedy lowering cannot fold the store into, so
+  // the store is the break carrier. The whole lead chunk is charged; the
+  // break-variant sw refunds no suffix.
+  constexpr size_t kLeadDivs =
+      (kMaxRunGas - kBaseInstructionGas) / kDivInstructionGas;
+  constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
   words.push_back(
       store(0, 2, 2047,
@@ -2578,7 +2602,8 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
                                                                 kLeadDivs),
             (&op_store<false, 4, true>));
 
-  const uint64_t charged = (kLeadDivs * kDivInstructionGas) + 1; // 9993
+  const uint64_t charged =
+      (kLeadDivs * kDivInstructionGas) + kBaseInstructionGas;
   expect_trap_gas_parity(words, Trap::kBadMemory,
                          /*expected_gas_remaining=*/20000 - charged,
                          /*check_pc=*/true, /*gas_limit=*/20000);
@@ -2669,22 +2694,28 @@ TEST(Rv32ThreadedTrapGas, cappedLoadFaultAtChunkHeadAfterCarrierBudgetSweep)
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultMidSecondChunkBudgetSweep)
 {
   using test_program::load;
-  // Chunk cap 8 over [8 addi][addi][LW][5 addi][ecall] (16 slots): the fault
-  // sits mid-chunk in the SECOND chunk (slots 8..15), past the carrier at
-  // slot 7. Budgets 8..9 enter that chunk in deficit with the fault in the
-  // unaffordable suffix (canonical OOGs at or before the lw -> kOutOfGas, 0);
-  // budget 10 pays exactly through the lw, so the deficit settle must still
-  // classify kBadMemory with zero remaining; larger budgets refund the
-  // unexecuted suffix.
+  // [9 addi][LW][5 addi][ecall] (16 slots) under a cap chosen so the faulting
+  // lw sits MID-chunk in the second chunk, past a break carrier. Budgets that
+  // enter that chunk in deficit leave the fault in the unaffordable suffix
+  // (canonical OOGs at or before the lw -> kOutOfGas, 0); the budget that pays
+  // exactly through the lw must still settle to kBadMemory with zero
+  // remaining; larger budgets refund the unexecuted suffix.
+  //
+  // Not kMinRunGasCap: that floor is one instruction's worth of gas, and a wide
+  // load fills a whole chunk on its own there, which would make the lw a chunk
+  // head and stop testing the mid-chunk case. Size the cap off the load
+  // instead, so it keeps holding the load plus neighbours on both sides.
+  constexpr uint32_t kCap = 4 * kWideLoadGas;
+  static_assert(kCap >= kMaxInstructionGas, "every instruction must fit a run");
   std::vector<uint32_t> words(9, addi(1, 0, 1));
   words.push_back(load(5, 2, 0, 300)); // slot 9: OOB lw mid chunk 2
   words.insert(words.end(), 5, addi(2, 0, 2));
   words.push_back(kEcallWord);
   auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
-                                      /*trace=*/false, kMinRunGasCap);
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
+                                      /*trace=*/false, kCap);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 5),
             (&op_ri<false, add_op, true>));
-  expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
+  expect_budget_sweep_parity_capped(words, kCap, /*max_budget=*/20);
 }
 
 TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
@@ -2700,7 +2731,8 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
     // lw at 0xFFFFFFFE: [0xFFFFFFFE, +4) wraps.
     const std::vector<uint32_t> words = {addi(1, 0, -2), load(2, 2, 1, 0)};
     expect_trap_gas_parity(words, Trap::kBadMemory,
-                           /*expected_gas_remaining=*/98);
+                           /*expected_gas_remaining=*/
+                           100 - (kBaseInstructionGas + kWideLoadGas));
   }
   {
     // sw at 0xFFFFFFFE.
@@ -2712,7 +2744,8 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
     // lh at 0xFFFFFFFF: the two-byte range crosses zero.
     const std::vector<uint32_t> words = {addi(1, 0, -1), load(2, 1, 1, 0)};
     expect_trap_gas_parity(words, Trap::kBadMemory,
-                           /*expected_gas_remaining=*/98);
+                           /*expected_gas_remaining=*/
+                           100 - (kBaseInstructionGas + kWideLoadGas));
   }
   {
     // lb at 0xFFFFFFFF: addr+1 lands exactly on 2^32.

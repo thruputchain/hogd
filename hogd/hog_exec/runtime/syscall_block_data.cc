@@ -18,11 +18,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
                              BlockHeight &output_result)
 {
-  auto status = syscall_handler.get_block_height();
-  if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  output_result = *status;
+  output_result = syscall_handler.get_block_height();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetBlockHeight>()) {
@@ -36,11 +32,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetNetworkHash_inner(SystemCallHandler &syscall_handler,
                              NetworkHash &output_network_hash)
 {
-  auto status = syscall_handler.get_network_hash();
-  if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  output_network_hash = *status;
+  output_network_hash = syscall_handler.get_network_hash();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetNetworkHash>()) {

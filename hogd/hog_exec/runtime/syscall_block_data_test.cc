@@ -318,10 +318,14 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
 }
 
 // A scheduler that supplies a height disagreeing with the tip is executing
-// against a different block than the one it is building. GetBlockHeight must
-// fail rather than serve either value: the point of carrying the height is
-// that the disagreement is caught here instead of reaching consensus.
-TEST_F(SyscallBlockDataTest, GetBlockHeightRejectsContextMismatchedWithTip)
+// against a different block than the one it is building. The transaction is
+// refused outright rather than run against either value.
+//
+// The check lives at the pin point (init_db_tip), not in GetBlockHeight, so
+// it fires during admission and the contract body below never runs -- that is
+// the point: the disagreement is caught before any contract can observe a
+// height, rather than reaching consensus.
+TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -333,14 +337,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightRejectsContextMismatchedWithTip)
   NativeContractBuilder builder;
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        // Never reached: admission refuses the transaction first. Kept as a
+        // tripwire -- succeeding here would mean the mismatch went unnoticed
+        // and a contract ran against a height nobody agreed on.
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
-        // Reaching here at all means the mismatch was not caught. Report
-        // success only if the syscall refused.
-        if (status.has_value() &&
-            status.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
-        }
+        (void)ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
         return {};
       });
 
@@ -364,8 +365,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightRejectsContextMismatchedWithTip)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  // The mismatch surfaces as an unrecoverable host-function error, which
-  // fails the invocation outright rather than returning a height.
+  // The mismatch surfaces as an unrecoverable system error out of the
+  // transaction's initial validation, so the root invocation fails.
   ASSERT_FALSE(handler.root_invoke().is_root_success());
 }
 
