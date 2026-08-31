@@ -161,6 +161,15 @@ public:
   DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
   sync_and_snapshot(uint64_t begin_lsn);
 
+  // snapshot_recommended returns true when the WAL beyond snapshot coverage
+  // has grown enough that a full snapshot would let cleanup reclaim it, and
+  // false while a snapshot is in flight. The threshold scales with the live
+  // set, estimated by the last completed snapshot's size: one snapshot per
+  // live-set's-worth of WAL bounds snapshot write amplification at ~2x and
+  // recovery reads at ~2x the live set. A floor of kDiskLogCleanupRatio WAL
+  // files keeps small databases from snapshotting continually.
+  bool snapshot_recommended() const;
+
   // set_active indicates to the database that it is in a state of activity (if
   // yes is true) or inactivity (if yes is false).  When inactive, items should
   // not be accessed (e.g., get(), put(), etc.); this allows the database to
@@ -233,6 +242,23 @@ private:
   // the thread's max_snapshot_end_lsn_ update.
   std::atomic<bool> snapshot_running_{false};
 
+  // WAL bytes already on disk when the database was opened. Counted as
+  // uncovered until a snapshot completes; cleanup may not yet have removed
+  // files an earlier snapshot covers, so this can overcount, which only
+  // makes the first snapshot happen sooner.
+  size_t wal_bytes_at_open_{0};
+
+  // Total WAL bytes (wal_bytes_at_open_ plus disk_bytes_written()) that
+  // snapshot coverage extends over, sampled at the covering snapshot's
+  // sync() point and published on its completion. Written by the snapshot
+  // thread; ordered by snapshot_running_.
+  std::atomic<size_t> covered_wal_bytes_{0};
+
+  // On-disk size of the last completed snapshot; estimates the live set for
+  // snapshot_recommended(). Written by the snapshot thread; ordered by
+  // snapshot_running_.
+  std::atomic<size_t> last_snapshot_bytes_{0};
+
   // periodically updated stats; registered in register_metrics().
   struct DbMetrics {
     std::atomic<size_t> snap_bytes_out_;
@@ -253,8 +279,11 @@ private:
   // durable snapshot file at path. Runs on snapshot_thread_. Counts
   // setup_latch down once the map's mutation callback is registered, after
   // which the caller may resume writes; the latch must not be touched later.
+  // On success, records that coverage now extends over wal_bytes_at_sync
+  // WAL bytes (the total at the sync() that began this snapshot).
   DBStatus<void> write_snapshot(const std::string &path, uint64_t begin_lsn,
-                                uint64_t end_lsn, std::latch &setup_latch);
+                                uint64_t end_lsn, size_t wal_bytes_at_sync,
+                                std::latch &setup_latch);
 
   static DBStatus<std::unique_ptr<Database>>
   open_internal(std::string_view path, std::optional<uint64_t> lsn,

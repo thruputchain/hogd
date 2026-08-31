@@ -214,7 +214,8 @@ Database::background_worker(const std::stop_token &stoken)
 
       // determine how much wal data there is, see if it's "too much".
       size_t log_bytes = DiskReader::log_bytes(dir_);
-      bool needed = log_bytes >= (4 * disk_writer_.get_file_size_threshold());
+      bool needed = log_bytes >= (kDiskLogCleanupRatio *
+                                  disk_writer_.get_file_size_threshold());
       info("disk logs occupy {}; cleanup {}needed",
            print_iec_bytes(log_bytes, true), needed ? "" : "not ");
 
@@ -296,6 +297,10 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     return DBError{DBCode::kTooBig};
   }
 
+  // Everything written so far is durable after the sync() above, so a
+  // completed snapshot extends coverage over exactly this many WAL bytes.
+  size_t wal_bytes_at_sync = wal_bytes_at_open_ + disk_writer_.get_bytes_out();
+
   std::latch setup_latch{1};
   auto promise = std::promise<DBStatus<void>>();
   std::future<DBStatus<void>> future = promise.get_future();
@@ -303,16 +308,16 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
   snapshot_running_.store(true, std::memory_order_relaxed);
   // Assignment joins the previous snapshot thread; it has already finished
   // (snapshot_running_ was false), so the join is immediate.
-  snapshot_thread_ =
-      std::jthread([this, path = std::move(path), begin_lsn, end_lsn,
-                    &setup_latch, promise = std::move(promise)]() mutable {
-        DBStatus<void> result =
-            write_snapshot(path, begin_lsn, end_lsn, setup_latch);
-        // Clear the flag before publishing the result: a caller that waits
-        // on the future may start the next snapshot immediately.
-        snapshot_running_.store(false, std::memory_order_release);
-        promise.set_value(std::move(result));
-      });
+  snapshot_thread_ = std::jthread([this, path = std::move(path), begin_lsn,
+                                   end_lsn, wal_bytes_at_sync, &setup_latch,
+                                   promise = std::move(promise)]() mutable {
+    DBStatus<void> result = write_snapshot(path, begin_lsn, end_lsn,
+                                           wal_bytes_at_sync, setup_latch);
+    // Clear the flag before publishing the result: a caller that waits
+    // on the future may start the next snapshot immediately.
+    snapshot_running_.store(false, std::memory_order_release);
+    promise.set_value(std::move(result));
+  });
 
   // wait for snapshotter thread to get writer initialized and map informed of
   // snapshot; after that the user can resume db operations.
@@ -321,9 +326,24 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
   return std::make_pair(end_lsn, std::move(future));
 }
 
+bool
+Database::snapshot_recommended() const
+{
+  if (snapshot_running_.load(std::memory_order_acquire))
+    return false;
+
+  size_t total = wal_bytes_at_open_ + disk_writer_.get_bytes_out();
+  size_t uncovered = total - covered_wal_bytes_.load(std::memory_order_relaxed);
+  size_t threshold =
+      std::max(kDiskLogCleanupRatio * disk_writer_.get_file_size_threshold(),
+               last_snapshot_bytes_.load(std::memory_order_relaxed));
+  return uncovered >= threshold;
+}
+
 DBStatus<void>
 Database::write_snapshot(const std::string &path, uint64_t begin_lsn,
-                         uint64_t end_lsn, std::latch &setup_latch)
+                         uint64_t end_lsn, size_t wal_bytes_at_sync,
+                         std::latch &setup_latch)
 {
   debug("snapshot starting in background");
   ElapsedTimer timer{};
@@ -452,6 +472,8 @@ Database::write_snapshot(const std::string &path, uint64_t begin_lsn,
   // The caller must check the future before using end_lsn as begin_lsn
   // for a subsequent incremental snapshot.
   max_snapshot_end_lsn_ = std::max(max_snapshot_end_lsn_, end_lsn);
+  covered_wal_bytes_.store(wal_bytes_at_sync, std::memory_order_relaxed);
+  last_snapshot_bytes_.store(bytes_out, std::memory_order_relaxed);
 
   return {};
 }
@@ -488,6 +510,7 @@ Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
     info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
   db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold);
   db->max_snapshot_end_lsn_ = snap_end;
+  db->wal_bytes_at_open_ = DiskReader::log_bytes(db->dir_);
   return db;
 }
 
