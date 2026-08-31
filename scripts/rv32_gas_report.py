@@ -45,16 +45,32 @@ SIGMA_THRESHOLD = 2.0
 # Gas units per baseline instruction in a proposed schedule.
 #
 # Costs must round *up* -- rounding down sells real work for free, and the
-# schedule exists to bound time from above. But rounding up at a coarse unit
-# systematically over-charges, and most of RV32IM sits within a factor of two of
-# the baseline, so a unit of one baseline instruction would round almost the
-# whole ISA to the same 1 or 2 and throw away the distinctions this harness
-# exists to find. Splitting the baseline into several units keeps the rounding
-# loss bounded by 1/RESOLUTION instead of by a factor of two.
+# schedule exists to bound time from above -- so a coarse unit systematically
+# over-charges, and a finer one bounds that loss by 1/RESOLUTION.
 #
-# The cost is that every number in the table scales by this factor, so block
-# gas limits and the syscall costs in gas_cost_table.h have to scale with it or
-# the two stop being comparable.
+# The cost is that every number in the table scales by this factor, so gas
+# limits and the syscall costs in gas_cost_table.h have to scale with it or the
+# two stop being comparable.
+#
+# What that trade actually buys, measured on hog10 across eleven workloads
+# (`--workloads` reports the spread; a limit must be sized for the worst
+# ns-per-gas, so everything below it is capacity given away):
+#
+#     resolution   1      2      4      8     16
+#     spread     4.59x  4.03x  4.03x  4.03x  4.03x
+#
+# It saturates at 2. Past that a finer unit scales every number and changes no
+# pricing. Even 1 -> 2 is narrow: six of the eleven workloads are unaffected,
+# and the gain is confined to branches (measured 1.38x a baseline instruction,
+# so resolution 1 rounds them to 2 and over-charges 45%, against 3/2 and 8% at
+# resolution 2) and loads. It is not, as this comment once claimed, that a unit
+# of one baseline instruction collapses the ISA -- resolution 1 still resolves
+# three tiers and keeps both large repricings the harness found.
+#
+# The floor under all of them is 4.03x, and no resolution reaches it: that
+# residue is a fused load-use pair running at 0.63 ns/instr while the schedule
+# charges it the pointer-chase rate, which per-opcode worst-case pricing cannot
+# tell apart at charge time.
 DEFAULT_RESOLUTION = 4
 
 # How far a program may exceed the sum of its opcodes' individual worst cases

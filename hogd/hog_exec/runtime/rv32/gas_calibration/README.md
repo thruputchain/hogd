@@ -305,6 +305,37 @@ scripts/rv32_gas_report.py /tmp/gas.json --emit-reference > \
 Regenerating to make a failure go away hides the one thing the check exists to
 surface.
 
+## What a gas is worth, in nanoseconds
+
+Roughly **one gas per nanosecond**, on hog10, under the schedule in `program.h`.
+That falls out of the design rather than being a coincidence: one baseline
+instruction takes 1.62 ns and is charged 1 gas, so the interpreter's dispatch
+cost sets the scale.
+
+Measured across the eleven validation workloads:
+
+| | ns per gas |
+| --- | --- |
+| worst -- what a limit has to assume | 1.550 |
+| median | 0.956 |
+| best | 0.253 |
+
+So 1M gas is about **1.5 ms** of single-core execution worst case, and nearer
+1 ms for typical code.
+
+Three things that number is not:
+
+- **Portable.** The gas schedule is a protocol constant; nanoseconds are not.
+  The ratios travel between hosts, the absolute scale does not, and the load
+  cells travel worst of all -- a chased `LW` costs 2.49x a baseline instruction
+  on hog10 and 3.8x on an Intel VM measured against the same engine.
+- **Everything the VM does.** This is the RV32 dispatch loop only. Syscalls,
+  storage, and anything crossing out of the VM are not in it, and the syscall
+  costs in `gas_cost_table.h` have never been calibrated against a nanosecond.
+- **Tight.** The 6.13x spread between the best- and worst-priced workload is
+  the error bar on "one gas per nanosecond". Size a budget that must hold at
+  1.55 ns/gas; estimate typical cost at about 1.
+
 ## Reading the numbers
 
 `ns_per_instruction` is what one more instance of that opcode costs the engine,
