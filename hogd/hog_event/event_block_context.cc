@@ -507,7 +507,20 @@ events_file_has_hole([[maybe_unused]] int fd, [[maybe_unused]] off_t size)
   // steps over compressed extents rather than reporting them as holes, so this
   // does not misread a legitimate file on compressing storage.
   const off_t first_hole = lseek(fd, 0, SEEK_HOLE);
-  return first_hole >= 0 && first_hole < size;
+  if (first_hole >= 0) {
+    return first_hole < size;
+  }
+  // SEEK_HOLE is defined but the filesystem rejected the probe at runtime.
+  // Fall back to the allocated-block count so a hole punched up to the cap is
+  // still caught rather than silently allocated.  st_blocks can undercount on
+  // compressing storage, but the compressing filesystems that matter (btrfs,
+  // zfs) implement SEEK_HOLE and so never reach this path; only a filesystem
+  // that both lacks SEEK_HOLE support and compresses would be misread here.
+  struct stat file_stat{};
+  if (fstat(fd, &file_stat) != 0) {
+    return false;
+  }
+  return static_cast<off_t>(file_stat.st_blocks) * 512 < size;
 #else
   // No portable hole probe on this platform; the caller still bounds the file
   // to the replay cap.
