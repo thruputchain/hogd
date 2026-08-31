@@ -17,7 +17,6 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -196,26 +195,6 @@ StorageSnapshotCache::try_get_db_tip()
   }
   CHECK_PTR(tip);
   return tip;
-}
-
-SystemStatus<uint32_t>
-StorageSnapshotCache::try_get_max_sha256_buffers()
-{
-  auto tip = try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
-  return tip.value()->network_config.max_sha256_buffers;
-}
-
-SystemStatus<uint32_t>
-StorageSnapshotCache::try_get_max_cross_invoke_depth()
-{
-  auto tip = try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
-  return tip.value()->network_config.max_cross_invoke_depth;
 }
 
 void
