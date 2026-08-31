@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <functional>
 #include <future>
+#include <latch>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -152,6 +153,11 @@ public:
   // call to sync_and_snapshot() on this Database instance (or loaded from
   // disk during recovery). Using an LSN from sync() that exceeds the
   // snapshot coverage will be rejected to prevent unrecoverable gaps.
+  //
+  // Same precondition as sync(): no put() or remove() may overlap this call.
+  // The snapshot itself runs on a thread owned by this Database; at most one
+  // may run at a time, and a call while one is in flight returns
+  // DBCode::kBusy. Destroying the Database awaits an in-flight snapshot.
   DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
   sync_and_snapshot(uint64_t begin_lsn);
 
@@ -220,6 +226,13 @@ private:
   // creating snapshot gaps that recovery cannot bridge.
   uint64_t max_snapshot_end_lsn_{0};
 
+  // True while a snapshot is in flight. sync_and_snapshot() rejects a new
+  // snapshot while one runs: the map's mutation callback is a single slot.
+  // The snapshot thread clears this with release ordering before publishing
+  // its result, so a caller that observes it false (acquire) also observes
+  // the thread's max_snapshot_end_lsn_ update.
+  std::atomic<bool> snapshot_running_{false};
+
   // periodically updated stats; registered in register_metrics().
   struct DbMetrics {
     std::atomic<size_t> snap_bytes_out_;
@@ -236,10 +249,23 @@ private:
   // background_worker performs periodic background work.
   void background_worker(const std::stop_token &stoken);
 
+  // write_snapshot writes every item with lsn in [begin_lsn, end_lsn) to a
+  // durable snapshot file at path. Runs on snapshot_thread_. Counts
+  // setup_latch down once the map's mutation callback is registered, after
+  // which the caller may resume writes; the latch must not be touched later.
+  DBStatus<void> write_snapshot(const std::string &path, uint64_t begin_lsn,
+                                uint64_t end_lsn, std::latch &setup_latch);
+
   static DBStatus<std::unique_ptr<Database>>
   open_internal(std::string_view path, std::optional<uint64_t> lsn,
                 size_t heap_size, int bucket_order,
                 size_t log_file_size_threshold);
+
+  // The in-flight snapshot thread, if any. Assigning a new thread joins the
+  // previous, already-finished one. Declared last so destruction joins it —
+  // awaiting an in-flight snapshot — before the modules it uses are torn
+  // down.
+  std::jthread snapshot_thread_;
 };
 
 inline DBStatus<std::unique_ptr<Database>>
