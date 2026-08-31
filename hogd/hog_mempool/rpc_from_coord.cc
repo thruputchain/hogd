@@ -245,8 +245,24 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
+  // Hashes of the submitted signings, aligned with [txs] so that consulting
+  // the cache below and writing it hash only once. Computed before the commit
+  // lock is taken: hashing a batch is pure, and it is the one part of the
+  // lookup that need not be serialized against commits.
+  x23::Vec<SHA256Hash> signing_hashes;
+  auto hash_node =
+      submit_dag.async<void>("hash signings", submit_dag.after(decode_node),
+                             [&]() -> x23::Async<void> {
+                               signing_hashes.clear();
+                               signing_hashes.reserve(txs->size());
+                               for (const SignedTransaction &tx : *txs) {
+                                 signing_hashes.push_back(sha256(tx));
+                               }
+                               co_return;
+                             });
+
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(hash_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -290,20 +306,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
-  // Hashes of the submitted signings, held alongside [txs] and pruned with it
-  // so that consulting the cache here and writing it below hash only once.
-  x23::Vec<SHA256Hash> signing_hashes;
-
   // Drop signings authentication has already rejected before paying for
   // another verification of the same bytes.
   auto drop_rejected_node = submit_dag.async<void>(
       "drop known-bad signatures", submit_dag.after(capacity_node),
       [&]() -> x23::Async<void> {
-        signing_hashes.clear();
-        signing_hashes.reserve(txs->size());
-        for (const SignedTransaction &tx : *txs) {
-          signing_hashes.push_back(sha256(tx));
-        }
+        // [enforce capacity] only ever drops from the tail.
+        signing_hashes.resize(txs->size());
 
         // A verdict is only as good as the key-change record checked against
         // it. A commit advances [current_block] before [auth_data_changed]
@@ -481,8 +490,24 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
+  // Hashes of the submitted signings, aligned with [txs] so that consulting
+  // the cache below and writing it hash only once. Computed before the commit
+  // lock is taken: hashing a batch is pure, and it is the one part of the
+  // lookup that need not be serialized against commits.
+  x23::Vec<SHA256Hash> signing_hashes;
+  auto hash_node =
+      submit_dag.async<void>("hash signings", submit_dag.after(decode_node),
+                             [&]() -> x23::Async<void> {
+                               signing_hashes.clear();
+                               signing_hashes.reserve(txs->size());
+                               for (const SignedTransaction &tx : *txs) {
+                                 signing_hashes.push_back(sha256(tx));
+                               }
+                               co_return;
+                             });
+
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(hash_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;

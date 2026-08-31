@@ -2884,6 +2884,62 @@ TEST(Mempool, ForgottenKeyChangesRaiseTheBar)
   EXPECT_TRUE(changes.still_current(address, /*height=*/1000));
 }
 
+// An eviction moves a change out of its bucket and into the bar, and a reader
+// crossing that moment must see it in one place or the other. Reading the bar
+// first leaves an interval where it is in neither, and a stale verdict passes.
+//
+// The height rises every round so the bar always trails the change being
+// asked about; a fixed height would be covered by the bar after the first
+// eviction and the reader would stop reaching the code that races.
+//
+// One-sided: [recorded_at] is published only once that change is recorded, and
+// from then on a verdict stamped at that height never counts -- whether the
+// change is still in its bucket or has aged into the bar. The reader can only
+// ever be wrong.
+TEST(Mempool, ForgottenKeyChangesAreNeverMissedUnderConcurrency)
+{
+  RecentKeyChanges changes(/*num_buckets=*/1);
+  const ContractAddress watched = MempoolTestInfra::kAccountAddresses[0];
+
+  std::atomic<BlockHeight> recorded_at = 0;
+  std::atomic<bool> stop = false;
+  std::atomic<bool> saw_stale = false;
+
+  std::thread reader([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      const BlockHeight height = recorded_at.load(std::memory_order_acquire);
+      if (height == 0) {
+        continue;
+      }
+      if (changes.still_current(watched, height)) {
+        saw_stale.store(true, std::memory_order_relaxed);
+        return;
+      }
+    }
+  });
+
+  ContractAddress rotator = {};
+  for (size_t round = 1;
+       round <= 20000 && !saw_stale.load(std::memory_order_relaxed); round++) {
+    const auto height = static_cast<BlockHeight>(round * 2);
+    changes.note(watched, height);
+    recorded_at.store(height, std::memory_order_release);
+
+    // Fill the one bucket, pushing [watched] back out of it. Its height is the
+    // lowest present, so it is among the entries displaced, and the bar has to
+    // rise to cover it.
+    for (size_t i = 0; i < detail::KeyChangeBucket::kBucketSize; i++) {
+      const size_t marker = (round * detail::KeyChangeBucket::kBucketSize) + i;
+      std::memcpy(rotator.data(), &marker, sizeof(marker));
+      changes.note(rotator, height + 1);
+    }
+  }
+  stop.store(true, std::memory_order_relaxed);
+  reader.join();
+
+  EXPECT_FALSE(saw_stale.load(std::memory_order_relaxed));
+}
+
 // A verdict is honoured only while the account still has the keys it was read
 // from.
 TEST(Mempool, CachedVerdictStopsCountingAfterAKeyChange)

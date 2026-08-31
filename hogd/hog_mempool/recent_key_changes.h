@@ -115,15 +115,24 @@ public:
   // [height].
   bool still_current(const ContractAddress &address, BlockHeight height)
   {
-    if (height <= forgotten_height_.load(std::memory_order_relaxed)) {
-      return false;
+    // Bucket first, bar second. [note] raises the bar while holding the bucket
+    // lock, so an eviction that beat us to the bucket is guaranteed to show up
+    // in the bar we read afterwards. Reading the bar first would let an
+    // eviction slip between the two and leave the change accounted for by
+    // neither.
+    {
+      auto [bucket, bucket_lock] = buckets_.find(bucket_key(address));
+      if (bucket != nullptr) {
+        // An account holds at most one entry, updated in place, and heights
+        // only rise -- so a recorded change is that account's latest and
+        // answers for it outright.
+        const std::optional<BlockHeight> changed_at = bucket->find(address);
+        if (changed_at.has_value()) {
+          return height > *changed_at;
+        }
+      }
     }
-    auto [bucket, bucket_lock] = buckets_.find(bucket_key(address));
-    if (bucket == nullptr) {
-      return true;
-    }
-    const std::optional<BlockHeight> changed_at = bucket->find(address);
-    return !changed_at.has_value() || height > *changed_at;
+    return height > forgotten_height_.load(std::memory_order_relaxed);
   }
 
   // Newest change dropped for want of room; -1 while none has been.
