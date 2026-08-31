@@ -521,16 +521,18 @@ get right, is where the estimator is at its strongest.
   fits the substitution design. `ECALL` no longer belongs on this list: it ends
   the run too, which is why it needed a kernel shape of its own rather than a
   substitution, and it has one.
-- The ecall *seam* is measured; syscalls are not. What `--syscalls` reports is
-  the crossing plus a modelled host-side write, with the production syscall path
-  absent -- see the section above for exactly what that excludes. The remaining
-  half needs a runtime-linked harness, and then the two compose: seam plus
-  handler, checked against an end-to-end measurement the way `--predict` checks
-  the per-opcode costs against real workloads.
-- `SHA256`'s per-byte cost is not measured anywhere. It is native C++ with no
-  interpreter dispatch in it and no arrangement the guest can force, so it wants
-  Google Benchmark over a size range in `hogd/crypto` -- not this harness, whose
-  entire apparatus exists to hold a *guest* arrangement constant.
+- What `--syscalls` reports is the crossing plus a modelled host-side write,
+  with the production syscall path absent -- see the section above for exactly
+  what that excludes. The other half now exists:
+  `hogd/hog_exec/runtime/rv32/rv32_syscall_entry_bench.cc` measures
+  `syscall_entry` under Google Benchmark, and its `vm` minus `entry` difference
+  agrees with the seam measured here to within a few nanoseconds. Two methods,
+  one number, which is what makes the decomposition a finding rather than an
+  assumption.
+- `SHA256`'s per-byte cost belongs there too, and is measured there: it is
+  native C++ with no interpreter dispatch in it and no arrangement the guest can
+  force, so the apparatus this harness spends on holding a *guest* arrangement
+  constant buys nothing for it.
 
 ## Changing the schedule
 

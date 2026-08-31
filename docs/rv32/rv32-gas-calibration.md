@@ -429,26 +429,32 @@ away, and it is where a cheaper context would pay for itself.
 
 ## Syscalls
 
-Still unpriced: `gas_cost_table.h` prices one syscall family (SHA256) and
-returns zero direct host gas for the rest. What is now measured is the half of
-that cost every syscall shares -- the **ecall seam**, the crossing itself --
-which the harness reports under `--syscalls` and the calibration workflow prints
-on the bench host.
+Measured now, in two harnesses that meet in the middle:
 
-### What was measured, and what was not
+- the **ecall seam** -- the crossing itself, what every syscall pays to leave
+  the guest and come back -- in the calibration harness under `--syscalls`;
+- the **production syscall path** -- `syscall_entry`, the ABI parse, the
+  coroutine frame, the real `SystemCallHandler` -- in
+  `rv32_syscall_entry_bench`, a Google Benchmark binary that links the runtime.
 
-In: the ecall's suspend, the unwind to the driver, the virtual dispatch through
-`Host::ecall`, the gas debit and register commit on the way back, and the fresh
-`enter_run` the resumed guest re-enters through.
+The split is not incidental. The calibration harness links only
+`rv32_isa_core` so it can run on a candidate validator without configuring the
+node build, and `syscall_entry` needs the protocol XDR, the DB proxy and the
+snapshot cache. Keeping them apart preserves that property and yields two
+independent estimates of the seam, which is how the decomposition below gets
+checked rather than assumed.
 
-Out: the production syscall path. `syscall_entry`'s ABI parse, the guest-pointer
-bounds checks, the coroutine frame every call allocates, and
-`SystemCallHandler`. That path needs the protocol XDR, the DB proxy and the
-snapshot cache; the calibration harness links only `rv32_isa_core`, deliberately,
-so a calibration can run on a candidate validator in seconds without configuring
-the node build. Keeping that property is worth more than folding the two halves
-into one binary, so **read these as a floor under a syscall's fixed cost, not as
-a syscall's cost.**
+The pricing has not changed: `gas_cost_table.h` still prices one syscall family
+(SHA256) and returns zero direct host gas for the rest. What follows is the
+input to changing that.
+
+### The seam
+
+What the calibration harness measures: the ecall's suspend, the unwind to the
+driver, the virtual dispatch through `Host::ecall`, the gas debit and register
+commit on the way back, and the fresh `enter_run` the resumed guest re-enters
+through. Not a syscall -- a floor under one. The syscall itself is two sections
+down.
 
 ### First results
 
@@ -514,34 +520,81 @@ reference with no seam guards checks no seam guards rather than failing. They
 appear the next time the bench pool regenerates it, which is the same
 `mode=reference` run that would be needed to make the ratios portable anyway.
 
-### What comes next
+### The other half, measured
 
-The remaining half is a second, runtime-linked harness driving the real
-`syscall_entry`. It cannot live in `gas_calibration` without giving up the
-core-only property, so it belongs in a sibling target that links
-`rv32_syscall_bridge` and the runtime; the provenance, JSON and report machinery
-is in the `rv32_gas_calibration` library rather than the executable, so it is
-shareable across the two.
+`rv32_syscall_entry_bench` (Google Benchmark,
+`hogd/hog_exec/runtime/rv32/rv32_syscall_entry_bench.cc`) measures what the
+seam harness cannot: `syscall_entry` itself, driven exactly as
+`rv32_contract.cc` drives it -- live guest memory, the real ABI parse, the
+coroutine frame every call allocates, the real `SystemCallHandler`. It is a
+separate binary because that path needs the protocol XDR, the DB proxy and the
+snapshot cache, and keeping the calibration harness core-only is worth more
+than one binary.
 
-Then the numbers compose, and the composition is the check worth running:
-measured end-to-end cost of a real `GetBlockHeight` against (seam) + (handler).
-Agreement within a few percent means the decomposition is real and
-`base + per-byte` is a defensible shape for the table. Disagreement is the ABI
-parse and the coroutine frame, and says how large a third term has to be. That
-is the same discipline `--predict` already applies to the opcode costs, and it
-is what makes a syscall price arguable rather than merely measured.
+Two rows per syscall, so the halves can be checked against the whole rather
+than assumed to compose: `entry/` calls `syscall_entry` directly, `vm/` drives
+the same syscall end to end through `ThreadedMachine`.
 
-Two smaller follow-ons:
+Same container, pinned to one core, five repetitions, medians:
 
-- **`SHA256`'s per-byte cost belongs in Google Benchmark, not here.** It is
-  native C++ with no interpreter dispatch in it and no arrangement a guest can
-  force, so the whole apparatus this harness spends on holding a guest
-  arrangement constant buys nothing. `hogd/crypto` already has a benchmark
-  target; a size range with `SetBytesProcessed` is a few lines, and
-  `scripts/compare_benchmark_json.py` already diffs the output.
-- **The engine fingerprint should cover the syscall gas schedule.** It currently
-  hashes the instruction schedule, the structural limits and the fusion matrix.
-  `kSyscallGasCostSchedule` is already folded into `kGasScheduleDigest`, so the
-  input exists; and `HOGD_RV32_ENGINE_SOURCES` wants a syscall-path equivalent,
-  or a rewrite of `syscall_entry_outer.h` moves these numbers with nothing
-  saying so.
+| syscall | `entry` ns | ± | `vm` ns/call | difference | gas charged |
+|---|---:|---:|---:|---:|---:|
+| `GetBlockHeight` | 90.4 | 0.29 | 106.8 | 16.4 | **0** |
+| `GetCurrentAddress` | 92.0 | 0.65 | 106.2 | 14.1 | **0** |
+| `GetMsgSender` | 92.1 | 0.29 | 107.0 | 15.0 | **0** |
+| `GetSourceTransactionHash` | 91.0 | 0.60 | 106.0 | 15.0 | **0** |
+| `GetCalldataLen` | 93.0 | 0.67 | 105.4 | 12.3 | **0** |
+| `SHA256` (0 bytes) | 172.9 | 0.69 | 184.4 | 11.5 | 500 |
+| `SHA256` (1 KiB) | 914.7 | 4.17 | 920.9 | 6.1 | 102,900 |
+
+**A stateless read costs about 90 ns and is charged nothing.** The five differ
+by 3% -- less than the spread between two runs of some opcode cells. Whatever
+each handler does is lost in the entry path around it, which is the finding:
+there is no per-syscall cost to price here, there is one crossing cost that
+every one of them pays. At the baseline instruction measured on this host, 90 ns
+is roughly **sixty dispatched instructions**, charged as zero.
+
+**The seam composes.** The `vm` − `entry` difference is 12-16 ns, against the
+17-20 ns the seam harness measures directly. The residual is the right sign and
+size: the seam harness saturates its body with ecalls so every one is its own
+straight-line run, while this guest loop has four instructions between calls to
+amortize `enter_run` over. Two harnesses, two methods, one number -- which is
+the evidence that the decomposition is real rather than a story about it.
+
+**SHA256 is priced in the wrong shape.** Measured, it is
+**173 ns + 0.72 ns/byte**. Charged, it is `SHA256HashCost` = 500 + 100/byte. The
+base is about 3x over-priced against instruction gas; the per-byte term is
+about **140x** over. Within the one syscall the schedule actually prices, real
+nanoseconds per gas run from 0.346 at zero bytes to 0.0073 at 32 KiB -- a **47x
+spread**, wider than the 5.4x the whole opcode schedule had before calibration.
+
+That is not a rounding error to tidy up. Two syscalls whose costs differ by 5x
+can be billed the same, or the same syscall billed 47x differently depending on
+an argument the caller chooses, and a block limit has to be sized for the worst
+of it.
+
+### What follows
+
+- **The zero-gas reads are the urgent one.** A loop of `GetBlockHeight` burns
+  90 ns per iteration and is charged only for the handful of instructions that
+  set up the call -- roughly 5 gas against 90 ns of real work, an order of
+  magnitude worse per gas than the worst opcode the calibration found. Every
+  syscall wants a base cost, and the seam plus entry measurement says what it
+  is: about 105 ns end to end, one number that covers all of them.
+- **`SHA256HashCost`'s two constants should be re-derived from the slope**, not
+  scaled. The measured base-to-per-byte ratio is 240:1 (173 ns : 0.72 ns); the
+  charged ratio is 5:1 (500 : 100). No single multiplier fixes both.
+- Both are gas-schedule changes: `kSyscallGasCostSchedule` is folded into
+  `rv32::kGasScheduleDigest`, so they move with the pinned digest in
+  `artifact.h` and every committed artifact, exactly as the opcode schedule did.
+- The engine fingerprint should cover the syscall path. It hashes the
+  instruction schedule, the structural limits and the fusion matrix;
+  `kSyscallGasCostSchedule` is already in `kGasScheduleDigest` so the input
+  exists, and `HOGD_RV32_ENGINE_SOURCES` wants a syscall-path equivalent, or a
+  rewrite of `syscall_entry_outer.h` moves these numbers with nothing saying so.
+- Stateful syscalls remain unmeasured and are the harder half: their worst case
+  is a snapshot-cache miss, which is a DB cost rather than a syscall cost and is
+  not reproducible the way these are. Note that even the stateless set has a
+  cold path -- the first `GetBlockHeight` in a block fetches the db tip through
+  the proxy, and every later one reads an atomic. The 90 ns above is the steady
+  state, which is what a contract making more than one syscall sees.

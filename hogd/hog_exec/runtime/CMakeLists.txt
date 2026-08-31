@@ -228,6 +228,56 @@ target_link_libraries(
 gtest_discover_tests(rv32_syscall_entry_bridge_test
                      TEST_PREFIX rv32.entry.)
 
+if(BUILD_BENCHMARKS)
+  # Syscall cost on the production entry path.
+  #
+  # A separate binary from the rv32 gas calibration on purpose. That harness
+  # links only rv32_isa_core so a calibration can run on a candidate validator
+  # without configuring the node build, which is exactly what it cannot do for
+  # a syscall: syscall_entry needs the protocol XDR, the DB proxy and the
+  # snapshot cache. Splitting them keeps the calibration portable and lets this
+  # one link whatever a real syscall needs.
+  #
+  # The link set is rv32_syscall_entry_bridge_test's, minus GTest and plus
+  # Google Benchmark. Deliberately not a minimized set: this benchmark stands
+  # up a SystemCallHandler behind the same in-process snapshot server and event
+  # aggregator that test does, and that test's dependency list is the one known
+  # to close over them.
+  add_executable(
+    rv32_syscall_entry_bench
+    rv32/rv32_syscall_entry_bench.cc
+  )
+
+  target_link_libraries(
+    rv32_syscall_entry_bench
+    precompiles
+    rv32_syscall_bridge
+    runtime
+    runtime_test_lib
+    runtime_test_util
+    db_interface
+    hog_db
+    storage_cost
+    model_checker
+    contract_loader
+    genesis
+    benchmark::benchmark
+  )
+
+  target_include_directories(
+    rv32_syscall_entry_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_BINARY_DIR}/hogd/xdr
+  )
+
+  # Optimized with LTO across the interpreter and the syscall bridge, matching
+  # how the node is built. A syscall measured through a non-LTO build is a
+  # different syscall.
+  set_property(TARGET rv32_syscall_entry_bench
+               PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
 add_executable(
   rv32_runtime_context_test
   rv32/runtime_context.cc
