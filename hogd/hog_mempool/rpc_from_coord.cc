@@ -296,7 +296,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
       [&]() -> x23::Async<void> {
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < txs->size(); i++) {
-          if (failed_signatures_.contains(sha256((*txs)[i]))) {
+          if (failed_signatures_.contains(
+                  (*txs)[i].tx.invocation.invoked_address, sha256((*txs)[i]))) {
             to_remove_indices.push_back(i);
           }
         }
@@ -307,10 +308,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
+  // Stamped onto verdicts cached below, so it must be the height auth actually
+  // read rather than one re-read after the tip may have moved.
+  BlockHeight verify_height = 0;
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(drop_rejected_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        const BlockHeight verify_height = scheduler_->current_block();
+        verify_height = scheduler_->current_block();
         co_return co_await auth_client_->authmempool_verify_transactions(
             verify_height, *txs);
       });
@@ -330,7 +334,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
             // Only [kAuthFailed] is a verdict about these bytes. The other
             // codes describe this node's own state and must not be cached.
             if (code == AuthErrorCode::kAuthFailed) {
-              failed_signatures_.insert(sha256((*txs)[i]));
+              failed_signatures_.insert(sha256((*txs)[i]), verify_height);
             }
             to_remove_indices.push_back(i);
           }
@@ -2958,20 +2962,15 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
-  // Every cached rejection was recorded against the account state that just
-  // changed. A signing this node turned down at [height] may verify against
-  // the new keys and weights, so keeping those verdicts would refuse a now
-  // valid transaction on the gateway until its entry aged out. The cache
-  // holds no address index -- it is keyed on the signing hash -- so drop it
-  // whole rather than picking out the changed addresses; it is best-effort,
-  // and refilling it costs one reverification per signing.
-  failed_signatures_.clear();
-
   static TransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();
   txs.clear();
   for (const KeyChange &change : key_changes) {
+    // Cached rejections for this account were read from the keys it held
+    // until now, so they stop counting from [height] on.
+    failed_signatures_.note_key_change(change.address, height);
+
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
     static TransactionHashBatch change_tx_hashes;

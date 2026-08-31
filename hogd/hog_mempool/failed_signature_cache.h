@@ -3,47 +3,51 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <utility>
 
+#include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/recent_key_changes.h"
 #include "types.hh"
 
 namespace hogd {
 
 namespace detail {
 
-// A fixed-size set of signings sharing one bucket key, evicting under a clock
-// policy: a lookup sets the entry's read bit, and an insert advances the hand
-// past set bits, clearing them, until it finds a slot to take. A signing that
-// keeps being resubmitted survives; one submitted once does not.
+// A fixed-size set of signings sharing one bucket, evicted by clock: a lookup
+// sets the read bit, an insert advances the hand past set bits, clearing them,
+// until it finds a slot. Signings that keep being resubmitted survive.
 //
-// Not synchronized. Callers hold the [SynchronizedMap] bucket lock covering
-// this value.
+// Not synchronized; callers hold the [SynchronizedMap] bucket lock.
 struct FailedSignatureBucket {
   constexpr static size_t kBucketSize = 16;
 
   struct Entry {
     SHA256Hash signed_tx_hash = {};
+    BlockHeight verified_at_height = 0;
     bool occupied = false;
     bool read = false;
   };
 
-  bool contains(const SHA256Hash &signed_tx_hash)
+  std::optional<BlockHeight> verified_at(const SHA256Hash &signed_tx_hash)
   {
     for (Entry &entry : entries) {
       if (entry.occupied && entry.signed_tx_hash == signed_tx_hash) {
         entry.read = true;
-        return true;
+        return entry.verified_at_height;
       }
     }
-    return false;
+    return std::nullopt;
   }
 
-  void insert(const SHA256Hash &signed_tx_hash)
+  void insert(const SHA256Hash &signed_tx_hash, BlockHeight verified_at_height)
   {
     for (Entry &entry : entries) {
       if (entry.occupied && entry.signed_tx_hash == signed_tx_hash) {
         entry.read = true;
+        entry.verified_at_height = verified_at_height;
         return;
       }
     }
@@ -54,6 +58,7 @@ struct FailedSignatureBucket {
         continue;
       }
       entries[clock_hand].signed_tx_hash = signed_tx_hash;
+      entries[clock_hand].verified_at_height = verified_at_height;
       entries[clock_hand].occupied = true;
       entries[clock_hand].read = false;
       clock_hand = (clock_hand + 1) % kBucketSize;
@@ -76,29 +81,25 @@ struct FailedSignatureBucket {
 
 } // namespace detail
 
-// Remembers signings that authentication has definitively rejected, so that
-// resubmitting the same bytes does not cost another verification.
+// Signings authentication has rejected, so resubmitting the same bytes does
+// not cost another verification.
 //
-// Keyed on sha256 of the whole [SignedTransaction]. The verdict comes from
-// [verify_auth], which consumes signatures, so the key has to cover them: a
-// [TransactionHash] covers [Transaction] alone and therefore names every
-// signing of a transaction, which would let one submitter's bad copy speak for
-// all of them -- including the genuine one.
+// Keyed on sha256 of the whole [SignedTransaction]: the verdict comes from
+// [verify_auth], which consumes signatures, so the key must cover them.
+// [TransactionHash] excludes them, and would let one bad copy speak for every
+// signing of that transaction, the genuine one included.
 //
-// For public-gateway admission only. Transactions arriving for a nomination
-// must bypass it. A verdict here is derived from account keys and weights that
-// a later block can change, so entries go stale; on the gateway that costs the
-// submitter a resubmission, but on the path that supplies bodies for block
-// validation it would keep this node from ever obtaining a body it needs, and
-// so from ever validating that block.
+// Verdicts carry the height they were taken at and are honoured only while
+// [RecentKeyChanges] says the account's keys have not moved since. Nothing is
+// dropped on a key change; entries just stop counting.
 //
-// Occupancy is bounded structurally at [max_entries]: signings are folded onto
-// a fixed number of bucket keys, and each bucket holds a fixed number of
-// entries. There is nothing to count and nothing to sweep.
+// Gateway admission only. Nomination traffic must bypass it: a stale entry on
+// the path that supplies bodies for block validation would keep this node from
+// obtaining one it needs.
 //
-// Best-effort in both directions: a miss costs only a reverification, and a
-// bucket evicts under the clock policy rather than exactly, so callers must
-// treat a hit and a miss alike as advisory.
+// Bounded structurally at [max_entries]. Best-effort: a miss costs only a
+// reverification and eviction is approximate, so treat hits and misses alike
+// as advisory.
 class FailedSignatureCache {
 public:
   // 8192 buckets of 16 is 128k signings, a few MB once warm.
@@ -106,30 +107,40 @@ public:
     : num_buckets_(num_buckets)
   {}
 
-  bool contains(const SHA256Hash &signed_tx_hash)
+  bool contains(const ContractAddress &address,
+                const SHA256Hash &signed_tx_hash)
   {
-    auto [bucket, bucket_lock] = buckets_.find(bucket_key(signed_tx_hash));
-    return bucket != nullptr && bucket->contains(signed_tx_hash);
+    std::optional<BlockHeight> verified_at;
+    {
+      auto [bucket, bucket_lock] = buckets_.find(bucket_key(signed_tx_hash));
+      if (bucket == nullptr) {
+        return false;
+      }
+      verified_at = bucket->verified_at(signed_tx_hash);
+    }
+    return verified_at.has_value() &&
+           key_changes_.still_current(address, *verified_at);
   }
 
-  void insert(const SHA256Hash &signed_tx_hash)
+  void insert(const SHA256Hash &signed_tx_hash, BlockHeight verified_at_height)
   {
     auto [bucket, bucket_lock] = buckets_[bucket_key(signed_tx_hash)];
-    bucket.insert(signed_tx_hash);
+    bucket.insert(signed_tx_hash, verified_at_height);
   }
 
-  // Drops every entry. Call when the account state authentication consults
-  // changes, since a verdict recorded against the old state may not hold
-  // against the new one.
-  void clear() { buckets_.clear(); }
+  void note_key_change(const ContractAddress &address, BlockHeight height)
+  {
+    key_changes_.note(address, height);
+  }
 
   size_t max_entries() const
   {
     return num_buckets_ * detail::FailedSignatureBucket::kBucketSize;
   }
 
-  // Retained signings. Walks every bucket, so this is for diagnostics rather
-  // than the admission path.
+  const RecentKeyChanges &key_changes() const { return key_changes_; }
+
+  // Locks every bucket in turn; for diagnostics, not the admission path.
   size_t size()
   {
     size_t total = 0;
@@ -142,16 +153,15 @@ public:
 private:
   uint64_t bucket_key(const SHA256Hash &signed_tx_hash) const
   {
-    // [SipHash24Hasher] is keyed from a per-process random key, so which
-    // bucket a signing lands in cannot be worked out offline. Folding the
-    // SHA-256 in directly would not do: it is uniform, but the submitter
-    // chooses the bytes it covers, so they could grind signings into one
-    // bucket and push out whatever else it held.
+    // Keyed per process, so a signing's bucket cannot be worked out offline
+    // and ground into. Being a SHA-256 makes it uniform, not unpredictable:
+    // the submitter chooses the bytes it covers.
     return SipHash24Hasher{}(signed_tx_hash) % num_buckets_;
   }
 
   size_t num_buckets_;
   SynchronizedMap<uint64_t, detail::FailedSignatureBucket> buckets_;
+  RecentKeyChanges key_changes_;
 };
 
 } // namespace hogd
