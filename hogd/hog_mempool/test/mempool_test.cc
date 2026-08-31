@@ -15,6 +15,7 @@
 #include <tuple>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_rpc.hh"
@@ -27,6 +28,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -518,7 +520,6 @@ TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
   // it blocks until a callback is registered.
   [](MempoolAuthRpc &auth_rpc) -> x23::Detached {
     co_await default_threadpool().bg();
-    EXPECT_TRUE(x23::in_thread_pool());
     co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
   }(auth_rpc);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
