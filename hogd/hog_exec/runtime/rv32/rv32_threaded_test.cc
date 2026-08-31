@@ -2621,9 +2621,9 @@ expect_budget_sweep_parity_capped(std::span<const uint32_t> words,
   }
 }
 
-// The smallest cap create() accepts: it clamps to at least kDivInstructionGas
+// The smallest cap create() accepts: it clamps to at least kMaxInstructionGas
 // so a valid split exists for every single instruction.
-constexpr uint32_t kMinRunGasCap = static_cast<uint32_t>(kDivInstructionGas);
+constexpr uint32_t kMinRunGasCap = static_cast<uint32_t>(kMaxInstructionGas);
 
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
 {

@@ -45,16 +45,32 @@ SIGMA_THRESHOLD = 2.0
 # Gas units per baseline instruction in a proposed schedule.
 #
 # Costs must round *up* -- rounding down sells real work for free, and the
-# schedule exists to bound time from above. But rounding up at a coarse unit
-# systematically over-charges, and most of RV32IM sits within a factor of two of
-# the baseline, so a unit of one baseline instruction would round almost the
-# whole ISA to the same 1 or 2 and throw away the distinctions this harness
-# exists to find. Splitting the baseline into several units keeps the rounding
-# loss bounded by 1/RESOLUTION instead of by a factor of two.
+# schedule exists to bound time from above -- so a coarse unit systematically
+# over-charges, and a finer one bounds that loss by 1/RESOLUTION.
 #
-# The cost is that every number in the table scales by this factor, so block
-# gas limits and the syscall costs in gas_cost_table.h have to scale with it or
-# the two stop being comparable.
+# The cost is that every number in the table scales by this factor, so gas
+# limits and the syscall costs in gas_cost_table.h have to scale with it or the
+# two stop being comparable.
+#
+# What that trade actually buys, measured on hog10 across eleven workloads
+# (`--workloads` reports the spread; a limit must be sized for the worst
+# ns-per-gas, so everything below it is capacity given away):
+#
+#     resolution   1      2      4      8     16
+#     spread     4.59x  4.03x  4.03x  4.03x  4.03x
+#
+# It saturates at 2. Past that a finer unit scales every number and changes no
+# pricing. Even 1 -> 2 is narrow: six of the eleven workloads are unaffected,
+# and the gain is confined to branches (measured 1.38x a baseline instruction,
+# so resolution 1 rounds them to 2 and over-charges 45%, against 3/2 and 8% at
+# resolution 2) and loads. It is not, as this comment once claimed, that a unit
+# of one baseline instruction collapses the ISA -- resolution 1 still resolves
+# three tiers and keeps both large repricings the harness found.
+#
+# The floor under all of them is 4.03x, and no resolution reaches it: that
+# residue is a fused load-use pair running at 0.63 ns/instr while the schedule
+# charges it the pointer-chase rate, which per-opcode worst-case pricing cannot
+# tell apart at charge time.
 DEFAULT_RESOLUTION = 4
 
 # How far a program may exceed the sum of its opcodes' individual worst cases
@@ -358,16 +374,46 @@ def sigmas(cell):
 def merge_runs(runs):
     """Combine several calibration runs into one set of cells.
 
-    Per (opcode, context), the cost is the highest any run measured and the
-    cell counts as resolved only if *every* run resolved it. Both halves matter
-    for different reasons. Taking the max is conservative in the direction gas
-    has to be conservative. Requiring unanimity is what makes a schedule
-    reproducible: a cell's within-run standard error captures scatter between
-    that run's kernels, but not drift between runs on a shared or thermally
-    variable machine, and on such a host the near-baseline cells move by tens of
-    percent between runs while the genuinely expensive ones move by one or two.
-    Demanding that every run agree an opcode is more expensive than the
-    baseline is what separates those two populations.
+    Per (opcode, context), the cost is the median across runs and the cell
+    counts as resolved only if *every* run resolved it. The two halves do
+    different jobs: the median estimates how much the opcode costs, unanimity
+    decides whether it costs more than the baseline at all.
+
+    Median *within* a host and max *across* hosts, because the two axes are
+    different questions. Repeated runs on one host measure one quantity, so
+    their max is not a conservative estimate of it -- it is a statistic that
+    grows with N, pricing the unluckiest sample and climbing as nights
+    accumulate: over three hog10 runs a plain max rose 241 -> 245 -> 246 gas
+    with nothing about the machine changing. It also priced noise into
+    individual opcodes, splitting identical single-dispatch instructions across
+    a rounding boundary on sub-tenth-of-a-percent differences. The median
+    converges instead.
+
+    Different hosts are not repeats of one measurement, though. Mixing them is
+    a deliberate workflow (see check_comparable) precisely because a schedule
+    has to hold on the slowest supported machine, so a host that finds an
+    opcode expensive must not be averaged away by two that do not. Hence the
+    max there.
+
+    The conservatism on the third axis is untouched: worst_by_op still takes
+    the max across *contexts*, which is the choice a guest author gets to make.
+
+    The cross-host max is over raw nanoseconds, which is what it has always
+    been. That is conservative but blunt: a host uniformly slower at everything
+    wins every opcode, and build_schedule then divides by the *fastest* host's
+    baseline, so the whole schedule inflates rather than just the opcodes that
+    host is relatively worse at. Comparing each host's cost against its own
+    baseline first would price the relative worst case instead. Left alone here
+    -- only hog10 has ever been merged, so nothing exercises it, and choosing
+    what a multi-host schedule means is a decision for whoever needs one.
+
+    Requiring unanimity is what makes a schedule reproducible: a cell's
+    within-run standard error captures scatter between that run's kernels, but
+    not drift between runs on a shared or thermally variable machine, and on
+    such a host the near-baseline cells move by tens of percent between runs
+    while the genuinely expensive ones move by one or two. Demanding that every
+    run agree an opcode is more expensive than the baseline is what separates
+    those two populations.
 
     With a single run this reduces to that run's own cells, which is why one
     run is enough to find the large effects and not enough to price the small
@@ -376,6 +422,7 @@ def merge_runs(runs):
     merged = {}
     total_runs = len(runs)
     for data in runs:
+        host = provenance(data).get("host") or "unknown host"
         baseline = baseline_ns(data)
         for cell in usable_cells(data):
             key = (cell["op"], context_label(cell))
@@ -389,14 +436,18 @@ def merge_runs(runs):
                     "op": cell["op"],
                     "context": context_label(cell),
                     "scheduled_gas": cell["scheduled_gas"],
-                    "ns_per_instruction": cost,
+                    "costs": {host: [cost]},
                     "resolved": cell_resolved,
                     "runs": 1,
                 }
                 continue
-            entry["ns_per_instruction"] = max(entry["ns_per_instruction"], cost)
+            entry["costs"].setdefault(host, []).append(cost)
             entry["resolved"] = entry["resolved"] and cell_resolved
             entry["runs"] += 1
+    for entry in merged.values():
+        by_host = entry.pop("costs")
+        entry["ns_per_instruction"] = max(statistics.median(samples)
+                                          for samples in by_host.values())
     # Unanimity has to mean every run, not every run that happened to contain
     # the cell. A context missing from one run -- a filtered run, or a sweep the
     # audit rejected -- would otherwise keep an earlier run's `resolved` and be
@@ -502,6 +553,28 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
         # the difference to belong to the target alone. Pricing there would
         # undercharge, so the floor holds.
         ns = max(cost_ns(cell), baseline)
+
+        # An opcode the table calls "same as ADD" is priced as ADD. Without
+        # this, whether a single-dispatch opcode lands a hair under the
+        # baseline or a hair over it decides its price: the floor above pins
+        # the former to exactly one unit while the latter rounds up to the next
+        # one. At resolution 1 that put ANDI at 1 gas and AND at 2, and SLTIU
+        # at 1 against SLTI at 2, on differences invisible at two decimal
+        # places. Charging one price for opcodes the report already calls
+        # indistinguishable is what makes the schedule legible, and it keeps
+        # the table and the schedule telling the reader the same story.
+        #
+        # VERDICT_MARGIN rather than a new constant: it is already this file's
+        # answer to "how far from the baseline is far enough to mean
+        # something". It is wider than the noise -- three hog10 runs reproduced
+        # to 0.9% at p90 -- so this can undercharge an opcode genuinely a few
+        # percent dearer than a dispatch, against rounding that otherwise
+        # overcharges by a whole unit, which is 100% of a dispatch at
+        # resolution 1.
+        same_as_baseline = ns <= baseline * (1.0 + VERDICT_MARGIN)
+        if same_as_baseline:
+            ns = baseline
+
         ratio = ns / unit
         schedule[op] = {
             "ratio": ratio,
@@ -509,6 +582,7 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
             "current_gas": cell["scheduled_gas"],
             "context": cell["context"],
             "ns": ns,
+            "same_as_baseline": same_as_baseline,
             "floored": ns > cost_ns(cell),
             "resolved": cell["resolved"],
         }
@@ -548,6 +622,8 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
         note = "" if entry["resolved"] else "not reproduced"
         if entry["floored"]:
             note = "measured below baseline, floored"
+        elif entry["same_as_baseline"]:
+            note = "same as ADD, priced as ADD"
         if entry["proposed_gas"] != entry["current_gas"]:
             changed += 1
             note = (note + " CHANGED").strip()
@@ -680,8 +756,21 @@ def cost_model(data, worst_case=False):
         cost = cost_ns(cell) if resolved(cell) else baseline
         op = cell["op"]
         if worst_case:
-            if op not in best or cost > best[op]:
-                best[op] = cost
+            # Floored at the baseline, exactly as build_schedule floors it and
+            # for the same reason: an opcode measuring under one dispatch has
+            # not found a cheaper dispatch, it is the estimator straining. The
+            # floor has to be applied in both places or this vector is not the
+            # one the schedule prices at, and the bound check is checking a
+            # schedule nobody proposed. On hog10 sixteen opcodes measure at
+            # 0.83x a dispatch, which put four workloads' bounds below what the
+            # schedule would actually charge them.
+            #
+            # Only the worst-case vector. The workload-matched vector below is
+            # testing whether the decomposition predicts real time, and
+            # flooring that one would bias the very quantity under test.
+            floored = max(cost, baseline)
+            if op not in best or floored > best[op]:
+                best[op] = floored
             continue
         rank = (_context_distance(cell), -cost)
         if op not in best or rank < best[op][0]:

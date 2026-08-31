@@ -188,6 +188,22 @@ constexpr std::array<uint64_t, kOpCount> kInstructionGasCosts =
     make_instruction_gas_costs();
 
 constexpr uint64_t
+max_instruction_gas()
+{
+  uint64_t worst = 0;
+  for (const auto &entry : kInstructionGasSchedule) {
+    worst = entry.cost > worst ? entry.cost : worst;
+  }
+  return worst;
+}
+
+// The most any single instruction can cost. Derived rather than named after
+// whichever opcode currently holds the title, so a repricing that moves the
+// peak elsewhere does not leave a stale bound behind. The lowering's run-gas
+// cap must not fall below it, or some instruction would not fit in any run.
+constexpr uint64_t kMaxInstructionGas = max_instruction_gas();
+
+constexpr uint64_t
 gas_cost_for_op(Op op)
 {
   return kInstructionGasCosts[static_cast<size_t>(op)];

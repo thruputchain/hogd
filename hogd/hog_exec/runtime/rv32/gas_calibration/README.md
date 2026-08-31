@@ -274,12 +274,24 @@ It also warns, without failing, when a cell has become expensive that is not in
 the reference at all. A newly expensive instruction is exactly what a gas
 schedule needs to hear about, but on a new host it may just be the first look.
 
-In CI it runs as the **RV32 Gas Calibration** workflow (manual dispatch;
-`scripts/schedules/rv32_gas_calibration.toml`), pinned to one bench host so
-successive runs stay comparable. Its `mode=reference` option measures without
-gating and prints a reference file for that host -- which is how a new bench
-host gets bootstrapped, since the committed reference's ratios were measured
-somewhere else.
+In CI it runs as the **RV32 Gas Calibration** workflow (nightly, plus manual
+dispatch; `scripts/schedules/rv32_gas_calibration.toml`), pinned to one bench
+host so successive runs stay comparable. Its `mode=reference` option measures
+without gating and prints a reference file for that host -- which is how a new
+bench host gets bootstrapped, since the committed reference's ratios were
+measured somewhere else.
+
+Every run files its calibration JSON to `metrics_history` under
+`metrics/rv32-gas-calibration/`, passing or failing, so the costs accumulate as
+a time series instead of a nightly pass/fail. One sample per commit, as
+everything in `metrics_history` is; a nightly re-run on a commit main has not
+moved off replaces the previous sample.
+
+That is also where the input to a gas-schedule proposal comes from:
+`--schedule` takes several of those files at once and merges them, so proposing
+a schedule reads history rather than needing shell access to the bench host.
+Runs are comparable when their engine fingerprints match, not when their commits
+do, so the several runs to merge are successive nights.
 
 Regenerate the reference only once you understand what moved and have decided
 the schedule does or does not need to follow:
@@ -292,6 +304,37 @@ scripts/rv32_gas_report.py /tmp/gas.json --emit-reference > \
 
 Regenerating to make a failure go away hides the one thing the check exists to
 surface.
+
+## What a gas is worth, in nanoseconds
+
+Roughly **one gas per nanosecond**, on hog10, under the schedule in `program.h`.
+That falls out of the design rather than being a coincidence: one baseline
+instruction takes 1.62 ns and is charged 1 gas, so the interpreter's dispatch
+cost sets the scale.
+
+Measured across the eleven validation workloads:
+
+| | ns per gas |
+| --- | --- |
+| worst -- what a limit has to assume | 1.550 |
+| median | 0.956 |
+| best | 0.253 |
+
+So 1M gas is about **1.5 ms** of single-core execution worst case, and nearer
+1 ms for typical code.
+
+Three things that number is not:
+
+- **Portable.** The gas schedule is a protocol constant; nanoseconds are not.
+  The ratios travel between hosts, the absolute scale does not, and the load
+  cells travel worst of all -- a chased `LW` costs 2.49x a baseline instruction
+  on hog10 and 3.8x on an Intel VM measured against the same engine.
+- **Everything the VM does.** This is the RV32 dispatch loop only. Syscalls,
+  storage, and anything crossing out of the VM are not in it, and the syscall
+  costs in `gas_cost_table.h` have never been calibrated against a nanosecond.
+- **Tight.** The 6.13x spread between the best- and worst-priced workload is
+  the error bar on "one gas per nanosecond". Size a budget that must hold at
+  1.55 ns/gas; estimate typical cost at about 1.
 
 ## Reading the numbers
 
