@@ -517,6 +517,28 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
         # the difference to belong to the target alone. Pricing there would
         # undercharge, so the floor holds.
         ns = max(cost_ns(cell), baseline)
+
+        # An opcode the table calls "same as ADD" is priced as ADD. Without
+        # this, whether a single-dispatch opcode lands a hair under the
+        # baseline or a hair over it decides its price: the floor above pins
+        # the former to exactly one unit while the latter rounds up to the next
+        # one. At resolution 1 that put ANDI at 1 gas and AND at 2, and SLTIU
+        # at 1 against SLTI at 2, on differences invisible at two decimal
+        # places. Charging one price for opcodes the report already calls
+        # indistinguishable is what makes the schedule legible, and it keeps
+        # the table and the schedule telling the reader the same story.
+        #
+        # VERDICT_MARGIN rather than a new constant: it is already this file's
+        # answer to "how far from the baseline is far enough to mean
+        # something". It is wider than the noise -- three hog10 runs reproduced
+        # to 0.9% at p90 -- so this can undercharge an opcode genuinely a few
+        # percent dearer than a dispatch, against rounding that otherwise
+        # overcharges by a whole unit, which is 100% of a dispatch at
+        # resolution 1.
+        same_as_baseline = ns <= baseline * (1.0 + VERDICT_MARGIN)
+        if same_as_baseline:
+            ns = baseline
+
         ratio = ns / unit
         schedule[op] = {
             "ratio": ratio,
@@ -524,6 +546,7 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
             "current_gas": cell["scheduled_gas"],
             "context": cell["context"],
             "ns": ns,
+            "same_as_baseline": same_as_baseline,
             "floored": ns > cost_ns(cell),
             "resolved": cell["resolved"],
         }
@@ -563,6 +586,8 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
         note = "" if entry["resolved"] else "not reproduced"
         if entry["floored"]:
             note = "measured below baseline, floored"
+        elif entry["same_as_baseline"]:
+            note = "same as ADD, priced as ADD"
         if entry["proposed_gas"] != entry["current_gas"]:
             changed += 1
             note = (note + " CHANGED").strip()
