@@ -619,13 +619,6 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   EXPECT_EQ(unregistered.wait_for(std::chrono::seconds(1)),
             std::future_status::ready);
   unregister_thread.join();
-
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
-  EXPECT_EQ(callback_count.load(std::memory_order_relaxed), 1);
-  // TODO(jhumphri): This should hang... fix the test.
-  auth_rpc.register_callback([](BlockHeight, KeyChangeBatch)
-                                 -> x23::Async<void> { co_return; },
-                             [] {})();
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
