@@ -18,3 +18,8 @@ The exception message omits the range, so callers must catch
 If callers need a stable API that does not expose generated wire internals,
 x23 would need accessors on `XdrCallFailed` (for example, an accepted status
 and an optional program-version range).
+
+The GCC debug CI lane reruns this test verbosely and uploads
+`x23-compat-probe.txt` in the `x23-compat-probe-gcc-debug` artifact. That output
+is the durable evidence for the native version, procedure, and argument-decoding
+outcomes.
