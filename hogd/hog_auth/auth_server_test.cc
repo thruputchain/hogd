@@ -18,13 +18,11 @@
 #include <utility>
 
 #include "auth_card.hh"
-#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "rpc_types.hh"
-#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
