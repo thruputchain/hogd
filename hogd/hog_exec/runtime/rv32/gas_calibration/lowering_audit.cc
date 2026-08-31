@@ -91,14 +91,16 @@ is_run_barrier(Op op)
 
 LoweringAudit
 audit_body(std::span<const uint8_t> code, std::span<const uint8_t> memory,
-           uint32_t memory_bytes, size_t body_start_index, size_t body_slots)
+           uint32_t memory_bytes, size_t body_start_index, size_t body_slots,
+           bool fuse)
 {
   LoweringAudit audit;
   audit.body_slots = body_slots;
 
   auto lowered =
       ThreadedMachinePreInstantiation::create(code, memory, 0, memory_bytes,
-                                              /*trace=*/false);
+                                              /*trace=*/false, kMaxRunGas,
+                                              fuse);
   if (!lowered.has_value()) {
     audit.rewritten_slots = body_slots;
     return audit;
@@ -143,10 +145,11 @@ audit_body(std::span<const uint8_t> code, std::span<const uint8_t> memory,
 }
 
 LoweringAudit
-audit_kernel(const Kernel &kernel, const KernelSpec &spec)
+audit_kernel(const Kernel &kernel, const KernelSpec &spec, bool fuse)
 {
   return audit_body(kernel.code, kernel.initial_memory, kernel.memory_bytes,
-                    kernel.body_start_pc / kInstructionBytes, spec.body_slots);
+                    kernel.body_start_pc / kInstructionBytes, spec.body_slots,
+                    fuse);
 }
 
 } // namespace hogd::rv32::gas_calibration

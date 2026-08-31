@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
@@ -173,6 +174,216 @@ TEST(Rv32GasCalibrationKernel, PlacementPhaseMovesWorkWithoutChangingIt)
 // trap or early exit in one assertion -- if a kernel silently ran a different
 // number of instructions than the harness credits it with, every ns-per
 // instruction derived from it would be wrong by that ratio.
+// A saturated body must really be all target, and must run.
+//
+// The saturated measurement divides a kernel's time by its instruction count
+// and calls the result the per-instruction cost of a program made of that
+// opcode. That claim rests on two things the harness controls: every interior
+// slot actually holds the target, and the kernel actually executes all of it.
+// Check both against the production decoder and the engine's own gas
+// accounting, for every opcode that can be saturated.
+TEST(Rv32GasCalibrationKernel, NoBodySlotEncodesAnImmediateItCannotReach)
+{
+  // Every body-slot encoder masks its immediate to the field width, so an
+  // out-of-range offset does not fail -- it encodes a different instruction
+  // that runs and halts cleanly. That is how the loop back edge truncated
+  // silently; JALR has the same shape, because its base register is fixed at
+  // the body midpoint and the immediate carries the whole per-slot offset.
+  //
+  // Build every target at every body size the harness allows. A kernel must
+  // either come out correct or be refused by name -- never come out wrong.
+  HaltHost host;
+  size_t refused = 0;
+  for (const uint32_t body_slots : {8U, 64U, 512U, 1024U, 2048U, 8192U}) {
+    for (size_t index = 0; index < kOpCount; ++index) {
+      const Op op = static_cast<Op>(index);
+      if (!is_measurable_target(op)) {
+        continue;
+      }
+      KernelSpec spec;
+      spec.target = op;
+      spec.saturated = true;
+      spec.body_slots = body_slots;
+      spec.trip_count = kTestTripCount;
+      spec.target_slots = max_target_slots(body_slots, spec);
+
+      const auto kernel = build_kernel(spec);
+      if (!kernel.has_value()) {
+        // Refusal is the acceptable outcome; a wrong encoding is not.
+        ++refused;
+        continue;
+      }
+      const auto program = ThreadedProgram::create(kernel.value().code);
+      ASSERT_TRUE(program.has_value()) << op_name(op) << " @ " << body_slots;
+      for (const uint32_t pc : kernel.value().target_slot_pcs) {
+        const auto decoded = program->instruction_at(pc / kInstructionBytes);
+        ASSERT_TRUE(decoded.has_value()) << op_name(op) << " @ " << body_slots;
+        EXPECT_EQ(decoded->op, op) << op_name(op) << " @ " << body_slots;
+      }
+    }
+  }
+  // JALR above 1024 slots is the case that motivated this; if nothing is ever
+  // refused the loop is not reaching the range it exists to probe.
+  EXPECT_GT(refused, 0U);
+}
+
+TEST(Rv32GasCalibrationKernel, SaturatedPairsTileWithoutOverlapping)
+{
+  // A saturated pair body has to be the pair repeated -- sw lw sw lw -- not a
+  // run of stores. Each substitution occupies two slots, so placing a head at
+  // every interior slot makes each pair's first instruction land on the
+  // previous pair's second: the body collapses to all-first-component with a
+  // single tail at the end, and it audits clean because sw;sw is not a fusion
+  // rule. The pair's cost would then be measured on a program that contains
+  // essentially none of the interaction the row exists to measure.
+  for (const PairKind pair :
+       {PairKind::kStoreLoadForward, PairKind::kStoreLoadDistinct}) {
+    KernelSpec spec;
+    spec.pair = pair;
+    spec.saturated = true;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(spec.body_slots, spec);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << pair_name(pair);
+
+    const auto [head_op, tail_op] = pair_components(pair);
+    const auto program = ThreadedProgram::create(kernel.value().code);
+    ASSERT_TRUE(program.has_value()) << pair_name(pair);
+
+    // Every recorded slot alternates head, tail, head, tail: two slots per
+    // substitution, in program order, none of them overwritten.
+    const auto &pcs = kernel.value().target_slot_pcs;
+    ASSERT_EQ(pcs.size() % 2U, 0U) << pair_name(pair);
+    ASSERT_GT(pcs.size(), 2U) << pair_name(pair);
+    for (size_t i = 0; i < pcs.size(); i += 2) {
+      EXPECT_EQ(pcs[i + 1], pcs[i] + kInstructionBytes)
+          << pair_name(pair) << ": pair halves are not adjacent";
+      const auto head = program->instruction_at(pcs[i] / kInstructionBytes);
+      const auto tail = program->instruction_at(pcs[i + 1] / kInstructionBytes);
+      ASSERT_TRUE(head.has_value() && tail.has_value()) << pair_name(pair);
+      EXPECT_EQ(head->op, head_op) << pair_name(pair) << " at pc " << pcs[i];
+      EXPECT_EQ(tail->op, tail_op)
+          << pair_name(pair) << " at pc " << pcs[i + 1];
+    }
+
+    // And the body really is made of the pair: at least a third of it, which a
+    // body of stores with one trailing load could never reach.
+    EXPECT_GE(kernel.value().target_units, spec.body_slots / 3)
+        << pair_name(pair);
+    EXPECT_EQ(pcs.size(), size_t{kernel.value().target_units} * 2U)
+        << pair_name(pair);
+  }
+}
+
+TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
+{
+  HaltHost host;
+  size_t measured = 0;
+  size_t fused = 0;
+  for (size_t index = 0; index < kOpCount; ++index) {
+    const Op op = static_cast<Op>(index);
+    if (!is_measurable_target(op)) {
+      continue;
+    }
+    KernelSpec spec;
+    spec.target = op;
+    spec.saturated = true;
+    spec.body_slots = kTestBodySlots;
+    spec.trip_count = kTestTripCount;
+    spec.target_slots = max_target_slots(spec.body_slots, spec);
+
+    const auto kernel = build_kernel(spec);
+    ASSERT_TRUE(kernel.has_value()) << op_name(op);
+    // Every interior slot is a target: the whole point of saturation.
+    EXPECT_EQ(kernel.value().target_slot_pcs.size(), spec.body_slots - 2)
+        << op_name(op);
+
+    if (!audit_kernel(kernel.value(), spec).clean()) {
+      // Adjacent copies of this opcode fuse, so it cannot be saturated. The
+      // driver reports that rather than measuring the fused form; here just
+      // record that it is a minority case.
+      ++fused;
+      continue;
+    }
+    ++measured;
+
+    const auto program = ThreadedProgram::create(kernel.value().code);
+    ASSERT_TRUE(program.has_value()) << op_name(op);
+    for (const uint32_t pc : kernel.value().target_slot_pcs) {
+      const auto decoded = program->instruction_at(pc / kInstructionBytes);
+      ASSERT_TRUE(decoded.has_value()) << op_name(op);
+      EXPECT_EQ(decoded->op, op) << "saturated body slot at pc " << pc
+                                 << " decoded as " << op_name(decoded->op);
+    }
+
+    auto pre =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(pre.has_value()) << op_name(op);
+    ThreadedMachine machine(*pre, kGasLimit);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted) << op_name(op);
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
+        << op_name(op) << " did not run its whole saturated body";
+  }
+  // Saturation has to work for most of the ISA or the primary estimator has no
+  // coverage. Only opcodes that pair with themselves under a fusion rule are
+  // expected to decline.
+  EXPECT_GT(measured, 35U);
+  EXPECT_LE(fused, 3U);
+}
+
+// A kernel must run all of its body, at every body size the harness allows.
+//
+// This is what a silently-truncated loop breaks. The old backwards branch
+// overflowed its 13-bit immediate past 1024 slots and the encoder truncated
+// rather than refused: at 2048 slots the kernel reported a clean halt having
+// burned 2107 of 16443 credited gas, every opcode priced at the baseline, and
+// the sweep looked reproducible because it had stopped measuring. Comparing
+// consumed against credited gas catches that in one assertion, so size the
+// bodies past the old cliff.
+TEST(Rv32GasCalibrationKernel, RunsTheWholeBodyAtEveryBodySize)
+{
+  HaltHost host;
+  for (const uint32_t slots :
+       {64U, 256U, 512U, 768U, 1024U, 1536U, 2048U, 4096U, 8192U}) {
+    KernelSpec spec;
+    spec.target = Op::kLw;
+    spec.working_set = WorkingSet::kPointerChase;
+    spec.body_slots = slots;
+    spec.trip_count = 8;
+    spec.target_slots = max_target_slots(slots, spec);
+
+    const auto kernel = build_kernel(spec);
+    // Refusing to build is a fine answer; building something that does not run
+    // is not.
+    if (!kernel.has_value()) {
+      continue;
+    }
+    auto program =
+        ThreadedMachinePreInstantiation::create(kernel.value().code,
+                                                kernel.value().initial_memory,
+                                                0, kernel.value().memory_bytes,
+                                                /*trace=*/false);
+    ASSERT_TRUE(program.has_value()) << "body_slots " << slots;
+
+    ThreadedMachine machine(*program, kGasLimit);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted)
+        << "body_slots " << slots << " did not halt (trap "
+        << static_cast<int>(outcome.trap) << ")";
+    EXPECT_EQ(outcome.trap, Trap::kNone) << "body_slots " << slots;
+    EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
+        << "body_slots " << slots << " executed " << outcome.gas_consumed
+        << " gas but is credited with " << kernel.value().scheduled_gas
+        << " -- the loop is not running the whole body";
+  }
+}
+
 TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
 {
   HaltHost host;
@@ -580,9 +791,13 @@ TEST(Rv32GasCalibrationKernel, ScheduledGasMatchesTheProductionDecoder)
   ASSERT_TRUE(kernel.has_value());
   const auto decoded = scheduled_gas_for_code(kernel.value().code);
   ASSERT_TRUE(decoded.has_value());
-  // One trip: the whole program runs top to bottom exactly once, so the
-  // schedule's total over the code equals the run's charge.
-  EXPECT_EQ(decoded.value(), kernel.value().scheduled_gas);
+  // One trip runs every instruction except the JAL back to the body head: the
+  // loop exits by taking the skip branch, which jumps over it. So the
+  // schedule's static total over the code is the run's charge plus that one
+  // JAL. (Before the loop tail became beq-over-jal this was a plain equality,
+  // because every instruction in the program executed.)
+  EXPECT_EQ(decoded.value(),
+            kernel.value().scheduled_gas + scheduled_gas_for(Op::kJal));
 }
 
 } // namespace

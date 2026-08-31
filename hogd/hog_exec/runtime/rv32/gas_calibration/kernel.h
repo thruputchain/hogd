@@ -167,6 +167,17 @@ struct KernelSpec {
   // How many of those slots hold the target. Swept 0..body_slots/2 so that
   // spread placement never puts two targets adjacent.
   uint32_t target_slots = 0;
+  // Fill every interior slot with the target instead of capping at half.
+  //
+  // The cap exists to keep a contrast clean -- targets non-adjacent, so no
+  // fusion appears or disappears as target_slots varies. A saturated body
+  // needs no contrast: its time over its substitution count is directly what a
+  // program made of this opcode costs, so it cannot go negative and does not
+  // depend on the filler.
+  //
+  // Adjacent targets would fuse, so single targets are lowered with fusion off
+  // and pairs keep it; run_sweep decides, and the audit checks either way.
+  bool saturated = false;
   // Rotates the target placement within the body without changing how many
   // targets there are. Two kernels differing only in phase do identical work,
   // so any difference between them is pure layout systematics -- code
@@ -193,6 +204,14 @@ struct Kernel {
   // Byte offsets of the body slots that hold the target instruction, in
   // program order. lowering_audit.h uses these to check the lowering.
   std::vector<uint32_t> target_slot_pcs;
+  // Substitutions placed in the body: one per target instruction for a single
+  // target, one per *pair* for a pair. target_slot_pcs holds every slot they
+  // occupy, so it is twice this for a pair -- which is why the two are not
+  // interchangeable. This is the denominator a saturated timing divides by,
+  // because it is the unit the cost is quoted in: ns per instruction for a
+  // single target, ns per pair for a pair, which is what a pair's ceiling
+  // (its two opcodes' costs summed) is compared against.
+  uint32_t target_units = 0;
   // Byte offset of the first body slot.
   uint32_t body_start_pc = 0;
 };
@@ -208,7 +227,11 @@ enum class KernelError {
   kZeroTripCount,
   kTooManyTargets, // would put two targets adjacent, exposing them to fusion
   kCodeTooLarge,   // over kMaxCodeBytes
-  kUndecodable,    // generated code did not round-trip through the decoder
+  // A body slot's own immediate does not reach. JALR carries the whole
+  // per-slot offset from a base anchored at the body midpoint, so its 12-bit
+  // signed field caps how large a body it can fill.
+  kTargetImmediateOutOfRange,
+  kUndecodable, // generated code did not round-trip through the decoder
 };
 
 [[nodiscard]] std::string kernel_error_name(KernelError error);

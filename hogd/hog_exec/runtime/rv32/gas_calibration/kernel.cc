@@ -560,6 +560,17 @@ max_target_slots(uint32_t body_slots, const KernelSpec &spec)
   // Slot 0 and the last slot stay filler; a pair's tail must also fit inside
   // that interior, so the head can sit one slot lower than a single target's.
   const uint32_t placeable = (body_slots - 2) - (per_target - 1);
+  if (spec.saturated) {
+    // Every interior slot a substitution can start at without landing on the
+    // previous one. Adjacency is the point, so unlike the sweep below there is
+    // no filler gap to keep -- but a pair still occupies two slots, and a head
+    // at every slot would make each pair's first instruction overwrite the
+    // previous pair's second. The body would come out as a run of stores with
+    // one trailing load, audit clean (sw;sw is not a fusion rule), and be
+    // reported as the cost of a pair. Dividing by per_target tiles them
+    // instead: sw lw sw lw, which is what "a program made of this pair" means.
+    return placeable / per_target;
+  }
   // One filler between substitutions, so the period is per_target + 1. Deriving
   // the cap from the same span the placement walks is what keeps the minimum
   // gap at or above that period.
@@ -722,6 +733,8 @@ kernel_error_name(KernelError error)
     return "trip count is zero";
   case KernelError::kTooManyTargets:
     return "too many targets to keep them non-adjacent";
+  case KernelError::kTargetImmediateOutOfRange:
+    return "target immediate out of range";
   case KernelError::kCodeTooLarge:
     return "generated code exceeds kMaxCodeBytes";
   case KernelError::kUndecodable:
@@ -867,6 +880,26 @@ build_kernel(const KernelSpec &spec)
   std::vector<uint32_t> prologue;
   emit_prologue(prologue, spec.working_set, spec.trip_count);
 
+  // JALR's target is rs1 + imm with rs1 fixed at the body midpoint, so the
+  // immediate carries the whole per-slot offset and its 12-bit signed field
+  // decides how large a body this target can fill. The encoder masks rather
+  // than refuses, so without this the kernel would build, decode and run --
+  // jumping somewhere inside the body instead of to the next slot, exactly the
+  // silent truncation the loop back edge used to suffer.
+  if (spec.target == Op::kJalr && spec.body_slots >= 4) {
+    const auto midpoint = static_cast<int32_t>(spec.body_slots / 2);
+    const auto offset = [&](uint32_t slot) {
+      return (static_cast<int32_t>(slot) + 1 - midpoint) *
+             static_cast<int32_t>(kInstructionBytes);
+    };
+    constexpr int32_t kJalrImmediateLimit = 1 << 11;
+    const int32_t lowest = offset(1);
+    const int32_t highest = offset(spec.body_slots - 2);
+    if (lowest < -kJalrImmediateLimit || highest >= kJalrImmediateLimit) {
+      return std::unexpected(KernelError::kTargetImmediateOutOfRange);
+    }
+  }
+
   std::vector<uint32_t> body(spec.body_slots);
   for (uint32_t slot = 0; slot < spec.body_slots; ++slot) {
     body[slot] = filler_instruction_word(slot);
@@ -918,13 +951,23 @@ build_kernel(const KernelSpec &spec)
         test_program::addi(kJalrBaseReg, kJalrBaseReg, lo);
   }
   words.insert(words.end(), body.begin(), body.end());
-  // Loop control: decrement and branch back to the body head. This pair fuses
-  // (fuse_alu_branch) into one slot, which is fine -- it is identical in every
-  // kernel of a sweep and lands in the fit's intercept.
+  // Loop control: decrement, then a forward branch that skips a JAL back to
+  // the body head.
+  //
+  // Not a backwards branch: a B-type immediate is 13 bits signed, reaching
+  // only 1024 instructions, and the encoder truncates rather than refuses --
+  // the kernel jumps into the middle of itself and still halts cleanly. JAL's
+  // 21 bits cover anything kMaxCodeBytes allows, and the branch skipping it
+  // only ever jumps two instructions.
   words.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
+  // beq counter, x0, +8 -- when the counter hits zero, skip the JAL and fall
+  // into the ecall.
+  words.push_back(
+      test_program::branch(0, kLoopCounterReg, 0,
+                           2 * static_cast<int32_t>(kInstructionBytes)));
   const int32_t back_edge =
-      -static_cast<int32_t>((spec.body_slots + 1) * kInstructionBytes);
-  words.push_back(test_program::branch(1, kLoopCounterReg, 0, back_edge));
+      -static_cast<int32_t>((spec.body_slots + 2) * kInstructionBytes);
+  words.push_back(test_program::j_type(0, back_edge));
   words.push_back(0x00000073U); // ecall: the halting host ends the run
 
   if (words.size() * kInstructionBytes > kMaxCodeBytes) {
@@ -944,6 +987,7 @@ build_kernel(const KernelSpec &spec)
                        memory_access_width(spec.target));
   }
   kernel.body_start_pc = body_start_index * kInstructionBytes;
+  kernel.target_units = static_cast<uint32_t>(target_slot_indices.size());
   for (const uint32_t slot : target_slot_indices) {
     // Record every slot a substitution occupies, so the audit checks both
     // halves of a pair rather than only its head.
@@ -953,10 +997,13 @@ build_kernel(const KernelSpec &spec)
     }
   }
 
-  kernel.instructions_per_iteration = spec.body_slots + 2;
+  // Steady state: the body, the decrement, the skip branch, and the JAL back.
+  kernel.instructions_per_iteration = spec.body_slots + 3;
+  // The last iteration takes the skip branch instead of the JAL, so the JAL
+  // retires trip_count - 1 times rather than trip_count.
   kernel.dynamic_instructions =
-      prologue.size() +
-      (uint64_t{spec.trip_count} * kernel.instructions_per_iteration) + 1;
+      prologue.size() + (uint64_t{spec.trip_count} * (spec.body_slots + 2)) +
+      (uint64_t{spec.trip_count} - 1) + 1;
 
   // Charge the body by decoding it with the production decoder rather than by
   // reasoning about which slot holds what. The slot-walking version silently
@@ -974,11 +1021,15 @@ build_kernel(const KernelSpec &spec)
   if (!prologue_gas.has_value()) {
     return std::unexpected(prologue_gas.error());
   }
+  // Charged per iteration: the decrement and the skip branch. The JAL back is
+  // charged separately because the final iteration takes the branch instead,
+  // so it executes one time fewer than the loop runs.
   const uint64_t loop_gas =
-      scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBne);
-  kernel.scheduled_gas = *prologue_gas +
-                         (uint64_t{spec.trip_count} * (*body_gas + loop_gas)) +
-                         scheduled_gas_for(Op::kEcall);
+      scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBeq);
+  kernel.scheduled_gas =
+      *prologue_gas + (uint64_t{spec.trip_count} * (*body_gas + loop_gas)) +
+      ((uint64_t{spec.trip_count} - 1) * scheduled_gas_for(Op::kJal)) +
+      scheduled_gas_for(Op::kEcall);
   return kernel;
 }
 

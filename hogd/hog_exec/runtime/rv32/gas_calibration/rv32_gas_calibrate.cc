@@ -26,6 +26,7 @@
 #include <ctime>
 #include <exception>
 #include <expected>
+#include <format>
 #include <memory>
 #include <print>
 #include <span>
@@ -82,6 +83,14 @@ struct SweepResult {
   // Empty for a single-opcode row.
   std::vector<std::string> pair_ops;
   uint64_t scheduled_gas = 0;
+  // Absolute upper bound on one target's cost, from the densest kernel alone.
+  // Non-negative by construction; see where it is computed for the derivation.
+  double ns_upper_bound = 0.0;
+  // Absolute ns per instruction of a body made entirely of this target. The
+  // primary number: no contrast, no filler, so it cannot come out negative.
+  // Zero when the saturated body could not be measured (see the note).
+  double ns_saturated = 0.0;
+  std::string saturated_note;
   LinearFit fit;
   double worst_relative_mad = 0.0;
   LoweringAudit audit;
@@ -229,12 +238,27 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     return result;
   }
 
+  const uint32_t trip_count =
+      tune_trip_count(*sweep->programs.back(), 64, options.target_ns);
+  sweep = build_sweep(base, counts, trip_count, options.placements);
+  if (!sweep.has_value()) {
+    result.rejected_because = "kernel not representable at the tuned trip "
+                              "count: " +
+                              kernel_error_name(sweep.error());
+    return result;
+  }
+
   // Audit every kernel in the sweep, not just the densest. A fit is a
   // statement about the difference between these specific programs, so a
   // fusion or run split in any one of them corrupts the slope -- and the
   // handler lookups are cached, so checking all of them costs little.
+  //
+  // After the rebuild, and at the trip count the measured kernels were built
+  // with. This used to run before the sweep was rebuilt at the tuned trip
+  // count, so the verdict described programs that were then discarded and the
+  // ones actually timed went unchecked.
   KernelSpec audited = base;
-  audited.trip_count = 64;
+  audited.trip_count = trip_count;
   for (size_t i = 0; i < sweep->kernels.size(); ++i) {
     audited.target_slots = sweep->target_counts[i];
     const LoweringAudit audit = audit_kernel(sweep->kernels[i], audited);
@@ -265,16 +289,6 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     }
   }
 
-  const uint32_t trip_count =
-      tune_trip_count(*sweep->programs.back(), 64, options.target_ns);
-  sweep = build_sweep(base, counts, trip_count, options.placements);
-  if (!sweep.has_value()) {
-    result.rejected_because = "kernel not representable at the tuned trip "
-                              "count: " +
-                              kernel_error_name(sweep.error());
-    return result;
-  }
-
   std::vector<MeasurementPoint> points;
   points.reserve(sweep->programs.size());
   for (size_t i = 0; i < sweep->programs.size(); ++i) {
@@ -298,9 +312,167 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   result.fit = fit_line(points);
   result.measured_points = points.size();
   // The slope is the cost of a target *minus* the filler it displaced; adding
-  // the filler's own measured absolute cost back gives an absolute per
-  // instruction number.
-  result.ns_per_instruction = filler_ns + result.fit.slope;
+  // the filler's own measured absolute cost back gives an absolute number.
+  //
+  // A pair displaces two filler slots, so its slope is c_pair - 2*c_filler and
+  // two have to come back. Adding one understated every pair row by a filler,
+  // which is the difference between a pair clearing the "no usable cost"
+  // rejection below and not.
+  result.ns_per_instruction =
+      (static_cast<double>(slots_per_target(base)) * filler_ns) +
+      result.fit.slope;
+
+  // An absolute upper bound, the fallback for a cell that cannot be saturated.
+  //
+  // The densest kernel runs `target_slots` targets and some fillers per
+  // iteration, so
+  //
+  //     T = n_target * c_target + n_filler * c_filler + loop overhead
+  //
+  // and every term is non-negative, so T / n_target bounds c_target from above
+  // -- no subtraction, no fit, no way to come out negative. It reads up to ~2x
+  // high with the body half targets, and tightens as the target gets more
+  // expensive, which is the right way round.
+  const uint32_t densest = sweep->target_counts.back();
+  if (densest > 0) {
+    std::vector<double> dense_samples;
+    for (size_t i = 0; i < points.size(); ++i) {
+      if (sweep->target_counts[i] == densest) {
+        dense_samples.push_back(points[i].median());
+      }
+    }
+    if (!dense_samples.empty()) {
+      // Median over placement phases: the phases do identical work, so the
+      // spread between them is layout systematics. That spread is small next
+      // to the structural margin above, so there is nothing to gain by taking
+      // the worst one and stability to lose.
+      std::ranges::sort(dense_samples);
+      const double dense_ns = dense_samples[dense_samples.size() / 2];
+      result.ns_upper_bound = dense_ns / static_cast<double>(densest);
+    }
+  }
+  // The primary measurement: a body made entirely of this target.
+  //
+  // Everything above is a contrast, which goes negative as soon as layout
+  // noise rivals the effect. This has no filler to subtract: its time over the
+  // substitutions placed is directly what a program made of this instruction
+  // costs, which is what worst-case pricing asks.
+  {
+    KernelSpec sat = base;
+    sat.saturated = true;
+    // A body of one repeated instruction is precisely the shape a fusion rule
+    // matches, so for a single target lower it with fusion off and measure the
+    // unfused cost directly. That is also the cost the schedule charges:
+    // fusion is a saving the engine may or may not get, and worst-case pricing
+    // cannot assume it.
+    //
+    // A pair row is the opposite -- auipc;jalr exists to measure the fused
+    // form -- so those keep it on.
+    const bool sat_fuse = base.pair != PairKind::kNone;
+    sat.body_slots = options.body_slots;
+    sat.target_slots = max_target_slots(options.body_slots, sat);
+    sat.placement_phase = 0;
+    sat.trip_count = 64;
+    auto probe = build_kernel(sat);
+    if (!probe.has_value()) {
+      result.saturated_note = "saturated kernel not representable: " +
+                              kernel_error_name(probe.error());
+    }
+    else {
+      auto seed = ThreadedMachinePreInstantiation::create(
+          probe->code, probe->initial_memory, 0, probe->memory_bytes,
+          /*trace=*/false, kMaxRunGas, sat_fuse);
+      if (!seed.has_value()) {
+        result.saturated_note = "saturated probe would not instantiate";
+      }
+      else {
+        sat.trip_count = tune_trip_count(*seed, 64, options.target_ns);
+        auto kernel = build_kernel(sat);
+        if (!kernel.has_value()) {
+          result.saturated_note = "saturated kernel not representable at the "
+                                  "tuned trip count: " +
+                                  kernel_error_name(kernel.error());
+        }
+        else {
+          const LoweringAudit audit = audit_kernel(*kernel, sat, sat_fuse);
+          // Same intent test as the sweep audit above, and for the same reason:
+          // a pair chosen *because* the engine fuses it has to fuse, and
+          // audit.clean() asks the opposite question. Requiring clean() here
+          // denied auipc;jalr the primary estimator permanently -- the one pair
+          // whose whole purpose is the fused form -- and blamed it on "adjacent
+          // copies of this opcode are a fusion rule", which is not what
+          // happened.
+          const bool expects_fusion = pair_expects_fusion(sat.pair);
+          const bool matched = expects_fusion
+                                   ? audit.rewritten_slots >= sat.target_slots
+                                   : audit.clean();
+          if (!matched) {
+            result.saturated_note =
+                expects_fusion
+                    ? "saturated body fused only " +
+                          std::to_string(audit.rewritten_slots) + " of " +
+                          std::to_string(sat.target_slots) +
+                          " pairs; this row exists to measure the fused form"
+                    : "saturated body fused " +
+                          std::to_string(audit.rewritten_slots) +
+                          " slot(s) (first at " +
+                          std::to_string(audit.first_rewritten_slot) +
+                          "); adjacent copies of this opcode are a fusion "
+                          "rule, "
+                          "so a program cannot be made of it unfused";
+          }
+          else {
+            auto program = ThreadedMachinePreInstantiation::create(
+                kernel->code, kernel->initial_memory, 0, kernel->memory_bytes,
+                false, kMaxRunGas, sat_fuse);
+            if (!program.has_value()) {
+              result.saturated_note = "saturated kernel would not instantiate";
+            }
+            else {
+              std::vector<MeasurementPoint> one{
+                  {.label = result.op + "/saturated",
+                   .x = 0.0,
+                   .program = &*program,
+                   .trip_count = sat.trip_count}};
+              measure_interleaved(one, {.repeats = options.repeats,
+                                        .warmup_runs = options.warmup_runs});
+              if (!one[0].ran_clean) {
+                result.saturated_note = "saturated kernel did not halt cleanly";
+              }
+              else {
+                // Substitutions placed, not instructions retired. Units: a
+                // pair's cost is quoted per pair, matching the ceiling it is
+                // compared against. Direction: the iteration also runs two
+                // boundary fillers and three loop instructions, and spreading
+                // their time across those averages the target down, which is
+                // the one direction worst-case pricing cannot tolerate.
+                // Attributing all of it to the targets makes this an upper
+                // bound, loose by about 1% at these body sizes.
+                result.ns_saturated =
+                    one[0].median() / static_cast<double>(kernel->target_units);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // A cell with no cost at all has nothing a schedule could use. Reject it
+  // rather than pass a negative downstream, where worst-case pricing would
+  // sort it to the bottom and treat the opcode as free. All three estimators
+  // have to be consulted, in the order cost_ns() tries them.
+  if (result.ns_saturated <= 0.0 && result.ns_upper_bound <= 0.0 &&
+      result.ns_per_instruction <= 0.0) {
+    result.rejected_because =
+        "no usable cost: " +
+        (result.saturated_note.empty() ? std::string("no saturated body")
+                                       : result.saturated_note) +
+        ", and the contrast fallback measured " +
+        std::format("{:.4f}", result.ns_per_instruction) + " ns";
+    return result;
+  }
+
   result.usable = true;
   return result;
 }
@@ -626,7 +798,9 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         out,
         "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
-        "\"pair_ops\": {}, \"scheduled_gas\": "
+        "\"pair_ops\": {}, \"ns_upper_bound\": {:.6f}, "
+        "\"ns_saturated\": {:.6f}, \"saturated_note\": \"{}\", "
+        "\"scheduled_gas\": "
         "{}, \"usable\": {}, \"rejected_because\": \"{}\", \"slope_ns\": "
         "{:.6f}, \"theil_sen_ns\": {:.6f}, \"r_squared\": {:.6f}, "
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
@@ -635,10 +809,12 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         escape_json(sweep.op), escape_json(sweep.context),
         escape_json(sweep.working_set), escape_json(sweep.magnitude),
         escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
-        json_string_array(sweep.pair_ops), sweep.scheduled_gas,
-        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
-        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
-        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
+        json_string_array(sweep.pair_ops), sweep.ns_upper_bound,
+        sweep.ns_saturated, escape_json(sweep.saturated_note),
+        sweep.scheduled_gas, sweep.usable ? "true" : "false",
+        escape_json(sweep.rejected_because), sweep.fit.slope,
+        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
+        sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
   }

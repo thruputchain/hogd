@@ -49,20 +49,92 @@ and not enough to price the small ones.
 ## What is measured
 
 `ThreadedMachine`, tracing off, built optimized with LTO: the engine and the
-codegen the node runs. Per opcode, the harness measures the marginal cost of
-one more instance of that opcode in a body of otherwise identical filler, in
-several operand contexts, and reports the worst.
+codegen the node runs. Per opcode and operand context, the harness times a loop
+body made **entirely of that opcode** and divides by the instruction count. The
+result is what a program consisting of that instruction costs per instruction.
+It reports the worst context.
+
+That is a level, not a difference, and the distinction is the whole method. The
+harness used to measure the *marginal* cost of one more instance of an opcode
+against a body of filler -- a contrast. A contrast between two large timings
+goes negative as soon as layout noise rivals the effect, and it did: about a
+third of sweeps priced below zero, which is not a cost a gas schedule can use.
+Dividing one absolute timing by one instruction count cannot produce a negative,
+does not depend on what the filler costs, and asks the question pricing actually
+cares about -- if a block is filled with this instruction, what does each one
+cost?
+
+Saturating a body means adjacent copies of the opcode, which is exactly the
+shape a fusion rule matches. The harness lowers those bodies with fusion turned
+off (`PreInstantiation::create`'s `fuse` flag, defaulted true and untouched by
+production) and measures the unfused cost directly. That is also the cost the
+schedule charges: fusion is a saving the engine may or may not get, and
+worst-case pricing cannot assume it.
+
+Detecting fusion after the fact was the earlier approach and it has a blind
+spot the flag removes. The audit compares each body slot against the same word
+lowered *in isolation* -- but the isolated probe is `filler, target, filler`,
+and the filler is an `ADD`, so for target `ADD` the probe fuses exactly like
+the body does, both sides match, and the audit reports clean. The one cell the
+whole reference used to divide by was the one cell the audit structurally could
+not check. With the flag, all 100 single-target cells saturate rather than 98:
+`ADDI` is measurable for the first time, having declined only because
+`addi;addi` is a rule.
+
+A pair row is the opposite -- `auipc;jalr` exists to measure the fused form --
+so those keep fusion on, and their audit requires the rule to fire.
+
+Ratios are taken against the **median** saturated cell, not against `ADD`. One
+cell carrying every ratio is one cell whose misbehaviour is indistinguishable
+from the whole ISA moving, and on the bench host that is what happened: between
+two runs every guarded ratio scaled by 2.015 while the opcodes themselves held
+to 0.1%. `ADD` was both the divisor and, on that microarchitecture, genuinely
+about twice as fast as `AND` -- a property of the generated code there, not
+present on a Xeon. A median over ~100 cells cannot be moved by one of them, and
+still moves when most of the ISA does, which is what the gate is for.
 
 The contexts are the load-bearing part. An opcode does not have one cost, and
 which end of its range applies is the guest author's choice, so gas has to
 price the end an adversary can force.
+
+## How reproducible is it
+
+Two back-to-back runs on the bench host (`hog10`, AMD EPYC 9554, Release built
+with gcc), as a relative difference between the two runs across the 95 cells
+both measured:
+
+| | median | p90 | max |
+|---|---:|---:|---:|
+| saturated, fusion off, median-normalized | **0.12%** | **1.22%** | **2.90%** |
+
+No cell moves more than 3%, against a gate tolerance of 100%. For contrast, the
+same two-run comparison before fusion was disabled and while ratios were taken
+against `ADD` had *every* cell scaling by 2.015x -- the gate would have failed
+wholesale on a machine that had not changed.
+
+The expensive cells agree between runs to within a few tenths of a percent:
+
+```
+                    run 1 / run 2   (x the median cell)
+LH   chase           2.648 / 2.651
+JALR chain           2.607 / 2.610
+LW   chase           2.491 / 2.496
+DIV  chain           1.979 / 1.980
+REM  chain           1.648 / 1.651
+BNE  taken           1.416 / 1.416
+```
+
+That host is the one that made the contrast unusable -- back-to-back runs there
+moved `SUB` by 6.3 ns and priced 28% of the ISA below zero. The same machine,
+the same binary and the same sweeps now agree to a tenth of a percent.
 
 ## First results
 
 Host: 4-core Intel Xeon @ 2.80GHz, 32 KiB L1d and 1 MiB L2 per core, Linux,
 Release build (`-O3 -march=native`, LTO). Development container, not a
 validator; treat the ordering as the finding and the absolute nanoseconds as
-host-specific.
+host-specific. These numbers predate the saturated estimator, so the absolute
+values are the contrast's; the ordering is unchanged.
 
 Baseline: one dispatched ALU instruction costs about **1.0 ns**, roughly 2.8
 cycles. That is the number every other cost is relative to.
@@ -117,11 +189,10 @@ the calibration no longer describes the engine. It is meant for a periodic job
 it is not built to run on every change.
 
 It checks three things: the engine fingerprint (deterministic, cannot flake), a
-set of guarded costs held as ratios to the baseline measured in the same run,
+set of guarded costs held as ratios to the median cell measured in the same run,
 and the interaction bound -- that no program or pair costs more than the sum of
-its opcodes' individual worst cases. The cost tolerance is loose by design: only
-cells at or above 1.5x baseline are guarded, and a guarded cost has to double
-before it fires. The bound is not loose, because exceeding it is a failure of
+its opcodes' individual worst cases. The cost tolerance is loose by design:
+every usable cell is guarded, and a guarded cost has to double before it fires. The bound is not loose, because exceeding it is a failure of
 the pricing method rather than a drifted measurement.
 
 The ratios are portable across **identical** hardware, which is what the bench
@@ -138,12 +209,17 @@ measuring, for use by hand after touching the interpreter.
 In CI this is the **RV32 Gas Calibration** workflow
 (`.github/workflows/rv32_gas_calibration.yml`, driving
 `scripts/schedules/rv32_gas_calibration.toml` through `hog_sched`). Manual
-dispatch for now; it is pinned to one bench host and builds Release with a
-pinned compiler, because both the host and the generated code are part of what
-is being measured. Dispatch it with `mode=reference` to bootstrap a new bench
-host -- that measures without gating and prints a reference file for that
-machine, which is needed because the committed reference's ratios were measured
-elsewhere.
+dispatch for now; it runs on the bench pool and builds Release with a pinned
+compiler, because both the host and the generated code are part of what is
+being measured -- the fingerprint is deliberately compiler-independent, so a
+compiler change would move the numbers silently.
+
+`mode=reference` measures without gating and prints, in order: the per-opcode
+costs, the validation workloads, the additivity check, the **proposed gas
+schedule for that host**, and a reference block for it. Use it to bootstrap a
+new bench host, whose ratios the committed reference does not describe, and to
+get schedule numbers off the machine class that runs the chain rather than off
+a development container. `check`, the default, gates.
 
 ## Re-running after an interpreter change
 
@@ -317,6 +393,11 @@ away, and it is where a cheaper context would pay for itself.
 
 ## Before changing the schedule
 
+- Take the numbers from the bench pool, not from wherever you happen to be
+  working. The calibration workflow's `mode=reference` prints the proposal
+  under `===== proposed gas schedule from this host =====`, measured on the
+  machine class that runs the chain. A schedule read off a development
+  container is measuring the wrong computer.
 - Re-run on the slowest supported validator class, not a development host. The
   schedule is a protocol constant and has to hold on the slowest machine that
   must keep up.
