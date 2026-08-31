@@ -151,7 +151,7 @@ SystemCallHandler::init_db_tip() const
   }
   // Owned by the snapshot cache and stable until the cache is recycled for a
   // new block, which cannot happen while this transaction is executing.
-  db_tip_ = tip.value();
+  db_tip_ = *tip;
   return {};
 }
 
