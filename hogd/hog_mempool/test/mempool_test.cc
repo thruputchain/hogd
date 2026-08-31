@@ -4,6 +4,7 @@
 #include <exception>
 #include <future>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <latch>
 #include <limits>
 #include <memory>
@@ -14,8 +15,10 @@
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/deploy_and_transfer.h"
@@ -40,6 +43,7 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
@@ -2308,7 +2312,7 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
-TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
+TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -2354,12 +2358,17 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
     return res_validate;
   };
 
-  for (size_t blocks_elapsed = 0;
-       blocks_elapsed <
-       MempoolCoordinatorRpc::kFailedAuthenticationTxsBlockExpiryDelta;
-       blocks_elapsed++) {
-    expect_validation_outcome(
-        SchedulerValidationResult::SchedulerValidationInvalid);
+  // A local auth failure says nothing about the signatures a proposer holds.
+  // [TransactionHash] covers [Transaction] and deliberately excludes
+  // signatures, so a transaction we could not authenticate may be correctly
+  // signed elsewhere on the network. Validation must ask the coordinator for
+  // the authoritative [SignedTransaction] instead of voting the block invalid,
+  // and must keep doing so however many blocks elapse.
+  for (size_t blocks_elapsed = 0; blocks_elapsed < 5; blocks_elapsed++) {
+    SchedulerValidationResult res_missing = expect_validation_outcome(
+        SchedulerValidationResult::SchedulerValidationMissingTxs);
+    ASSERT_EQ(res_missing.missing_tx_hashes().size(), 1UL);
+    EXPECT_EQ(res_missing.missing_tx_hashes()[0], tx_hash);
 
     // Now commit an empty block.
     SchedulerGetTipResult get_tip =
@@ -2380,6 +2389,663 @@ TEST(Mempool, FailedAuthenticationTxExpiresAfterBlockDelta)
       SchedulerValidationResult::SchedulerValidationMissingTxs);
   ASSERT_EQ(res_validate.missing_tx_hashes().size(), 1UL);
   EXPECT_EQ(res_validate.missing_tx_hashes()[0], tx_hash);
+}
+
+// [TransactionHash] hashes [Transaction] and deliberately excludes signatures
+// so that a third party cannot change an in-flight transaction's identity. A
+// failed authentication is therefore a verdict about particular signature
+// bytes, while the hash naming it covers every signing of that transaction.
+// An attacker who takes a validly signed transaction, corrupts its signatures
+// and submits the result must not be able to move this node's verdict on a
+// block carrying the genuine transaction.
+TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+
+  // The genuine transaction, correctly signed.
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+
+  // The attacker's copy: identical [Transaction], corrupted signature bytes.
+  // The two share a [TransactionHash], which is what makes the attack possible.
+  SignedTransaction poisoned_tx = txs[0];
+  DecoratedSignature bad_signature =
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  bad_signature.signature.ed25519()[0] ^= 0xff;
+  poisoned_tx.signatures.push_back(bad_signature);
+
+  const TransactionHash tx_hash = sha256(tx);
+  ASSERT_EQ(sha256(poisoned_tx.tx), tx_hash);
+
+  // The attacker submits the corrupted copy over the unauthenticated path. It
+  // must fail authentication and must not be admitted.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  // A proposal carrying the genuine transaction must come back as MissingTxs,
+  // so the coordinator is asked for the authoritative [SignedTransaction].
+  // Voting Invalid here would reject a perfectly good block on the strength of
+  // signature bytes this node was handed by an anonymous submitter.
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  TransactionHashBatch tx_hashes{tx_hash};
+  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+      NondeterministicProposalData{}};
+  Proposal poisoned_proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height =
+                     get_tip.db_tip().value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .nondeterministic_data =
+                           t_to_parallel_batch(tx_nondeterministic_data)()}};
+
+  SchedulerValidationResult res_poisoned =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, poisoned_proposal)();
+  ASSERT_EQ(res_poisoned.outcome(),
+            SchedulerValidationResult::SchedulerValidationMissingTxs);
+  ASSERT_EQ(res_poisoned.missing_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_poisoned.missing_tx_hashes()[0], tx_hash);
+
+  // Once the genuine transaction arrives the same hash validates normally: the
+  // earlier authentication failure left no residue behind.
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal good_proposal = res_nominate.proposed_block().proposal;
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+
+  SchedulerValidationResult res_good =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, good_proposal)();
+  EXPECT_EQ(res_good.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+}
+
+namespace {
+
+struct NamedSigning {
+  const char *name;
+  SignedTransaction signed_tx;
+};
+
+// Signings that share [base_tx] -- and therefore its [TransactionHash] -- but
+// that authentication must reject. Between them they cover what someone who
+// does not hold the signing key can produce (corrupt, absent, borrowed from
+// another key, another transaction, or another network) and the orderings the
+// auth-claim rules turn down as malformed.
+//
+// [key_id_0_sk] signs as registered key 0. [unrelated_sk] is a key the account
+// has never registered.
+inline std::vector<NamedSigning>
+rejectable_signings(const Transaction &base_tx, const SecretKey &key_id_0_sk,
+                    const SecretKey &unrelated_sk,
+                    const NetworkHash &network_hash)
+{
+  const DecoratedSignature good =
+      make_signature(key_id_0_sk, base_tx, /*public_key_id=*/0, network_hash);
+
+  auto signing = [&base_tx](std::initializer_list<DecoratedSignature> sigs) {
+    SignedTransaction out;
+    out.tx = base_tx;
+    for (const DecoratedSignature &sig : sigs) {
+      out.signatures.push_back(sig);
+    }
+    return out;
+  };
+
+  DecoratedSignature flipped = good;
+  flipped.signature.ed25519()[0] ^= 0xff;
+
+  DecoratedSignature zeroed = good;
+  for (auto &byte : zeroed.signature.ed25519()) {
+    byte = 0;
+  }
+
+  // A real signature by a key the account does not list.
+  const DecoratedSignature unrelated_key =
+      make_signature(unrelated_sk, base_tx, /*public_key_id=*/0, network_hash);
+
+  // A real signature by the right key over a different transaction.
+  Transaction other_tx = base_tx;
+  other_tx.uniquifier.nonce = base_tx.uniquifier.nonce + 1;
+  const DecoratedSignature other_message =
+      make_signature(key_id_0_sk, other_tx, /*public_key_id=*/0, network_hash);
+
+  // A real signature by the right key over this transaction, but bound to a
+  // different network by the signature preimage.
+  NetworkHash other_network = network_hash;
+  other_network[0] ^= 0xff;
+  const DecoratedSignature other_chain =
+      make_signature(key_id_0_sk, base_tx, /*public_key_id=*/0, other_network);
+
+  // Valid bytes attributed to a key slot the account has not registered.
+  DecoratedSignature unregistered_slot = good;
+  unregistered_slot.public_key_id = 1;
+
+  return {
+      {"no signatures", signing({})},
+      {"bit-flipped signature", signing({flipped})},
+      {"zeroed signature", signing({zeroed})},
+      {"signature by an unregistered key", signing({unrelated_key})},
+      {"signature over a different transaction", signing({other_message})},
+      {"signature bound to a different network", signing({other_chain})},
+      {"signature attributed to an unregistered slot",
+       signing({unregistered_slot})},
+      // Signer ids must be strictly increasing, so a repeated id is malformed
+      // even though each copy verifies on its own.
+      {"duplicated signer id", signing({good, good})},
+      {"valid signature followed by a corrupt one", signing({good, flipped})},
+  };
+}
+
+// Registers [key_id_0_sk] as key 0 with weight 1 and requires weight 1.
+inline SecretKey
+register_single_signer(MempoolTestInfra &server, Transaction &tx)
+{
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+  return sk;
+}
+
+inline SecretKey
+unregistered_signer()
+{
+  AddressAuthData scratch = get_default_account();
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = create_key_pair(scratch, /*idx=*/0, /*weight=*/1);
+  return sk;
+}
+
+} // namespace
+
+// The property the whole design rests on: [TransactionHash] covers
+// [Transaction] and nothing else, so no manipulation of the signatures can
+// change it. That is what makes a signature-keyed verdict stored under a
+// [TransactionHash] unsound.
+TEST(Mempool, TransactionHashIsIndependentOfSignatureManipulation)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  Transaction &tx = txs[0].tx;
+  const SecretKey sk = register_single_signer(server, tx);
+  const SecretKey unrelated = unregistered_signer();
+
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+
+  const TransactionHash tx_hash = sha256(tx);
+  const SHA256Hash good_signing_hash = sha256(good_tx);
+
+  for (const NamedSigning &attack :
+       rejectable_signings(tx, sk, unrelated, MempoolTestInfra::kNetworkHash)) {
+    SCOPED_TRACE(attack.name);
+    // The manipulated signing is indistinguishable from the genuine one by
+    // transaction hash ...
+    EXPECT_EQ(sha256(attack.signed_tx.tx), tx_hash);
+    // ... and distinguishable by the hash that covers the signatures.
+    EXPECT_NE(sha256(attack.signed_tx), good_signing_hash);
+  }
+}
+
+// No manipulation of a transaction's signatures may let a third party move this
+// node's verdict on a block carrying the genuine transaction. Every rejected
+// signing must leave validation answering MissingTxs, and the genuine
+// transaction must still be admitted and validate afterwards.
+TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  Transaction &tx = txs[0].tx;
+  const SecretKey sk = register_single_signer(server, tx);
+  const SecretKey unrelated = unregistered_signer();
+
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+  const TransactionHash tx_hash = sha256(tx);
+
+  // Submit every rejectable signing over the unauthenticated gateway path,
+  // twice each so a resubmission of already-rejected bytes is covered too.
+  // None may be admitted.
+  for (const NamedSigning &attack :
+       rejectable_signings(tx, sk, unrelated, MempoolTestInfra::kNetworkHash)) {
+    SCOPED_TRACE(attack.name);
+    for (int attempt = 0; attempt < 2; attempt++) {
+      server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+          t_to_parallel_batch(SignedTransactionBatch{attack.signed_tx})())();
+      ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+    }
+  }
+
+  // After all of that, a proposal carrying the genuine transaction is still
+  // only missing data -- never invalid.
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  TransactionHashBatch tx_hashes{tx_hash};
+  x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
+      NondeterministicProposalData{}};
+  Proposal proposal{
+      .header = {.ext = {},
+                 .network_hash = MempoolTestInfra::kNetworkHash,
+                 .block_height =
+                     get_tip.db_tip().value.proposal_header.block_height + 1},
+      .transactions = {.ext = {},
+                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .nondeterministic_data =
+                           t_to_parallel_batch(tx_nondeterministic_data)()}};
+
+  SchedulerValidationResult res_missing =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, proposal)();
+  ASSERT_EQ(res_missing.outcome(),
+            SchedulerValidationResult::SchedulerValidationMissingTxs);
+  ASSERT_EQ(res_missing.missing_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_missing.missing_tx_hashes()[0], tx_hash);
+
+  // And the genuine signing of that same transaction is still accepted.
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal good_proposal = res_nominate.proposed_block().proposal;
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+
+  SchedulerValidationResult res_good =
+      server.mempool_coord_rpc().schedulercoord_validate_block(
+          get_tip.db_tip().id, good_proposal)();
+  EXPECT_EQ(res_good.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+}
+
+// With k-of-N signers a transaction legitimately has many valid signings, so
+// the distinction between "this transaction" and "these signature bytes"
+// matters in normal operation and not only under attack.
+TEST(Mempool, MultiSignerSigningsShareATransactionHash)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey key_0 =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  const Ed25519SecretKey key_1 =
+      create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  Transaction &tx = txs[0].tx;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 0b11;
+  claim.source_address_claim().required_weight = 2;
+  tx.auth_claim = claim;
+
+  SecretKey sk_0(CryptographicScheme::Ed25519);
+  sk_0.ed25519() = key_0;
+  SecretKey sk_1(CryptographicScheme::Ed25519);
+  sk_1.ed25519() = key_1;
+
+  const DecoratedSignature sig_0 =
+      make_signature(sk_0, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  const DecoratedSignature sig_1 =
+      make_signature(sk_1, tx, /*public_key_id=*/1,
+                     MempoolTestInfra::kNetworkHash);
+
+  // Signer ids must be strictly increasing, so this is the one accepted
+  // ordering and the reverse is malformed.
+  SignedTransaction ordered = txs[0];
+  ordered.signatures.push_back(sig_0);
+  ordered.signatures.push_back(sig_1);
+
+  SignedTransaction reversed = txs[0];
+  reversed.signatures.push_back(sig_1);
+  reversed.signatures.push_back(sig_0);
+
+  // Only one signer: below the required weight.
+  SignedTransaction below_threshold = txs[0];
+  below_threshold.signatures.push_back(sig_0);
+
+  const TransactionHash tx_hash = sha256(tx);
+  EXPECT_EQ(sha256(reversed.tx), tx_hash);
+  EXPECT_EQ(sha256(below_threshold.tx), tx_hash);
+  EXPECT_NE(sha256(reversed), sha256(ordered));
+  EXPECT_NE(sha256(below_threshold), sha256(ordered));
+
+  // Neither rejected signing is admitted, and neither may keep the properly
+  // ordered, fully weighted signing out afterwards.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{reversed})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{below_threshold})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{ordered})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// Driven entirely through the gateway and coordinator RPCs, with the auth
+// change written by ordinary execution rather than injected: a transaction is
+// refused for want of signing weight, a committed block lowers the account's
+// threshold, and the same bytes are then accepted.
+TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+
+  MempoolTestInfra server;
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  // Two keys of weight 1 apiece, against a threshold of 2.
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey key_a =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  const Ed25519SecretKey key_b =
+      create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  SecretKey sk_a(CryptographicScheme::Ed25519);
+  sk_a.ed25519() = key_a;
+  SecretKey sk_b(CryptographicScheme::Ed25519);
+  sk_b.ed25519() = key_b;
+
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 0b11;
+  claim.source_address_claim().required_weight = 1;
+
+  auto submit_over_gateway = [&](const SignedTransaction &tx) {
+    gateway.schedgateway_submit_tx_batch(
+        t_to_parallel_batch(SignedTransactionBatch{tx})())();
+  };
+
+  // Signed by one key, so weight 1 against a threshold of 2.
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  txs[0].tx.auth_claim = claim;
+  SignedTransaction underweight = txs[0];
+  underweight.signatures.push_back(
+      make_signature(sk_a, txs[0].tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash));
+
+  submit_over_gateway(underweight);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  // Again, rejected the same way.
+  submit_over_gateway(underweight);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  // A transaction that does meet the threshold, lowering it to 1.
+  SignedTransactionBatch lower_txs = generate_unsigned_txs(fib_client, 1);
+  lower_txs[0].tx.invocation =
+      fib_client.make_invocation<u8"change_nonce_config">(
+          /*gas_amount=*/5'000'000'000, uint32_t{1});
+  lower_txs[0].tx.uniquifier.nonce = 99;
+  lower_txs[0].tx.auth_claim = claim;
+  SignedTransaction lower = lower_txs[0];
+  lower.signatures.push_back(make_signature(sk_a, lower_txs[0].tx,
+                                            /*public_key_id=*/0,
+                                            MempoolTestInfra::kNetworkHash));
+  lower.signatures.push_back(make_signature(sk_b, lower_txs[0].tx,
+                                            /*public_key_id=*/1,
+                                            MempoolTestInfra::kNetworkHash));
+
+  submit_over_gateway(lower);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_EQ(commit_block(server, get_tip.db_tip(),
+                         res_nominate.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  // The same bytes now carry enough weight, and the earlier rejections must
+  // not stand in the way.
+  submit_over_gateway(underweight);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
+// A rejection is never remembered: every resubmission of a turned-down
+// signing reaches authentication and is judged against the account's current
+// auth data, so a signing this node turned down is re-verified -- and can be
+// admitted -- once a committed block changes the account's keys.
+TEST(Mempool, RejectedSigningIsReverifiedOnEveryResubmission)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  // The account lists one key now and a different one after the change, and
+  // the transaction is signed by neither. Authentication turns it down either
+  // way; the auth-failure counter shows every submission reaching it.
+  AddressAuthData initial_auth_data = get_default_account();
+  create_key_pair(initial_auth_data, /*idx=*/0, /*weight=*/1);
+  initial_auth_data.last_written_height = 1;
+  initial_auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               initial_auth_data);
+
+  AddressAuthData later_auth_data = get_default_account();
+  create_key_pair(later_auth_data, /*idx=*/0, /*weight=*/1);
+  later_auth_data.required_weight = 1;
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  const SecretKey sk = unregistered_signer();
+  SignedTransaction signed_tx = txs[0];
+  signed_tx.signatures.push_back(
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash));
+
+  auto submit_over_gateway = [&] {
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{signed_tx})())();
+  };
+  auto auth_failures = [] {
+    return MempoolMetrics::instance().auth_failed_tx_count.value();
+  };
+
+  // Rejected against the initial auth data, and again on resubmission: each
+  // attempt reaches authentication.
+  const ssize_t before = auth_failures();
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  ASSERT_EQ(auth_failures(), before + 1);
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  ASSERT_EQ(auth_failures(), before + 2);
+
+  // The account's keys change.
+  later_auth_data.last_written_height = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               later_auth_data);
+  KeyChangeBatch key_changes = {
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AddressAuthData>(later_auth_data)}};
+  server.register_auth_data_updates(2, std::move(key_changes))();
+
+  // The same bytes reach authentication again, judged against the new auth
+  // data. Had this account's new keys made the signature valid, this is what
+  // would let the transaction in.
+  submit_over_gateway();
+  EXPECT_EQ(auth_failures(), before + 3);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+}
+
+// A body supplied for a nomination is always authenticated, whatever this
+// node concluded about the same bytes over the gateway: dropping one
+// unexamined would keep this node from validating the block that referenced
+// it. The auth-failure counter shows every path reaching authentication.
+TEST(Mempool, VettedSubmissionsAreAlwaysAuthenticated)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  Transaction &tx = txs[0].tx;
+  const SecretKey sk = register_single_signer(server, tx);
+
+  SignedTransaction poisoned_tx = txs[0];
+  DecoratedSignature bad_signature =
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  bad_signature.signature.ed25519()[0] ^= 0xff;
+  poisoned_tx.signatures.push_back(bad_signature);
+
+  auto submit_over_gateway = [&] {
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  };
+  auto auth_failures = [] {
+    return MempoolMetrics::instance().auth_failed_tx_count.value();
+  };
+
+  // The first gateway submission reaches authentication and is turned down.
+  const ssize_t before_first = auth_failures();
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  const ssize_t after_first = auth_failures();
+  ASSERT_EQ(after_first, before_first + 1);
+
+  // So does the second: rejections are not remembered.
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_EQ(auth_failures(), after_first + 1);
+
+  // The same bytes arriving for a nomination are authenticated regardless of
+  // the gateway rejections.
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id,
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  EXPECT_EQ(auth_failures(), after_first + 2);
+}
+
+// A rejected signing is a verdict about those bytes alone. The genuine
+// signing shares its [TransactionHash] -- signatures are deliberately outside
+// the hash -- so one bad copy from an anonymous submitter must never lock out
+// the genuine one.
+TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey private_key =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = private_key;
+
+  SignedTransaction good_tx = txs[0];
+  good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
+                                              MempoolTestInfra::kNetworkHash));
+
+  SignedTransaction poisoned_tx = txs[0];
+  DecoratedSignature bad_signature =
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash);
+  bad_signature.signature.ed25519()[0] ^= 0xff;
+  poisoned_tx.signatures.push_back(bad_signature);
+
+  // Same transaction, so the two share a [TransactionHash] ...
+  ASSERT_EQ(sha256(poisoned_tx.tx), sha256(good_tx.tx));
+  // ... but different signings, distinguished by their signature bytes.
+  ASSERT_NE(sha256(poisoned_tx), sha256(good_tx));
+
+  // The bad signing fails authentication and is never admitted, on either
+  // submission.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  // The genuine signing of that same transaction must still be admitted.
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{good_tx})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
 TEST(Mempool, GenesisLoadGatewayGetTipDataRace)

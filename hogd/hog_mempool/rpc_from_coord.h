@@ -76,8 +76,6 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
-
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
                         size_t num_exec_shards = 1)
@@ -726,54 +724,6 @@ private:
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
-  void clear_expired_failed_authentication_txs()
-  {
-    // Entries are keyed by the last committed block height at which the failed
-    // authentication should still affect validation.
-    const BlockHeight cutoff =
-        last_committed_block_.value.proposal_header.block_height;
-    for (BlockHeight height = cutoff;
-         height > cutoff - static_cast<BlockHeight>(
-                               kFailedAuthenticationTxsBlockExpiryDelta);
-         height--) {
-      failed_authentication_txs_.remove(height);
-    }
-  }
-
-  void mark_tx_failed_authentication(const TransactionHash &tx_hash)
-  {
-    const BlockHeight expiry =
-        last_committed_block_.value.proposal_header.block_height +
-        kFailedAuthenticationTxsBlockExpiryDelta;
-    auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
-    // We do not check whether the insert succeeds. It is possible for the same
-    // tx to be added multiple times for the same block height (two validators
-    // could each call [schedulercoord_submit_unvetted()] with the same tx).
-    tx_hashes.insert(tx_hash, 0);
-  }
-
-  bool tx_failed_authentication(const TransactionHash &tx_hash)
-  {
-    const BlockHeight min_unexpired_height =
-        last_committed_block_.value.proposal_header.block_height + 1;
-    const BlockHeight max_unexpired_height =
-        last_committed_block_.value.proposal_header.block_height +
-        kFailedAuthenticationTxsBlockExpiryDelta;
-    for (BlockHeight height = min_unexpired_height;
-         height <= max_unexpired_height; height++) {
-      auto [tx_hashes, tx_hashes_lock] =
-          failed_authentication_txs_.find(height);
-      if (tx_hashes == nullptr) {
-        continue;
-      }
-      auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
-      if (entry != nullptr) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
   const NetworkHash network_hash_;
@@ -807,11 +757,6 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-  using FailedAuthenticationTxSet =
-      SynchronizedMap<TransactionHash, char, SipHash24Hasher>;
-  SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
-      failed_authentication_txs_;
-
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
 
