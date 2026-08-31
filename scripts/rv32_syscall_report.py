@@ -48,6 +48,34 @@ ECALL_INSTRUCTION_GAS = 1
 # resolve a slope; below this the fit is measuring its own intercept.
 MIN_SWEEP_POINTS = 4
 
+# Denominators a per-unit charge may use: cost = ceil(n * numerator /
+# denominator). Powers of two so the division is exact and cheap, up to
+# SHA256's own 64-byte block -- past which the charge stops tracking input size
+# at a granularity a guest can feel.
+#
+# This exists because a per-byte cost can land well under one gas unit, and an
+# integer gas-per-byte then has no way to express it: rounding 0.46 gas up to 1
+# overcharges by 2.2x, which is a worse mispricing than most of what the opcode
+# calibration set out to fix. Splitting the charge over several bytes gets the
+# precision without touching the gas unit -- and touching the gas unit means
+# rescaling the opcode schedule and the block limits with it, since the two
+# cannot be denominated differently.
+RATE_DENOMINATORS = (1, 2, 4, 8, 16, 32, 64)
+
+# Stop refining once the rounding overcharge is inside this, and take the
+# simplest denominator that gets there rather than the most accurate one
+# available.
+#
+# The threshold is set by the measurement's own reproducibility, not by how
+# small it can be made. Two runs of this benchmark half an hour apart on a
+# shared host moved individual syscalls by up to 11%; a denominator chosen to
+# bring a rounding error from 9% down to 3% is fitting a digit the underlying
+# number does not have, and pays for it in a consensus constant that nobody can
+# read. 1/2 gas per byte is a thing a contract author can hold in their head.
+# 15/32 is not, and it is not more correct -- it is more precise about a
+# quantity known less precisely than that.
+RATE_OVERCHARGE_TARGET = 1.10
+
 SHA256_ROW = re.compile(r"^(entry|vm)/SHA256/(\d+)$")
 
 
@@ -148,6 +176,27 @@ def fit_sha256(points):
     total = sum((y - mean_y) ** 2 for y in ys)
     r_squared = 1.0 if total == 0.0 else 1.0 - residual / total
     return intercept, slope, r_squared
+
+
+def choose_rate(gas_per_unit):
+    """Express a sub-unit rate as ceil(n * numerator / denominator).
+
+    Returns (numerator, denominator, overcharge). The smallest denominator that
+    brings the overcharge inside RATE_OVERCHARGE_TARGET wins, so the simplest
+    expression that is accurate enough is the one proposed rather than the most
+    accurate one available.
+    """
+    if gas_per_unit <= 0.0:
+        return 1, 1, 1.0
+    best = None
+    for denominator in RATE_DENOMINATORS:
+        numerator = max(1, math.ceil(gas_per_unit * denominator - 1e-9))
+        overcharge = (numerator / denominator) / gas_per_unit
+        if best is None or overcharge < best[2]:
+            best = (numerator, denominator, overcharge)
+        if overcharge <= RATE_OVERCHARGE_TARGET:
+            return numerator, denominator, overcharge
+    return best
 
 
 def baseline_ns_from_calibration(data):
@@ -270,7 +319,7 @@ def print_table(data):
     return 0
 
 
-def build_schedule(bench, calibration, resolution):
+def build_schedule(bench, calibration, resolution, margin=0.0):
     measured = rows(bench)
     baseline = baseline_ns_from_calibration(calibration)
     if baseline <= 0.0:
@@ -282,10 +331,10 @@ def build_schedule(bench, calibration, resolution):
         # capacity the schedule hands out for free, and the rounding error is
         # bounded by one unit either way -- so take the safe direction, the
         # same way the opcode schedule does.
-        return max(1, math.ceil(ns / unit - 1e-9))
+        return max(1, math.ceil(ns * (1.0 + margin) / unit - 1e-9))
 
     proposal = {"unit_ns": unit, "baseline_ns": baseline,
-                "resolution": resolution, "syscalls": {}}
+                "resolution": resolution, "margin": margin, "syscalls": {}}
 
     # The shared base every syscall pays.
     #
@@ -310,6 +359,17 @@ def build_schedule(bench, calibration, resolution):
     # The ecall instruction is already charged by kInstructionGasSchedule, so
     # host gas covers the rest. Subtracting it is the difference between
     # pricing the crossing once and pricing it twice.
+    # The crossing, as this run measured it: what a vm row costs beyond its
+    # entry row. Needed to price the SHA256 sweep, whose rows are entry-only.
+    seams = []
+    for name in syscall_names(measured):
+        vm_row = measured.get("vm/" + name)
+        if not vm_row:
+            continue
+        vm_ns = vm_ns_per_call(vm_row)
+        if vm_ns:
+            seams.append(vm_ns - measured["entry/" + name]["real_time"])
+    proposal["seam_ns"] = statistics.median(seams) if seams else 0.0
     proposal["base_gas"] = max(1, to_gas(worst_ns) - ECALL_INSTRUCTION_GAS)
     proposal["base_ns"] = worst_ns
     proposal["base_from"] = worst_name
@@ -321,25 +381,31 @@ def build_schedule(bench, calibration, resolution):
         # already pays for. Charging its full measured base as well would bill
         # the crossing twice.
         excess_ns = max(0.0, base_ns - proposal["base_ns"])
+        gas_per_byte = per_byte_ns * (1.0 + margin) / unit
+        flat_gas = to_gas(per_byte_ns)
+        numerator, denominator, overcharge = choose_rate(gas_per_byte)
         proposal["sha256"] = {
             "measured_base_ns": base_ns,
             "excess_over_base_ns": excess_ns,
             "per_byte_ns": per_byte_ns,
+            "gas_per_byte": gas_per_byte,
             "r_squared": r_squared,
             "base_gas": to_gas(excess_ns) if excess_ns > 0 else 0,
-            "byte_gas": to_gas(per_byte_ns),
-            # A per-byte term smaller than one gas unit cannot be represented
-            # without rounding up to a whole one, which overcharges by however
-            # far it had to travel. Report the factor rather than hide it: it
-            # is the argument for a finer resolution, and the same argument the
-            # opcode schedule's --resolution note makes.
-            "byte_rounding_factor": (to_gas(per_byte_ns) * unit) / per_byte_ns
+            # What a flat integer per-byte cost would have to be, and how far
+            # it overshoots. Kept beside the proposal because the gap between
+            # the two is the entire argument for the divisor.
+            "flat_byte_gas": flat_gas,
+            "flat_overcharge": (flat_gas * unit) / per_byte_ns
             if per_byte_ns > 0 else 0.0,
+            "byte_numerator": numerator,
+            "byte_denominator": denominator,
+            "byte_overcharge": overcharge,
         }
+        proposal["sweep"] = sha256_points(measured)
     return proposal
 
 
-def print_schedule(bench, calibration, resolution):
+def print_schedule(bench, calibration, resolution, margin=0.0):
     problems = check_joinable(bench, calibration)
     if problems:
         print("refusing to price this run against that calibration:",
@@ -347,7 +413,7 @@ def print_schedule(bench, calibration, resolution):
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
-    proposal = build_schedule(bench, calibration, resolution)
+    proposal = build_schedule(bench, calibration, resolution, margin)
     if proposal is None:
         print("not enough measured rows to build a schedule", file=sys.stderr)
         return 1
@@ -367,9 +433,24 @@ def print_schedule(bench, calibration, resolution):
         print(f"{name:<28}{row['vm_ns']:>10.1f}{row['current_gas']:>9}"
               f"{proposal['base_gas']:>14}")
     print()
+    # How much room the proposal leaves over the dearest thing it has to
+    # cover. Worth printing because rounding up to the next whole gas is the
+    # only headroom a zero-margin proposal has, and at this unit that is a few
+    # percent -- narrower than the run-to-run spread of the measurement it came
+    # from. Whether that is enough is a policy call, which is what --margin is
+    # for; the report's job is to make the size of it visible rather than let
+    # it be discovered later.
+    budget_ns = ((proposal["base_gas"] + ECALL_INSTRUCTION_GAS) *
+                 proposal["unit_ns"])
+    headroom = budget_ns / proposal["base_ns"] - 1.0 if proposal["base_ns"] else 0.0
     print(f"One shared base of {proposal['base_gas']} gas, taken from "
           f"{proposal['base_from']} at {proposal['base_ns']:.1f} ns -- the "
           "dearest of them.")
+    if margin:
+        print(f"Includes a {margin * 100:.0f}% margin, applied before "
+              "rounding.")
+    print(f"That buys {budget_ns:.1f} ns of budget: {headroom * 100:+.1f}% "
+          "over the dearest measured call.")
     print("One constant rather than one per syscall because that is what the")
     print("measurement says: these land within a few percent of each other, so")
     print("what is being priced is the crossing and not the handler.")
@@ -383,16 +464,53 @@ def print_schedule(bench, calibration, resolution):
               f"{sha['per_byte_ns']:.4f} ns/byte (R2={sha['r_squared']:.4f})")
         print(f"  of which {sha['excess_over_base_ns']:.1f} ns is its own work, "
               "above the shared crossing")
-        if sha["byte_rounding_factor"] > 1.5:
-            print(f"  WARNING: the per-byte term is "
-                  f"{sha['per_byte_ns']:.4f} ns against a "
-                  f"{proposal['unit_ns']:.4f} ns gas unit, so rounding it up "
-                  f"to {sha['byte_gas']} gas overcharges by "
-                  f"{sha['byte_rounding_factor']:.1f}x.")
-            print("  Raise --resolution until this is close to 1, and raise "
-                  "the opcode")
-            print("  schedule's resolution with it -- they have to share a "
-                  "unit.")
+        print(f"  per byte that is {sha['gas_per_byte']:.4f} gas, which no "
+              "integer can express:")
+        print(f"    flat {sha['flat_byte_gas']} gas/byte overcharges by "
+              f"{sha['flat_overcharge']:.2f}x")
+        print(f"    {sha['byte_numerator']} gas per "
+              f"{sha['byte_denominator']} bytes overcharges by "
+              f"{sha['byte_overcharge']:.2f}x")
+        if sha["byte_denominator"] > 1:
+            print("  The divisor is the cheap fix. The other one is a finer")
+            print("  --resolution, which buys the same precision and rescales")
+            print("  the opcode schedule and the block gas limits to get it.")
+
+        # How even the pricing comes out, which is the question the constants
+        # are answering and the one a list of constants cannot show. Same
+        # metric the opcode schedule is judged by: a gas limit converts to a
+        # wall-clock bound at the worst ns/gas, and everything above that is
+        # capacity the schedule gives away.
+        print()
+        print("  Pricing quality across the size sweep (ns of real work per "
+              "gas;")
+        print(f"  a dispatched instruction is {proposal['unit_ns']:.4f}):")
+        print(f"    {'bytes':>8}{'now':>10}{'flat':>10}{'proposed':>10}")
+        rates = {"now": [], "flat": [], "proposed": []}
+        for size, ns in proposal.get("sweep", []):
+            # What the guest causes, not what the handler alone costs: the
+            # crossing is part of the price being set.
+            real = ns + proposal["seam_ns"]
+            now = 500 + 100 * size
+            flat = (proposal["base_gas"] + sha["base_gas"] +
+                    sha["flat_byte_gas"] * size)
+            proposed = (proposal["base_gas"] + sha["base_gas"] +
+                        -(-sha["byte_numerator"] * size //
+                          sha["byte_denominator"]))
+            for key, gas in (("now", now), ("flat", flat),
+                             ("proposed", proposed)):
+                rates[key].append(real / gas if gas else float("inf"))
+            print(f"    {size:>8}{real / now:>10.4f}{real / flat:>10.4f}"
+                  f"{real / proposed:>10.4f}")
+        print(f"    {'spread':>8}", end="")
+        for key in ("now", "flat", "proposed"):
+            values = [r for r in rates[key] if r > 0]
+            print(f"{max(values) / min(values):>9.2f}x", end="")
+        print()
+        print("  Spread is worst-over-best: how differently the same syscall "
+              "is")
+        print("  billed depending on an argument the caller picks. Lower is "
+              "flatter.")
 
     print()
     print("=" * 68)
@@ -404,7 +522,24 @@ def print_schedule(bench, calibration, resolution):
         print(f"constexpr static uint64_t kSHA256HashBaseCost = "
               f"{sha['base_gas']};   // was 500")
         print(f"constexpr static uint64_t kSHA256HashByteCost = "
-              f"{sha['byte_gas']};   // was 100")
+              f"{sha['byte_numerator']};     // was 100")
+        if sha["byte_denominator"] > 1:
+            print(f"constexpr static uint64_t kSHA256HashByteDivisor = "
+                  f"{sha['byte_denominator']};  // new")
+            print()
+            print("  SHA256HashCost then charges")
+            print("    base + ceil(bytes * kSHA256HashByteCost /")
+            print("                kSHA256HashByteDivisor)")
+            print("  Ceiling, not truncation: rounding a charge down is the")
+            print("  unsafe direction, and integer division rounds down.")
+            print()
+            print("  READ THIS BEFORE ADOPTING THE DIVISOR. gas_schedule_digest()")
+            print("  in artifact.h hashes kSyscallGasCostSchedule's names and")
+            print("  costs -- not SHA256HashCost's formula. A divisor that is")
+            print("  only a constant in the lambda changes what every contract")
+            print("  is billed while the digest sits still, which is the exact")
+            print("  failure the digest exists to prevent. It has to be an")
+            print("  entry in kSyscallGasCostSchedule to be hashed.")
     print()
     print("kSyscallBaseCost is new: every syscall charges it, which is the")
     print("change the measurement actually argues for. Adding it means adding")
@@ -454,6 +589,13 @@ def main():
     parser.add_argument("--resolution", type=int, default=DEFAULT_RESOLUTION,
                         help="gas units per baseline instruction "
                              f"(default {DEFAULT_RESOLUTION})")
+    parser.add_argument("--margin", type=float, default=0.0, metavar="PERCENT",
+                        help="safety margin applied to every measured cost "
+                             "before rounding, as a percentage. Zero-margin "
+                             "costs are worst-case-measured but their only "
+                             "headroom is the rounding, which at resolution 1 "
+                             "is a few percent -- narrower than this "
+                             "benchmark reproduces to on a shared host.")
     args = parser.parse_args()
 
     runs = [load(path) for path in args.json]
@@ -465,7 +607,8 @@ def main():
                 "--schedule needs --gas CALIBRATION: gas is one currency, and "
                 "the unit comes from the opcode calibration's baseline "
                 "instruction measured on the same host")
-        return print_schedule(runs[0], load(args.gas), args.resolution)
+        return print_schedule(runs[0], load(args.gas), args.resolution,
+                              args.margin / 100.0)
     if len(runs) == 2:
         return print_comparison(runs[0], runs[1])
     if len(runs) != 1:

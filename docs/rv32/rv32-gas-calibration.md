@@ -618,10 +618,14 @@ GetCurrentAddress                105.1        0            68
 GetMsgSender                     109.0        0            68
 GetSourceTransactionHash         106.5        0            68
 
-constexpr static uint64_t kSyscallBaseCost = 68;
-constexpr static uint64_t kSHA256HashBaseCost = 37;   // was 500
-constexpr static uint64_t kSHA256HashByteCost = 1;    // was 100
+constexpr static uint64_t kSyscallBaseCost = 67;
+constexpr static uint64_t kSHA256HashBaseCost = 33;    // was 500
+constexpr static uint64_t kSHA256HashByteCost = 1;     // was 100
+constexpr static uint64_t kSHA256HashByteDivisor = 2;  // new
 ```
+
+The divisor is there because the per-byte rate is 0.46 gas and no integer
+expresses it; see below. `--margin 3` moves the base to 69, `--margin 5` to 70.
 
 Three decisions are baked into those numbers, and each is arguable on its own.
 
@@ -649,22 +653,86 @@ half an hour apart moved individual syscalls by up to 11% (the proposal moved
 term well under a gas unit -- is stable; the last digit is not. Take the numbers
 that set the schedule from the bench pool.
 
-### The resolution problem, and it is a real one
+### The per-byte term cannot be an integer, and that is fixable cheaply
 
-SHA256's per-byte cost is **0.73 ns**. A gas unit at resolution 1 is 1.60 ns. So
-the smallest representable non-zero per-byte charge overcharges by **2.2x**, and
-the report says so rather than printing a number that looks fine:
+SHA256's per-byte cost is **0.73 ns**, and a gas unit at resolution 1 is
+1.60 ns. So the rate is **0.46 gas per byte**, and no integer expresses it: a
+flat 1 gas/byte overcharges by **2.2x**.
+
+There are two ways out, and they buy the same precision at very different
+prices.
+
+**Raise the resolution.** `--resolution 4` makes the unit 0.40 ns and the
+per-byte term 2 gas, at 1.10x. It also multiplies every number in the opcode
+schedule, the syscall schedule, and the block gas limits by four, because the
+two tables cannot be denominated differently.
+
+**Or split the charge over several bytes.** `ceil(bytes * 1 / 2)` -- one gas per
+two bytes -- is 1.09x, at resolution 1, changing nothing outside
+`SHA256HashCost`. The report proposes this form and prints both so the
+comparison is visible:
 
 ```
-WARNING: the per-byte term is 0.7261 ns against a 1.6014 ns gas unit, so
-rounding it up to 1 gas overcharges by 2.2x.
+per byte that is 0.4566 gas, which no integer can express:
+  flat 1 gas/byte overcharges by 2.19x
+  1 gas per 2 bytes overcharges by 1.10x
 ```
 
-At `--resolution 4` it becomes 2 gas and the overcharge falls to 1.10x. That is
-the argument for a finer resolution, and it has to be made *jointly* with the
-opcode schedule -- `--resolution` scales every number in both tables, block gas
-limits included, and the two cannot be denominated differently. Deciding it is
-the one thing here that is not a measurement.
+It searches denominators up to 64 -- SHA256's own block size -- but stops at the
+simplest one inside 1.10x rather than the most accurate one available. 15/32
+would reach 1.03x; the benchmark reproduces to about 11% run-to-run on a shared
+host, so that is fitting a digit the measurement does not have, in a consensus
+constant nobody can read.
+
+What it buys, measured across the size sweep (ns of real work per gas, against
+1.60 for a dispatched instruction):
+
+| bytes | now | flat 1/byte | 1 per 2 bytes |
+|---:|---:|---:|---:|
+| 0 | 0.369 | 1.847 | 1.847 |
+| 256 | 0.014 | 1.035 | 1.617 |
+| 4096 | 0.008 | 0.754 | 1.473 |
+| 32768 | 0.007 | 0.735 | 1.465 |
+| **spread** | **50.1x** | **2.5x** | **1.26x** |
+
+Spread is worst-over-best: how differently the same syscall is billed depending
+on an argument the caller picks. Today it is 50x. A flat integer per-byte cost
+takes that to 2.5x. The divisor takes it to 1.26x, and the residual is the
+fixed base being amortized over a growing input, which no per-byte term can
+remove.
+
+**One thing to check before adopting a divisor.** `gas_schedule_digest()` in
+`artifact.h` hashes `kSyscallGasCostSchedule`'s names and costs -- not
+`SHA256HashCost`'s formula. A divisor written only as a constant inside the
+lambda would change what every contract is billed while the digest sat still,
+which is precisely the failure the digest exists to prevent. It has to be an
+entry in the schedule array to be hashed. The report says so in its output.
+
+### How much headroom the base has, and why that is a question
+
+The base is worst-case-measured -- the dearest of the stateless reads -- and its
+only headroom is the rounding up to the next whole gas. At this unit that is
+about **1%**:
+
+```
+One shared base of 67 gas, taken from GetMsgSender at 107.6 ns.
+That buys 108.9 ns of budget: +1.2% over the dearest measured call.
+```
+
+Against a benchmark that reproduces to ~11% on a shared host, 1% is not a
+margin. `--margin PERCENT` applies one before rounding, and the report says what
+the result buys:
+
+```
+scripts/rv32_syscall_report.py sys.json --gas gas.json --schedule --margin 3
+  -> kSyscallBaseCost = 69     (+4.2% over the dearest measured call)
+scripts/rv32_syscall_report.py sys.json --gas gas.json --schedule --margin 5
+  -> kSyscallBaseCost = 70     (+5.7%)
+```
+
+How much margin a protocol constant deserves is a policy call, not a
+measurement. The report's job is to make the size of it visible rather than let
+it be discovered later; picking it is yours.
 
 ### What follows
 
@@ -672,9 +740,10 @@ the one thing here that is not a measurement.
   ~105 ns per iteration and is charged for the handful of instructions that set
   the call up -- roughly 5 gas against 105 ns of real work, an order of magnitude
   worse per gas than the worst opcode the calibration found.
-- **`SHA256HashCost`'s two constants need re-deriving, not scaling.** The
-  measured base-to-per-byte ratio is 230:1 (168 ns : 0.73 ns); the charged ratio
-  is 5:1 (500 : 100). No single multiplier fixes both.
+- **`SHA256HashCost` needs re-deriving, not scaling.** The measured
+  base-to-per-byte ratio is about 220:1 (160 ns : 0.73 ns); the charged ratio is
+  5:1 (500 : 100). No single multiplier fixes both, and the per-byte term needs
+  a divisor to be expressible at all.
 - Take the numbers from the bench pool, not from a container, and from more than
   one run -- the same rules the opcode schedule is under. Absolute nanoseconds
   are host-specific; the ordering and the ratios are the finding.
