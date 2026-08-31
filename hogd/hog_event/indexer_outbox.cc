@@ -61,6 +61,17 @@ constexpr std::string_view kOutboxDirectory = "indexer-outbox";
 constexpr size_t kIdentityDigits = 20;
 static_assert(x23::detail::xdr_size_bounds<ConsensusValue>().max_ <
               kIndexerRpcMaxMessageSize);
+// A committed record stores only the small {format_version, consensus_value}
+// wrapper; the block's event logs and transaction bodies live separately in
+// the content-addressed events file. Every ConsensusValue field is fixed-width
+// except its bounded upgrades<6> vector, so the wrapper has a small constant
+// maximum serialized size. Recovery rejects any current-protocol committed
+// record whose declared payload exceeds this before materializing it, keeping
+// the wrapper guard separate from the events-file replay cap.
+constexpr size_t kMaxIndexerOutboxCommittedStoredPayloadBytes =
+    x23::detail::xdr_size_bounds<IndexerOutboxCommittedStoredPayload>().max_;
+static_assert(kMaxIndexerOutboxCommittedStoredPayloadBytes <
+              kMaxIndexerOutboxPayloadBytes);
 
 std::atomic<int> injected_fault{-1};
 
@@ -1942,6 +1953,20 @@ IndexerOutboxStore::load_header(std::string_view filename) const
           IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
       header.payload_byte_length != epoch_origin_payload_byte_length()) {
     return std::unexpected("epoch origin payload size mismatch");
+  }
+  // A current-protocol committed record's stored payload is the bounded
+  // {format_version, consensus_value} wrapper, only a few hundred bytes -- its
+  // pairs live in the referenced events file. Reject an oversized declaration
+  // here, before load allocates and reads payload_byte_length bytes, rather
+  // than letting the generic outbox payload cap apply. Archival committed
+  // records need a matching binary to decode and are enumerated by header
+  // alone, so they are not bound here. See #3733.
+  if (header.record_identity.kind() ==
+          IndexerOutboxRecordKind::IndexerOutboxCommitted &&
+      header.protocol == version::kHogdProtocol() &&
+      header.payload_byte_length >
+          kMaxIndexerOutboxCommittedStoredPayloadBytes) {
+    return std::unexpected("committed stored payload size exceeds bound");
   }
   return header;
 }

@@ -1449,6 +1449,40 @@ TEST_F(IndexerOutboxTest, EpochOriginPayloadSizeMustMatchFixedShape)
       << loaded.error();
 }
 
+TEST_F(IndexerOutboxTest, CommittedStoredPayloadSizeMustNotExceedWrapperBound)
+{
+  // A committed record stores only the small {format_version, consensus_value}
+  // wrapper; its event logs and transaction bodies live in the referenced
+  // events file. A tampered file can declare a payload up to the generic outbox
+  // cap and sparse-extend to match; recovery must reject the oversized
+  // declaration from the header alone, before load allocates and reads the
+  // declared payload bytes.
+  IndexerOutboxStore store = open_store(dir_);
+  auto committed = make_committed(153, {}, {});
+  initialize_test_origin(store, committed);
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  const std::string filename = IndexerOutboxStore::committed_filename(153);
+  TestOutboxFile record = read_envelope(dir_, filename);
+  constexpr uint64_t kSparsePayloadBytes = 512ULL * 1024 * 1024;
+  static_assert(kSparsePayloadBytes < kMaxIndexerOutboxPayloadBytes);
+  write_sparse_record(dir_, filename, std::move(record), kSparsePayloadBytes);
+
+  // Enumeration reads the header for every committed record; a current-protocol
+  // record's oversized declaration is caught there, before any payload read.
+  auto records = store.enumerate_committed_records_raw();
+  ASSERT_FALSE(records.has_value());
+  EXPECT_NE(records.error().find("committed stored payload size exceeds bound"),
+            std::string::npos)
+      << records.error();
+
+  // The direct load path is bound the same way.
+  auto loaded = store.load_committed(153)();
+  ASSERT_FALSE(loaded.has_value());
+  EXPECT_NE(loaded.error().find("committed stored payload size exceeds bound"),
+            std::string::npos)
+      << loaded.error();
+}
+
 TEST_F(IndexerOutboxTest,
        CandidateCardinalityAndCommittedBodyMismatchAreRejected)
 {
