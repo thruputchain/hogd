@@ -358,16 +358,29 @@ def sigmas(cell):
 def merge_runs(runs):
     """Combine several calibration runs into one set of cells.
 
-    Per (opcode, context), the cost is the highest any run measured and the
-    cell counts as resolved only if *every* run resolved it. Both halves matter
-    for different reasons. Taking the max is conservative in the direction gas
-    has to be conservative. Requiring unanimity is what makes a schedule
-    reproducible: a cell's within-run standard error captures scatter between
-    that run's kernels, but not drift between runs on a shared or thermally
-    variable machine, and on such a host the near-baseline cells move by tens of
-    percent between runs while the genuinely expensive ones move by one or two.
-    Demanding that every run agree an opcode is more expensive than the
-    baseline is what separates those two populations.
+    Per (opcode, context), the cost is the median across runs and the cell
+    counts as resolved only if *every* run resolved it. The two halves do
+    different jobs: the median estimates how much the opcode costs, unanimity
+    decides whether it costs more than the baseline at all.
+
+    The median rather than the max, though gas has to be conservative, because
+    the max of N samples is not conservatism -- it is a statistic that grows
+    with N. Repeated runs measure one quantity, so taking their max prices the
+    unluckiest sample and keeps climbing as nights accumulate: over three hog10
+    runs the proposal rose 241 -> 245 -> 246 gas with nothing about the machine
+    changing. That also prices noise into individual opcodes, splitting
+    identical single-dispatch instructions across a rounding boundary on
+    sub-tenth-of-a-percent differences. The median converges instead, and the
+    conservatism that matters is untouched: worst_by_op still takes the max
+    across *contexts*, which is the choice an adversary actually makes.
+
+    Requiring unanimity is what makes a schedule reproducible: a cell's
+    within-run standard error captures scatter between that run's kernels, but
+    not drift between runs on a shared or thermally variable machine, and on
+    such a host the near-baseline cells move by tens of percent between runs
+    while the genuinely expensive ones move by one or two. Demanding that every
+    run agree an opcode is more expensive than the baseline is what separates
+    those two populations.
 
     With a single run this reduces to that run's own cells, which is why one
     run is enough to find the large effects and not enough to price the small
@@ -389,14 +402,16 @@ def merge_runs(runs):
                     "op": cell["op"],
                     "context": context_label(cell),
                     "scheduled_gas": cell["scheduled_gas"],
-                    "ns_per_instruction": cost,
+                    "costs": [cost],
                     "resolved": cell_resolved,
                     "runs": 1,
                 }
                 continue
-            entry["ns_per_instruction"] = max(entry["ns_per_instruction"], cost)
+            entry["costs"].append(cost)
             entry["resolved"] = entry["resolved"] and cell_resolved
             entry["runs"] += 1
+    for entry in merged.values():
+        entry["ns_per_instruction"] = statistics.median(entry.pop("costs"))
     # Unanimity has to mean every run, not every run that happened to contain
     # the cell. A context missing from one run -- a filtered run, or a sweep the
     # audit rejected -- would otherwise keep an earlier run's `resolved` and be
