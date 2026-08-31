@@ -2277,6 +2277,22 @@ SystemCallHandler::get_block_height() const
   return tip.value()->value.proposal_header.block_height + 1;
 }
 
+SystemStatus<NetworkHash>
+SystemCallHandler::get_network_hash() const
+{
+  auto tip = snapshot_cache_.try_get_db_tip();
+  if (!tip.has_value()) {
+    return tip.error();
+  }
+  // Unlike the block height, the network hash is not a property of the block
+  // being executed: it identifies the network and is identical in every
+  // header, so the parent tip's copy is the executing block's value with no
+  // adjustment. Every transaction signature already commits to this same
+  // value (see transaction_signature_preimage); this is the contract-visible
+  // form of it.
+  return tip.value()->value.proposal_header.network_hash;
+}
+
 // == Auth token syscalls ==
 
 SyscallStatus<uint32_t>

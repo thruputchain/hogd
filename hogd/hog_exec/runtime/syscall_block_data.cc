@@ -32,4 +32,22 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_GetNetworkHash_inner(SystemCallHandler &syscall_handler,
+                             NetworkHash &output_network_hash)
+{
+  auto status = syscall_handler.get_network_hash();
+  if (!status) {
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+  output_network_hash = *status;
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetNetworkHash>()) {
+    trace_data->outputs.emplace(
+        SyscallGetNetworkHashOutputs{.network_hash = output_network_hash});
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
 } // namespace hogd
