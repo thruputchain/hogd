@@ -2274,7 +2274,42 @@ SystemCallHandler::get_block_height() const
   // for an open block. Contract-facing height-gated logic (auth-token expiry,
   // timelocks) must observe the executing height, matching the replay-cache
   // expiry check.
-  return tip.value()->value.proposal_header.block_height + 1;
+  BlockHeight derived = tip.value()->value.proposal_header.block_height + 1;
+
+  // When an executor opened this block the scheduler supplied its height, and
+  // that value is what the block's header will claim. It must agree with what
+  // the tip says, or this node is executing against a different block than the
+  // one it is building: fail the syscall rather than let the divergence reach
+  // consensus. The view path and the test harnesses build a snapshot cache
+  // with no context, and keep the derived value.
+  auto const &block_execution = snapshot_cache_.block_execution_context();
+  if (block_execution.has_value() &&
+      block_execution->block_height != derived) [[unlikely]] {
+    error("Block height mismatch: scheduler supplied {}, db tip implies {}",
+          block_execution->block_height, derived);
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  return derived;
+}
+
+SystemStatus<TimePoint>
+SystemCallHandler::get_block_timepoint() const
+{
+  // Unlike the height there is no recovering this from the db tip: for an open
+  // block the tip is the parent, whose timepoint belongs to the previous
+  // block. The only correct source is the context the scheduler opened the
+  // block with -- taken from the coordinator when proposing and from the
+  // proposal's header when validating, so a proposer and its validators all
+  // execute against the same value.
+  auto const &block_execution = snapshot_cache_.block_execution_context();
+  if (!block_execution.has_value()) [[unlikely]] {
+    // No executor opened this block (view queries, test and bench harnesses).
+    // There is no meaningful timepoint to report, and inventing one would be
+    // worse than refusing.
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+  return block_execution->block_timepoint;
 }
 
 SystemStatus<NetworkHash>

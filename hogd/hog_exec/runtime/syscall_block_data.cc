@@ -50,4 +50,22 @@ syscall_GetNetworkHash_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_GetBlockTimepoint_inner(SystemCallHandler &syscall_handler,
+                                TimePoint &output_block_timepoint)
+{
+  auto status = syscall_handler.get_block_timepoint();
+  if (!status) {
+    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+  }
+  output_block_timepoint = *status;
+  if (auto *trace_data =
+          syscall_handler
+              .get_syscall_trace_data<SyscallNo::kGetBlockTimepoint>()) {
+    trace_data->outputs.emplace(SyscallGetBlockTimepointOutputs{
+        .block_timepoint = output_block_timepoint});
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+}
+
 } // namespace hogd

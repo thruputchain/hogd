@@ -75,6 +75,26 @@ public:
   SystemStatus<uint32_t> try_get_max_sha256_buffers();
   SystemStatus<uint32_t> try_get_max_cross_invoke_depth();
 
+  // The executing block's own facts, supplied by the scheduler when the block
+  // was opened. Distinct from everything above, which is read from the db tip
+  // -- and the tip, for an open block, is the *parent*. The height is
+  // recoverable from the parent (it is the tip's height plus one) but the
+  // timepoint is not: the parent's timepoint is the previous block's.
+  //
+  // Empty when no executor opened this block: the view path and the test and
+  // bench harnesses build a snapshot cache directly. Callers must handle that
+  // rather than assume a context is present.
+  std::optional<BlockExecutionContext> const &block_execution_context() const
+  {
+    return block_execution_context_;
+  }
+
+  void
+  set_block_execution_context(BlockExecutionContext const &block_execution)
+  {
+    block_execution_context_ = block_execution;
+  }
+
   ~StorageSnapshotCache();
 
   void reset()
@@ -83,6 +103,11 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
+    // Caches are pooled and reused across blocks, so this must be cleared
+    // with the rest: a context surviving into the next block would serve it
+    // the previous block's timepoint, silently and only under contracts that
+    // read it.
+    block_execution_context_.reset();
     release_db_tip();
   }
 
@@ -123,6 +148,11 @@ private:
       snapshot_item_cache_;
 
   BlockID block_id_;
+
+  // Set once when the block is opened, before any transaction runs, and
+  // cleared by reset() when the cache is recycled. Read-only for the life of
+  // the block, so unlike the tip it needs no synchronization.
+  std::optional<BlockExecutionContext> block_execution_context_;
   DatabaseProxy &db_proxy_;
 
   std::atomic<DbTip *> db_tip_ = nullptr;

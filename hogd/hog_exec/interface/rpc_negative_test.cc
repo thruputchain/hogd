@@ -46,6 +46,18 @@
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
+namespace {
+// These tests exercise the executor's block state machine, not the
+// block's contents, so any consistent context will do. It has to be the
+// same value for every open of a given block: open_block rejects a
+// reopen whose context disagrees.
+constexpr hogd::BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1,
+};
+} // namespace
+
+
 namespace hogd {
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -230,7 +242,7 @@ TEST_F(RpcNegativeTest, TestModeMismatchProposeOnValidationBlock)
   init_executor();
 
   BlockID block_id = 1000;
-  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   // Proposing on a validation block should fail
@@ -250,7 +262,7 @@ TEST_F(RpcNegativeTest, TestModeMismatchValidateOnProposalBlock)
   init_executor();
 
   BlockID block_id = 1001;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   open_db_block(block_id);
@@ -272,11 +284,11 @@ TEST_F(RpcNegativeTest, TestConflictingModeOpen)
   init_executor();
 
   BlockID block_id = 1002;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   // Opening a validation block with the same ID should fail
-  EXPECT_EQ(client_.executorsched_open_validation_block(block_id),
+  EXPECT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultSystemError);
 
   client_.executorsched_finish_block(block_id);
@@ -307,7 +319,7 @@ TEST_F(RpcNegativeTest, ProposeRejectsExpiredReplayUniquifier)
   init_executor();
 
   BlockID block_id = 1010;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_db_block(block_id);
 
@@ -330,7 +342,7 @@ TEST_F(RpcNegativeTest, ValidateRejectsExpiredReplayUniquifier)
   init_executor();
 
   BlockID block_id = 1011;
-  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   auto db_res = db_client_.dbsched_create_snapshot(
       0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
@@ -354,7 +366,7 @@ TEST_F(RpcNegativeTest, ProposeRejectsOversizedTransaction)
   init_executor();
 
   BlockID block_id = 1020;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_db_block(block_id);
 
@@ -374,7 +386,7 @@ TEST_F(RpcNegativeTest, ValidateRejectsOversizedTransaction)
   init_executor();
 
   BlockID block_id = 1021;
-  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   auto db_res = db_client_.dbsched_create_snapshot(
       0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
@@ -399,7 +411,7 @@ TEST_F(RpcNegativeTest, TestDoubleFinish)
   init_executor();
 
   BlockID block_id = 1003;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
@@ -429,7 +441,7 @@ TEST_F(RpcNegativeTest, TestEmptyBatch)
   init_executor();
 
   BlockID block_id = 1004;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   open_db_block(block_id);
@@ -455,7 +467,7 @@ TEST_F(RpcNegativeTest,
   });
 
   init_executor(make_shard_card(snapshot_port));
-  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
@@ -488,7 +500,7 @@ TEST_F(RpcNegativeTest,
   // ordering that released the executor context before awaiting the batch,
   // resuming this stalled validation then trips UAF or reads through the
   // wrong block snapshot. Sanitized builds catch that old behavior reliably.
-  ASSERT_EQ(client_.executorsched_open_validation_block(recycle_probe_block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(recycle_probe_block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_event_block(recycle_probe_block_id);
 
@@ -520,7 +532,7 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   });
 
   init_executor(make_shard_card(snapshot_port));
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
@@ -547,7 +559,7 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   // while a stalled propose still holds a context ref, opening another block
   // can retarget the recycled snapshot cache. Sanitized builds should catch
   // that shutdown/GC regression here.
-  ASSERT_EQ(client_.executorsched_open_proposal_block(recycle_probe_block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(recycle_probe_block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_event_block(recycle_probe_block_id);
 
@@ -616,7 +628,7 @@ TEST_F(RpcNegativeTest, TestEmptyValidateBatch)
   init_executor();
 
   BlockID block_id = 3001;
-  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   auto db_res = db_client_.dbsched_create_snapshot(
       0, block_id, BlockExecutionMode::kBlockExecutionModeValidation);
@@ -636,9 +648,9 @@ TEST_F(RpcNegativeTest, TestConflictingModeOpenValidationFirst)
   init_executor();
 
   BlockID block_id = 3002;
-  ASSERT_EQ(client_.executorsched_open_validation_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
-  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id),
+  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultSystemError);
   client_.executorsched_finish_block(block_id);
 }
@@ -655,7 +667,7 @@ TEST_F(RpcNegativeTest, TestOversizedBeatsExpired)
   init_executor();
 
   BlockID block_id = 3003;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_db_block(block_id);
 
@@ -687,7 +699,7 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
   });
 
   init_executor(make_shard_card(snapshot_port));
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
@@ -709,15 +721,15 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
             ExecResult::ExecResultOK);
 
   // The block is now closing: count 0, context alive via the stalled tx.
-  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id),
+  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultSystemError);
-  EXPECT_EQ(client_.executorsched_open_validation_block(block_id),
+  EXPECT_EQ(client_.executorsched_open_validation_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultSystemError);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultSystemError);
   // The stray finish must not have decremented the count: the reopen guard
   // still rejects.
-  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id),
+  EXPECT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultSystemError);
 
   snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
@@ -728,7 +740,7 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
 
   // The straggler resolved and its release_context ran gc, so the same id is
   // a fresh block again.
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
@@ -747,7 +759,7 @@ TEST_F(RpcNegativeTest, TestFinishBlockSurfacesEventEmitFailure)
   init_executor();
 
   BlockID block_id = 3005;
-  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id),
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id, kTestBlockExecution),
             ExecResult::ExecResultOK);
   open_db_block(block_id);
   open_event_block(block_id);

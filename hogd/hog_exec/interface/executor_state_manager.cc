@@ -52,7 +52,8 @@ ExecutorStateManager::get_executor_context_slow(BlockID block_id)
 }
 
 x23::Async<ExecResult>
-ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
+ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
+                                 BlockExecutionContext block_execution)
 {
   x23::CoroGuard g;
   co_await g(active_blocks_lock_);
@@ -60,6 +61,20 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
   if (auto it = active_blocks_.find(new_block_id); it != active_blocks_.end()) {
     // Increase the refcount on an existing block
     if (it->second.context.get().mode() != mode) {
+      co_await g.reset_and_return(ExecResult::ExecResultSystemError);
+      panic("unreachable");
+    }
+    // Same block, so the same facts: a second open disagreeing about the
+    // height or timepoint means two callers think this block is two
+    // different blocks. Refuse rather than let whichever opened first decide
+    // what every contract in the block sees.
+    if (auto const &open = it->second.context.get().block_execution();
+        open.block_height != block_execution.block_height ||
+        open.block_timepoint != block_execution.block_timepoint) {
+      error("Tried to reopen block {} with a different execution context "
+            "(height {} vs {}, timepoint {} vs {})",
+            new_block_id, open.block_height, block_execution.block_height,
+            open.block_timepoint, block_execution.block_timepoint);
       co_await g.reset_and_return(ExecResult::ExecResultSystemError);
       panic("unreachable");
     }
@@ -87,7 +102,7 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
 
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
-      std::forward_as_tuple(mode, new_block_id, *db_proxy_,
+      std::forward_as_tuple(mode, new_block_id, block_execution, *db_proxy_,
                             std::move(snapshot_cache), *event_server_proxy_,
                             worker_pool_));
   assert(inserted);
@@ -110,15 +125,19 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode)
 }
 
 x23::Async<ExecResult>
-ExecutorStateManager::open_proposal(BlockID new_proposal_id)
+ExecutorStateManager::open_proposal(BlockID new_proposal_id,
+                                   BlockExecutionContext block_execution)
 {
-  return open_block(new_proposal_id, ExecutionMode::kProposing);
+  return open_block(new_proposal_id, ExecutionMode::kProposing,
+                    block_execution);
 }
 
 x23::Async<ExecResult>
-ExecutorStateManager::open_validation(BlockID new_validation_id)
+ExecutorStateManager::open_validation(BlockID new_validation_id,
+                                     BlockExecutionContext block_execution)
 {
-  return open_block(new_validation_id, ExecutionMode::kValidating);
+  return open_block(new_validation_id, ExecutionMode::kValidating,
+                    block_execution);
 }
 
 x23::Async<ExecResult>

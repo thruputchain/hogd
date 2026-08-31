@@ -27,14 +27,21 @@ namespace hogd {
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
-  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
+  ExecutorContext(ExecutionMode mode, BlockID id,
+                  BlockExecutionContext const &block_execution,
+                  DatabaseProxy &db_proxy,
                   std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                   EventServerProxy &event_server_proxy,
                   DispatchPool &worker_pool)
-    : mode_(mode), block_id_(id), db_proxy_(db_proxy),
-      event_server_proxy_(event_server_proxy),
+    : mode_(mode), block_id_(id), block_execution_(block_execution),
+      db_proxy_(db_proxy), event_server_proxy_(event_server_proxy),
       snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
-  {}
+  {
+    // The syscall handlers read the block's own facts (its timepoint, and the
+    // height they cross-check against the tip) off the snapshot cache, which
+    // is what they are handed. Install it before any transaction can run.
+    snapshot_cache_->set_block_execution_context(block_execution_);
+  }
 
   // Disable copy and move
   ExecutorContext(ExecutorContext const &) = delete;
@@ -43,6 +50,14 @@ public:
   ExecutorContext &operator=(ExecutorContext &&) = delete;
 
   ExecutionMode mode() const { return mode_; }
+
+  // The block's facts as the scheduler opened it with. Compared against a
+  // second open of the same block: two opens that disagree about the block
+  // are a scheduler bug, not a refcount bump.
+  BlockExecutionContext const &block_execution() const
+  {
+    return block_execution_;
+  }
 
   x23::Async<ExecProposeBatchResult>
   propose_transaction_batch(SignedTransactionBatch const &signed_txs,
@@ -85,6 +100,7 @@ private:
 
   const ExecutionMode mode_;
   const BlockID block_id_;
+  const BlockExecutionContext block_execution_;
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;

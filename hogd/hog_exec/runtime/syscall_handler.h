@@ -412,6 +412,9 @@ public:
   // These are based on reading the db tip.
   SystemStatus<BlockHeight> get_block_height() const;
   SystemStatus<NetworkHash> get_network_hash() const;
+  // Served from the BlockExecutionContext the block was opened with, not from
+  // the db tip. Fails if no executor opened this block.
+  SystemStatus<TimePoint> get_block_timepoint() const;
 
   // == General access methods ==
   //

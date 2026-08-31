@@ -787,11 +787,12 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 }
 
 x23::Async<ExecResult>
-MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
-                                           size_t executor_idx)
+MempoolCoordinatorRpc::open_proposal_block(
+    BlockID block_id, BlockExecutionContext block_execution,
+    size_t executor_idx)
 {
   return exec_clients_[executor_idx].executorsched_open_proposal_block(
-      block_id);
+      block_id, block_execution);
 }
 
 MempoolCoordinatorRpc::InitializeBlockNodes
@@ -834,6 +835,7 @@ MempoolCoordinatorRpc::add_initialize_block_nodes(
         [&, i]() -> x23::Async<ExecResult> {
           const ExecResult result =
               co_await open_proposal_block(cache.block_id,
+                                           cache.block_execution,
                                            /*executor_idx=*/i);
           if (result == ExecResult::ExecResultOK) {
             executor_cleanups[i].arm();
@@ -1388,6 +1390,15 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   auto prepare_cache_node = nomination_dag.async<void>(
       "prepare nomination cache", [&]() -> x23::Async<void> {
         nominated_block_cache_.block_id = generate_block_id();
+        // The block's own facts, fixed before it executes: the height it will
+        // claim, and the coordinator's timepoint for it. Every executor gets
+        // this same value, and a validator of this block rebuilds it from the
+        // header these become.
+        nominated_block_cache_.block_execution = BlockExecutionContext{
+            .block_height =
+                last_committed_block_.value.proposal_header.block_height + 1,
+            .block_timepoint = context.block_timepoint,
+        };
         proposal_block_id.store(nominated_block_cache_.block_id);
         cache_cleanup.arm();
         // We place the block txs and tx hashes into these vectors. We mark
@@ -1648,8 +1659,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
     }
     event_open = true;
+    // Same construction as ordinary proposal: the height this block will
+    // claim, and the ceremony request's own timepoint.
+    const BlockExecutionContext genesis_block_execution{
+        .block_height =
+            last_committed_block_.value.proposal_header.block_height + 1,
+        .block_timepoint = request.context.block_timepoint,
+    };
     for (size_t i = 0; i < exec_clients_.size(); ++i) {
-      if (co_await open_proposal_block(block_id, i) !=
+      if (co_await open_proposal_block(block_id, genesis_block_execution, i) !=
           ExecResult::ExecResultOK) {
         co_await cleanup();
         co_return result(
@@ -1951,11 +1969,12 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
 }
 
 x23::Async<ExecResult>
-MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
-                                             size_t executor_idx)
+MempoolCoordinatorRpc::open_validation_block(
+    BlockID block_id, BlockExecutionContext block_execution,
+    size_t executor_idx)
 {
   co_return co_await exec_clients_[executor_idx]
-      .executorsched_open_validation_block(block_id);
+      .executorsched_open_validation_block(block_id, block_execution);
 }
 
 x23::Async<SchedulerValidationResult>
@@ -2227,6 +2246,16 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         co_return;
       });
 
+  // Taken from the header of the proposal under validation, never recomputed
+  // locally: these are the values the proposer's own execution committed to,
+  // so reproducing the block means reproducing them exactly. Deriving the
+  // height from our tip or the timepoint from a local clock would diverge
+  // this node's execution from the proposer's and split consensus.
+  const BlockExecutionContext validation_block_execution{
+      .block_height = proposal.header.block_height,
+      .block_timepoint = proposal.header.block_timepoint,
+  };
+
   x23::Vec<x23::DagNode<void>> open_validation_block_nodes;
   open_validation_block_nodes.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -2235,6 +2264,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         [&, i]() -> x23::Async<void> {
           ExecResult result =
               co_await open_validation_block(validation_block_id,
+                                             validation_block_execution,
                                              /*executor_idx=*/i);
           if (result != ExecResult::ExecResultOK) {
             co_await cancel_with_result(

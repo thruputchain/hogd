@@ -39,6 +39,18 @@
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
+namespace {
+// These tests exercise the executor's block state machine, not the
+// block's contents, so any consistent context will do. It has to be the
+// same value for every open of a given block: open_block rejects a
+// reopen whose context disagrees.
+constexpr hogd::BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1,
+};
+} // namespace
+
+
 namespace hogd {
 
 namespace {
@@ -107,7 +119,7 @@ protected:
 
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
-    auto open_res = client_.executorsched_open_proposal_block(block_id);
+    auto open_res = client_.executorsched_open_proposal_block(block_id, kTestBlockExecution);
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
     auto db_res = db_client_.dbsched_create_snapshot(
