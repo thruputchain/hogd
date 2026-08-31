@@ -127,6 +127,94 @@ divide_mix_body()
   return body;
 }
 
+// The workloads above are each one instruction pair repeated, which is what
+// isolates a fusion rule or an operand shape. The ones below are inner loops
+// out of real algorithms instead: several opcodes in the proportions an actual
+// program uses them. A schedule fitted to per-opcode worst cases has to price
+// these sanely too, and a pair-shaped workload cannot tell you whether it does.
+
+std::vector<uint32_t>
+fibonacci_body()
+{
+  // Iterative fibonacci: t = a + b; a = b; b = t. Three chained R-type adds
+  // per step, no memory and no branches -- the shape of a compute contract's
+  // hot loop, and the case where dispatch is the entire cost.
+  constexpr uint8_t kA = kDataBankBase;
+  constexpr uint8_t kB = kDataBankBase + 1;
+  constexpr uint8_t kT = kDataBankBase + 2;
+  std::vector<uint32_t> body;
+  while (body.size() < kWorkloadBodySlots) {
+    body.push_back(test_program::op(kT, kA, kB, 0, 0x00));
+    body.push_back(test_program::op(kA, 0, kB, 0, 0x00));
+    body.push_back(test_program::op(kB, 0, kT, 0, 0x00));
+  }
+  return body;
+}
+
+std::vector<uint32_t>
+dot_product_body()
+{
+  // The multiply-accumulate at the centre of any numeric kernel: load both
+  // operands, multiply, accumulate. Half memory and half arithmetic, with the
+  // accumulator carrying a dependence the two loads do not.
+  constexpr uint8_t kAcc = kDataBankBase;
+  constexpr uint8_t kProd = kDataBankBase + 1;
+  std::vector<uint32_t> body;
+  for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
+    body.push_back(
+        test_program::load(kLoadDstBase, 2, kAddressBankBase, walk_offset(i)));
+    body.push_back(test_program::load(kLoadDstBase + 1, 2,
+                                      kAddressBankBase + 1,
+                                      walk_offset(i + 1)));
+    body.push_back(test_program::op(kProd, kLoadDstBase, kLoadDstBase + 1, 0,
+                                    0x01));
+    body.push_back(test_program::op(kAcc, kAcc, kProd, 0, 0x00));
+  }
+  return body;
+}
+
+std::vector<uint32_t>
+hash_mix_body()
+{
+  // An xorshift round: xor, shift left, shift right, or, add. Shift- and
+  // mask-heavy integer work with no memory at all -- what a hash, a PRNG, or a
+  // bit-packing codec spends its time on, and the mix furthest from the ALU
+  // workload's add-shaped ops.
+  constexpr uint8_t kState = kDataBankBase;
+  constexpr uint8_t kHi = kDataBankBase + 1;
+  constexpr uint8_t kLo = kDataBankBase + 2;
+  std::vector<uint32_t> body;
+  while (body.size() < kWorkloadBodySlots) {
+    body.push_back(test_program::op(kState, kState, kSrcSmallReg, 4, 0x00));
+    body.push_back(test_program::i_type(0x13U, kHi, 1, kState, 13));
+    body.push_back(test_program::i_type(0x13U, kLo, 5, kState, 17));
+    body.push_back(test_program::op(kState, kHi, kLo, 6, 0x00));
+    body.push_back(test_program::op(kState, kState, kSrcLargeReg, 0, 0x00));
+  }
+  return body;
+}
+
+std::vector<uint32_t>
+crc_byte_body()
+{
+  // Byte-at-a-time CRC/checksum: load a byte, fold it in, shift, mask, fold
+  // again. Narrow loads mixed with bit manipulation, which is the shape of
+  // serialization and hashing code -- and the only workload here whose loads
+  // are sub-word.
+  constexpr uint8_t kCrc = kDataBankBase;
+  constexpr uint8_t kTmp = kDataBankBase + 1;
+  std::vector<uint32_t> body;
+  for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
+    body.push_back(
+        test_program::load(kLoadDstBase, 4, kAddressBankBase, walk_offset(i)));
+    body.push_back(test_program::op(kCrc, kCrc, kLoadDstBase, 4, 0x00));
+    body.push_back(test_program::i_type(0x13U, kTmp, 5, kCrc, 8));
+    body.push_back(test_program::i_type(0x13U, kCrc, 7, kCrc, 255));
+    body.push_back(test_program::op(kCrc, kCrc, kTmp, 4, 0x00));
+  }
+  return body;
+}
+
 struct Workload {
   std::string name;
   std::string shape;
@@ -144,6 +232,10 @@ workload_table()
       {"branch_dense", "addi;bne (fused, barrier-heavy)", &branch_dense_body},
       {"multiply_mix", "mul;add", &multiply_mix_body},
       {"divide_mix", "div;add", &divide_mix_body},
+      {"fibonacci", "iterative fib (chained ALU)", &fibonacci_body},
+      {"dot_product", "lw;lw;mul;add", &dot_product_body},
+      {"hash_mix", "xorshift round", &hash_mix_body},
+      {"crc_byte", "lbu;xor;srli;andi;xor", &crc_byte_body},
   };
   return table;
 }
@@ -226,7 +318,13 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
 
   // Tune each workload's trip count on its own, then measure them together in
   // one interleaved schedule so they share whatever drift the host has.
-  std::vector<uint32_t> trip_counts;
+  //
+  // Keyed by name rather than by position: a workload that fails to build has
+  // to drop itself and nothing else. Indexing a compacted vector by the table's
+  // position silently handed every workload after a failed one its neighbour's
+  // trip count and then dropped the tail, which is a hard failure to notice
+  // from output that still looks well-formed.
+  std::map<std::string, uint32_t> trip_counts;
   for (const Workload &workload : workload_table()) {
     const std::optional<BuiltWorkload> seed = build_workload(workload, 64);
     if (!seed.has_value()) {
@@ -239,18 +337,18 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     if (!seed_program.has_value()) {
       continue;
     }
-    trip_counts.push_back(tune_trip_count(*seed_program, 64, target_ns));
+    trip_counts[workload.name] = tune_trip_count(*seed_program, 64, target_ns);
   }
 
-  size_t index = 0;
+  std::vector<uint32_t> measured_trip_counts;
   for (const Workload &workload : workload_table()) {
-    if (index >= trip_counts.size()) {
-      break;
+    const auto trip = trip_counts.find(workload.name);
+    if (trip == trip_counts.end()) {
+      continue;
     }
     const std::optional<BuiltWorkload> tuned =
-        build_workload(workload, trip_counts[index]);
+        build_workload(workload, trip->second);
     if (!tuned.has_value()) {
-      ++index;
       continue;
     }
     auto program =
@@ -258,7 +356,6 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
                                                 kMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!program.has_value()) {
-      ++index;
       continue;
     }
     built.push_back(*tuned);
@@ -274,7 +371,7 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
                                     tuned->body_start_index, tuned->body_slots)
                              .rewritten_slots;
     results.push_back(std::move(result));
-    ++index;
+    measured_trip_counts.push_back(trip->second);
   }
 
   points.reserve(programs.size());
@@ -282,7 +379,7 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     points.push_back({.label = results[i].name,
                       .x = static_cast<double>(i),
                       .program = programs[i].get(),
-                      .trip_count = trip_counts[i]});
+                      .trip_count = measured_trip_counts[i]});
   }
   measure_interleaved(points, {.repeats = repeats, .warmup_runs = warmup_runs});
 
