@@ -1291,9 +1291,10 @@ TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
   // Instructions retired before the trap are metered; the trapping fetch or
   // access itself is charged too.
   expect_deterministic(make_bad_pc_image(), 1 * rv32::kBaseInstructionGas);
-  expect_deterministic(make_bad_memory_image(), 1 * rv32::kBaseInstructionGas);
+  // Both bad-memory images fault on an lw, which is priced as a wide load.
+  expect_deterministic(make_bad_memory_image(), rv32::kWideLoadGas);
   expect_deterministic(make_unaligned_oob_access_image(),
-                       2 * rv32::kBaseInstructionGas);
+                       rv32::kBaseInstructionGas + rv32::kWideLoadGas);
   expect_deterministic(make_breakpoint_image(), 1 * rv32::kBaseInstructionGas);
 }
 
