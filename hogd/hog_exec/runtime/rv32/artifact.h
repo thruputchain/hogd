@@ -35,7 +35,7 @@ inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // into the header at kArtifactGasVersionOffset and validated at load.
 // v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
 // trap.
-inline constexpr uint32_t kGasTableVersion = 3;
+inline constexpr uint32_t kGasTableVersion = 4;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -95,7 +95,38 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0x918317c21c46bb60ULL);
+static_assert(kGasScheduleDigest == 0xac8aefb00a997407ULL);
+
+// The gas schedules an artifact is allowed to declare. The first entry is what
+// this build meters with and what a current lowerer stamps; any further entry
+// is transitional, accepted so a repricing can land here before the lowerer
+// that stamps it has rolled out.
+//
+// Matched as a pair. Checking version and digest independently would accept a
+// combination no tool ever produced, which is worse than rejecting both.
+//
+// What a transitional entry means, stated plainly: the artifact is metered with
+// the CURRENT schedule, not the one it declares. Costs come from
+// kInstructionGasCosts at execution time and nothing in the artifact bytes
+// depends on them, so an older artifact simply gets the new prices. That is the
+// point -- a repricing has to reach contracts that are already deployed -- and
+// it is also the hazard, because the digest exists precisely to stop an
+// artifact being metered under a schedule it did not agree to. Two consequences
+// follow. Every node must carry an identical list, or they will disagree about
+// which transactions are valid. And the list is not a permanent compatibility
+// surface: drop the transitional entries once the lowerer that stamps the
+// current schedule has rolled out, so the check goes back to meaning what it
+// says.
+struct AcceptedGasSchedule {
+  uint32_t version;
+  uint64_t digest;
+};
+
+inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
+    {kGasTableVersion, kGasScheduleDigest},
+    // groundhog-cli <= 0.10.2. Remove once the lowerer stamps v4.
+    {3, 0x918317c21c46bb60ULL},
+}};
 
 constexpr uint64_t
 format_fingerprint_u64(uint64_t digest, const char8_t *name, uint64_t value)
@@ -256,7 +287,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x8e5caf3e9cd23b22ULL);
+static_assert(kArtifactFormatFingerprint == 0xcc78e61a463f927eULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 

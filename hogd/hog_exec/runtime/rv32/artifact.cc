@@ -90,10 +90,15 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
-  if (gas_schedule_version != kGasTableVersion) {
+  // Accepted as a (version, digest) pair; see kAcceptedGasSchedules for why the
+  // list can hold more than the current schedule and when to shrink it.
+  const auto *accepted = std::ranges::find(kAcceptedGasSchedules,
+                                           gas_schedule_version,
+                                           &AcceptedGasSchedule::version);
+  if (accepted == kAcceptedGasSchedules.end()) {
     return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
   }
-  if (gas_digest != kGasScheduleDigest) {
+  if (gas_digest != accepted->digest) {
     return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
   }
   // memory_bytes == 0 is a valid degenerate: a zero-memory contract whose
