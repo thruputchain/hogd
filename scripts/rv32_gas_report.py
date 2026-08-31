@@ -474,24 +474,6 @@ def print_table(data):
         )
 
 
-def op_spread_ns(runs):
-    """Per opcode, how far its worst-context cost moved across the runs.
-
-    The measurement's own reproducibility, in the units the schedule prices in.
-    One run cannot report a spread and gets zero, which is the honest answer:
-    a single sample makes no claim about how much it would move.
-    """
-    per_run = []
-    for data in runs:
-        per_run.append({op: cost_ns(cell)
-                        for op, cell in worst_by_op([data]).items()})
-    spread = {}
-    for op in {op for costs in per_run for op in costs}:
-        seen = [costs[op] for costs in per_run if op in costs]
-        spread[op] = max(seen) - min(seen) if len(seen) > 1 else 0.0
-    return spread
-
-
 def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
     """Integer gas costs from the measured per-instruction times.
 
@@ -502,7 +484,6 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
     worst = worst_by_op(runs)
     if not worst:
         return None, None
-    spread = op_spread_ns(runs)
     baseline = min(baseline_ns(data)
                    for data in runs)
     if baseline <= 0.0:
@@ -522,34 +503,12 @@ def build_schedule(runs, resolution=DEFAULT_RESOLUTION):
         # undercharge, so the floor holds.
         ns = max(cost_ns(cell), baseline)
         ratio = ns / unit
-
-        # Round up only what the measurement can actually resolve. A gas unit
-        # is a quarter of a baseline instruction; the measurement reproduces to
-        # about a tenth of a percent. Rounding a smaller excess up buys a whole
-        # unit for noise: SLTI measured 0.016% over the baseline and SLTIU
-        # landed exactly on it, so ceil alone charges SLTI 25% more than SLTIU
-        # for two single-dispatch instructions that cost the same thing. Snap a
-        # ratio down to the boundary below it when the gap is inside the
-        # opcode's own run-to-run spread, then round up whatever survives.
-        #
-        # Undercharging by less than the spread is not a hole in the bound: the
-        # baseline it is measured against carries the same uncertainty, and the
-        # floor below still holds every opcode at one full dispatch. With one
-        # run the spread is zero and this does nothing, which is correct --
-        # reproducibility is not a claim a single sample can make.
-        boundary = math.floor(ratio)
-        snapped = (boundary >= 1
-                   and (ratio - boundary) * unit <= spread.get(op, 0.0))
-        if snapped:
-            ratio = float(boundary)
-
         schedule[op] = {
             "ratio": ratio,
             "proposed_gas": max(1, math.ceil(ratio - 1e-9)),
             "current_gas": cell["scheduled_gas"],
             "context": cell["context"],
             "ns": ns,
-            "snapped": snapped,
             "floored": ns > cost_ns(cell),
             "resolved": cell["resolved"],
         }
@@ -589,8 +548,6 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
         note = "" if entry["resolved"] else "not reproduced"
         if entry["floored"]:
             note = "measured below baseline, floored"
-        elif entry["snapped"]:
-            note = "excess within run-to-run spread"
         if entry["proposed_gas"] != entry["current_gas"]:
             changed += 1
             note = (note + " CHANGED").strip()
