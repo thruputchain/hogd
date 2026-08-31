@@ -35,21 +35,14 @@ public:
   // watermark; partial component restart during an in-flight commit is not a
   // safe state to recover by advancing mempool independently of HogDB.
   template<typename OnRegistered>
-  std::optional<BlockHeight> register_callback(BlockHeight recovered_db_height,
-                                               auth_data_callback &&callback,
-                                               OnRegistered &&on_registered)
+  void register_callback(BlockHeight recovered_db_height,
+                         auth_data_callback &&callback,
+                         OnRegistered &&on_registered)
   {
     const std::lock_guard lock(callback_mutex_);
     CHECK(!callback_.has_value());
-    if (pending_height_ && *pending_height_ > recovered_db_height) {
-      std::optional<BlockHeight> rejected_height = pending_height_;
-      pending_height_.reset();
-      return rejected_height;
-    }
-    pending_height_.reset();
     callback_ = std::move(callback);
     std::forward<OnRegistered>(on_registered)();
-    return std::nullopt;
   }
 
   // Stop admitting callbacks that can touch coordinator state, then wait for
@@ -87,18 +80,19 @@ public:
                                                  KeyChangeBatch key_changes)
   {
     std::optional<auth_data_callback> callback;
-    {
+    while (true) {
       const std::lock_guard lock(callback_mutex_);
       if (!callback_) {
         info("Recording auth-data watermark {} before mempool coordinator "
              "initialization; discarding {} key changes for an empty "
              "scheduler",
              height, key_changes.size());
-        pending_height_ = std::max(pending_height_.value_or(height), height);
-        co_return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        continue;
       }
       callback = callback_;
       ++callbacks_in_flight_;
+      break;
     }
     x23::Defer release_callback([this] {
       const std::lock_guard lock(callback_mutex_);
@@ -129,7 +123,6 @@ private:
   std::mutex callback_mutex_;
   std::condition_variable callback_drained_;
   std::optional<auth_data_callback> callback_;
-  std::optional<BlockHeight> pending_height_;
   size_t callbacks_in_flight_ = 0;
 };
 

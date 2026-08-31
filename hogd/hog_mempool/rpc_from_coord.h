@@ -522,20 +522,12 @@ private:
     co_await db_rpc_->register_scheduler(scheduler_);
     const BlockHeight recovered_db_height =
         last_committed_block_.value.proposal_header.block_height;
-    std::optional<BlockHeight> rejected_auth_height =
-        auth_rpc_->register_callback(
-            recovered_db_height,
-            [this](BlockHeight height, KeyChangeBatch key_changes) {
-              return auth_data_changed(height, std::move(key_changes));
-            },
-            [this] { initialized_.store(true, std::memory_order_release); });
-    if (rejected_auth_height) {
-      co_await db_rpc_->reset_scheduler();
-      throw std::runtime_error(std::format(
-          "auth startup watermark {} is ahead of recovered database height "
-          "{}; partial restart during an in-flight commit is unsupported",
-          *rejected_auth_height, recovered_db_height));
-    }
+    auth_rpc_->register_callback(
+        recovered_db_height,
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        },
+        [this] { initialized_.store(true, std::memory_order_release); });
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }
