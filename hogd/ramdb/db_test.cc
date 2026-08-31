@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <future>
 #include <limits>
 #include <memory>
 #include <span>
@@ -96,6 +97,7 @@ make_value(uint64_t seed, size_t len)
 
 } // namespace
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 class DatabaseTest : public testing::Test {
 protected:
   DatabaseTest() = default;
@@ -494,6 +496,55 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   auto ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
 
+  check_integrity();
+}
+
+// Destroying the database with a snapshot in flight must await it: the
+// snapshot thread reads the map and allocates loglets, so tearing those down
+// under it is a use-after-free. The join also makes the snapshot durable.
+TEST_F(DatabaseTest, SnapshotDestructorAwaitsCompletion)
+{
+  insert_n(kInsertions);
+
+  auto sync_ret = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(sync_ret);
+
+  // drop the database without waiting on the snapshot future.
+  db_.reset();
+
+  check_file_exists("0-1.snap");
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  check_integrity();
+}
+
+// Only one snapshot may run at a time (the map's mutation callback is a
+// single slot); a second request while one is in flight returns kBusy, and a
+// request after completion is admitted again.
+TEST_F(DatabaseTest, SnapshotRejectsOverlapping)
+{
+  insert_n(kInsertions);
+
+  auto first = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(first);
+  auto &[lsn, snapshot_future] = *first;
+
+  auto second = db_->sync_and_snapshot(0);
+  if (second) {
+    // Only admissible if the first snapshot had already finished.
+    EXPECT_EQ(snapshot_future.wait_for(std::chrono::seconds::zero()),
+              std::future_status::ready);
+    EXPECT_TRUE(second->second.get());
+  }
+  else {
+    EXPECT_EQ(second.error(), DBCode::kBusy);
+  }
+
+  EXPECT_TRUE(snapshot_future.get());
+
+  // after completion the next snapshot is admitted.
+  auto third = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(third);
+  EXPECT_TRUE(third->second.get());
   check_integrity();
 }
 
