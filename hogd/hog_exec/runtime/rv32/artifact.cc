@@ -92,9 +92,9 @@ artifact_image_checks(std::span<const uint8_t> bytes)
   }
   // Accepted as a (version, digest) pair; see kAcceptedGasSchedules for why the
   // list can hold more than the current schedule and when to shrink it.
-  const auto *accepted = std::ranges::find(kAcceptedGasSchedules,
-                                           gas_schedule_version,
-                                           &AcceptedGasSchedule::version);
+  const auto *accepted =
+      std::ranges::find(kAcceptedGasSchedules, gas_schedule_version,
+                        &AcceptedGasSchedule::version);
   if (accepted == kAcceptedGasSchedules.end()) {
     return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
   }
