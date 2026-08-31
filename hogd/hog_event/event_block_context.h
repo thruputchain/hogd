@@ -97,6 +97,17 @@ parse_events_file_pairs(std::span<const uint8_t> bytes, std::string_view name);
 std::expected<EventBlockPairs, std::string>
 read_final_events_file(std::string_view work_directory, SHA256Hash const &hash);
 
+// True when the regular file [fd] of [size] bytes contains an unallocated hole
+// before end-of-file.  A genuine events file is written in full and fsynced
+// before it is published, so a hole means the file was truncated into
+// existence -- a forgery that stays cheap even at the replay-cap size -- rather
+// than written.  Recovery uses this to fail such a file closed before
+// allocating a buffer for the hole.  Detection uses SEEK_HOLE, which reports
+// genuine holes and not compressed extents, so a legitimately-written file on
+// compressing storage is never misread as sparse; where the platform lacks
+// SEEK_HOLE the probe is unavailable and returns false.
+bool events_file_has_hole(int fd, off_t size);
+
 class EventBlockContext {
 public:
   static std::string temp_events_filename(std::string_view work_directory,

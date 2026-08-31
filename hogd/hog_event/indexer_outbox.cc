@@ -2060,6 +2060,11 @@ IndexerOutboxStore::assemble_committed_payload(
     return std::unexpected(
         std::format("events file {} exceeds replayable payload size", name));
   }
+  // A sparse file is cheap to forge at the accepted size limit; reject one
+  // punched full of holes before allocating a buffer for them.
+  if (events_file_has_hole(file.get(), file_stat.st_size)) {
+    return std::unexpected(std::format("events file {} is sparse", name));
+  }
   std::vector<uint8_t> bytes(static_cast<size_t>(file_stat.st_size));
   size_t offset = 0;
   while (offset < bytes.size()) {

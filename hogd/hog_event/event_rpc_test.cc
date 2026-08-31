@@ -15,6 +15,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <unistd.h> // IWYU pragma: keep
 #include <utility>
 #include <vector>
 
@@ -3264,10 +3265,13 @@ TEST_F(EventRpcTest, OversizedEventsFileIsRejectedBeforeAllocation)
 
 TEST_F(EventRpcTest, SparseEventsFileAtSizeLimitIsRejectedBeforeAllocation)
 {
+#ifndef SEEK_HOLE
+  GTEST_SKIP() << "hole detection needs SEEK_HOLE, absent on this platform";
+#else
   // A sparse file resized to exactly the replay cap passes the size check but
   // is not a genuine events file: it costs an attacker no storage yet reads
-  // back as a near-2-GiB run of zeros.  Recovery must reject it from its
-  // unbacked blocks, before reading its full length into memory.
+  // back as a near-2-GiB run of zeros.  Recovery must reject it from its holes,
+  // before reading its full length into memory.
   const SHA256Hash root{};
   const std::string name =
       EventBlockContext::final_events_filename(temp_dir(), root);
@@ -3281,6 +3285,7 @@ TEST_F(EventRpcTest, SparseEventsFileAtSizeLimitIsRejectedBeforeAllocation)
   ASSERT_FALSE(pairs.has_value());
   EXPECT_NE(pairs.error().find("is sparse"), std::string::npos)
       << pairs.error();
+#endif
 }
 
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)

@@ -497,6 +497,24 @@ parse_events_file_pairs(std::span<const uint8_t> bytes, std::string_view name)
   return pairs;
 }
 
+bool
+events_file_has_hole([[maybe_unused]] int fd, [[maybe_unused]] off_t size)
+{
+#ifdef SEEK_HOLE
+  // SEEK_HOLE reports the first unallocated region at or after the offset, with
+  // an implicit hole assumed at end-of-file, so a fully-written file returns
+  // [size] and a truncated-into-existence one returns an earlier offset.  It
+  // steps over compressed extents rather than reporting them as holes, so this
+  // does not misread a legitimate file on compressing storage.
+  const off_t first_hole = lseek(fd, 0, SEEK_HOLE);
+  return first_hole >= 0 && first_hole < size;
+#else
+  // No portable hole probe on this platform; the caller still bounds the file
+  // to the replay cap.
+  return false;
+#endif
+}
+
 std::expected<EventBlockPairs, std::string>
 read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
 {
@@ -521,15 +539,10 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
     return std::unexpected(
         std::format("events file {} exceeds replayable payload size", name));
   }
-  // A genuine events file is streamed to disk in full and fsynced before it is
-  // published, so every byte it claims is backed by an allocated block.  A
-  // sparse file is cheap to forge at the accepted size limit -- it costs no
+  // A sparse file is cheap to forge at the accepted size limit -- it costs no
   // real storage yet reads back as an equally large run of zeros -- so reject a
-  // file whose allocated blocks cannot cover its length before allocating a
-  // buffer for the hole.  (st_blocks counts 512-byte units; events files share
-  // the node's uncompressed durable storage, so a fully-written file is never
-  // under-allocated.)
-  if (file_stat.st_blocks * 512 < size) {
+  // file punched full of holes before allocating a buffer for them.
+  if (events_file_has_hole(fd.get(), size)) {
     return std::unexpected(std::format("events file {} is sparse", name));
   }
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
