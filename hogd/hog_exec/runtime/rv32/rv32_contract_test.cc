@@ -733,7 +733,7 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
 
 TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 {
-  Contract contract(ContractType::kWasmi);
+  Contract contract(ContractType::kNative);
   Rv32Context context;
   EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
 }

@@ -71,8 +71,6 @@ contract_blob_size(Contract const &contract)
   case ContractType::kNative:
   case ContractType::kMockTest:
     return 0;
-  case ContractType::kWasmi:
-    return contract.wasmi_contract().data.size();
   case ContractType::kRv32:
     return contract.rv32_contract().data.size();
   }
