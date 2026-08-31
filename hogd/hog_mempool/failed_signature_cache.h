@@ -138,8 +138,6 @@ public:
     return num_buckets_ * detail::FailedSignatureBucket::kBucketSize;
   }
 
-  const RecentKeyChanges &key_changes() const { return key_changes_; }
-
   // Locks every bucket in turn; for diagnostics, not the admission path.
   size_t size()
   {

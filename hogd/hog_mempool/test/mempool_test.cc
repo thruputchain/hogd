@@ -2913,6 +2913,91 @@ TEST(Mempool, CachedVerdictStopsCountingAfterAKeyChange)
   EXPECT_TRUE(cache.contains(rotated, rotated_signing));
 }
 
+// The same case driven entirely through the gateway and coordinator RPCs, with
+// the auth change written by ordinary execution rather than injected: a
+// transaction is refused for want of signing weight, a committed block lowers
+// the account's threshold, and the same bytes are then accepted.
+TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+
+  MempoolTestInfra server;
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  // Two keys of weight 1 apiece, against a threshold of 2.
+  AddressAuthData auth_data = get_default_account();
+  const Ed25519SecretKey key_a =
+      create_key_pair(auth_data, /*idx=*/0, /*weight=*/1);
+  const Ed25519SecretKey key_b =
+      create_key_pair(auth_data, /*idx=*/1, /*weight=*/1);
+  auth_data.last_written_height = 1;
+  auth_data.required_weight = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               auth_data);
+
+  SecretKey sk_a(CryptographicScheme::Ed25519);
+  sk_a.ed25519() = key_a;
+  SecretKey sk_b(CryptographicScheme::Ed25519);
+  sk_b.ed25519() = key_b;
+
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 0b11;
+  claim.source_address_claim().required_weight = 1;
+
+  auto submit_over_gateway = [&](const SignedTransaction &tx) {
+    gateway.schedgateway_submit_tx_batch(
+        t_to_parallel_batch(SignedTransactionBatch{tx})())();
+  };
+
+  // Signed by one key, so weight 1 against a threshold of 2.
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  txs[0].tx.auth_claim = claim;
+  SignedTransaction underweight = txs[0];
+  underweight.signatures.push_back(
+      make_signature(sk_a, txs[0].tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash));
+
+  submit_over_gateway(underweight);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  // Again, answered from cache.
+  submit_over_gateway(underweight);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+
+  // A transaction that does meet the threshold, lowering it to 1.
+  SignedTransactionBatch lower_txs = generate_unsigned_txs(fib_client, 1);
+  lower_txs[0].tx.invocation =
+      fib_client.make_invocation<u8"change_nonce_config">(
+          /*gas_amount=*/5'000'000'000, uint32_t{1});
+  lower_txs[0].tx.uniquifier.nonce = 99;
+  lower_txs[0].tx.auth_claim = claim;
+  SignedTransaction lower = lower_txs[0];
+  lower.signatures.push_back(make_signature(sk_a, lower_txs[0].tx,
+                                            /*public_key_id=*/0,
+                                            MempoolTestInfra::kNetworkHash));
+  lower.signatures.push_back(make_signature(sk_b, lower_txs[0].tx,
+                                            /*public_key_id=*/1,
+                                            MempoolTestInfra::kNetworkHash));
+
+  submit_over_gateway(lower);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  SchedulerProposalResult res_nominate =
+      propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_EQ(commit_block(server, get_tip.db_tip(),
+                         res_nominate.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  // The same bytes now carry enough weight, and the cached rejection must not
+  // stand in the way.
+  submit_over_gateway(underweight);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+}
+
 // Once a committed block changes an account's keys, a signing this node turned
 // down may verify, so the cache must stop refusing it.
 TEST(Mempool, ChangedAuthDataInvalidatesCachedVerdicts)
