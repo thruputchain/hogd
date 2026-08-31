@@ -422,6 +422,34 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
             empty.identity.consensus_hash);
 }
 
+TEST_F(StrictIndexerTest, ShortPersistedTxValueYieldsRecoverableLookupError)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(4813, 0x48);
+  const TransactionHash tx_hash = sha256(body.signed_tx.tx);
+  IndexerCommittedBlock first =
+      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  db_.reset();
+
+  std::string tx_key;
+  IndexerKeyFormat::make_tx_key(tx_key, tx_hash);
+  for (const std::string short_value : {std::string(), std::string(7, '\x7f')}) {
+    SCOPED_TRACE(::testing::Message() << "short length=" << short_value.size());
+    overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily,
+                            tx_key, short_value);
+
+    auto reopened = IndexDB::open(path_);
+    ASSERT_TRUE(reopened.has_value());
+    auto record = reopened->get_tx_record(tx_hash);
+    ASSERT_FALSE(record.has_value());
+    EXPECT_EQ(record.error().code(), IndexerErrorCode::kInternal);
+  }
+}
+
 TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
 {
   IndexerOutboxOrigin origin = make_origin();

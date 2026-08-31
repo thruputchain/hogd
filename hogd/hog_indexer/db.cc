@@ -1453,6 +1453,11 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
+  if (value.size() < sizeof(BlockHeight)) {
+    error("get_tx_record: short tx_index value of size {}", value.size());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+
   try {
     TxRecord record = parse_tx_value(value);
     const int64_t watermark =
