@@ -124,8 +124,8 @@ SystemCallHandler::replay_uniquifier_expired(Uniquifier const &uniquifier,
   return uniquifier.block_expiry_height < executing_height;
 }
 
-SystemStatus<bool>
-SystemCallHandler::replay_uniquifier_expired()
+bool
+SystemCallHandler::replay_uniquifier_expired() const
 {
   // Only real transactions carry a uniquifier (the test-harness constructor
   // leaves it empty).
@@ -133,13 +133,24 @@ SystemCallHandler::replay_uniquifier_expired()
     return false;
   }
   // get_block_height() returns the executing block height (parent tip + 1),
-  // which is exactly the height ReplayCacheLock validates expiry against. A
-  // tip-read failure is propagated.
-  auto height = get_block_height();
-  if (!height.has_value()) {
-    return std::unexpected(height.error());
+  // which is exactly the height ReplayCacheLock validates expiry against.
+  return replay_uniquifier_expired(*tx_uniquifier_, get_block_height());
+}
+
+SystemStatus<void>
+SystemCallHandler::init_db_tip() const
+{
+  if (db_tip_ != nullptr) [[likely]] {
+    return {};
   }
-  return replay_uniquifier_expired(*tx_uniquifier_, *height);
+  auto tip = snapshot_cache_.try_get_db_tip();
+  if (!tip.has_value()) {
+    return std::unexpected(tip.error());
+  }
+  // Owned by the snapshot cache and stable until the cache is recycled for a
+  // new block, which cannot happen while this transaction is executing.
+  db_tip_ = *tip;
+  return {};
 }
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
@@ -218,17 +229,19 @@ SystemCallHandler::SystemCallHandler(
 SystemStatus<void>
 SystemCallHandler::perform_initial_validation()
 {
+  // Pin the block's db tip before anything reads a value derived from it. This
+  // is the transaction's one fallible tip read: a failure here is a system
+  // error and is propagated to the caller, not dropped.
+  if (auto res = init_db_tip(); !res.has_value()) {
+    return std::unexpected(res.error());
+  }
+
   // Reject a transaction whose replay uniquifier has already expired before any
   // attached-contract verification or body execution runs (#2568). Without this
   // the body would run to completion and the transaction would only be rejected
-  // by the late replay-cache reservation. A db-tip read failure is a system
-  // error and is propagated to the caller, not dropped.
+  // by the late replay-cache reservation.
   {
-    auto expired = replay_uniquifier_expired();
-    if (!expired.has_value()) {
-      return std::unexpected(expired.error());
-    }
-    if (*expired) {
+    if (replay_uniquifier_expired()) {
       // An expired uniquifier is a deterministic, proposer-attributable
       // rejection: map it to ValidationFailure uniformly in proposal and
       // validation mode. In proposal mode this is only reachable when the
@@ -493,15 +506,13 @@ SystemCallHandler::try_commit_transaction()
     // The tip re-read here cannot fail: reaching a proposal-mode
     // ValidationFailure means perform_initial_validation() already read the tip
     // successfully (a failed read there surfaces as Abandon/Unrecoverable, not
-    // ValidationFailure), which caches it in the snapshot cache. That cache is
-    // only released when it is recycled for a new block, which cannot happen
-    // during the synchronous root_invoke() -> try_commit_transaction() window.
-    // So require has_value().
+    // ValidationFailure), which pinned the tip on this handler. That pin stays
+    // valid for the whole synchronous root_invoke() -> try_commit_transaction()
+    // window, so re-reading the height here cannot fail.
     if constexpr (is_debug_build()) {
       if (error_code == InvokeErrorCode::ValidationFailure &&
           std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
-        auto expired = replay_uniquifier_expired();
-        CHECK(expired.has_value() && *expired);
+        CHECK(replay_uniquifier_expired());
       }
     }
 
@@ -779,13 +790,15 @@ SystemCallHandler::validate_new_invocation(
   // once. Every open frame holds a live contract runtime, so without this a
   // recursive call chain grows until the executor cannot hold it.
   //
-  // Reading the bound off the tip can fail, and that is a system error ending
-  // block execution -- not something the caller is told about.
-  auto max_depth = snapshot_cache_.try_get_max_cross_invoke_depth();
-  if (!max_depth.has_value()) {
-    return max_depth.error();
+  // Pinning the tip can fail, and that is a system error ending block
+  // execution -- not something the caller is told about. This is the pin point
+  // for the paths that enter below root_invoke() (the test FFI mock frame runs
+  // these checks itself); once pinned, the bound is a plain load.
+  if (auto res = init_db_tip(); !res.has_value()) {
+    return res.error();
   }
-  if (invocation_frame_stack_.size() >= *max_depth) {
+  if (invocation_frame_stack_.size() >=
+      db_tip_->network_config.max_cross_invoke_depth) {
     return SyscallStatus<void>{std::unexpected(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }
@@ -978,15 +991,15 @@ SystemCallHandler::start_frame(
   auto admitted = [&]() -> SystemStatus<void> {
     try {
       // The frame's hash-buffer limit is fixed at admission, so a syscall
-      // enforcing it has no tip read left to fail on.
-      auto max_buffers = snapshot_cache_.try_get_max_sha256_buffers();
-      if (!max_buffers.has_value()) {
-        return std::unexpected(max_buffers.error());
+      // enforcing it has no tip read left to fail on. This is the pin point
+      // for the view path, which calls start_frame() directly for its root
+      // parent frame rather than going through invoke().
+      if (auto res = init_db_tip(); !res.has_value()) {
+        return std::unexpected(res.error());
       }
-      return invocation_frame_stack_.start_frame(invocation.invoked_address,
-                                                 std::move(invocation.calldata),
-                                                 flags, owned_auth_token_ids,
-                                                 *max_buffers);
+      return invocation_frame_stack_.start_frame(
+          invocation.invoked_address, std::move(invocation.calldata), flags,
+          owned_auth_token_ids, db_tip_->network_config.max_sha256_buffers);
     } catch (std::exception const &e) {
       try {
         error("unrecoverable: frame admission threw: {}", e.what());
@@ -1222,24 +1235,15 @@ SystemCallHandler::report_db_conflict_diagnostic() const
     first = conflict.conflicts().data();
   }
 
-  auto height = get_block_height();
-  if (!height.has_value()) {
-    // Best-effort report, but a tip read failing (e.g. the block is being torn
-    // down) is worth surfacing rather than swallowing.
-    warn("dropping tx-failure diagnostic: could not read executing block "
-         "height (db tip unavailable)");
-    return;
-  }
   // Fire-and-forget: drive the async send in a detached coroutine so execution
   // never waits on it (the same detached-await shape as the event server's own
   // detached sends). report_tx_failure copies the client, so the send is
   // self-contained and safe to outlive us.
-  [](x23::Async<void> send) -> x23::Detached {
-    co_await send;
-  }(event_server_proxy_.report_tx_failure(get_source_tx_hash(),
-                                          TxFailureDiagnostic{
-                                              .attempt_height = height.value(),
-                                              .conflict = *first}));
+  const BlockHeight height = get_block_height();
+  [](x23::Async<void> send)
+      -> x23::Detached { co_await send; }(event_server_proxy_.report_tx_failure(
+          get_source_tx_hash(),
+          TxFailureDiagnostic{.attempt_height = height, .conflict = *first}));
 }
 
 void
@@ -1393,13 +1397,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     // auth guard rejects callers that cannot authenticate for the address.
     // If the configured hash has no contract record, resolution fails the
     // same way as any other missing contract.
-    // NOTE: called with no snapshot-cache lock held; try_get_db_tip must
-    // stay outside any SynchronizedMap lock scope (lock-free atomic tip).
-    auto tip = snapshot_cache_.try_get_db_tip();
-    if (!tip.has_value()) {
-      return tip.error();
-    }
-    local_hash = tip.value()->default_wallet;
+    local_hash = db_tip()->default_wallet;
   }
 
   if (!local_hash) {
@@ -2258,13 +2256,9 @@ SystemCallHandler::sha256_finalize(uint32_t input_index)
 
 // == Block statistics syscalls ==
 
-SystemStatus<BlockHeight>
+BlockHeight
 SystemCallHandler::get_block_height() const
 {
-  auto tip = snapshot_cache_.try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
   // The contract-visible current block height is the *executing* block height,
   // which is the parent tip's height + 1: HogDb opens the BlockTX at
   // get_tip().value.proposal_header.block_height + 1 (see
@@ -2272,7 +2266,7 @@ SystemCallHandler::get_block_height() const
   // for an open block. Contract-facing height-gated logic (auth-token expiry,
   // timelocks) must observe the executing height, matching the replay-cache
   // expiry check.
-  return tip.value()->value.proposal_header.block_height + 1;
+  return db_tip()->value.proposal_header.block_height + 1;
 }
 
 // == Auth token syscalls ==
