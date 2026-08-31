@@ -184,8 +184,14 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
       return ret.error();
   }
 
-  // persist everything to the ramdb.
-  HogDbStatus<uint64_t> lsn = ctx_.get_db().commit();
+  // persist everything to the ramdb. Writes have quiesced here (sync()'s
+  // precondition), so this is also the safe point to snapshot when enough
+  // WAL lies beyond snapshot coverage that disk cleanup could reclaim it
+  // (#3704). The snapshot copies items on its own thread; only the sync is
+  // paid inline.
+  HogDbStatus<uint64_t> lsn = ctx_.get_db().snapshot_recommended()
+                                  ? ctx_.get_db().commit_and_snapshot()
+                                  : ctx_.get_db().commit();
   if (!lsn)
     return lsn.error();
 

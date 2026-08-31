@@ -66,6 +66,9 @@ enum class HogDbCode : uint8_t {
   // changed state that this block already read. The block should
   // be abandoned.
   kStaleBlock,
+
+  // The operation conflicts with one already in progress.
+  kBusy,
 };
 
 // HogDbCategory provides an error category for hog_db errors.
@@ -82,6 +85,9 @@ using HogDbError = EnumError<HogDbCode, HogDbCategory>;
 inline HogDbError
 to_hog_db_error(DBError err)
 {
+  // kBusy sits past the shared numeric prefix of the two enums.
+  if (err.code() == DBCode::kBusy)
+    return HogDbError(HogDbCode::kBusy);
   assert(err.raw_code() <= std::to_underlying(HogDbCode::kCorruption));
   return HogDbError(static_cast<HogDbCode>(err.raw_code()));
 }

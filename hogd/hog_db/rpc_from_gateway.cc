@@ -53,6 +53,7 @@ to_rpc_error(HogDbError err)
   case HogDbCode::kIO:
   case HogDbCode::kInvalidExecutorBehavior:
   case HogDbCode::kStaleBlock:
+  case HogDbCode::kBusy:
     return RPCError::kRPCUnrecoverable;
   }
   return RPCError::kRPCUnrecoverable;
