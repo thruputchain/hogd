@@ -606,28 +606,34 @@ night on the same silicon.
 
 ### What the proposal says
 
-From this container, at resolution 1:
+Measured on the bench pool -- hog10, AMD EPYC 9554, the machine the committed
+opcode reference came from. Run 33444039972, `mode=reference`.
 
 ```
-gas unit: 1.6014 ns (1/1 of the 1.6014 ns baseline instruction)
+gas unit: 1.6221 ns (1/1 of the 1.6221 ns baseline instruction)
 
 syscall                        ns/call  gas now  gas proposed
-GetBlockHeight                   105.2        0            68
-GetCalldataLen                   104.4        0            68
-GetCurrentAddress                105.1        0            68
-GetMsgSender                     109.0        0            68
-GetSourceTransactionHash         106.5        0            68
+GetBlockHeight                    71.9        0            48
+GetCalldataLen                    79.2        0            48
+GetCurrentAddress                 75.1        0            48
+GetMsgSender                       79.0       0            48
+GetSourceTransactionHash          75.8        0            48
 
-constexpr static uint64_t kSyscallBaseCost = 67;
-constexpr static uint64_t kSHA256HashBaseCost = 33;    // was 500
-constexpr static uint64_t kSHA256HashByteCost = 1;     // was 100
-constexpr static uint64_t kSHA256HashByteDivisor = 2;  // new
+constexpr static uint64_t kSyscallBaseCost = 48;
+constexpr static uint64_t kSHA256HashBaseCost = 20;    // was 500
+constexpr static uint64_t kSHA256HashByteCost = 11;    // was 100
+constexpr static uint64_t kSHA256HashByteDivisor = 32; // new
 ```
 
-The divisor is there because the per-byte rate is 0.46 gas and no integer
-expresses it; see below. `--margin 3` moves the base to 69, `--margin 5` to 70.
+hog10 is roughly 40% faster than the container these numbers were first taken on
+and far quieter with it: per-syscall standard deviations of 0.04-0.27 ns against
+0.2-2.2. The *shape* is identical -- one crossing cost that swamps every
+handler, SHA256 as a small base plus a sub-unit per-byte term -- which is what
+makes the shape the finding and the container's absolute numbers superseded.
 
-Three decisions are baked into those numbers, and each is arguable on its own.
+SHA256 there measures **111.4 ns + 0.5429 ns/byte** at R2 = 1.0000.
+
+Three decisions are baked into the proposal, and each is arguable on its own.
 
 **One shared base, not one constant per syscall.** The stateless reads land
 within a few percent of each other, so what is being priced is the crossing and
@@ -641,65 +647,58 @@ pricing is the rule the opcode schedule already follows. One gas of it is
 already charged as the `ecall` instruction, so the proposal subtracts it rather
 than billing the crossing twice.
 
-**SHA256's base is its excess over the crossing, not its total.** The 168 ns
-here is the fit's intercept over the whole size sweep, not the 173 ns measured
-at zero bytes in the table above -- they are different quantities and agree to
-3%. Of it, about 109 ns is the crossing every syscall already pays; charging
-SHA256's full base as well would bill that twice.
-
-A caveat on all the absolute numbers: this is a shared container, and two runs
-half an hour apart moved individual syscalls by up to 11% (the proposal moved
-68 gas to 67). The shape -- one crossing cost, a small SHA256 excess, a per-byte
-term well under a gas unit -- is stable; the last digit is not. Take the numbers
-that set the schedule from the bench pool.
+**SHA256's base is its excess over the crossing, not its total.** The 111.4 ns
+is the fit's intercept over the whole size sweep, not the 115.9 ns measured at
+zero bytes -- different quantities, agreeing to 4%. Of it, about 79 ns is the
+crossing every syscall already pays, leaving 32.2 ns of SHA256's own work.
+Charging its full base as well would bill the crossing twice.
 
 ### The per-byte term cannot be an integer, and that is fixable cheaply
 
-SHA256's per-byte cost is **0.73 ns**, and a gas unit at resolution 1 is
-1.60 ns. So the rate is **0.46 gas per byte**, and no integer expresses it: a
-flat 1 gas/byte overcharges by **2.2x**.
+On hog10 SHA256's per-byte cost is **0.5429 ns** against a 1.6221 ns gas unit --
+**0.335 gas per byte**, and no integer expresses it. A flat 1 gas/byte
+overcharges by **3.0x**.
 
-There are two ways out, and they buy the same precision at very different
-prices.
+Two ways out, same precision, very different prices.
 
-**Raise the resolution.** `--resolution 4` makes the unit 0.40 ns and the
-per-byte term 2 gas, at 1.10x. It also multiplies every number in the opcode
-schedule, the syscall schedule, and the block gas limits by four, because the
-two tables cannot be denominated differently.
+**Raise the resolution.** `--resolution 4` makes the unit 0.41 ns. It also
+multiplies every number in the opcode schedule, the syscall schedule, and the
+block gas limits by four, because the two tables cannot be denominated
+differently.
 
-**Or split the charge over several bytes.** `ceil(bytes * 1 / 2)` -- one gas per
-two bytes -- is 1.09x, at resolution 1, changing nothing outside
-`SHA256HashCost`. The report proposes this form and prints both so the
-comparison is visible:
+**Or split the charge over several bytes.** `ceil(bytes * 11 / 32)` is 1.03x, at
+resolution 1, changing nothing outside `SHA256HashCost`. The report prints both
+so the comparison is visible:
 
 ```
-per byte that is 0.4566 gas, which no integer can express:
-  flat 1 gas/byte overcharges by 2.19x
-  1 gas per 2 bytes overcharges by 1.10x
+per byte that is 0.3347 gas, which no integer can express:
+  flat 1 gas/byte overcharges by 2.99x
+  11 gas per 32 bytes overcharges by 1.03x
 ```
 
-It searches denominators up to 64 -- SHA256's own block size -- but stops at the
-simplest one inside 1.10x rather than the most accurate one available. 15/32
-would reach 1.03x; the benchmark reproduces to about 11% run-to-run on a shared
-host, so that is fitting a digit the measurement does not have, in a consensus
-constant nobody can read.
+What it buys, across the size sweep (ns of real work per gas, against 1.62 for a
+dispatched instruction):
 
-What it buys, measured across the size sweep (ns of real work per gas, against
-1.60 for a dispatched instruction):
-
-| bytes | now | flat 1/byte | 1 per 2 bytes |
+| bytes | now | flat 1/byte | 11 per 32 bytes |
 |---:|---:|---:|---:|
-| 0 | 0.369 | 1.847 | 1.847 |
-| 256 | 0.014 | 1.035 | 1.617 |
-| 4096 | 0.008 | 0.754 | 1.473 |
-| 32768 | 0.007 | 0.735 | 1.465 |
-| **spread** | **50.1x** | **2.5x** | **1.26x** |
+| 0 | 0.267 | 1.962 | 1.962 |
+| 256 | 0.011 | 0.844 | 1.753 |
+| 4096 | 0.006 | 0.565 | 1.594 |
+| 32768 | 0.006 | 0.546 | 1.581 |
+| **spread** | **48.8x** | **3.6x** | **1.24x** |
 
 Spread is worst-over-best: how differently the same syscall is billed depending
-on an argument the caller picks. Today it is 50x. A flat integer per-byte cost
-takes that to 2.5x. The divisor takes it to 1.26x, and the residual is the
-fixed base being amortized over a growing input, which no per-byte term can
-remove.
+on an argument the caller picks. Today it is 49x. A flat integer per-byte cost
+takes that to 3.6x. The divisor takes it to 1.24x, and the residual is the fixed
+base amortizing over a growing input, which no per-byte term can remove.
+
+A note on the fraction itself. On a slower host the rate was 0.457 gas/byte and
+the answer was a tidy `1 gas per 2 bytes`; on hog10 it is 0.335 and the answer
+is `11/32`. The pretty fraction was an artifact of that host's ratio, not a
+property of SHA256 -- worth knowing before anyone gets attached to one. The
+search also only tries power-of-two denominators, which is why it lands on 11/32
+rather than something nearer 1/3; widening it would find shorter fractions, at
+the cost of a divisor that is not a shift.
 
 **One thing to check before adopting a divisor.** `gas_schedule_digest()` in
 `artifact.h` hashes `kSyscallGasCostSchedule`'s names and costs -- not
@@ -715,20 +714,22 @@ only headroom is the rounding up to the next whole gas. At this unit that is
 about **1%**:
 
 ```
-One shared base of 67 gas, taken from GetMsgSender at 107.6 ns.
-That buys 108.9 ns of budget: +1.2% over the dearest measured call.
+One shared base of 48 gas, taken from GetCalldataLen at 79.2 ns.
+That buys 79.5 ns of budget: +0.3% over the dearest measured call.
 ```
 
-Against a benchmark that reproduces to ~11% on a shared host, 1% is not a
-margin. `--margin PERCENT` applies one before rounding, and the report says what
-the result buys:
+Three tenths of a percent. That is not a margin, it is where the rounding
+happened to land, and on a different night it lands somewhere else.
+`--margin PERCENT` applies one before rounding, and the report says what the
+result buys:
 
 ```
-scripts/rv32_syscall_report.py sys.json --gas gas.json --schedule --margin 3
-  -> kSyscallBaseCost = 69     (+4.2% over the dearest measured call)
-scripts/rv32_syscall_report.py sys.json --gas gas.json --schedule --margin 5
-  -> kSyscallBaseCost = 70     (+5.7%)
+--margin 0  ->  kSyscallBaseCost = 48   (+0.3% over the dearest measured call)
+--margin 5  ->  kSyscallBaseCost = 51   (+6.5%)
 ```
+
+The calibration workflow prints both, so a reviewer sees the choice rather than
+inheriting it.
 
 How much margin a protocol constant deserves is a policy call, not a
 measurement. The report's job is to make the size of it visible rather than let
@@ -736,12 +737,13 @@ it be discovered later; picking it is yours.
 
 ### What follows
 
-- **The zero-gas reads are the urgent item.** A loop of `GetBlockHeight` burns
-  ~105 ns per iteration and is charged for the handful of instructions that set
-  the call up -- roughly 5 gas against 105 ns of real work, an order of magnitude
-  worse per gas than the worst opcode the calibration found.
-- **`SHA256HashCost` needs re-deriving, not scaling.** The measured
-  base-to-per-byte ratio is about 220:1 (160 ns : 0.73 ns); the charged ratio is
+- **The zero-gas reads are the urgent item.** On hog10 a loop of
+  `GetBlockHeight` burns ~72 ns per iteration and is charged for the handful of
+  instructions that set the call up -- roughly 5 gas against 72 ns of real work,
+  an order of magnitude worse per gas than the worst opcode the calibration
+  found.
+- **`SHA256HashCost` needs re-deriving, not scaling.** On hog10 the measured
+  base-to-per-byte ratio is about 205:1 (111 ns : 0.54 ns); the charged ratio is
   5:1 (500 : 100). No single multiplier fixes both, and the per-byte term needs
   a divisor to be expressible at all.
 - Take the numbers from the bench pool, not from a container, and from more than
