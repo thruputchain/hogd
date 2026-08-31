@@ -178,7 +178,9 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 // format_version here does not produce a correct fingerprint for another
 // version on its own.
 constexpr uint64_t
-format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
+format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
+                   uint32_t gas_version = kGasTableVersion,
+                   uint64_t gas_digest = kGasScheduleDigest)
 {
   uint64_t digest = kFnvOffsetBasis;
   digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
@@ -195,10 +197,8 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion)
                                   kArtifactEntryAbiVersion);
   digest = format_fingerprint_u64(digest, u8"syscall_abi_version",
                                   kArtifactSyscallAbiVersion);
-  digest =
-      format_fingerprint_u64(digest, u8"gas_table_version", kGasTableVersion);
-  digest = format_fingerprint_u64(digest, u8"gas_schedule_digest",
-                                  kGasScheduleDigest);
+  digest = format_fingerprint_u64(digest, u8"gas_table_version", gas_version);
+  digest = format_fingerprint_u64(digest, u8"gas_schedule_digest", gas_digest);
 
   digest = format_fingerprint_layout_field(digest, u8"header.magic.offset",
                                            u8"header.magic.size", 0,
@@ -290,6 +290,33 @@ inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
 static_assert(kArtifactFormatFingerprint == 0xcc78e61a463f927eULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
+
+// The engine fingerprints a lowerer may report while kAcceptedGasSchedules
+// still has transitional entries: one per accepted schedule, in the same order.
+// The fingerprint folds the gas schedule, so a lowerer that stamps a
+// transitional schedule necessarily reports a different value from this build's
+// -- the same rollout skew kAcceptedGasSchedules exists for, seen from the
+// metadata side. This list is derived from that one and disappears with it.
+constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
+accepted_format_fingerprints()
+{
+  std::array<uint64_t, kAcceptedGasSchedules.size()> fingerprints = {};
+  for (size_t i = 0; i < kAcceptedGasSchedules.size(); ++i) {
+    fingerprints[i] = format_fingerprint(kArtifactFormatVersion,
+                                         kAcceptedGasSchedules[i].version,
+                                         kAcceptedGasSchedules[i].digest);
+  }
+  return fingerprints;
+}
+
+inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
+    kAcceptedFormatFingerprints = accepted_format_fingerprints();
+static_assert(kAcceptedFormatFingerprints.front() ==
+              kArtifactFormatFingerprint);
+// The v3 entry is what groundhog-cli 0.10.2 reports. Pinning it here proves
+// this derivation reproduces a fingerprint the lowerer actually emits, rather
+// than one only this header believes in.
+static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
