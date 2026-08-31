@@ -65,9 +65,10 @@ namespace {
 
 enum class CommitMetricsOutcome { kOk, kBlockNotFound };
 
-template<typename T>
+// [indices] must be sorted ascending and within range.
+template<typename Container>
 void
-remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
+remove_indices(Container &remove_from, const x23::Vec<size_t> &indices)
 {
   size_t write_idx = 0;
   size_t num_erased = 0;
@@ -289,11 +290,21 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
+  // Hashes of the submitted signings, held alongside [txs] and pruned with it
+  // so that consulting the cache here and writing it below hash only once.
+  x23::Vec<SHA256Hash> signing_hashes;
+
   // Drop signings authentication has already rejected before paying for
   // another verification of the same bytes.
   auto drop_rejected_node = submit_dag.async<void>(
       "drop known-bad signatures", submit_dag.after(capacity_node),
       [&]() -> x23::Async<void> {
+        signing_hashes.clear();
+        signing_hashes.reserve(txs->size());
+        for (const SignedTransaction &tx : *txs) {
+          signing_hashes.push_back(sha256(tx));
+        }
+
         // A verdict is only as good as the key-change record checked against
         // it. A commit advances [current_block] before [auth_data_changed]
         // records that block's key changes, so while the watermark lags,
@@ -306,12 +317,16 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < txs->size(); i++) {
           if (failed_signatures_.contains(
-                  (*txs)[i].tx.invocation.invoked_address, sha256((*txs)[i]))) {
+                  (*txs)[i].tx.invocation.invoked_address, signing_hashes[i])) {
             to_remove_indices.push_back(i);
           }
         }
         if (!to_remove_indices.empty()) {
+          MempoolMetrics::instance().cached_auth_failure_tx_count.increment(
+              to_remove_indices.size());
           remove_indices(/*remove_from=*/*txs,
+                         /*indices=*/to_remove_indices);
+          remove_indices(/*remove_from=*/signing_hashes,
                          /*indices=*/to_remove_indices);
         }
         co_return;
@@ -336,6 +351,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         // submitted transaction; otherwise we cannot attribute auth results to
         // transactions and must not admit the batch.
         CHECK_EQ(auth_ret.size(), txs->size());
+        CHECK_EQ(signing_hashes.size(), txs->size());
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
@@ -343,7 +359,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
             // Only [kAuthFailed] is a verdict about these bytes. The other
             // codes describe this node's own state and must not be cached.
             if (code == AuthErrorCode::kAuthFailed) {
-              failed_signatures_.insert(sha256((*txs)[i]), verify_height);
+              failed_signatures_.insert(signing_hashes[i], verify_height);
             }
             to_remove_indices.push_back(i);
           }

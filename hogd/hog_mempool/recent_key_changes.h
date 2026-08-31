@@ -75,8 +75,8 @@ struct KeyChangeBucket {
 //
 // Being bounded, changes can be forgotten. [forgotten_height] is the newest
 // one dropped; nothing at or below it counts as current, since a forgotten
-// change cannot be newer than that. Ordinary traffic never displaces anything
-// and the bar stays at zero.
+// change cannot be newer than that. It is -1, below every real height, while
+// nothing has been dropped, which is where ordinary traffic leaves it.
 //
 // Per-account rather than a single global bar: anyone can rotate their own
 // keys, so a global rule would let one account invalidate everyone's.
@@ -85,19 +85,21 @@ struct KeyChangeBucket {
 // "check again" rather than as a statement about the account.
 class RecentKeyChanges {
 public:
-  // 1M buckets of 8 is 8M tracked accounts. Buckets are materialized as
-  // accounts land in them, so this costs nothing until they do.
+  // 1M buckets of 8 is 8M tracked accounts, and roughly 430MB if every one
+  // of them is used. Buckets are materialized as accounts land in them, so
+  // the resident cost tracks accounts that have actually written auth data
+  // rather than the ceiling.
   explicit RecentKeyChanges(size_t num_buckets = 1 << 20)
     : num_buckets_(num_buckets)
   {}
 
   void note(const ContractAddress &address, BlockHeight height)
   {
-    std::optional<BlockHeight> forgotten;
-    {
-      auto [bucket, bucket_lock] = buckets_[bucket_key(address)];
-      forgotten = bucket.insert(address, height);
-    }
+    // Raise the bar while still holding the bucket lock. A change dropped
+    // from the bucket is accounted for by nothing until the bar covers it,
+    // and a reader in between would call a stale conclusion current.
+    auto [bucket, bucket_lock] = buckets_[bucket_key(address)];
+    const std::optional<BlockHeight> forgotten = bucket.insert(address, height);
     if (!forgotten.has_value()) {
       return;
     }
@@ -124,7 +126,7 @@ public:
     return !changed_at.has_value() || height > *changed_at;
   }
 
-  // Newest change dropped for want of room; zero while none has been.
+  // Newest change dropped for want of room; -1 while none has been.
   BlockHeight forgotten_height() const
   {
     return forgotten_height_.load(std::memory_order_relaxed);
@@ -140,7 +142,7 @@ private:
 
   size_t num_buckets_;
   SynchronizedMap<uint64_t, detail::KeyChangeBucket> buckets_;
-  std::atomic<BlockHeight> forgotten_height_ = 0;
+  std::atomic<BlockHeight> forgotten_height_ = -1;
 };
 
 } // namespace hogd

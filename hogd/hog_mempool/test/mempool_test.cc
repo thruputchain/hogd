@@ -2865,7 +2865,9 @@ TEST(Mempool, ForgottenKeyChangesRaiseTheBar)
   const ContractAddress address = MempoolTestInfra::kAccountAddresses[0];
 
   ASSERT_TRUE(changes.still_current(address, /*height=*/10));
-  ASSERT_EQ(changes.forgotten_height(), 0UL);
+  ASSERT_EQ(changes.forgotten_height(), -1);
+  // Height 0 is a real height, so the empty bar must sit below it.
+  ASSERT_TRUE(changes.still_current(address, /*height=*/0));
 
   // Rotate enough distinct accounts to overflow the single bucket, so the
   // earliest of them is dropped.
@@ -2874,7 +2876,7 @@ TEST(Mempool, ForgottenKeyChangesRaiseTheBar)
     std::memcpy(rotator.data(), &i, sizeof(i));
     changes.note(rotator, static_cast<BlockHeight>(20 + i));
   }
-  EXPECT_GT(changes.forgotten_height(), 0UL);
+  EXPECT_GT(changes.forgotten_height(), 0);
 
   // Predates a change we can no longer answer for.
   EXPECT_FALSE(changes.still_current(address, /*height=*/10));

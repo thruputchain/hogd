@@ -126,6 +126,7 @@ public:
   Metrics::Counter rejected_malformed_unvetted_rpc_count;
   Metrics::Counter rejected_malformed_vetted_rpc_count;
   Metrics::Counter auth_failed_tx_count;
+  Metrics::Counter cached_auth_failure_tx_count;
   Metrics::Counter nomination_attempt_count;
   Metrics::Counter nomination_success_count;
   Metrics::Counter nomination_error_count;
@@ -232,6 +233,10 @@ MempoolMetrics::init()
   auth_failed_tx_count = metrics.per_thread_counter(
       kComponent, "auth_failed_tx_count",
       "Submitted transactions rejected by authentication.");
+  cached_auth_failure_tx_count = metrics.per_thread_counter(
+      kComponent, "cached_auth_failure_tx_count",
+      "Unvetted submitted transactions dropped on a cached authentication "
+      "failure, without reaching authentication.");
   nomination_attempt_count =
       metrics.per_thread_counter(kComponent, "nomination_attempt_count",
                                  "Block nomination attempts.");
