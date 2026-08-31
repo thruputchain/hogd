@@ -332,9 +332,18 @@ IndexerPullController::run(const std::stop_token &stop)
         mark_not_ready();
         retry_delay = true;
         break;
+      case EventIndexerPullOutcome::EventIndexerPullInternalFailure:
+        // The event service reporting an internal failure serving this pull
+        // (for example a durable read of a corrupted retained outbox record)
+        // is the server's problem, not a fatal indexer condition. Stay alive
+        // and unhealthy and retry rather than terminating the process.
+        error("event service internal failure serving indexer pull: {}",
+              result.diagnostic());
+        mark_not_ready();
+        retry_delay = true;
+        break;
       case EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol:
       case EventIndexerPullOutcome::EventIndexerPullProgressConflict:
-      case EventIndexerPullOutcome::EventIndexerPullInternalFailure:
         panic("fatal indexer pull outcome {}: {}", result.outcome(),
               result.diagnostic());
       }

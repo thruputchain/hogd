@@ -386,6 +386,75 @@ private:
 
 static_assert(is_EventIndexer1<BlockingPullRpc *, x23::MaybeAsync>);
 
+// Reports EventIndexerPullInternalFailure (as the event service does for a
+// durable read failure of a corrupted retained outbox record) for the first
+// few pulls, then recovers by reporting caught-up. Used to prove the
+// controller stays alive and retries instead of terminating the process.
+class InternalFailurePullRpc {
+public:
+  using rpc_service = EventIndexer1;
+
+  InternalFailurePullRpc()
+  {
+    origin_.protocol = version::kHogdProtocol();
+    origin_.first_height = IndexDB::kFirstOutboxBlockHeight;
+    std::ranges::fill(origin_.first_prev_hash, 0x42);
+  }
+
+  x23::Async<EventIndexerPullResult>
+  event_indexer_pull_next(EventIndexerPullRequest /*request*/)
+  {
+    if (calls_.fetch_add(1, std::memory_order_relaxed) < kFailureCount) {
+      co_return EventIndexerPullResult(
+          EventIndexerPullOutcome::EventIndexerPullInternalFailure);
+    }
+    EventIndexerPullResult result(
+        EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+    result.origin() = origin_;
+    co_return result;
+  }
+
+  static IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures()
+  {
+    return {};
+  }
+
+  std::size_t calls() const { return calls_.load(std::memory_order_relaxed); }
+
+private:
+  static constexpr std::size_t kFailureCount = 3;
+  IndexerOutboxOrigin origin_{};
+  std::atomic<std::size_t> calls_ = 0;
+};
+
+static_assert(is_EventIndexer1<InternalFailurePullRpc *, x23::MaybeAsync>);
+
+// Regression: an EventIndexerPullInternalFailure reported by the event service
+// (e.g. a durable read failure of a corrupted retained outbox record) must not
+// terminate the production indexer. The controller must remain alive, retry,
+// and catch up once the event service recovers.
+TEST(IndexerPullController, SurvivesEventServiceInternalFailure)
+{
+  TmpDir indexer_dir;
+  auto db = IndexDB::make_new(std::filesystem::path(indexer_dir.directory()) /
+                              "indexer-db");
+  ASSERT_TRUE(db.has_value()) << db.error();
+  RecentTxFailureCache failures;
+  RpcServer<InternalFailurePullRpc> event_server;
+  const std::uint16_t event_port =
+      event_server.start_server(x23::HostPort{"127.0.0.1", 0});
+  IndexerPullControllerOptions options;
+  options.retry_delay = std::chrono::milliseconds(1);
+  options.caught_up_poll_delay = std::chrono::milliseconds(1);
+
+  IndexerPullController controller(
+      std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
+      options);
+
+  EXPECT_TRUE(controller.wait_until_caught_up_for(std::chrono::seconds(5)));
+  EXPECT_GT(event_server.impl()->calls(), 3UL);
+}
+
 TEST(IndexerPullController, RetriesAppliesBlockAndConfirmsCurrentProgress)
 {
   TmpDir indexer_dir;
