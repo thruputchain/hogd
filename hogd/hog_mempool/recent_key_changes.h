@@ -85,8 +85,9 @@ struct KeyChangeBucket {
 // "check again" rather than as a statement about the account.
 class RecentKeyChanges {
 public:
-  // 1024 buckets of 8 is 8k tracked accounts.
-  explicit RecentKeyChanges(size_t num_buckets = 1024)
+  // 1M buckets of 8 is 8M tracked accounts. Buckets are materialized as
+  // accounts land in them, so this costs nothing until they do.
+  explicit RecentKeyChanges(size_t num_buckets = 1 << 20)
     : num_buckets_(num_buckets)
   {}
 
