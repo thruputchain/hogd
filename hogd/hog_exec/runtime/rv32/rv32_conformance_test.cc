@@ -10,6 +10,7 @@
 
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/machine.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
 
