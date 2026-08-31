@@ -127,8 +127,11 @@ fi
 # files into one gas proposal. Filing the JSON is what lets that merge happen
 # from history rather than from shell access to the bench host.
 #
-# Filed under the time it was measured, not the commit's: nightly runs pile up
-# on whatever main last landed, and every one is a separate sample.
+# One file per commit, like every other metric here: a nightly re-run on a
+# commit main has not moved off replaces the previous sample rather than adding
+# to it. That is enough to merge several runs into a gas proposal -- runs are
+# comparable when the engine fingerprint matches, not when the commit does, so
+# the samples to merge are successive nights, not repeats of one night.
 file_measurement() {
   # Absent when the calibration itself failed rather than the comparison -- a
   # build that will not run, a machine that will not hold still. Nothing to
@@ -143,8 +146,7 @@ file_measurement() {
 
   echo 'log the calibration'
   ./scripts/log_metric.sh rv32-gas-calibration \
-    ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
-    "$(date -u +%Y-%m-%dT%H:%M:%S)" || return $?
+    ${HOG_DUMP_DIR}/rv32-gas-calibration.json || return $?
 
   echo 'commit metrics'
   ./scripts/commit_metrics.sh
