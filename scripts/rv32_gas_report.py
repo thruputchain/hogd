@@ -379,16 +379,33 @@ def merge_runs(runs):
     different jobs: the median estimates how much the opcode costs, unanimity
     decides whether it costs more than the baseline at all.
 
-    The median rather than the max, though gas has to be conservative, because
-    the max of N samples is not conservatism -- it is a statistic that grows
-    with N. Repeated runs measure one quantity, so taking their max prices the
-    unluckiest sample and keeps climbing as nights accumulate: over three hog10
-    runs the proposal rose 241 -> 245 -> 246 gas with nothing about the machine
-    changing. That also prices noise into individual opcodes, splitting
-    identical single-dispatch instructions across a rounding boundary on
-    sub-tenth-of-a-percent differences. The median converges instead, and the
-    conservatism that matters is untouched: worst_by_op still takes the max
-    across *contexts*, which is the choice an adversary actually makes.
+    Median *within* a host and max *across* hosts, because the two axes are
+    different questions. Repeated runs on one host measure one quantity, so
+    their max is not a conservative estimate of it -- it is a statistic that
+    grows with N, pricing the unluckiest sample and climbing as nights
+    accumulate: over three hog10 runs a plain max rose 241 -> 245 -> 246 gas
+    with nothing about the machine changing. It also priced noise into
+    individual opcodes, splitting identical single-dispatch instructions across
+    a rounding boundary on sub-tenth-of-a-percent differences. The median
+    converges instead.
+
+    Different hosts are not repeats of one measurement, though. Mixing them is
+    a deliberate workflow (see check_comparable) precisely because a schedule
+    has to hold on the slowest supported machine, so a host that finds an
+    opcode expensive must not be averaged away by two that do not. Hence the
+    max there.
+
+    The conservatism on the third axis is untouched: worst_by_op still takes
+    the max across *contexts*, which is the choice a guest author gets to make.
+
+    The cross-host max is over raw nanoseconds, which is what it has always
+    been. That is conservative but blunt: a host uniformly slower at everything
+    wins every opcode, and build_schedule then divides by the *fastest* host's
+    baseline, so the whole schedule inflates rather than just the opcodes that
+    host is relatively worse at. Comparing each host's cost against its own
+    baseline first would price the relative worst case instead. Left alone here
+    -- only hog10 has ever been merged, so nothing exercises it, and choosing
+    what a multi-host schedule means is a decision for whoever needs one.
 
     Requiring unanimity is what makes a schedule reproducible: a cell's
     within-run standard error captures scatter between that run's kernels, but
@@ -405,6 +422,7 @@ def merge_runs(runs):
     merged = {}
     total_runs = len(runs)
     for data in runs:
+        host = provenance(data).get("host") or "unknown host"
         baseline = baseline_ns(data)
         for cell in usable_cells(data):
             key = (cell["op"], context_label(cell))
@@ -418,16 +436,18 @@ def merge_runs(runs):
                     "op": cell["op"],
                     "context": context_label(cell),
                     "scheduled_gas": cell["scheduled_gas"],
-                    "costs": [cost],
+                    "costs": {host: [cost]},
                     "resolved": cell_resolved,
                     "runs": 1,
                 }
                 continue
-            entry["costs"].append(cost)
+            entry["costs"].setdefault(host, []).append(cost)
             entry["resolved"] = entry["resolved"] and cell_resolved
             entry["runs"] += 1
     for entry in merged.values():
-        entry["ns_per_instruction"] = statistics.median(entry.pop("costs"))
+        by_host = entry.pop("costs")
+        entry["ns_per_instruction"] = max(statistics.median(samples)
+                                          for samples in by_host.values())
     # Unanimity has to mean every run, not every run that happened to contain
     # the cell. A context missing from one run -- a filtered run, or a sweep the
     # audit rejected -- would otherwise keep an earlier run's `resolved` and be

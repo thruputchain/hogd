@@ -163,11 +163,10 @@ dot_product_body()
   for (uint32_t i = 0; body.size() < kWorkloadBodySlots; ++i) {
     body.push_back(
         test_program::load(kLoadDstBase, 2, kAddressBankBase, walk_offset(i)));
-    body.push_back(test_program::load(kLoadDstBase + 1, 2,
-                                      kAddressBankBase + 1,
+    body.push_back(test_program::load(kLoadDstBase + 1, 2, kAddressBankBase + 1,
                                       walk_offset(i + 1)));
-    body.push_back(test_program::op(kProd, kLoadDstBase, kLoadDstBase + 1, 0,
-                                    0x01));
+    body.push_back(
+        test_program::op(kProd, kLoadDstBase, kLoadDstBase + 1, 0, 0x01));
     body.push_back(test_program::op(kAcc, kAcc, kProd, 0, 0x00));
   }
   return body;
