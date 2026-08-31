@@ -294,6 +294,15 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto drop_rejected_node = submit_dag.async<void>(
       "drop known-bad signatures", submit_dag.after(capacity_node),
       [&]() -> x23::Async<void> {
+        // A verdict is only as good as the key-change record checked against
+        // it. A commit advances [current_block] before [auth_data_changed]
+        // records that block's key changes, so while the watermark lags,
+        // leave the cache alone and pay for the verification.
+        if (auth_data_height_.load() <
+            static_cast<int64_t>(scheduler_->current_block())) {
+          co_return;
+        }
+
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < txs->size(); i++) {
           if (failed_signatures_.contains(
