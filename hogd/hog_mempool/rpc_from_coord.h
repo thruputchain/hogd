@@ -89,7 +89,7 @@ public:
 
   ~MempoolCoordinatorRpc()
   {
-    disconnect_auth_callback();
+    disconnect_auth_callback()();
     // Wait for coroutines that outlive their initiating RPC handler and still
     // touch our members -- the detached vetted-notify send and the
     // [auth_data_changed] callback (whose [auth_data_height_] broadcast tail
@@ -104,10 +104,10 @@ public:
   // RPC is destroyed. This is normally called by our destructor; the devnode's
   // failed-construction path calls it earlier because it closes the auth server
   // before member destruction reaches the coordinator.
-  void disconnect_auth_callback()
+  x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
-      auth_rpc_->unregister_callback();
+      co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
   }
@@ -518,22 +518,11 @@ private:
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
-    const BlockHeight recovered_db_height =
-        last_committed_block_.value.proposal_header.block_height;
-    std::optional<BlockHeight> rejected_auth_height =
-        auth_rpc_->register_callback(
-            recovered_db_height,
-            [this](BlockHeight height, KeyChangeBatch key_changes) {
-              return auth_data_changed(height, std::move(key_changes));
-            },
-            [this] { initialized_.store(true, std::memory_order_release); });
-    if (rejected_auth_height) {
-      co_await db_rpc_->reset_scheduler();
-      throw std::runtime_error(std::format(
-          "auth startup watermark {} is ahead of recovered database height "
-          "{}; partial restart during an in-flight commit is unsupported",
-          *rejected_auth_height, recovered_db_height));
-    }
+    co_await auth_rpc_->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        },
+        [this] { initialized_.store(true, std::memory_order_release); });
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }

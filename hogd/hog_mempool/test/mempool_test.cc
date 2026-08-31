@@ -14,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -510,67 +512,73 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
-TEST(MempoolAuthRpc, StartupWatermarkMustNotExceedRecoveredDbTip)
+TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 {
   MempoolAuthRpc auth_rpc;
   constexpr BlockHeight kDbTip = 4;
-  std::optional<BlockHeight> callback_height;
-  bool registration_completed = false;
+  std::vector<BlockHeight> callback_height;
+  std::latch update_finished(1);
 
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
+  // We run [auth_rpc.mempoolauth_auth_data_changed()] in a separate thread as
+  // it blocks until a callback is registered.
+  [](MempoolAuthRpc &auth_rpc, std::latch &update_finished) -> x23::Detached {
+    co_await default_threadpool().bg();
+    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
+    update_finished.count_down();
+  }(auth_rpc, update_finished);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(callback_height.empty());
 
-  EXPECT_EQ(auth_rpc.register_callback(
-                kDbTip,
-                [&callback_height](BlockHeight height,
-                                   KeyChangeBatch /*key_changes*/)
-                    -> x23::Async<void> {
-                  callback_height = height;
-                  co_return;
-                },
-                [&registration_completed] { registration_completed = true; }),
-            kDbTip + 2);
-  EXPECT_EQ(callback_height, std::nullopt);
-  EXPECT_FALSE(registration_completed);
+  auth_rpc.register_callback(
+      [&callback_height](BlockHeight height,
+                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+        callback_height.push_back(height);
+        co_return;
+      },
+      [] {})();
 
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
-  EXPECT_EQ(auth_rpc.register_callback(
-                kDbTip,
-                [&callback_height](BlockHeight height,
-                                   KeyChangeBatch /*key_changes*/)
-                    -> x23::Async<void> {
-                  callback_height = height;
-                  co_return;
-                },
-                [&registration_completed] { registration_completed = true; }),
-            std::nullopt);
-  EXPECT_TRUE(registration_completed);
-
+  update_finished.wait();
   auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
-  EXPECT_EQ(callback_height, kDbTip + 1);
+  EXPECT_EQ(callback_height.size(), 2);
+  EXPECT_EQ(callback_height[0], kDbTip);
+  EXPECT_EQ(callback_height[1], kDbTip + 1);
 }
 
-TEST(MempoolAuthRpc, StartupUpdatesCoalesceToHighestWatermark)
+TEST(MempoolAuthRpc, StartupUpdatesDoNotCoalesce)
 {
   MempoolAuthRpc auth_rpc;
   constexpr BlockHeight kDbTip = 4;
+  std::unordered_set<BlockHeight> callback_height;
+  std::latch updates_finished(2);
 
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{})();
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip - 1, KeyChangeBatch{})();
+  // We run [auth_rpc.mempoolauth_auth_data_changed()] in separate threads as
+  // they block until a callback is registered.
+  [](MempoolAuthRpc &auth_rpc, std::latch &updates_finished) -> x23::Detached {
+    co_await default_threadpool().bg();
+    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
+    updates_finished.count_down();
+  }(auth_rpc, updates_finished);
+  [](MempoolAuthRpc &auth_rpc, std::latch &updates_finished) -> x23::Detached {
+    co_await default_threadpool().bg();
+    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1,
+                                                    KeyChangeBatch{});
+    updates_finished.count_down();
+  }(auth_rpc, updates_finished);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(callback_height.empty());
 
-  EXPECT_EQ(auth_rpc.register_callback(
-                kDbTip - 1,
-                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
-                  co_return;
-                },
-                [] {}),
-            kDbTip);
-  EXPECT_EQ(auth_rpc.register_callback(
-                kDbTip,
-                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
-                  co_return;
-                },
-                [] {}),
-            std::nullopt);
+  auth_rpc.register_callback(
+      [&callback_height](BlockHeight height,
+                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+        EXPECT_TRUE(callback_height.insert(height).second);
+        co_return;
+      },
+      [] {})();
+
+  updates_finished.wait();
+  EXPECT_EQ(callback_height.size(), 2);
+  EXPECT_TRUE(callback_height.contains(kDbTip));
+  EXPECT_TRUE(callback_height.contains(kDbTip + 1));
 }
 
 TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
@@ -582,16 +590,14 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   std::latch unregister_started(1);
   std::atomic<size_t> callback_count = 0;
 
-  EXPECT_EQ(auth_rpc.register_callback(
-                kDbTip,
-                [&](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
-                  callback_count.fetch_add(1, std::memory_order_relaxed);
-                  callback_started.count_down();
-                  allow_callback_finish.wait();
-                  co_return;
-                },
-                [] {}),
-            std::nullopt);
+  auth_rpc.register_callback(
+      [&](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+        callback_count.fetch_add(1, std::memory_order_relaxed);
+        callback_started.count_down();
+        allow_callback_finish.wait();
+        co_return;
+      },
+      [] {})();
 
   std::thread callback_thread([&] {
     auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
@@ -602,7 +608,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   std::future<void> unregistered = unregister_result.get_future();
   std::thread unregister_thread([&] {
     unregister_started.count_down();
-    auth_rpc.unregister_callback();
+    auth_rpc.unregister_callback()();
     unregister_result.set_value();
   });
   unregister_started.wait();
@@ -614,16 +620,6 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   EXPECT_EQ(unregistered.wait_for(std::chrono::seconds(1)),
             std::future_status::ready);
   unregister_thread.join();
-
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 2, KeyChangeBatch{})();
-  EXPECT_EQ(callback_count.load(std::memory_order_relaxed), 1);
-  EXPECT_EQ(auth_rpc.register_callback(
-                kDbTip,
-                [](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
-                  co_return;
-                },
-                [] {}),
-            kDbTip + 2);
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
