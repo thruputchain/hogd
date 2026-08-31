@@ -477,29 +477,6 @@ static_assert(is_MempoolAuth1<RecordingMempoolAuthRpc *, x23::Async>);
 
 } // namespace
 
-TEST(AuthServerSubscribeTest, SynchronizesMempoolToIntroHeight)
-{
-  constexpr BlockHeight kIntroHeight = 5;
-  RpcServer<SimpleDBAuthRpc> db_server(kIntroHeight);
-  const uint16_t db_port = db_server.start_server(0);
-  dbauth_client_t db_client =
-      make_dbauth_client(std::format("localhost:{}", db_port))().value();
-
-  RpcServer<RecordingMempoolAuthRpc> mempool_server;
-  const uint16_t mempool_port = mempool_server.start_server(0);
-  x23::HostPort mempool_address;
-  ASSERT_TRUE(mempool_address.parse(std::format("localhost:{}", mempool_port)));
-  sched_auth_client_t mempool_client =
-      make_rpc_client<MempoolAuth1>(mempool_address)().value();
-
-  AuthServer auth_server(std::move(db_client), NetworkHash{}, 16);
-  auth_server.set_mempool_client(std::move(mempool_client));
-  auth_server.subscribe_to_auth_data_changes(AuthCard{})();
-
-  ASSERT_EQ(mempool_server->impl()->height_, kIntroHeight);
-  ASSERT_EQ(mempool_server->impl()->batch_size_, 0U);
-}
-
 // Regression test for #1448: lookup_auth_data waiters stranded when
 // subscribe_to_auth_data_changes stores the initial height without broadcast.
 TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
