@@ -984,8 +984,8 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
 
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
-  const GasAmount sha_gas = 9'981;
-  const GasAmount return_gas = 8'774;
+  const GasAmount sha_gas = 9'977;
+  const GasAmount return_gas = 8'770;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -1030,8 +1030,8 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   // The repeated-hash method hashes once and returns an empty buffer.
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
-  const GasAmount sha_gas = 9'979;
-  const GasAmount return_gas = 8'772;
+  const GasAmount sha_gas = 9'974;
+  const GasAmount return_gas = 8'767;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, {}));
