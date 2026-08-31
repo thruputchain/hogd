@@ -283,7 +283,9 @@ measured somewhere else.
 
 Every run files its calibration JSON to `metrics_history` under
 `metrics/rv32-gas-calibration/`, passing or failing, so the costs accumulate as
-a time series instead of a nightly pass/fail. That is also where the input to a
+a time series instead of a nightly pass/fail. Each sample is named for the time
+it was measured rather than the commit's, since the nightly re-measures whatever
+main last landed and every run is a separate sample of the machine. That is also where the input to a
 gas-schedule proposal comes from: `--schedule` takes several of those files at
 once and merges them, so proposing a schedule reads history rather than needing
 shell access to the bench host.

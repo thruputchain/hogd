@@ -127,25 +127,42 @@ fi
 # files into one gas proposal. Filing the JSON is what lets that merge happen
 # from history rather than from shell access to the bench host.
 #
-# It is absent when the calibration itself failed rather than the comparison --
-# a build that will not run, a machine that will not hold still.
-if [ -s ${HOG_DUMP_DIR}/rv32-gas-calibration.json ]; then
+# Filed under the time it was measured, not the commit's: nightly runs pile up
+# on whatever main last landed, and every one is a separate sample.
+file_measurement() {
+  # Absent when the calibration itself failed rather than the comparison -- a
+  # build that will not run, a machine that will not hold still. Nothing to
+  # file, and nothing wrong with the filing.
+  if [ ! -s ${HOG_DUMP_DIR}/rv32-gas-calibration.json ]; then
+    echo 'no calibration output to file'
+    return 0
+  fi
 
   echo 'clone metrics history'
-  ./scripts/clone_metrics_history.sh
+  ./scripts/clone_metrics_history.sh || return $?
 
   echo 'log the calibration'
   ./scripts/log_metric.sh rv32-gas-calibration \
-    ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+    ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+    "$(date -u +%Y-%m-%dT%H:%M:%S)" || return $?
 
   echo 'commit metrics'
   ./scripts/commit_metrics.sh
+}
 
-else
-  echo 'no calibration output to file'
+METRICS_RESULT=0
+file_measurement || METRICS_RESULT=$?
+
+# The gate's verdict outranks a filing failure: a drifted calibration is the
+# more urgent news, and its output is in the log above either way. But a filing
+# failure still has to fail the job -- this script runs under `set -x` alone, so
+# an unconditional `exit $CHECK_RESULT` would leave a green nightly that pushed
+# nothing, which is the one failure nobody would notice.
+if [ $CHECK_RESULT -ne 0 ]; then
+  exit $CHECK_RESULT
 fi
 
-exit $CHECK_RESULT
+exit $METRICS_RESULT
 
 """
 
