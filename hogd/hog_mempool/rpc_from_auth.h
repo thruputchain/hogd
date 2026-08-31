@@ -31,12 +31,8 @@ public:
 
   // A fresh scheduler has no cached transactions, so auth updates received
   // before coordinator initialization only contribute a height watermark.
-  // Registration succeeds only when the recovered HogDB tip covers that
-  // watermark; partial component restart during an in-flight commit is not a
-  // safe state to recover by advancing mempool independently of HogDB.
   template<typename OnRegistered>
-  void register_callback(BlockHeight recovered_db_height,
-                         auth_data_callback &&callback,
+  void register_callback(auth_data_callback &&callback,
                          OnRegistered &&on_registered)
   {
     const std::lock_guard lock(callback_mutex_);

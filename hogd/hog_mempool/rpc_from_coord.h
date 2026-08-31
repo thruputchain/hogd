@@ -520,10 +520,7 @@ private:
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
-    const BlockHeight recovered_db_height =
-        last_committed_block_.value.proposal_header.block_height;
     auth_rpc_->register_callback(
-        recovered_db_height,
         [this](BlockHeight height, KeyChangeBatch key_changes) {
           return auth_data_changed(height, std::move(key_changes));
         },
