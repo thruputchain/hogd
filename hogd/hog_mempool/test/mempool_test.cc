@@ -2833,6 +2833,76 @@ TEST(Mempool, FailedSignatureCacheKeepsRepeatedlyHitEntries)
   EXPECT_TRUE(cache.contains(repeated));
 }
 
+// A rejection is only a verdict about the account state authentication read at
+// the time. Once a committed block changes an account's keys, a signing this
+// node turned down may verify, so the cache must not go on refusing it.
+TEST(Mempool, ChangedAuthDataFlushesTheFailedSignatureCache)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+
+  // The account lists one key now and a different one after the change, and
+  // the transaction is signed by neither. Authentication turns it down either
+  // way, so the only thing that varies across the change is whether the cache
+  // lets it be asked at all.
+  AddressAuthData initial_auth_data = get_default_account();
+  create_key_pair(initial_auth_data, /*idx=*/0, /*weight=*/1);
+  initial_auth_data.last_written_height = 1;
+  initial_auth_data.required_weight = 1;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               initial_auth_data);
+
+  AddressAuthData later_auth_data = get_default_account();
+  create_key_pair(later_auth_data, /*idx=*/0, /*weight=*/1);
+  later_auth_data.required_weight = 1;
+
+  Transaction &tx = txs[0].tx;
+  tx.auth_claim = make_sign_claim(0);
+
+  const SecretKey sk = unregistered_signer();
+  SignedTransaction signed_tx = txs[0];
+  signed_tx.signatures.push_back(
+      make_signature(sk, tx, /*public_key_id=*/0,
+                     MempoolTestInfra::kNetworkHash));
+
+  auto submit_over_gateway = [&] {
+    server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{signed_tx})())();
+  };
+  auto auth_failures = [] {
+    return MempoolMetrics::instance().auth_failed_tx_count.value();
+  };
+
+  // Rejected against the initial auth data, then cached: the second attempt
+  // never reaches authentication.
+  const ssize_t before = auth_failures();
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  ASSERT_EQ(auth_failures(), before + 1);
+  submit_over_gateway();
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  ASSERT_EQ(auth_failures(), before + 1);
+
+  // The account's keys change.
+  later_auth_data.last_written_height = 2;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               later_auth_data);
+  KeyChangeBatch key_changes = {
+      {.address = MempoolTestInfra::kAccountAddresses[0],
+       .auth_data = x23::Ptr<AddressAuthData>(later_auth_data)}};
+  server.register_auth_data_updates(2, std::move(key_changes))();
+
+  // The cached verdict was recorded against auth data that no longer applies,
+  // so it must not stand: the same bytes reach authentication again. Had this
+  // account's new keys made the signature valid, this is what would let the
+  // transaction in rather than leaving it refused until its entry aged out.
+  submit_over_gateway();
+  EXPECT_EQ(auth_failures(), before + 2);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+}
+
 // [FailedSignatureCache] is a public-gateway admission throttle. Transactions
 // arriving for a nomination must bypass it: a cached verdict can go stale,
 // because authentication reads account keys and weights that a later block can

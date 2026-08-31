@@ -118,6 +118,11 @@ public:
     bucket.insert(signed_tx_hash);
   }
 
+  // Drops every entry. Call when the account state authentication consults
+  // changes, since a verdict recorded against the old state may not hold
+  // against the new one.
+  void clear() { buckets_.clear(); }
+
   size_t max_entries() const
   {
     return num_buckets_ * detail::FailedSignatureBucket::kBucketSize;
@@ -137,11 +142,11 @@ public:
 private:
   uint64_t bucket_key(const SHA256Hash &signed_tx_hash) const
   {
-    // Keyed, and random per process. Being a SHA-256 makes this uniform but
-    // not unpredictable -- whoever submits the transaction chooses the bytes
-    // it covers -- so folding it with an index they could compute offline
-    // would let them grind signings into one bucket and push out whatever
-    // else it held.
+    // [SipHash24Hasher] is keyed from a per-process random key, so which
+    // bucket a signing lands in cannot be worked out offline. Folding the
+    // SHA-256 in directly would not do: it is uniform, but the submitter
+    // chooses the bytes it covers, so they could grind signings into one
+    // bucket and push out whatever else it held.
     return SipHash24Hasher{}(signed_tx_hash) % num_buckets_;
   }
 

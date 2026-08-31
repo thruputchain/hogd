@@ -2958,6 +2958,15 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
 
+  // Every cached rejection was recorded against the account state that just
+  // changed. A signing this node turned down at [height] may verify against
+  // the new keys and weights, so keeping those verdicts would refuse a now
+  // valid transaction on the gateway until its entry aged out. The cache
+  // holds no address index -- it is keyed on the signing hash -- so drop it
+  // whole rather than picking out the changed addresses; it is best-effort,
+  // and refilling it costs one reverification per signing.
+  failed_signatures_.clear();
+
   static TransactionHashBatch tx_hashes;
   static SignedTransactionBatch txs;
   tx_hashes.clear();
