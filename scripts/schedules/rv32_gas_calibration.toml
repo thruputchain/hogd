@@ -120,9 +120,20 @@ if [ "{{ .mode }}" = "reference" ]; then
   # The point of running this here rather than on a laptop: syscall gas is a
   # protocol constant and has to come from the machine class that runs the
   # chain.
-  echo '===== proposed syscall gas costs from this host ====='
+  #
+  # Printed twice, at no margin and at 5%. The zero-margin numbers are what the
+  # measurement says; their only headroom is the rounding up to the next whole
+  # gas, which at resolution 1 is a couple of percent -- narrower than this
+  # benchmark's own run-to-run spread. How much margin a protocol constant
+  # deserves is a policy call rather than a measurement, so the run shows both
+  # and leaves the choice to whoever adopts them.
+  echo '===== proposed syscall gas costs from this host (no margin) ====='
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
     --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule
+
+  echo '===== the same, with a 5% margin ====='
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule --margin 5
 
   echo '===== proposed reference.txt for this host ====='
   echo 'To adopt: copy ${HOG_DUMP_DIR}/rv32-gas-reference.txt from this host'
