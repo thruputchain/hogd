@@ -38,8 +38,6 @@
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
-#include "hogd/hog_mempool/failed_signature_cache.h"
-#include "hogd/hog_mempool/recent_key_changes.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
@@ -2606,8 +2604,7 @@ unregistered_signer()
 // The property the whole design rests on: [TransactionHash] covers
 // [Transaction] and nothing else, so no manipulation of the signatures can
 // change it. That is what makes a signature-keyed verdict stored under a
-// [TransactionHash] unsound, and it is why the cache below keys on the whole
-// [SignedTransaction] instead.
+// [TransactionHash] unsound.
 TEST(Mempool, TransactionHashIsIndependentOfSignatureManipulation)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -2656,8 +2653,8 @@ TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
   const TransactionHash tx_hash = sha256(tx);
 
   // Submit every rejectable signing over the unauthenticated gateway path,
-  // twice each so the second submission exercises the rejected-signature
-  // cache. None may be admitted.
+  // twice each so a resubmission of already-rejected bytes is covered too.
+  // None may be admitted.
   for (const NamedSigning &attack :
        rejectable_signings(tx, sk, unrelated, MempoolTestInfra::kNetworkHash)) {
     SCOPED_TRACE(attack.name);
@@ -2791,190 +2788,10 @@ TEST(Mempool, MultiSignerSigningsShareATransactionHash)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
-// The cache bounds what someone submitting endless distinct invalid signings
-// can occupy. Eviction is approximate, but the ceiling is not.
-TEST(Mempool, FailedSignatureCacheIsBounded)
-{
-  FailedSignatureCache cache(/*num_buckets=*/64);
-  const ContractAddress address = MempoolTestInfra::kAccountAddresses[0];
-
-  SHA256Hash hash{};
-  for (size_t i = 0; i < cache.max_entries() * 4; i++) {
-    std::memcpy(hash.data(), &i, sizeof(i));
-    cache.insert(hash, /*verified_at_height=*/1);
-  }
-
-  EXPECT_LE(cache.size(), cache.max_entries());
-  // Still doing its job at the ceiling: the most recent signing is retained.
-  EXPECT_TRUE(cache.contains(address, hash));
-}
-
-// A signing that keeps being resubmitted stays cached, which is the point of
-// promoting on a hit -- otherwise the entries worth keeping are exactly the
-// ones a flood of one-shot garbage would push out.
-TEST(Mempool, FailedSignatureCacheKeepsRepeatedlyHitEntries)
-{
-  FailedSignatureCache cache(/*num_buckets=*/64);
-  const ContractAddress address = MempoolTestInfra::kAccountAddresses[0];
-
-  SHA256Hash repeated{};
-  const size_t marker = 0xD1CED1CED1CED1CEULL;
-  std::memcpy(repeated.data(), &marker, sizeof(marker));
-  cache.insert(repeated, /*verified_at_height=*/1);
-
-  // Enough distinct signings to sweep the clock hand around every bucket many
-  // times over.
-  SHA256Hash filler{};
-  for (size_t i = 0; i < cache.max_entries() * 8; i++) {
-    std::memcpy(filler.data(), &i, sizeof(i));
-    cache.insert(filler, /*verified_at_height=*/1);
-    // Keep the entry live, as a submitter replaying the same bytes would. The
-    // read bit is what carries it past the clock hand.
-    ASSERT_TRUE(cache.contains(address, repeated));
-  }
-
-  EXPECT_TRUE(cache.contains(address, repeated));
-}
-
-// A key change invalidates that account and no other, so that rotating one's
-// own keys cannot invalidate everyone else's.
-TEST(Mempool, KeyChangeAffectsOnlyThatAccount)
-{
-  RecentKeyChanges changes;
-  const ContractAddress rotated = MempoolTestInfra::kAccountAddresses[0];
-  const ContractAddress untouched = MempoolTestInfra::kAccountAddresses[1];
-
-  EXPECT_TRUE(changes.still_current(rotated, /*height=*/5));
-  EXPECT_TRUE(changes.still_current(untouched, /*height=*/5));
-
-  changes.note(rotated, /*height=*/6);
-
-  // Anything read before the change is stale for that account ...
-  EXPECT_FALSE(changes.still_current(rotated, /*height=*/5));
-  // ... anything read after it is not ...
-  EXPECT_TRUE(changes.still_current(rotated, /*height=*/7));
-  // ... and no other account is touched.
-  EXPECT_TRUE(changes.still_current(untouched, /*height=*/5));
-}
-
-// Forgetting a change leaves nothing to compare older conclusions against, so
-// they stop counting. Newer ones are unaffected.
-TEST(Mempool, ForgottenKeyChangesRaiseTheBar)
-{
-  RecentKeyChanges changes(/*num_buckets=*/1);
-  const ContractAddress address = MempoolTestInfra::kAccountAddresses[0];
-
-  ASSERT_TRUE(changes.still_current(address, /*height=*/10));
-  ASSERT_EQ(changes.forgotten_height(), -1);
-  // Height 0 is a real height, so the empty bar must sit below it.
-  ASSERT_TRUE(changes.still_current(address, /*height=*/0));
-
-  // Rotate enough distinct accounts to overflow the single bucket, so the
-  // earliest of them is dropped.
-  ContractAddress rotator{};
-  for (size_t i = 0; i < detail::KeyChangeBucket::kBucketSize * 2; i++) {
-    std::memcpy(rotator.data(), &i, sizeof(i));
-    changes.note(rotator, static_cast<BlockHeight>(20 + i));
-  }
-  EXPECT_GT(changes.forgotten_height(), 0);
-
-  // Predates a change we can no longer answer for.
-  EXPECT_FALSE(changes.still_current(address, /*height=*/10));
-  // Postdates every forgotten change.
-  EXPECT_TRUE(changes.still_current(address, /*height=*/1000));
-}
-
-// An eviction moves a change out of its bucket and into the bar, and a reader
-// crossing that moment must see it in one place or the other. Reading the bar
-// first leaves an interval where it is in neither, and a stale verdict passes.
-//
-// The height rises every round so the bar always trails the change being
-// asked about; a fixed height would be covered by the bar after the first
-// eviction and the reader would stop reaching the code that races.
-//
-// One-sided: [recorded_at] is published only once that change is recorded, and
-// from then on a verdict stamped at that height never counts -- whether the
-// change is still in its bucket or has aged into the bar. The reader can only
-// ever be wrong.
-TEST(Mempool, ForgottenKeyChangesAreNeverMissedUnderConcurrency)
-{
-  RecentKeyChanges changes(/*num_buckets=*/1);
-  const ContractAddress watched = MempoolTestInfra::kAccountAddresses[0];
-
-  std::atomic<BlockHeight> recorded_at = 0;
-  std::atomic<bool> stop = false;
-  std::atomic<bool> saw_stale = false;
-
-  std::thread reader([&] {
-    while (!stop.load(std::memory_order_relaxed)) {
-      const BlockHeight height = recorded_at.load(std::memory_order_acquire);
-      if (height == 0) {
-        continue;
-      }
-      if (changes.still_current(watched, height)) {
-        saw_stale.store(true, std::memory_order_relaxed);
-        return;
-      }
-    }
-  });
-
-  ContractAddress rotator = {};
-  for (size_t round = 1;
-       round <= 20000 && !saw_stale.load(std::memory_order_relaxed); round++) {
-    const auto height = static_cast<BlockHeight>(round * 2);
-    changes.note(watched, height);
-    recorded_at.store(height, std::memory_order_release);
-
-    // Fill the one bucket, pushing [watched] back out of it. Its height is the
-    // lowest present, so it is among the entries displaced, and the bar has to
-    // rise to cover it.
-    for (size_t i = 0; i < detail::KeyChangeBucket::kBucketSize; i++) {
-      const size_t marker = (round * detail::KeyChangeBucket::kBucketSize) + i;
-      std::memcpy(rotator.data(), &marker, sizeof(marker));
-      changes.note(rotator, height + 1);
-    }
-  }
-  stop.store(true, std::memory_order_relaxed);
-  reader.join();
-
-  EXPECT_FALSE(saw_stale.load(std::memory_order_relaxed));
-}
-
-// A verdict is honoured only while the account still has the keys it was read
-// from.
-TEST(Mempool, CachedVerdictStopsCountingAfterAKeyChange)
-{
-  FailedSignatureCache cache(/*num_buckets=*/64);
-  const ContractAddress rotated = MempoolTestInfra::kAccountAddresses[0];
-  const ContractAddress untouched = MempoolTestInfra::kAccountAddresses[1];
-
-  SHA256Hash rotated_signing{};
-  const size_t rotated_marker = 0xA1;
-  std::memcpy(rotated_signing.data(), &rotated_marker, sizeof(rotated_marker));
-  SHA256Hash untouched_signing{};
-  const size_t untouched_marker = 0xB2;
-  std::memcpy(untouched_signing.data(), &untouched_marker,
-              sizeof(untouched_marker));
-
-  cache.insert(rotated_signing, /*verified_at_height=*/5);
-  cache.insert(untouched_signing, /*verified_at_height=*/5);
-  ASSERT_TRUE(cache.contains(rotated, rotated_signing));
-  ASSERT_TRUE(cache.contains(untouched, untouched_signing));
-
-  cache.note_key_change(rotated, /*height=*/6);
-
-  EXPECT_FALSE(cache.contains(rotated, rotated_signing));
-  EXPECT_TRUE(cache.contains(untouched, untouched_signing));
-
-  // Reverifying against the new keys puts it back.
-  cache.insert(rotated_signing, /*verified_at_height=*/7);
-  EXPECT_TRUE(cache.contains(rotated, rotated_signing));
-}
-
-// The same case driven entirely through the gateway and coordinator RPCs, with
-// the auth change written by ordinary execution rather than injected: a
-// transaction is refused for want of signing weight, a committed block lowers
-// the account's threshold, and the same bytes are then accepted.
+// Driven entirely through the gateway and coordinator RPCs, with the auth
+// change written by ordinary execution rather than injected: a transaction is
+// refused for want of signing weight, a committed block lowers the account's
+// threshold, and the same bytes are then accepted.
 TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -3017,7 +2834,7 @@ TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
 
   submit_over_gateway(underweight);
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
-  // Again, answered from cache.
+  // Again, rejected the same way.
   submit_over_gateway(underweight);
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 
@@ -3050,15 +2867,17 @@ TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
                          res_nominate.proposed_block()),
             SchedulerCommitOutcome::SchedulerCommitOK);
 
-  // The same bytes now carry enough weight, and the cached rejection must not
-  // stand in the way.
+  // The same bytes now carry enough weight, and the earlier rejections must
+  // not stand in the way.
   submit_over_gateway(underweight);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
-// Once a committed block changes an account's keys, a signing this node turned
-// down may verify, so the cache must stop refusing it.
-TEST(Mempool, ChangedAuthDataInvalidatesCachedVerdicts)
+// A rejection is never remembered: every resubmission of a turned-down
+// signing reaches authentication and is judged against the account's current
+// auth data, so a signing this node turned down is re-verified -- and can be
+// admitted -- once a committed block changes the account's keys.
+TEST(Mempool, RejectedSigningIsReverifiedOnEveryResubmission)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -3067,8 +2886,7 @@ TEST(Mempool, ChangedAuthDataInvalidatesCachedVerdicts)
 
   // The account lists one key now and a different one after the change, and
   // the transaction is signed by neither. Authentication turns it down either
-  // way, so the only thing that varies across the change is whether the cache
-  // lets it be asked at all.
+  // way; the auth-failure counter shows every submission reaching it.
   AddressAuthData initial_auth_data = get_default_account();
   create_key_pair(initial_auth_data, /*idx=*/0, /*weight=*/1);
   initial_auth_data.last_written_height = 1;
@@ -3097,15 +2915,15 @@ TEST(Mempool, ChangedAuthDataInvalidatesCachedVerdicts)
     return MempoolMetrics::instance().auth_failed_tx_count.value();
   };
 
-  // Rejected against the initial auth data, then cached: the second attempt
-  // never reaches authentication.
+  // Rejected against the initial auth data, and again on resubmission: each
+  // attempt reaches authentication.
   const ssize_t before = auth_failures();
   submit_over_gateway();
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
   ASSERT_EQ(auth_failures(), before + 1);
   submit_over_gateway();
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
-  ASSERT_EQ(auth_failures(), before + 1);
+  ASSERT_EQ(auth_failures(), before + 2);
 
   // The account's keys change.
   later_auth_data.last_written_height = 2;
@@ -3116,20 +2934,19 @@ TEST(Mempool, ChangedAuthDataInvalidatesCachedVerdicts)
        .auth_data = x23::Ptr<AddressAuthData>(later_auth_data)}};
   server.register_auth_data_updates(2, std::move(key_changes))();
 
-  // The cached verdict was recorded against auth data that no longer applies,
-  // so it must not stand: the same bytes reach authentication again. Had this
-  // account's new keys made the signature valid, this is what would let the
-  // transaction in rather than leaving it refused until its entry aged out.
+  // The same bytes reach authentication again, judged against the new auth
+  // data. Had this account's new keys made the signature valid, this is what
+  // would let the transaction in.
   submit_over_gateway();
-  EXPECT_EQ(auth_failures(), before + 2);
+  EXPECT_EQ(auth_failures(), before + 3);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 }
 
-// Nomination traffic must bypass the cache: dropping a body there would keep
-// this node from validating the block that referenced it. The auth-failure
-// counter shows both halves -- a cached rejection never reaches
-// authentication, a vetted submission always does.
-TEST(Mempool, VettedSubmissionsBypassTheFailedSignatureCache)
+// A body supplied for a nomination is always authenticated, whatever this
+// node concluded about the same bytes over the gateway: dropping one
+// unexamined would keep this node from validating the block that referenced
+// it. The auth-failure counter shows every path reaching authentication.
+TEST(Mempool, VettedSubmissionsAreAlwaysAuthenticated)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -3160,27 +2977,25 @@ TEST(Mempool, VettedSubmissionsBypassTheFailedSignatureCache)
   const ssize_t after_first = auth_failures();
   ASSERT_EQ(after_first, before_first + 1);
 
-  // The second is answered from the cache, so authentication never sees it.
-  // This is what the cache exists for.
+  // So does the second: rejections are not remembered.
   submit_over_gateway();
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
-  EXPECT_EQ(auth_failures(), after_first);
+  EXPECT_EQ(auth_failures(), after_first + 1);
 
   // The same bytes arriving for a nomination are authenticated regardless of
-  // that cached verdict.
+  // the gateway rejections.
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(
       validator_id,
       t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
-  EXPECT_EQ(auth_failures(), after_first + 1);
+  EXPECT_EQ(auth_failures(), after_first + 2);
 }
 
-// The rejected-signature cache spares us reverifying bytes authentication has
-// already turned down. It is keyed on the whole [SignedTransaction] for the
-// same reason the blacklist above was removed: keyed on [TransactionHash] it
-// would name every signing of the transaction, so one bad copy from an
-// anonymous submitter would lock out the genuine one.
-TEST(Mempool, RejectedSignatureCacheDoesNotBlockValidSigning)
+// A rejected signing is a verdict about those bytes alone. The genuine
+// signing shares its [TransactionHash] -- signatures are deliberately outside
+// the hash -- so one bad copy from an anonymous submitter must never lock out
+// the genuine one.
+TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -3214,11 +3029,11 @@ TEST(Mempool, RejectedSignatureCacheDoesNotBlockValidSigning)
 
   // Same transaction, so the two share a [TransactionHash] ...
   ASSERT_EQ(sha256(poisoned_tx.tx), sha256(good_tx.tx));
-  // ... but different bytes, so they must not share a cache key.
+  // ... but different signings, distinguished by their signature bytes.
   ASSERT_NE(sha256(poisoned_tx), sha256(good_tx));
 
-  // The bad signing fails authentication and is never admitted. Submitting the
-  // identical bytes again is served from the cache, with the same outcome.
+  // The bad signing fails authentication and is never admitted, on either
+  // submission.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);

@@ -34,7 +34,6 @@
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/config_hash.h"
-#include "hogd/hog_mempool/failed_signature_cache.h"
 #include "hogd/hog_mempool/registration.h"
 #include "hogd/hog_mempool/rpc_from_auth.h"
 #include "hogd/hog_mempool/rpc_from_db.h"
@@ -760,10 +759,6 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-  // Gateway-admission throttle. Nomination traffic bypasses it -- see
-  // [FailedSignatureCache].
-  FailedSignatureCache failed_signatures_;
-
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
 

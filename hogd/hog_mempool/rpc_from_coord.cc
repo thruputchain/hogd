@@ -65,10 +65,9 @@ namespace {
 
 enum class CommitMetricsOutcome { kOk, kBlockNotFound };
 
-// [indices] must be sorted ascending and within range.
-template<typename Container>
+template<typename T>
 void
-remove_indices(Container &remove_from, const x23::Vec<size_t> &indices)
+remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
 {
   size_t write_idx = 0;
   size_t num_erased = 0;
@@ -245,24 +244,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
-  // Hashes of the submitted signings, aligned with [txs] so that consulting
-  // the cache below and writing it hash only once. Computed before the commit
-  // lock is taken: hashing a batch is pure, and it is the one part of the
-  // lookup that need not be serialized against commits.
-  x23::Vec<SHA256Hash> signing_hashes;
-  auto hash_node =
-      submit_dag.async<void>("hash signings", submit_dag.after(decode_node),
-                             [&]() -> x23::Async<void> {
-                               signing_hashes.clear();
-                               signing_hashes.reserve(txs->size());
-                               for (const SignedTransaction &tx : *txs) {
-                                 signing_hashes.push_back(sha256(tx));
-                               }
-                               co_return;
-                             });
-
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(hash_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -302,55 +285,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           MempoolMetrics::instance().discarded_capacity_tx_count.increment(
               num_discarded);
           txs->resize(resize_to);
-          signing_hashes.resize(resize_to);
         }
         co_return;
       });
 
-  // Drop signings authentication has already rejected before paying for
-  // another verification of the same bytes.
-  auto drop_rejected_node = submit_dag.async<void>(
-      "drop known-bad signatures", submit_dag.after(capacity_node),
-      [&]() -> x23::Async<void> {
-        // Anything that resizes or reorders [txs] must do the same to
-        // [signing_hashes] where it does so ([enforce capacity] above,
-        // [remove_indices] below), or hashes pair with the wrong transactions.
-        CHECK_EQ(signing_hashes.size(), txs->size());
-
-        // A verdict is only as good as the key-change record checked against
-        // it. A commit advances [current_block] before [auth_data_changed]
-        // records that block's key changes, so while the watermark lags,
-        // leave the cache alone and pay for the verification.
-        if (auth_data_height_.load() <
-            static_cast<int64_t>(scheduler_->current_block())) {
-          co_return;
-        }
-
-        x23::Vec<size_t> to_remove_indices;
-        for (size_t i = 0; i < txs->size(); i++) {
-          if (failed_signatures_.contains(
-                  (*txs)[i].tx.invocation.invoked_address, signing_hashes[i])) {
-            to_remove_indices.push_back(i);
-          }
-        }
-        if (!to_remove_indices.empty()) {
-          MempoolMetrics::instance().cached_auth_failure_tx_count.increment(
-              to_remove_indices.size());
-          remove_indices(/*remove_from=*/*txs,
-                         /*indices=*/to_remove_indices);
-          remove_indices(/*remove_from=*/signing_hashes,
-                         /*indices=*/to_remove_indices);
-        }
-        co_return;
-      });
-
-  // Stamped onto verdicts cached below, so it must be the height auth actually
-  // read rather than one re-read after the tip may have moved.
-  BlockHeight verify_height = 0;
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(drop_rejected_node),
+      "verify transactions", submit_dag.after(capacity_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
-        verify_height = scheduler_->current_block();
+        const BlockHeight verify_height = scheduler_->current_block();
         co_return co_await auth_client_->authmempool_verify_transactions(
             verify_height, *txs);
       });
@@ -363,16 +305,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         // submitted transaction; otherwise we cannot attribute auth results to
         // transactions and must not admit the batch.
         CHECK_EQ(auth_ret.size(), txs->size());
-        CHECK_EQ(signing_hashes.size(), txs->size());
         x23::Vec<size_t> to_remove_indices;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
-            // Only [kAuthFailed] is a verdict about these bytes. The other
-            // codes describe this node's own state and must not be cached.
-            if (code == AuthErrorCode::kAuthFailed) {
-              failed_signatures_.insert(signing_hashes[i], verify_height);
-            }
             to_remove_indices.push_back(i);
           }
         }
@@ -500,10 +436,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_return;
                              });
 
-  // These transactions arrive for a nomination, so they neither consult nor
-  // populate [failed_signatures_]. A cached verdict can be stale -- account
-  // keys and weights move underneath it -- and dropping a body here would keep
-  // this node from ever validating the block that needs it.
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(lock_commit_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
@@ -3004,10 +2936,6 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   tx_hashes.clear();
   txs.clear();
   for (const KeyChange &change : key_changes) {
-    // Cached rejections for this account were read from the keys it held
-    // until now, so they stop counting from [height] on.
-    failed_signatures_.note_key_change(change.address, height);
-
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
     static TransactionHashBatch change_tx_hashes;
