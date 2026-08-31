@@ -12,9 +12,10 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.10.2"
+EXPECTED_VERSION="groundhog 0.11.0"
 ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
-if [ "${ACTUAL_VERSION}" != "${EXPECTED_VERSION}" ]; then
+ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
+if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then
     echo "error: expected '${EXPECTED_VERSION}', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2
     exit 1
 fi
