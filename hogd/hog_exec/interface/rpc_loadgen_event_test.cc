@@ -42,9 +42,8 @@
 #include "x23/vec.h"
 
 namespace {
-// The executor checks the height the scheduler supplies against the one its db
-// tip implies, so the height has to be the parent's committed height plus one.
-// The timepoint is not cross-checked against anything, so a stand-in is fine.
+// Must be the parent's committed height plus one, since the executor
+// cross-checks it against the tip. The timepoint is a stand-in.
 constexpr hogd::BlockExecutionContext
 test_block_execution(uint64_t block_height)
 {
@@ -121,10 +120,8 @@ protected:
   }
   EventCard make_event_card() { return event_wrapper_.make_event_card(); }
 
-  // Heights are tracked explicitly rather than read off a block id: the two
-  // are unrelated (a production BlockID is a nanosecond timestamp), and these
-  // tests jump to a distant id for the block under test while its height just
-  // continues the chain.
+  // Tracked explicitly: these tests jump to a distant block id for the block
+  // under test, while its height just continues the chain.
   BlockHeight committed_height_ = 0;
 
   void open_block(BlockID block_id, BlockID parent_block_id)

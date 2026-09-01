@@ -56,10 +56,8 @@
 #include "x23/vec.h"
 
 namespace {
-// The executor checks the supplied height against the one its db tip implies,
-// so this has to be the height the block will actually commit: the previous
-// committed value's height plus one. The timepoint is not cross-checked
-// against anything, so a stand-in is fine.
+// Must be the height the block will actually commit, since the executor
+// cross-checks it against the tip. The timepoint is a stand-in.
 constexpr hogd::BlockExecutionContext
 test_block_execution(uint64_t block_height)
 {
@@ -388,9 +386,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto start_time = x23::fastclock::get_ns();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
-  // The height comes off the previous committed value, never off a block
-  // number: a BlockID is an opaque identifier (generate_block_id() returns a
-  // nanosecond timestamp) and says nothing about chain position.
+  // Height comes off the previous committed value, never off a block number.
   open_block(db_sched_client, event_sched_client, exec_clients,
              parent_block_number, current_block_number,
              prev_value.proposal_header.block_height + 1);

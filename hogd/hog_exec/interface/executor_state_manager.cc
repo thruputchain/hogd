@@ -64,10 +64,8 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
       co_await g.reset_and_return(ExecResult::ExecResultSystemError);
       panic("unreachable");
     }
-    // Same block, so the same facts: a second open disagreeing about the
-    // height or timepoint means two callers think this block is two
-    // different blocks. Refuse rather than let whichever opened first decide
-    // what every contract in the block sees.
+    // Two opens disagreeing about the block's facts is a scheduler bug, not
+    // a refcount bump.
     if (auto const &open = it->second.context.get().block_execution();
         open.block_height != block_execution.block_height ||
         open.block_timepoint != block_execution.block_timepoint) {
@@ -299,9 +297,7 @@ ExecutorStateManager::get_snapshot_cache(
   auto out = std::move(free_snapshot_caches_.back());
   CHECK(out != nullptr);
   out->set_block_id(block_id);
-  // A recycled cache still carries the previous block's context, so re-arm it
-  // here rather than anywhere later: this is the single point where a cache
-  // becomes this block's, whether it is fresh or reused.
+  // A recycled cache still carries the previous block's context.
   out->set_block_execution_context(block_execution);
   free_snapshot_caches_.pop_back();
   return out;

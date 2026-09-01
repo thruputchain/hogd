@@ -133,10 +133,8 @@ public:
   // rejected at commit).
   BlockID block_height() const { return block_number_; }
 
-  // The context an executor would open the current block with. The height is
-  // read off the tip the executor will itself pin -- never derived from a
-  // block id, which is an opaque identifier and says nothing about chain
-  // position. Nothing cross-checks the timepoint, so a stand-in is fine.
+  // Height read off the tip the executor itself pins, never from a block id.
+  // Nothing cross-checks the timepoint.
   BlockExecutionContext get_block_execution_context() const
   {
     auto tip = db_proxy_->get_db_tip(block_number_);

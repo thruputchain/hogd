@@ -56,13 +56,9 @@ public:
 private:
   static constexpr std::uint32_t kMaxViewAttempts = 3;
 
-  // A view runs against committed state and answers "what would this return
-  // if executed now" -- that is, in a hypothetical block on top of the tip.
-  // So the height is the tip's plus one, which is also what the executor
-  // derives from that same tip, and the timepoint is wall-clock now: no block
-  // has been proposed, so there is no agreed timepoint to serve, and now is
-  // what a proposer would put in the block this view stands in for.
-  // TimePoint is Unix nanoseconds.
+  // A view stands in for a hypothetical block on top of the tip: height is
+  // the tip's plus one, and since no block has been proposed there is no
+  // agreed timepoint, so use now. TimePoint is Unix nanoseconds.
   static BlockExecutionContext view_block_execution_context(DbTip const &tip)
   {
     return BlockExecutionContext{
@@ -79,8 +75,7 @@ private:
     DbTip tip;
     StorageSnapshotCache snapshot_cache;
 
-    // tip is declared before snapshot_cache, so it is already initialized
-    // here; read it rather than the moved-from t.
+    // tip is declared first, so read it rather than the moved-from t.
     ViewState(BlockID id, DbTip t, DatabaseProxy &db_proxy)
       : block_id(id), tip(std::move(t)),
         snapshot_cache(id, view_block_execution_context(tip), db_proxy)

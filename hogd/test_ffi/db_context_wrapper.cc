@@ -142,12 +142,10 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   }
 
   current_block_id_++;
-  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
-      current_block_id_,
-      // Read the height off the tip the executor will itself pin. A BlockID
-      // is an opaque identifier and says nothing about chain position, so it
-      // is never the source of a height. Nothing cross-checks the timepoint.
-      block_execution_context(), *db_proxy_);
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(current_block_id_,
+                                             block_execution_context(),
+                                             *db_proxy_);
   event_server_.open_block(current_block_id_)();
 }
 

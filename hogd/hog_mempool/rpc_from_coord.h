@@ -427,11 +427,9 @@ private:
   struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
-    // The block's own height and timepoint, handed to every executor when it
-    // opens the block. On the proposal path these come from the coordinator's
-    // ProposalContext; on the validation path they come from the header of
-    // the proposal being validated, so a validator reproduces exactly what
-    // the proposer executed against.
+    // Handed to every executor opening the block: from the coordinator's
+    // ProposalContext when proposing, from the proposal's header when
+    // validating.
     BlockExecutionContext block_execution;
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<TransactionHash> tx_hashes;

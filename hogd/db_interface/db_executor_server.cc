@@ -250,9 +250,7 @@ DbExecutorRpc::get_db_tip(BlockID block_id)
 
   // The tip id is the committed parent -- distinct from block_id, which
   // get_block_data() just confirmed is an open child (DatabaseProxy rejects a
-  // tip whose id equals the requested block). Its height is the one the block
-  // manager has been counting: -1 before genesis, 0 at genesis, and one more
-  // per committed block after that.
+  // tip whose id equals the requested block).
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);
   ConsensusValue value{};

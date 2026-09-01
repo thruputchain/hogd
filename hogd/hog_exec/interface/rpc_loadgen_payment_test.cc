@@ -36,10 +36,8 @@
 #include "x23/vec.h"
 
 namespace {
-// These tests exercise the executor's block state machine, not the
-// block's contents, so any consistent context will do. It has to be the
-// same value for every open of a given block: open_block rejects a
-// reopen whose context disagrees.
+// Any consistent context will do, but it must be the same for every open of
+// a given block: open_block rejects a reopen whose context disagrees.
 constexpr hogd::BlockExecutionContext kTestBlockExecution{
     .block_height = 1,
     .block_timepoint = 1,

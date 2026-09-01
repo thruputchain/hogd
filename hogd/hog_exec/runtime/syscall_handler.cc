@@ -147,11 +147,10 @@ SystemCallHandler::init_db_tip() const
   if (!tip.has_value()) {
     return std::unexpected(tip.error());
   }
-  // Whoever opened this block supplied the height it will claim. It has to
-  // agree with the tip we are about to pin, or this node is executing against
-  // a different block than the one it is building. Checked here, at the
-  // transaction's one fallible tip read, so every later height read stays a
-  // plain infallible load.
+  // The height the block was opened with must agree with the tip we are about
+  // to pin, or this node is executing a different block than it is building.
+  // Checked here, the transaction's one fallible tip read, so every later
+  // height read stays a plain load.
   auto const &block_execution = snapshot_cache_.block_execution_context();
   const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
   if (block_execution.block_height != derived) [[unlikely]] {
@@ -2285,23 +2284,16 @@ SystemCallHandler::get_block_height() const
 NetworkHash
 SystemCallHandler::get_network_hash() const
 {
-  // Unlike the block height, the network hash is not a property of the block
-  // being executed: it identifies the network and is identical in every
-  // header, so the pinned parent tip's copy is already the executing block's
-  // value, with no adjustment. Every transaction signature commits to this
-  // same value (see transaction_signature_preimage); this is the
-  // contract-visible form of it.
+  // Identical in every header, so the parent tip's copy is already this
+  // block's value, no adjustment needed.
   return db_tip()->value.proposal_header.network_hash;
 }
 
 TimePoint
 SystemCallHandler::get_block_timepoint() const
 {
-  // Not recoverable from the tip at all: for an open block the tip is the
-  // parent, whose timepoint belongs to the previous block. The only correct
-  // source is the context the block was opened with -- from the coordinator
-  // when proposing, and from the proposal's header when validating, so a
-  // proposer and its validators execute against the same value.
+  // Not derivable from the tip: for an open block that is the parent, whose
+  // timepoint is the previous block's.
   return snapshot_cache_.block_execution_context().block_timepoint;
 }
 

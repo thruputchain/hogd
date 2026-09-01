@@ -47,13 +47,10 @@
 #include "x23/vec.h"
 
 namespace {
-// The executor cross-checks the height the scheduler supplies against the one
-// its db tip implies (the tip's height plus one), so a test's context has to
-// agree with whatever tip that test's db serves. The timepoint is not
-// cross-checked against anything, so a stand-in is fine.
-//
-// The context also has to be the same value for every open of a given block:
-// open_block rejects a reopen whose context disagrees.
+// Must agree with whatever tip the test's db serves, since the executor
+// cross-checks it, and must be the same for every open of a given block:
+// open_block rejects a reopen whose context disagrees. The timepoint is a
+// stand-in.
 constexpr hogd::BlockExecutionContext
 test_block_execution(uint64_t block_height)
 {
@@ -63,10 +60,8 @@ test_block_execution(uint64_t block_height)
   };
 }
 
-// For blocks opened on top of the genesis tip the fixture loads, which commits
-// at height 0. Tests served by a BlockSnapshotServer instead take the height
-// from that server (open_block_height()); a BlockID says nothing about chain
-// position, so it is never the source of a height.
+// For blocks opened on top of the fixture's genesis tip. Tests served by a
+// BlockSnapshotServer take the height from that server instead.
 constexpr hogd::BlockExecutionContext kTestBlockExecution =
     test_block_execution(1);
 } // namespace
@@ -489,8 +484,6 @@ TEST_F(RpcNegativeTest,
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
-  // Ask the server what height its tip implies rather than deriving one from
-  // a block id: the two are unrelated (a production BlockID is a timestamp).
   const auto block_execution =
       test_block_execution(snapshot_server->impl()->open_block_height());
   const auto probe_block_execution = block_execution;
@@ -562,8 +555,6 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
-  // Ask the server what height its tip implies rather than deriving one from
-  // a block id: the two are unrelated (a production BlockID is a timestamp).
   const auto block_execution =
       test_block_execution(snapshot_server->impl()->open_block_height());
   const auto probe_block_execution = block_execution;
@@ -741,11 +732,8 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
-  // Ask the server what height its tip implies rather than deriving one from
-  // a block id: the two are unrelated (a production BlockID is a timestamp).
-  // Every open below reuses this value: the reopen guard rejects a second
-  // open whose context disagrees, and these reopens are meant to be rejected
-  // for the closing state instead.
+  // Every open below reuses this: the reopens here must be rejected for the
+  // closing state, not for a disagreeing context.
   const auto block_execution =
       test_block_execution(snapshot_server->impl()->open_block_height());
 

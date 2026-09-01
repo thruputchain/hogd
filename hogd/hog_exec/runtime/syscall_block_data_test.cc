@@ -254,10 +254,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-// The timepoint comes from the BlockExecutionContext the block was opened
-// with, not from the db tip -- the tip is the parent block, whose timepoint
-// belongs to the previous block. This framework builds a snapshot cache
-// directly, so the test installs the context the way an executor would.
+// The timepoint comes from the context the block was opened with, not the tip.
 TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
 {
   auto contract_addr = make_contract_address(0);
@@ -317,14 +314,10 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
 }
 
-// A scheduler that supplies a height disagreeing with the tip is executing
-// against a different block than the one it is building. The transaction is
-// refused outright rather than run against either value.
-//
-// The check lives at the pin point (init_db_tip), not in GetBlockHeight, so
-// it fires during admission and the contract body below never runs -- that is
-// the point: the disagreement is caught before any contract can observe a
-// height, rather than reaching consensus.
+// A supplied height disagreeing with the tip means this node is executing a
+// different block than it is building. The check lives at the pin point
+// (init_db_tip), so it fires during admission and no contract ever observes
+// the disputed height.
 TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
 {
   auto contract_addr = make_contract_address(0);
@@ -337,9 +330,7 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
   NativeContractBuilder builder;
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-        // Never reached: admission refuses the transaction first. Kept as a
-        // tripwire -- reporting success here would mean the mismatch went
-        // unnoticed and a contract ran against a height nobody agreed on.
+        // Never reached: admission refuses the transaction first. A tripwire.
         BlockHeight block_height = 0;
         auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
         if (status.has_value() &&
@@ -369,16 +360,12 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  // The mismatch surfaces as an unrecoverable system error out of the
-  // transaction's initial validation, so the root invocation fails.
+  // Surfaces as an unrecoverable system error out of initial validation.
   ASSERT_FALSE(handler.root_invoke().is_root_success());
 }
 
-// The two syscalls above are read-only and take no inputs, so their whole
-// contribution to a transaction trace is the value they returned. These pin
-// that the trace records it, and records the value the contract actually saw
-// -- a trace that reported a different height or timepoint than the block
-// executed against would misexplain every transaction replayed from it.
+// Both syscalls take no inputs, so their whole contribution to a trace is the
+// value returned. Pin that it is recorded, and is what the contract saw.
 TEST_F(SyscallBlockDataTest, GetBlockHeightIsTraced)
 {
   auto contract_addr = make_contract_address(0);
@@ -441,10 +428,8 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointIsTraced)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  // Unlike the height, the timepoint is not derivable from the tip, so the
-  // traced value has to be the one the block was opened with. Set a distinct
-  // one so a trace echoing some other source (the parent's timepoint, a
-  // default) cannot pass.
+  // Distinct value, so a trace echoing the parent's timepoint or a default
+  // cannot pass.
   constexpr TimePoint kExpectedTimepoint = 1'724'000'000;
   get_storage_snapshot_cache()->set_block_execution_context(
       BlockExecutionContext{.block_height = 1,

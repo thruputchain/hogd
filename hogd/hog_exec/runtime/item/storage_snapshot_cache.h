@@ -71,22 +71,15 @@ public:
 
   SystemStatus<const DbTip *> try_get_db_tip();
 
-  // The executing block's own facts, supplied by whoever opened the block.
-  // Distinct from everything above, which is read from the db tip -- and the
-  // tip, for an open block, is the *parent*. The height is recoverable from
-  // the parent (it is the tip's height plus one) but the timepoint is not:
-  // the parent's timepoint is the previous block's.
-  //
-  // Mandatory: a snapshot cache is always a cache for one specific block
-  // execution, so there is no state in which this is absent and a caller has
-  // to decide what to do about it.
+  // The executing block's own facts. Unlike everything above these do not
+  // come from the db tip, which for an open block is the *parent*: the height
+  // is the tip's plus one, and the timepoint is not derivable from it at all.
   BlockExecutionContext const &block_execution_context() const
   {
     return block_execution_context_;
   }
 
-  // Re-arms a recycled cache for its next block. Also used by tests that need
-  // to execute against a deliberately wrong context.
+  // Re-arms a recycled cache for its next block.
   void set_block_execution_context(BlockExecutionContext const &block_execution)
   {
     block_execution_context_ = block_execution;
@@ -100,10 +93,8 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
-    // block_execution_context_ is deliberately left alone: it is re-armed by
-    // whoever takes the cache out of the pool, and a stale one surviving into
-    // the next block cannot go unnoticed -- its height disagrees with the tip
-    // that block pins, which fails the transaction in init_db_tip().
+    // block_execution_context_ is left alone: get_snapshot_cache() re-arms it,
+    // and a stale one is caught by the height check in init_db_tip().
     release_db_tip();
   }
 
@@ -145,9 +136,8 @@ private:
 
   BlockID block_id_;
 
-  // Set when the block is opened, before any transaction runs, and re-armed
-  // when the cache is recycled for the next block. Read-only for the life of
-  // the block, so unlike the tip it needs no synchronization.
+  // Read-only for the life of the block, so unlike the tip it needs no
+  // synchronization.
   BlockExecutionContext block_execution_context_;
   DatabaseProxy &db_proxy_;
 

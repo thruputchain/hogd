@@ -47,10 +47,7 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
-// These tests drive contracts directly against a mock db rather than through
-// block admission, but a snapshot cache is always a cache for one specific
-// block execution, so they still name one. The mock serves a genesis tip at
-// height 0, so the block being executed is height 1.
+// The mock serves a genesis tip at height 0, so the executing block is 1.
 constexpr BlockExecutionContext kTestBlockExecution{
     .block_height = 1,
     .block_timepoint = 1'700'000'000,
@@ -87,11 +84,8 @@ protected:
     assert(db_proxy_ != nullptr);
     assert(event_server_proxy_ != nullptr);
 
-    // None of these tests is about replay expiry, and none of them sets a
-    // uniquifier. A default-constructed one expires at height 0, which the
-    // executor rejects during initial validation -- the mock tip puts the
-    // block under test at height 1. Stamp one that outlives the block,
-    // leaving an explicit choice alone.
+    // None of these tests is about replay expiry, and a default-constructed
+    // uniquifier expires at height 0. Leave an explicit choice alone.
     if (tx.uniquifier.block_expiry_height == 0) {
       tx.uniquifier.block_expiry_height = 1'000'000;
     }

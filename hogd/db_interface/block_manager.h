@@ -43,10 +43,7 @@ public:
   // child block.
   BlockID committed_tip_id();
 
-  // The height of that block. Heights are not supplied: commit_block()
-  // requires the committed block to be a direct child of the last committed
-  // one, so the chain here is linear and each commit is exactly one above its
-  // parent. -1 before genesis, 0 once genesis is loaded.
+  // -1 before genesis, 0 once genesis is loaded, one more per commit.
   BlockHeight committed_tip_height();
 
   // new_id should be a new, never-before-used ID.
@@ -133,7 +130,6 @@ private:
   // section of the lock.
   std::vector<std::shared_ptr<BlockState>> remove_subtree(BlockID root);
 
-  // Guarded by mtx_, alongside last_committed_id_.
   BlockHeight last_committed_height_ = -1;
 
   std::shared_mutex mtx_;

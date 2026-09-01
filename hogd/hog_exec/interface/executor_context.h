@@ -36,13 +36,7 @@ public:
     : mode_(mode), block_id_(id), block_execution_(block_execution),
       db_proxy_(db_proxy), event_server_proxy_(event_server_proxy),
       snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
-  {
-    // The cache arrives already armed with this same context, by
-    // ExecutorStateManager::get_snapshot_cache() -- the one place a cache
-    // becomes a given block's, for both fresh and recycled caches. It is held
-    // here as well because the cache is extracted at teardown, and the reopen
-    // check still needs to compare against it.
-  }
+  {}
 
   // Disable copy and move
   ExecutorContext(ExecutorContext const &) = delete;
@@ -52,9 +46,6 @@ public:
 
   ExecutionMode mode() const { return mode_; }
 
-  // The block's facts as the scheduler opened it with. Compared against a
-  // second open of the same block: two opens that disagree about the block
-  // are a scheduler bug, not a refcount bump.
   BlockExecutionContext const &block_execution() const
   {
     return block_execution_;
@@ -101,6 +92,7 @@ private:
 
   const ExecutionMode mode_;
   const BlockID block_id_;
+  // Also held by the snapshot cache, but that is extracted at teardown.
   const BlockExecutionContext block_execution_;
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;

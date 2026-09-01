@@ -593,19 +593,10 @@ public:
     return *r;
   }
 
-  // The context an executor would have opened the current block with: the
-  // height the block will claim, which is the committed tip's height plus one.
-  //
-  // Computed the same way the executor derives it from the tip it pins, so
-  // the two agree, but without an rpc at block-open time: some tests shrink
-  // the rpc message limit to force oversized-batch errors, and an added
-  // get_db_tip() there fails the whole test before it starts.
-  //
-  // Tracked rather than derived from a block id -- a BlockID is an opaque
-  // identifier (generate_block_id() returns a nanosecond timestamp) and says
-  // nothing about chain position.
-  //
-  // The timepoint is a fixed stand-in; nothing cross-checks it.
+  // What an executor would open the current block with. Tracked rather than
+  // read off the tip so block-open costs no rpc: some tests shrink the rpc
+  // message limit, and an added get_db_tip() there fails them. The timepoint
+  // is a stand-in; nothing cross-checks it.
   BlockExecutionContext get_block_execution_context() const
   {
     return BlockExecutionContext{
@@ -787,10 +778,8 @@ private:
   uint64_t next_uniquifier_nonce_ = 0;
   BlockID block_number_ = 0;
   BlockID dbtip_block_id_ = 0;
-  // Height of the most recently committed block. Genesis commits at 0.
-  // Advanced only by try_advance_block(), which is the only path that
-  // commits: discard_block() and reject_block() move block_number_ on
-  // without committing, so the chain's height stays put.
+  // Genesis commits at 0. Only try_advance_block() commits, so discard_block()
+  // and reject_block() move block_number_ on without moving this.
   BlockHeight committed_height_ = 0;
 
   std::unique_ptr<CoordWrapper> coord_wrapper_;

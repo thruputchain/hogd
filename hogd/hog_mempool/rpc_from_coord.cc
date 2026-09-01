@@ -1390,10 +1390,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   auto prepare_cache_node = nomination_dag.async<void>(
       "prepare nomination cache", [&]() -> x23::Async<void> {
         nominated_block_cache_.block_id = generate_block_id();
-        // The block's own facts, fixed before it executes: the height it will
-        // claim, and the coordinator's timepoint for it. Every executor gets
-        // this same value, and a validator of this block rebuilds it from the
-        // header these become.
+        // Fixed before execution; every executor gets this same value.
         nominated_block_cache_.block_execution = BlockExecutionContext{
             .block_height =
                 last_committed_block_.value.proposal_header.block_height + 1,
@@ -1659,8 +1656,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
     }
     event_open = true;
-    // Same construction as ordinary proposal: the height this block will
-    // claim, and the ceremony request's own timepoint.
+    // Same construction as an ordinary proposal.
     const BlockExecutionContext genesis_block_execution{
         .block_height =
             last_committed_block_.value.proposal_header.block_height + 1,
@@ -2246,11 +2242,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         co_return;
       });
 
-  // Taken from the header of the proposal under validation, never recomputed
-  // locally: these are the values the proposer's own execution committed to,
-  // so reproducing the block means reproducing them exactly. Deriving the
-  // height from our tip or the timepoint from a local clock would diverge
-  // this node's execution from the proposer's and split consensus.
+  // From the proposal's header, never recomputed locally: these are what the
+  // proposer executed against, and deriving them here would split consensus.
   const BlockExecutionContext validation_block_execution{
       .block_height = proposal.header.block_height,
       .block_timepoint = proposal.header.block_timepoint,
