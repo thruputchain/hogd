@@ -78,7 +78,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  GenesisConfiguration genesis_configuration{.network_hash = {},
+  GenesisConfiguration genesis_configuration{.network_hash = network_hash,
                                              .storage_cost_model = cost_model,
                                              .network_config = network_config,
                                              .root_contract =
@@ -87,6 +87,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                                                  native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.network_hash = network_hash;
   genesis_value.proposal_header.config_hash =
       compute_config_hash(genesis_configuration);
   auto res =
