@@ -296,15 +296,23 @@ SystemCallHandler::perform_initial_validation()
     // transaction: is_banned_redeploy_native_contract() rejects every id, so
     // an attached one could never reach deploy_contract successfully.
     //
-    // TODO(geoff): filter these out in the scheduler. A transaction carrying
-    // one should never reach the executor, so seeing it here is an internal
-    // inconsistency rather than a contract fault -- hence Unrecoverable, not
-    // Deterministic. Genesis is unaffected: it installs the native token and
-    // wallet through the deployment prerequisites, not contracts_to_deploy.
+    // TODO(geoff): filter these out in the scheduler, which is what should
+    // stop one being proposed in the first place. Until then the
+    // classification depends on where the transaction came from: in proposal
+    // mode it is ours and the scheduler should already have dropped it, so
+    // reaching here is an internal inconsistency; in validation mode it came
+    // from another proposer and is attacker-controlled, so it is a
+    // proposer-attributable rejection and must never be reportable as an
+    // internal error a peer can induce.
+    //
+    // Genesis is unaffected: it installs the native token and wallet through
+    // the deployment prerequisites, not through contracts_to_deploy.
     if (contract->contract_type() == ContractType::kNative) {
       error("Attached contract is native; native contracts are not deployable");
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::Unrecoverable};
+      cumulative_invoke_result_.result_ = InvokeError{
+          std::holds_alternative<ValidationModeData>(execution_mode_data_)
+              ? InvokeErrorCode::ValidationFailure
+              : InvokeErrorCode::Unrecoverable};
       return {};
     }
     PreparedContract prepared;

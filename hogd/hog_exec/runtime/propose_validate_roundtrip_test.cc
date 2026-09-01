@@ -1491,6 +1491,34 @@ TEST_P(ProposeValidateRoundtripTest,
          "validation rejects an invalid attached contract";
 }
 
+// An attached native contract is refused during initial validation. In
+// validation mode the transaction came from another proposer, so it is a
+// proposer-attributable ValidationFailure rather than the Unrecoverable that
+// proposal mode reports -- a peer must not be able to induce an internal
+// error on every validating node.
+TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
+{
+  auto native_context = make_noop_context();
+  auto tx = make_invoke_a_tx(0);
+
+  Contract native_contract(ContractType::kNative);
+  native_contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  tx.contracts_to_deploy = {native_contract};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *native_context,
+                                              NondeterministicProposalData{});
+  auto res = handler.root_invoke();
+  ASSERT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::ValidationFailure});
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultTxValidationFailure);
+}
+
 // Regression test for issue #2063: verify that unused queue entry observations
 // are also detected when initial validation fails before root execution.
 TEST_P(ProposeValidateRoundtripTest,
