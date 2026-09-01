@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -59,7 +60,17 @@ load_raw_file(std::string_view filename)
     }
   }
   if (!f) {
-    panic("failed to load contract artifact: {}", filename);
+    std::string searched_directories;
+    for (const std::filesystem::path &search_dir : search_directories) {
+      if (!searched_directories.empty()) {
+        searched_directories.append(", ");
+      }
+      searched_directories.append(search_dir.string());
+    }
+    panic("failed to load contract artifact: {}; searched directories: {}; "
+          "pass --contract-artifacts-dir <DIR> to add a contract artifact "
+          "directory",
+          filename, searched_directories);
   }
 
   ContractBlob contents;

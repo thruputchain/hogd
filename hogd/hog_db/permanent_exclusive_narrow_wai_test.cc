@@ -293,7 +293,8 @@ protected:
     ASSERT_TRUE(db_.write_address_metadata(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
-                             .contract_size = 10}));
+                             .contract_size = 10,
+                             .contract_type = ContractType::kRv32}));
   }
 
   HogDbDAO db_;

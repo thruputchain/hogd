@@ -10,23 +10,23 @@
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
 
-StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
-                                           DatabaseProxy &db_proxy)
-  : block_id_(block_id), db_proxy_(db_proxy)
+StorageSnapshotCache::StorageSnapshotCache(
+    BlockID block_id, BlockExecutionContext const &block_execution,
+    DatabaseProxy &db_proxy)
+  : block_id_(block_id), block_execution_context_(block_execution),
+    db_proxy_(db_proxy)
 {}
 
 StorageSnapshotCache::~StorageSnapshotCache()
@@ -196,26 +196,6 @@ StorageSnapshotCache::try_get_db_tip()
   }
   CHECK_PTR(tip);
   return tip;
-}
-
-SystemStatus<uint32_t>
-StorageSnapshotCache::try_get_max_sha256_buffers()
-{
-  auto tip = try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
-  return tip.value()->network_config.max_sha256_buffers;
-}
-
-SystemStatus<uint32_t>
-StorageSnapshotCache::try_get_max_cross_invoke_depth()
-{
-  auto tip = try_get_db_tip();
-  if (!tip.has_value()) {
-    return tip.error();
-  }
-  return tip.value()->network_config.max_cross_invoke_depth;
 }
 
 void

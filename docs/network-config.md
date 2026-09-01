@@ -23,8 +23,10 @@ From there it rides the `DbTip`, exactly as `default_wallet` does:
   carries the field forward.
 - The scheduler copies it from the committed parent tip when it builds the
   nominated or validated tip (`rpc_from_coord.cc`).
-- The executor reads individual parameters through `StorageSnapshotCache`,
-  which serves them off the same lock-free tip cache as the block height.
+- Each transaction pins the tip on its `SystemCallHandler` at its first
+  admission check (`SystemCallHandler::init_db_tip`), so the executor reads
+  individual parameters straight off that pin rather than through the shared
+  `StorageSnapshotCache` on every frame.
 
 `ConfigHashPreimage` pairs it with the storage cost model, and
 `ProposalHeader::config_hash` commits to their hash -- so a block records the

@@ -39,6 +39,9 @@ enum class DBCode : uint8_t {
 
   // Data corruption detected.
   kCorruption,
+
+  // The operation conflicts with one already in progress.
+  kBusy,
 };
 
 // DBCategory provides an error category for database errors.

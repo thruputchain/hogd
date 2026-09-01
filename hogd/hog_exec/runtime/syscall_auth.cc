@@ -142,11 +142,7 @@ syscall_MintAuthToken_inner(
                        .expiry_height = input_expiry_height};
 
   // Check expiry height is in the future
-  auto height = syscall_handler.get_block_height();
-  if (!height) {
-    return {height.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  if (input_expiry_height < *height) {
+  if (input_expiry_height < syscall_handler.get_block_height()) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
@@ -189,12 +185,9 @@ syscall_ConsumeAuthToken_inner(
     uint32_t &output_unwrapped_token_id_start,
     uint32_t &output_unwrapped_token_id_count)
 {
-  auto height = syscall_handler.get_block_height();
-  if (!height) {
-    return {height.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-
-  auto status = syscall_handler.consume_auth_token(input_token_id, *height);
+  auto status =
+      syscall_handler.consume_auth_token(input_token_id,
+                                         syscall_handler.get_block_height());
   if (!status) {
     return {status.error().code(), WrappedGasAmount{0}};
   }

@@ -100,6 +100,19 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
   advance_new_block();
 }
 
+BlockExecutionContext
+DBContext::block_execution_context() const
+{
+  auto tip = db_proxy_->get_db_tip(current_block_id_);
+  if (!tip.has_value()) {
+    throw std::runtime_error("block_execution_context: get_db_tip failed");
+  }
+  return BlockExecutionContext{
+      .block_height = tip->value.proposal_header.block_height + 1,
+      .block_timepoint = 1'700'000'000,
+  };
+}
+
 void
 DBContext::advance_new_block(BlockExecutionMode mode)
 {
@@ -130,7 +143,9 @@ DBContext::advance_new_block(BlockExecutionMode mode)
 
   current_block_id_++;
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(current_block_id_,
+                                             block_execution_context(),
+                                             *db_proxy_);
   event_server_.open_block(current_block_id_)();
 }
 

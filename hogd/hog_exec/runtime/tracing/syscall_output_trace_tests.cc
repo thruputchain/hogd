@@ -691,7 +691,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 
         uint32_t token_id = 0;
         auto m = ctx.syscall<SyscallNo::kMintAuthToken>(
-            BlockHeight{ctx.handler().get_block_height().value() + 5},
+            BlockHeight{ctx.handler().get_block_height() + 5},
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(
                                            serialized_node.data()),
                                        serialized_node.size()),
