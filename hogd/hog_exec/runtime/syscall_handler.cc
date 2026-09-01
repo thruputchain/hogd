@@ -294,15 +294,17 @@ SystemCallHandler::perform_initial_validation()
     }
     // Native contracts are registered at genesis, never deployed by a
     // transaction: is_banned_redeploy_native_contract() rejects every id, so
-    // an attached one could never reach deploy_contract successfully and only
-    // costs the transaction the bytes to carry it. Reject it here rather than
-    // verifying and retaining dead weight. Genesis is unaffected -- it
-    // installs the native token and wallet through the deployment
-    // prerequisites, not through contracts_to_deploy.
+    // an attached one could never reach deploy_contract successfully.
+    //
+    // TODO(geoff): filter these out in the scheduler. A transaction carrying
+    // one should never reach the executor, so seeing it here is an internal
+    // inconsistency rather than a contract fault -- hence Unrecoverable, not
+    // Deterministic. Genesis is unaffected: it installs the native token and
+    // wallet through the deployment prerequisites, not contracts_to_deploy.
     if (contract->contract_type() == ContractType::kNative) {
       error("Attached contract is native; native contracts are not deployable");
       cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::Deterministic};
+          InvokeError{InvokeErrorCode::Unrecoverable};
       return {};
     }
     PreparedContract prepared;

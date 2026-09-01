@@ -1375,6 +1375,72 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
 }
 
+// A native contract attached to a transaction is rejected during initial
+// validation, even when the body never deploys or invokes it: every native id
+// is refused by deploy_contract's banned-redeploy check, so an attachment
+// could never be deployed. The scheduler is meant to drop such a transaction
+// before it reaches the executor, so the classification is Unrecoverable
+// rather than a contract fault. The contract here is registered in the
+// NativeContext, so it is rejected for being native, not for being unknown.
+TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
+{
+  // A distinct id from the deployer's, so the attachment is registered in the
+  // context but does not hash to a contract already in the db.
+  auto attached_native = make_native_contract(1);
+  auto attached_hash = sha256(*attached_native);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "transaction body must not execute when a native "
+                         "contract is attached";
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
+  fns_1.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "the attached native contract must never be invoked";
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto native_contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  contract_map.emplace(1, std::move(native_contract_1));
+  NativeContext native_context(std::move(contract_map));
+  NoopRv32Context noop_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kRv32, {&noop_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {*attached_native},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
+
+  auto res = handler.root_invoke();
+  EXPECT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultUnrecoverable);
+  advance_block();
+  EXPECT_FALSE(lookup_contract_from_db(attached_hash).has_value());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,

@@ -17,6 +17,7 @@
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -1458,14 +1459,18 @@ TEST_P(ProposeValidateRoundtripTest,
 // returning before check_all_consumed(). Unused proposal bits must still be
 // detected as a validation failure.
 TEST_P(ProposeValidateRoundtripTest,
-       InvalidAttachedNativeContractChecksUnusedProposalBits)
+       InvalidAttachedContractChecksUnusedProposalBits)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  Contract invalid_contract(ContractType::kNative);
-  invalid_contract.native_contract_id() =
-      static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
+  // Oversized rather than native: the size gate rejects it Deterministically
+  // before verify_contract runs, which is what lets check_final_validation_-
+  // data() still convert to a ValidationFailure. A native attachment is now
+  // Unrecoverable and would short-circuit that conversion.
+  Contract invalid_contract(ContractType::kRv32);
+  invalid_contract.rv32_contract().data.resize_uninitialized(
+      kMaxContractSizeBytes + 1);
   tx.contracts_to_deploy = {invalid_contract};
 
   NondeterministicProposalData proposal_data;
@@ -1483,7 +1488,7 @@ TEST_P(ProposeValidateRoundtripTest,
   EXPECT_EQ(handler.try_commit_transaction(),
             ExecResult::ExecResultTxValidationFailure)
       << "Unused proposal bit must cause validation failure even when initial "
-         "validation rejects an invalid native contract";
+         "validation rejects an invalid attached contract";
 }
 
 // Regression test for issue #2063: verify that unused queue entry observations
@@ -1494,9 +1499,13 @@ TEST_P(ProposeValidateRoundtripTest,
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  Contract invalid_contract(ContractType::kNative);
-  invalid_contract.native_contract_id() =
-      static_cast<HogexecPrecompiledNativeContracts>(0x7fffffff);
+  // Oversized rather than native: the size gate rejects it Deterministically
+  // before verify_contract runs, which is what lets check_final_validation_-
+  // data() still convert to a ValidationFailure. A native attachment is now
+  // Unrecoverable and would short-circuit that conversion.
+  Contract invalid_contract(ContractType::kRv32);
+  invalid_contract.rv32_contract().data.resize_uninitialized(
+      kMaxContractSizeBytes + 1);
   tx.contracts_to_deploy = {invalid_contract};
 
   NondeterministicProposalData proposal_data;
