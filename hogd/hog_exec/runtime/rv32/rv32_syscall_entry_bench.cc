@@ -13,7 +13,9 @@
 #include <utility>
 #include <vector>
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
@@ -80,6 +82,17 @@ constexpr uint32_t kOutputAddressA = 0x0400;
 constexpr uint32_t kOutputAddressB = 0x0800;
 // Input buffer for the hashing syscalls, past both output pointers.
 constexpr uint32_t kInputAddress = 0x1000;
+// Signature, public key and message for VerifySignature, below the hashing
+// input so the two never overlap.
+constexpr uint32_t kSignatureAddress = 0x0900;
+constexpr uint32_t kPublicKeyAddress = 0x0980;
+constexpr uint32_t kMessageAddress = 0x09C0;
+constexpr uint32_t kMessageBytes = 64;
+// Hasher slots. HashBuffers caps live streams at the network config's
+// max_sha256_buffers (8 here), and Copy needs a distinct destination, so two
+// low indices are enough and stay well inside the cap.
+constexpr uint32_t kHashSlot = 0;
+constexpr uint32_t kHashSlotCopy = 1;
 
 // A RuntimeContext that can build nothing.
 //
@@ -258,16 +271,99 @@ sha256_call(uint32_t bytes)
   return call;
 }
 
-// Guest memory with the hashing input seeded. Content is arbitrary but not
-// zeros: a compressor or a special-cased zero page would be measuring the
-// wrong thing, and SHA256 has no such path but the next syscall might.
+// The incremental hashing family, which hashes the same bytes as SHA256 and is
+// charged nothing at all: syscall_crypto.cc returns WrappedGasAmount{0} from
+// Update, Copy and Finalize alike. Whatever the one-shot's constants end up
+// being, a guest can reach the same work through these for free, so measuring
+// them is the point rather than a completeness exercise.
+
+// Update with reset=true: creates or resets slot `index` and hashes `bytes`.
+// Self-contained, so it repeats cleanly in a timing loop -- reset=false would
+// append to a stream that grows without bound across iterations and stop
+// measuring a fixed amount of work.
+SyscallCall
+sha256_update_call(uint32_t bytes)
+{
+  SyscallCall call = make_call("SHA256Update", SyscallNo::kSHA256Update,
+                               {kHashSlot, kInputAddress, bytes, /*reset=*/1});
+  call.input_bytes = bytes;
+  return call;
+}
+
+// Finalize erases the stream it finalizes, so it cannot repeat on its own: the
+// second call in a loop would find no stream and take an error path. The pair
+// is what a guest issues anyway, and subtracting the measured Update/0 row
+// gives Finalize alone -- which is why that row is swept down to zero bytes.
+std::vector<SyscallCall>
+sha256_finalize_pair()
+{
+  return {sha256_update_call(0),
+          make_call("SHA256Finalize", SyscallNo::kSHA256Finalize,
+                    {kHashSlot, kOutputAddressA})};
+}
+
+// Copy clones a live hasher into another slot. Needs a source stream to exist,
+// which the fixture's warm-up establishes, and a destination distinct from it
+// (copy() early-returns when src == dst, which would measure nothing).
+SyscallCall
+sha256_copy_call()
+{
+  return make_call("SHA256Copy", SyscallNo::kSHA256Copy,
+                   {kHashSlot, kHashSlotCopy});
+}
+
+// VerifySignature(scheme, signature, public_key, message). Seven argument
+// words -- the register-native ABI's maximum -- because three spans cost two
+// slots each.
+SyscallCall
+verify_signature_call(uint32_t message_bytes)
+{
+  SyscallCall call =
+      make_call("VerifySignature", SyscallNo::kVerifySignature,
+                {static_cast<uint32_t>(CryptographicScheme::Ed25519),
+                 kSignatureAddress, 64U, kPublicKeyAddress, 32U,
+                 kMessageAddress, message_bytes});
+  call.input_bytes = message_bytes;
+  return call;
+}
+
+// Guest memory with the hashing input seeded, and a real ed25519 signature
+// laid out where VerifySignature's arguments point.
+//
+// A real one, not a plausible-looking one: verification rejects a bad signature
+// early, on a path far cheaper than the one being priced, and the benchmark
+// would report that cheap path as the cost of verifying. The keypair is derived
+// from a fixed seed so the measurement is reproducible.
 std::vector<uint8_t>
 make_guest_memory()
 {
+  // Content arbitrary but not zeros: a special-cased zero page would be
+  // measuring the wrong thing. SHA256 has no such path, but the next syscall
+  // added here might.
   std::vector<uint8_t> memory(kGuestMemoryBytes, 0);
   for (size_t i = kInputAddress; i < memory.size(); ++i) {
     memory[i] = static_cast<uint8_t>(i * 31U);
   }
+
+  std::array<std::byte, 32> seed = {};
+  for (size_t i = 0; i < seed.size(); ++i) {
+    seed[i] = static_cast<std::byte>(i + 1);
+  }
+  const auto [public_key, secret_key] = ed25519_keygen_from_seed(seed);
+
+  std::array<uint8_t, kMessageBytes> message = {};
+  for (size_t i = 0; i < message.size(); ++i) {
+    message[i] = static_cast<uint8_t>(i * 7U + 1U);
+  }
+  const auto signature =
+      ed25519_sign(secret_key, std::as_bytes(std::span(message)));
+  if (!signature.has_value()) {
+    std::abort();
+  }
+
+  std::ranges::copy(*signature, memory.begin() + kSignatureAddress);
+  std::ranges::copy(public_key, memory.begin() + kPublicKeyAddress);
+  std::ranges::copy(message, memory.begin() + kMessageAddress);
   return memory;
 }
 
@@ -348,6 +444,59 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   // finding rather than an omission, so the counter is emitted either way --
   // but ns/gas is only meaningful when gas is nonzero, and reporting `inf` for
   // every free syscall buries the rows where it is a real number.
+  state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
+}
+
+// Several syscalls per timed iteration, with an optional setup sequence issued
+// once before timing starts.
+//
+// Two of the new families cannot be measured as a single repeated call.
+// Finalize erases the stream it finalizes, so a second call in a loop finds
+// nothing and takes an error path; the Update+Finalize pair is what a guest
+// issues anyway, and subtracting the measured Update/0 row recovers Finalize
+// alone. Copy is the mirror image: it needs a source stream that already
+// exists, which is setup rather than per-iteration work, so seeding it inside
+// the timed region would price a Copy that no guest performs.
+void
+bm_syscall_entry_sequence(benchmark::State &state,
+                          std::vector<SyscallCall> setup,
+                          std::vector<SyscallCall> timed)
+{
+  SyscallBenchFixture &fixture = shared_fixture();
+  std::vector<uint8_t> memory = make_guest_memory();
+  const std::span<uint8_t> memory_span(memory);
+
+  for (const SyscallCall &call : setup) {
+    (void)invoke_syscall_entry(fixture.handler(), memory_span, call);
+  }
+  // Warm anything the first call of the timed sequence would build lazily, so
+  // the first iteration is not a different measurement from the rest.
+  uint64_t gas = 0;
+  for (const SyscallCall &call : timed) {
+    gas += invoke_syscall_entry(fixture.handler(), memory_span, call);
+  }
+  for (const SyscallCall &call : setup) {
+    (void)invoke_syscall_entry(fixture.handler(), memory_span, call);
+  }
+
+  int64_t iterations = 0;
+  uint32_t input_bytes = 0;
+  for (const SyscallCall &call : timed) {
+    input_bytes += call.input_bytes;
+  }
+  for (auto _ : state) {
+    for (const SyscallCall &call : timed) {
+      benchmark::DoNotOptimize(
+          invoke_syscall_entry(fixture.handler(), memory_span, call));
+    }
+    benchmark::ClobberMemory();
+    ++iterations;
+  }
+
+  state.SetItemsProcessed(iterations);
+  if (input_bytes > 0) {
+    state.SetBytesProcessed(iterations * static_cast<int64_t>(input_bytes));
+  }
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
 
@@ -489,6 +638,39 @@ register_benchmarks()
   benchmark::RegisterBenchmark("vm/SHA256/0", bm_syscall_vm, sha256_call(0));
   benchmark::RegisterBenchmark("vm/SHA256/1024", bm_syscall_vm,
                                sha256_call(1024));
+
+  // The incremental family. Same sweep as the one-shot up to
+  // kSHA256BufferMaxSize, which is where HashBuffers::update stops accepting a
+  // buffer -- so the comparison against SHA256 at the same size is direct, and
+  // the point it is making is that one of the two is free.
+  for (const uint32_t bytes : {0U, 32U, 256U, 1024U, 4096U}) {
+    if (bytes > kSHA256BufferMaxSize) {
+      continue;
+    }
+    benchmark::RegisterBenchmark(
+        ("entry/SHA256Update/" + std::to_string(bytes)).c_str(),
+        bm_syscall_entry, sha256_update_call(bytes));
+  }
+  benchmark::RegisterBenchmark("entry/SHA256Update0+Finalize",
+                               bm_syscall_entry_sequence,
+                               std::vector<SyscallCall>{},
+                               sha256_finalize_pair());
+  benchmark::RegisterBenchmark("entry/SHA256Copy", bm_syscall_entry_sequence,
+                               std::vector<SyscallCall>{sha256_update_call(0)},
+                               std::vector<SyscallCall>{sha256_copy_call()});
+  benchmark::RegisterBenchmark("vm/SHA256Update/1024", bm_syscall_vm,
+                               sha256_update_call(1024));
+
+  // Signature verification. The message sweep is short because the cost is
+  // dominated by the curve arithmetic rather than by hashing the message --
+  // which is itself the finding, if it holds.
+  for (const uint32_t bytes : {0U, kMessageBytes}) {
+    benchmark::RegisterBenchmark(
+        ("entry/VerifySignature/" + std::to_string(bytes)).c_str(),
+        bm_syscall_entry, verify_signature_call(bytes));
+  }
+  benchmark::RegisterBenchmark("vm/VerifySignature", bm_syscall_vm,
+                               verify_signature_call(kMessageBytes));
 }
 
 // Everything needed to know whether this run is comparable with another one,
