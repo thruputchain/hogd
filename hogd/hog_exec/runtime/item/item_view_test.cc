@@ -14,6 +14,7 @@
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/queue_util.h"
