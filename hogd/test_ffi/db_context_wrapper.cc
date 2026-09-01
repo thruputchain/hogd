@@ -50,7 +50,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                      NetworkHash network_hash,
                      Contract const &genesis_root_contract,
                      NetworkConfig const &network_config)
-  : db_proxy_(nullptr), snapshot_cache_(nullptr), network_hash_(network_hash)
+  : network_hash_(network_hash), db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = hog_db_wrapper_.exec_port()});
