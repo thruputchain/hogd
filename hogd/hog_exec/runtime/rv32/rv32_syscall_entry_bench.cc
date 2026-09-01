@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
@@ -139,7 +140,8 @@ constexpr uint32_t kHashSlotCopy = 1;
 // here ever does invoke, this aborts rather than quietly measuring a stub.
 class NoChildRuntimeContext final : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*contract*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*contract*/,
+                                  PreparedContract & /*out*/) const override
   {
     std::abort();
   }
