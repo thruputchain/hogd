@@ -100,6 +100,10 @@ constexpr uint32_t kSignatureStride = 64;
 // against it is what the first bench-pool run died on.
 inline constexpr std::array<uint32_t, 3> kVerifyMessageBytes = {0, 64, 1024};
 constexpr uint32_t kMaxMessageBytes = 1024;
+// The length the ecall-crossing row uses. Mid-sweep: long enough that the
+// message is not degenerate, short enough that the row still finishes.
+constexpr size_t kVerifyVmRow = 1;
+static_assert(kVerifyVmRow < kVerifyMessageBytes.size());
 
 constexpr uint32_t
 signature_address(size_t index)
@@ -341,14 +345,21 @@ sha256_copy_call()
 // VerifySignature(scheme, signature, public_key, message). Seven argument
 // words -- the register-native ABI's maximum -- because three spans cost two
 // slots each.
+//
+// Indexed by row rather than by length: each swept length has its own
+// signature, over exactly that prefix, at its own address. Passing the length
+// here instead would have to search for the matching signature, and getting
+// that wrong verifies a signature against the wrong message -- which fails on
+// ed25519's cheap reject path and prices the wrong thing.
 SyscallCall
-verify_signature_call(uint32_t message_bytes)
+verify_signature_call(size_t index)
 {
+  const uint32_t message_bytes = kVerifyMessageBytes.at(index);
   SyscallCall call =
       make_call("VerifySignature", SyscallNo::kVerifySignature,
                 {static_cast<uint32_t>(CryptographicScheme::Ed25519),
-                 kSignatureAddress, 64U, kPublicKeyAddress, 32U,
-                 kMessageAddress, message_bytes});
+                 signature_address(index), kSignatureStride, kPublicKeyAddress,
+                 kPublicKeyBytes, kMessageAddress, message_bytes});
   call.input_bytes = message_bytes;
   return call;
 }
@@ -757,8 +768,10 @@ register_benchmarks()
                                      .c_str(),
                                  bm_syscall_entry, verify_signature_call(i));
   }
+  // One length through the VM, to price the ecall crossing against a call
+  // whose own cost dwarfs it.
   benchmark::RegisterBenchmark("vm/VerifySignature", bm_syscall_vm,
-                               verify_signature_call(1));
+                               verify_signature_call(kVerifyVmRow));
 }
 
 // Everything needed to know whether this run is comparable with another one,
