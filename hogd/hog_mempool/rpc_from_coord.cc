@@ -663,6 +663,7 @@ MempoolCoordinatorRpc::get_txset_hash(
   // mempool has already deduplicated. Use [try_get_txset_hash()] for hashes
   // that came off the wire.
   CHECK(txset_hash.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return *txset_hash;
 }
 
