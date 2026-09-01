@@ -866,9 +866,13 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 }
 
 // Regression test for issue #1512. An attached native contract with an
-// unknown native_contract_id must be rejected by verify_contract rather
-// than reaching the panic in the deploy path.
-TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
+// unknown native_contract_id must be rejected during initial validation
+// rather than reaching the panic in the deploy path. Attachments are now
+// refused by contract type before verify_contract runs -- as Unrecoverable,
+// since the scheduler is meant to drop them first -- so this no longer
+// exercises that unknown-id branch, but it still pins what #1512 is about:
+// the panic stays unreachable.
+TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
 {
   StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
@@ -916,7 +920,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
 
   auto res = handler.root_invoke();
   ASSERT_FALSE(res.result_);
-  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Unrecoverable);
 }
 
 TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)

@@ -50,7 +50,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                      NetworkHash network_hash,
                      Contract const &genesis_root_contract,
                      NetworkConfig const &network_config)
-  : db_proxy_(nullptr), snapshot_cache_(nullptr)
+  : network_hash_(network_hash), db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = hog_db_wrapper_.exec_port()});
@@ -78,7 +78,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  GenesisConfiguration genesis_configuration{.network_hash = {},
+  GenesisConfiguration genesis_configuration{.network_hash = network_hash,
                                              .storage_cost_model = cost_model,
                                              .network_config = network_config,
                                              .root_contract =
@@ -87,6 +87,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                                                  native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.network_hash = network_hash;
   genesis_value.proposal_header.config_hash =
       compute_config_hash(genesis_configuration);
   auto res =
@@ -125,6 +126,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
 
     ConsensusValue value{};
     value.proposal_header.block_height = current_block_id_;
+    value.proposal_header.network_hash = network_hash_;
     res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(

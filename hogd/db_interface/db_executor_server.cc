@@ -255,6 +255,7 @@ DbExecutorRpc::get_db_tip(BlockID block_id)
   out.error(RPCError::kRPCNone);
   ConsensusValue value{};
   value.proposal_header.block_height = block_manager_->committed_tip_height();
+  value.proposal_header.network_hash = block_manager_->get_network_hash();
   out.db_tip() = DbTip{.id = block_manager_->committed_tip_id(),
                        .storage_long_hash = {},
                        .value = value,
