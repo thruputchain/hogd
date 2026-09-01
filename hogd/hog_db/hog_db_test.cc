@@ -1007,6 +1007,28 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenBalanceIsNegative)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
+TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
+{
+  constexpr uint128_t kMax = std::numeric_limits<uint128_t>::max();
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // kMax + 10 + 1 wraps to exactly 10, the persisted balance. An unchecked
+  // sum therefore reports this row as already reconciled and leaves it in
+  // place, and the corruption only surfaces later in the mempool scheduler.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/kMax,
+                   /*already_scheduled=*/10,
+                   /*received=*/1,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
 TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)
 {
   Address sender_addr = make_address(kAddress);
