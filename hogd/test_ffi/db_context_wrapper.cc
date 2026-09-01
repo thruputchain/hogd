@@ -1,6 +1,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <memory>
@@ -34,6 +35,17 @@
 namespace hogd {
 
 namespace {
+// TimePoint is Unix nanoseconds; system_clock's epoch is the Unix epoch on
+// every platform this builds for.
+TimePoint
+wall_clock_timepoint()
+{
+  return static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
 dbauth_client_t
 make_dbauth_client(x23::HostPort const &hostport)
 {
@@ -110,12 +122,13 @@ DBContext::block_execution_context() const
   }
   return BlockExecutionContext{
       .block_height = tip->value.proposal_header.block_height + 1,
-      .block_timepoint = 1'700'000'000,
+      .block_timepoint = block_timepoint_,
   };
 }
 
 void
-DBContext::advance_new_block(BlockExecutionMode mode)
+DBContext::advance_new_block(BlockExecutionMode mode,
+                             std::optional<TimePoint> block_timepoint)
 {
   if (current_block_id_ > 0) {
     auto res = db_sched_client_.dbsched_close_snapshot(current_block_id_);
@@ -144,6 +157,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   }
 
   current_block_id_++;
+  block_timepoint_ = block_timepoint.value_or(wall_clock_timepoint());
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_,
                                              block_execution_context(),

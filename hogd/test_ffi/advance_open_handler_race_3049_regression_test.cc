@@ -100,7 +100,7 @@ TEST(TestBindingsTest, OpenSyscallHandlerRefusedDuringLifecycleTransition)
 
     // A second transition is refused for the same reason: the two lifecycle
     // operations are exclusive of each other, not just of open handlers.
-    EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+    EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
   }
 
   // The transition is over; handler admission works again.
@@ -157,7 +157,7 @@ TEST(TestBindingsTest, ConcurrentAdvanceAndOpenNeverShareTornState)
 
     std::thread advance_thread([&] {
       start.arrive_and_wait();
-      advance_result.store(advance_new_block(db));
+      advance_result.store(advance_new_block(db, nullptr));
     });
 
     start.arrive_and_wait();

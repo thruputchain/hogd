@@ -97,10 +97,10 @@ TEST(TestBindingsTest, SnapshotReadAndAdvanceNewBlockExcludeEachOther)
     ASSERT_TRUE(borrow.held());
     EXPECT_TRUE(typed_db->has_open_handlers());
 
-    EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+    EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
   }
 
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
   auto after_advance = get_snapshot_storage_item(db, ffi_addrkey);
   EXPECT_EQ(after_advance.ffi_error_code, kTestFFIErrorCodeNone);
   free_buffer_if_present(after_advance.data);
@@ -193,7 +193,7 @@ TEST(TestBindingsTest, SnapshotStorageItemReadRacesAdvanceNewBlock)
       // poisoned DB with the same code, and retrying the latter would spin and
       // then surface as a confusing advance-count failure instead of the real
       // one. Stop on poison; the assertions after the join report it.
-      if (advance_new_block(db) != kTestFFIErrorCodeNone &&
+      if (advance_new_block(db, nullptr) != kTestFFIErrorCodeNone &&
           typed_db->is_lifecycle_poisoned()) {
         break;
       }
@@ -229,7 +229,7 @@ TEST(TestBindingsTest, SnapshotStorageItemReadRacesAdvanceNewBlock)
   auto final_read = get_snapshot_storage_item(db, ffi_addrkey);
   EXPECT_EQ(final_read.ffi_error_code, kTestFFIErrorCodeNone);
   free_buffer_if_present(final_read.data);
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 } // namespace hogd

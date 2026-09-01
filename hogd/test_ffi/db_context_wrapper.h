@@ -48,10 +48,22 @@ public:
             NetworkConfig const &network_config);
 
   // Height is the tip's plus one, read off the tip rather than a block id.
+  // The timepoint is whatever the advance that opened this block was given;
+  // unlike the height it is not derivable from the chain.
   BlockExecutionContext block_execution_context() const;
 
-  void advance_new_block(BlockExecutionMode mode =
-                             BlockExecutionMode::kBlockExecutionModeProposal);
+  // Opens the next block. `block_timepoint` is that block's timepoint in Unix
+  // nanoseconds; nullopt takes the current wall clock, which is what a caller
+  // with no opinion wants -- a contract reading GetBlockTimepoint then sees a
+  // plausible present-day value rather than a fixed one. Pass a value to pin
+  // it, which is how a test drives contract logic keyed on time: deadlines,
+  // expiry, vesting, rate limits.
+  //
+  // Nothing requires successive timepoints to increase. A test pinning them
+  // owns that ordering; the wall clock supplies it on its own.
+  void advance_new_block(
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
+      std::optional<TimePoint> block_timepoint = std::nullopt);
 
   struct EphemeralTxIdentifier {
     BlockID block_id;
@@ -251,6 +263,12 @@ private:
 
   using db_sched_client_t =
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
+
+  // Unix nanoseconds, as a real chain's header carries. Set by each
+  // advance_new_block() and read back by block_execution_context(): for an
+  // open block the timepoint is not on the tip (that one is the parent's), so
+  // unlike the height there is nothing to recompute it from.
+  TimePoint block_timepoint_ = 0;
 
   BlockID current_block_id_ = 0;
   // The network this chain belongs to. Every committed value carries it, not
