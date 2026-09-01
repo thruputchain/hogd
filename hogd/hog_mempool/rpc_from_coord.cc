@@ -2070,8 +2070,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  if (proposal.header.block_timepoint <
-      last_committed_block_.value.proposal_header.block_timepoint) {
+  // Read once, before the decrement below: that reopens the validation gate
+  // and can wake a commit waiting in close_validation_gate(), which replaces
+  // last_committed_block_ -- and the co_await is a suspension point besides.
+  // Reading it again afterwards would race a non-atomic DbTip, and would let
+  // the diagnostic name a different tip than the one actually compared.
+  const TimePoint committed_timepoint =
+      last_committed_block_.value.proposal_header.block_timepoint;
+  if (proposal.header.block_timepoint < committed_timepoint) {
     // Blocks only move forward in time. This header comes from another
     // proposer, so without the check a peer decides that time runs backwards
     // for us: the value reaches every executor through the block execution
@@ -2083,7 +2089,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     error("Rejecting block at height {}: timepoint {} predates the committed "
           "tip's {}",
           proposal.header.block_height, proposal.header.block_timepoint,
-          last_committed_block_.value.proposal_header.block_timepoint);
+          committed_timepoint);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
