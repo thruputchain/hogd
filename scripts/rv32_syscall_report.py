@@ -267,9 +267,21 @@ def check_joinable(bench, calibration):
     bench_ctx = context(bench)
     cal_prov = calibration.get("provenance", {})
 
+    # Absence is refused, not waved through. A file that cannot say which
+    # engine or machine it came from -- truncated, hand-edited, or written by
+    # an older binary -- cannot be shown to be joinable, and "we could not
+    # check" is not the same as "it is fine". Treating a missing field as
+    # compatible is what would let this function's own stated invariant be
+    # skipped by exactly the inputs least worth trusting.
     bench_fp = bench_ctx.get("engine_fingerprint")
     cal_fp = cal_prov.get("engine_fingerprint")
-    if bench_fp and cal_fp and bench_fp != cal_fp:
+    if not bench_fp or not cal_fp:
+        problems.append(
+            "missing engine fingerprint: "
+            f"{'benchmark' if not bench_fp else 'calibration'} does not record "
+            "one, so there is no way to tell whether these describe the same "
+            "engine. Re-run it with a binary that stamps its provenance.")
+    elif bench_fp != cal_fp:
         problems.append(
             f"engine fingerprint {bench_fp} (benchmark) != {cal_fp} "
             "(calibration): these measured different engines, so the "
@@ -278,7 +290,13 @@ def check_joinable(bench, calibration):
 
     bench_host = bench_ctx.get("hogd_host")
     cal_host = cal_prov.get("host")
-    if bench_host and cal_host and bench_host != cal_host:
+    if not bench_host or not cal_host:
+        problems.append(
+            "missing host: "
+            f"{'benchmark' if not bench_host else 'calibration'} does not "
+            "record one, so there is no way to tell whether the nanoseconds "
+            "and the gas unit come from the same machine.")
+    elif bench_host != cal_host:
         problems.append(
             f"host {bench_host} (benchmark) != {cal_host} (calibration): "
             "nanoseconds are a fact about one machine, and the gas unit would "
@@ -633,9 +651,20 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
     heavy = {name: row for name, row in proposal["syscalls"].items()
              if name not in crossing}
     proposal["crossing"] = sorted(crossing)
+    # Gas for the heavy rows is computed here, with to_gas, rather than at the
+    # point of printing. Doing it in the printer is how these two numbers came
+    # to ignore --margin entirely: to_gas is where the margin is applied, and a
+    # second, inline `ceil(ns / unit)` beside it looks equivalent and is not.
+    # The run then prints a "5% margin" proposal whose most expensive entries
+    # carry no margin at all, which is the one place it would matter most.
+    crossing_worst_ns = max(r["vm_ns"] for r in crossing.values())
     proposal["heavy"] = {
-        name: {**row, "own_ns": max(0.0, row["vm_ns"] - max(
-            r["vm_ns"] for r in crossing.values()))}
+        name: {**row,
+               "own_ns": max(0.0, row["vm_ns"] - crossing_worst_ns),
+               # base + its own work, rounded up once on the total rather
+               # than twice.
+               "total_gas": to_gas(row["vm_ns"]) - ECALL_INSTRUCTION_GAS,
+               "own_gas": to_gas(max(0.0, row["vm_ns"] - crossing_worst_ns))}
         for name, row in sorted(heavy.items())}
 
     # Worst case within the crossing-dominated group: a base every syscall pays
@@ -739,9 +768,7 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
               f"{proposal['base_gas']:>14}")
     unit = proposal["unit_ns"]
     for name, row in proposal["heavy"].items():
-        # base + its own work, rounded up once on the total rather than twice.
-        total = max(1, math.ceil(row["vm_ns"] / unit - 1e-9)) - \
-            ECALL_INSTRUCTION_GAS
+        total = row["total_gas"]
         print(f"{name:<28}{row['vm_ns']:>10.1f}{row['current_gas']:>9}"
               f"{total:>14}  = base + {total - proposal['base_gas']}")
     print()
@@ -773,9 +800,8 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
               "the shared base")
         print("cannot cover and need a cost of their own on top of it:")
         for name, row in proposal["heavy"].items():
-            own_gas = max(1, math.ceil(row["own_ns"] / unit - 1e-9))
             print(f"  {name:<26}{row['own_ns']:>9.1f} ns of its own "
-                  f"-> {own_gas} gas above the base")
+                  f"-> {row['own_gas']} gas above the base")
         print("A single shared constant taken over all of them would price "
               "every")
         print("syscall at the dearest, which is the bug this split exists to "

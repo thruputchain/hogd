@@ -81,15 +81,26 @@ static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-// Blocks a hash of `len` bytes compresses, including the padding block. Written
-// to avoid overflowing on a length near the top of the range rather than to be
-// clever: the addition is the only place it could, so it is the only place
-// guarded.
-constexpr static auto HashBlockCount = [](uint64_t len, uint64_t block_bytes,
-                                          uint64_t pad_bytes) -> uint64_t {
-  if (len > UINT64_MAX - pad_bytes)
-    return UINT64_MAX / block_bytes;
-  return (len + pad_bytes + block_bytes - 1) / block_bytes;
+// Blocks a hash of `message_bytes` compresses, padding block included. One
+// helper per hash, with its geometry baked in, rather than one taking the block
+// and padding sizes as arguments: three interchangeable uint64_t parameters is
+// a call any caller can get wrong in a way that silently misprices, and there
+// are only two hashes to write. The guard is against overflowing on a length
+// near the top of the range; the addition is the only place that could.
+constexpr static auto SHA256BlockCount =
+    [](uint64_t message_bytes) -> uint64_t {
+  if (message_bytes > UINT64_MAX - kSHA256PadBytes)
+    return UINT64_MAX / kSHA256BlockBytes;
+  return (message_bytes + kSHA256PadBytes + kSHA256BlockBytes - 1) /
+         kSHA256BlockBytes;
+};
+
+constexpr static auto SHA512BlockCount =
+    [](uint64_t message_bytes) -> uint64_t {
+  if (message_bytes > UINT64_MAX - kSHA512PadBytes)
+    return UINT64_MAX / kSHA512BlockBytes;
+  return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
+         kSHA512BlockBytes;
 };
 
 // Saturating, so a length chosen to overflow the product bills the maximum
@@ -103,8 +114,7 @@ constexpr static auto SaturatingCost = [](uint64_t base, uint64_t per_block,
 
 constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
   return SaturatingCost(kSHA256HashBaseCost, kSHA256HashBlockCost,
-                        HashBlockCount(bytes_len, kSHA256BlockBytes,
-                                       kSHA256PadBytes));
+                        SHA256BlockCount(bytes_len));
 };
 
 // Update compresses only the whole blocks it completes; a partial tail stays
@@ -128,8 +138,7 @@ constexpr static auto VerifySignatureCost =
                               ? UINT64_MAX - kEd25519HashedPrefixBytes
                               : message_len + kEd25519HashedPrefixBytes;
   return SaturatingCost(kVerifySignatureBaseCost, kVerifySignatureBlockCost,
-                        HashBlockCount(hashed, kSHA512BlockBytes,
-                                       kSHA512PadBytes));
+                        SHA512BlockCount(hashed));
 };
 // NOLINTEND(readability-identifier-naming)
 
