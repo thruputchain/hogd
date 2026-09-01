@@ -913,9 +913,10 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
       {Op::kUnimp, u8"UNIMP", 1},
   }};
-  const std::array<ExpectedSyscallGasEntry, 6> expected_syscalls = {{
+  const std::array<ExpectedSyscallGasEntry, 7> expected_syscalls = {{
       {u8"SyscallBase", hogd::kSyscallBaseCost},
       {u8"SHA256HashBlock", hogd::kSHA256HashBlockCost},
+      {u8"SHA256Stream", hogd::kSHA256StreamCost},
       {u8"VerifySignatureBase", hogd::kVerifySignatureBaseCost},
       {u8"VerifySignatureBlock", hogd::kVerifySignatureBlockCost},
       {u8"NoSyscall", hogd::kNoSyscallCost},
@@ -924,7 +925,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
 
   EXPECT_EQ(kOpCount, 49U);
   EXPECT_EQ(kGasTableVersion, 4U);
-  EXPECT_EQ(kGasScheduleDigest, 0x330d62c07d0fa1ccULL);
+  EXPECT_EQ(kGasScheduleDigest, 0x86dd48334941726cULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);

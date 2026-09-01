@@ -408,14 +408,16 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part1);
     body.sha256_update().inputs.reset = true;
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, SHA256UpdateCost(part1.size()),
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part2);
     body.sha256_update().inputs.reset = false;
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, SHA256UpdateCost(part2.size()),
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Finalize);
@@ -647,7 +649,8 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = src_index;
     body.sha256_copy().inputs.dst_index = dst_index;
-    return step_entry(gas, 0, std::move(body), std::move(status));
+    const GasAmount cost = is_ok(status) ? kSHA256CopyCost : 0;
+    return step_entry(gas, cost, std::move(body), std::move(status));
   };
   auto finalize_entry = [&gas](uint32_t index, SHA256Hash hash,
                                HostFunctionStatusXdr status) {

@@ -44,6 +44,27 @@ constexpr static uint64_t kSyscallBaseCost = 50;
 // call, which is inside the fit's own residual.
 constexpr static uint64_t kSHA256HashBlockCost = 22;
 
+// What touching a hash stream costs on top of the blocks it compresses, paid by
+// SHA256Update and SHA256Copy. Both reach the frame's stream table, and both
+// create an entry in it when the destination slot does not exist yet -- an
+// allocation with no compression attached, so no block term bills it. A
+// zero-byte reset update creates a stream and hashes nothing at all.
+//
+// Charged on every such call, not only the ones that allocate. The alternative
+// makes the price depend on whether the slot happened to exist, which is a
+// thing about the frame's state rather than about the call; the flat charge
+// keeps every cost in this table a function of its arguments. It overbills a
+// repeat touch, which measures near the crossing alone, by well under 2x --
+// the direction the opcode schedule already rounds, and far inside the spread
+// this schedule replaced.
+//
+// The stream table's size limit is max_sha256_buffers, which is network config
+// rather than a protocol constant, so this cannot lean on the limit being
+// small. It does not need to: the cost per creation is flat in occupancy
+// (measured to 32768), so an unordered_map insert stays amortized O(1) however
+// large a chain sets it.
+constexpr static uint64_t kSHA256StreamCost = 26;
+
 // ed25519, which this schedule prices for the first time. The curve arithmetic
 // dominates; the block term covers hashing the message, and is needed because
 // the syscall puts no bound on its length.
@@ -103,10 +124,16 @@ constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
 // later call completes it. The carry this under-counts by is at most one block
 // per call, far less than the crossing that call already paid.
 constexpr static auto SHA256UpdateCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(0, kSHA256HashBlockCost, bytes_len / kSHA256BlockBytes);
+  return SaturatingCost(kSHA256StreamCost, kSHA256HashBlockCost,
+                        bytes_len / kSHA256BlockBytes);
 };
 
+// Copy compresses nothing; the stream it clones into is the whole cost.
+constexpr static uint64_t kSHA256CopyCost = kSHA256StreamCost;
+
 // Finalize compresses the padding block the streaming path has not yet done.
+// It creates no stream -- it erases one -- so it pays no stream cost: the
+// create-side call already paid for both halves of the slot's life.
 constexpr static uint64_t kSHA256FinalizeCost = kSHA256HashBlockCost;
 
 constexpr static auto VerifySignatureCost =
@@ -130,9 +157,10 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 6> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
+    {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},

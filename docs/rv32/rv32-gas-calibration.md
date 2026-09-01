@@ -731,6 +731,7 @@ The schedule committed in `gas_cost_table.h`, measured on hog10 (run
 ```
 constexpr static uint64_t kSyscallBaseCost         = 50;
 constexpr static uint64_t kSHA256HashBlockCost     = 22;
+constexpr static uint64_t kSHA256StreamCost        = 26;
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 ```
@@ -767,21 +768,56 @@ rule the schedule followed in any case. The report still prints the residual as
 a diagnostic -- if it ever grows past a few gas, the block model has stopped
 describing the syscall.
 
-**`SHA256Copy` is not in the schedule either.** It carried an explicit
-`kSHA256CopyCost = 0` whose comment said the crossing covers it. Zero is
-almost certainly the right price -- `HashBuffers::copy` runs no compression
-function, and the map insert it does perform on a new destination slot is
-bounded at `max_sha256_buffers` (8 by default) per frame, each of those calls
-having paid a crossing. But the row that was supposed to establish that
-measured the wrong thing: `entry/SHA256Copy` repeats one fixed
+**Touching a hash stream is priced, on both paths that do it.**
+`SHA256Update` and `SHA256Copy` reach the frame's stream table, and both insert
+into it when the destination slot does not exist yet -- an allocation with no
+compression attached, so no block term bills it. A zero-byte reset update
+creates a stream and hashes nothing at all. Neither charged for it.
+
+Measured on hog10 by driving `HashBuffers` directly (run 33557627276), per
+slot created, converged over occupancy: **Copy ~34.8 ns, Update ~41.0 ns**,
+flat from occupancy 64 through 32768 -- an unordered_map insert stays amortized
+O(1), so a chain that raises `max_sha256_buffers` does not change the price.
+`kSHA256StreamCost` is the dearer of the two at that run's 1.6232 ns unit:
+`ceil(41.0 / 1.6232)` = 26.
+
+It is charged on every such call, not only the ones that allocate. Making the
+price depend on whether the slot happened to exist would be the first cost in
+this table that is a fact about the frame's state rather than about the call.
+The flat charge overbills a repeat touch -- which measures near the crossing
+alone -- by well under 2x, the direction the opcode schedule already rounds.
+
+The syscall-path rows could not have found this. `max_sha256_buffers` is
+network config, so the mock snapshot server the fixture talks to serves one
+value and cannot sweep it; and `entry/SHA256Copy` repeats a single
 (source, destination) pair, so the warm pass creates the destination and every
-timed iteration after it takes the assignment branch, never the allocating one.
-A zero-valued entry in a hashed schedule asserts a measurement that was not
-made, so the entry is gone and Copy falls through to the default the schedule
-already states: the crossing and nothing more. `entry/SHA256CopyNewSlot+Finalize`
-now pairs the copy with a finalize that erases the destination, putting the
-insert back in the timed loop, so the next calibration run prices the path a
-guest can actually choose.
+timed iteration after it takes the assignment branch.
+`buffers/CopyFill` and `buffers/UpdateFill` drive the component instead, and
+`entry/SHA256CopyNewSlot+Finalize` puts the insert back in the syscall-path
+timed loop by erasing the destination each iteration.
+
+**No per-call base, and R2 is not why.** An earlier draft of this schedule
+carried `kSHA256HashBaseCost = 2` and cited R2 = 1.000000 as the evidence for
+the block model. The R2 does not support that reading. The sweep runs
+{0, 32, 256, 1024, 4096, 16384, 32768} bytes, which is block counts
+{1, 1, 5, 17, 65, 257, 513}: the 32768-byte point alone carries about two
+thirds of the x-variance, and the y-variance is dominated by the same point. R2
+prints 1.000000 there for a residual of roughly 4-5 ns RMS -- 0.03% at the top
+of the sweep and about 4% at the 117 ns bottom, which is precisely where an
+intercept is determined. Any roughly linear model scores ~1.0 on a sweep this
+wide. The diagnostic that discriminates is the billed-to-measured ratio, which
+is why the table below is the evidence and R2 is no longer quoted.
+
+The base went with it, for a stronger reason than noise. `blocks(n)` is never
+zero -- SHA-256 always compresses its padding, so even the empty input runs one
+block, and no point in the sweep sits at the intercept. It is an extrapolation
+to a block count no call can have. What it was estimating is what remains of a
+117 ns call once the crossing (81 ns) and that first block (35 ns) are paid:
+about 2 ns, inside the fit's own residual. `SHA256Finalize` writes the same
+32-byte digest to guest memory and carries no base either, so a base was not a
+rule the schedule followed in any case. The report still prints the residual as
+a diagnostic -- if it ever grows past a few gas, the block model has stopped
+describing the syscall.
 
 Every constant the cost functions read is an entry in
 `kSyscallGasCostSchedule`, so all of them are hashed. Block *geometry* -- the
@@ -795,7 +831,7 @@ How it bills against what was measured, crossing included:
 | `SHA256/0` | 117.4 | 73 gas | 1.01x |
 | `SHA256/1024` | 673.2 | 425 gas | 1.03x |
 | `SHA256/32768` | 17798.4 | 11337 gas | 1.03x |
-| `SHA256Update/4096` | 2286.0 | 1459 gas | 1.04x |
+| `SHA256Update/4096` | 2286.0 | 1485 gas | 1.06x |
 | `SHA256Finalize` | 114.0 | 73 gas | 1.04x |
 | `VerifySignature/0` | 28635.5 | 17932 gas | 1.02x |
 | `VerifySignature/1024` | 30631.7 | 18980 gas | 1.01x |

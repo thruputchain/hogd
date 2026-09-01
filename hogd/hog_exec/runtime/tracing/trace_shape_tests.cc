@@ -152,8 +152,9 @@ push_static_key_entries(SyscallTraceVec &expected,
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.reset = true;
-    expected.push_back(make_entry(gas[0], gas[0] - kSyscallBaseCost,
-                                  std::move(body), ok_status()));
+    expected.push_back(
+        make_entry(gas[0], gas[0] - SHA256UpdateCost(0) - kSyscallBaseCost,
+                   std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
@@ -170,7 +171,8 @@ push_static_key_entries(SyscallTraceVec &expected,
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = 0;
     body.sha256_copy().inputs.dst_index = 1;
-    expected.push_back(make_entry(gas[2], gas[2] - kSyscallBaseCost,
+    expected.push_back(make_entry(gas[2],
+                                  gas[2] - kSHA256CopyCost - kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
   {
@@ -510,14 +512,14 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'896, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'793, 99'732, 99'666,
-                                                  99'605, 99'544, 99'428};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'793, 99'706, 99'614,
+                                                  99'527, 99'440, 99'324};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'167, storage_key, 32));
+  expected.push_back(bytestring_get_len_entry(99'063, storage_key, 32));
   expected.push_back(
-      bytestring_get_entry(99'099, storage_key,
+      bytestring_get_entry(98'995, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -545,10 +547,10 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(98'907, 98'249, std::move(body), ok_status()));
+        make_entry(98'803, 98'145, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(98'205, inner_calldata));
-  expected.push_back(return_entry(97'979, {}));
+  expected.push_back(get_returned_buffer_entry(98'101, inner_calldata));
+  expected.push_back(return_entry(97'875, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -604,14 +606,14 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'864, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'761, 99'700, 99'634,
-                                                  99'573, 99'512, 99'396};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'761, 99'674, 99'582,
+                                                  99'495, 99'408, 99'292};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'136, storage_key, 32));
+  expected.push_back(bytestring_get_len_entry(99'032, storage_key, 32));
   expected.push_back(
-      bytestring_get_entry(99'068, storage_key,
+      bytestring_get_entry(98'964, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -637,9 +639,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(98'877, 97'827, std::move(body), ok_status()));
+        make_entry(98'773, 97'723, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(97'728, {}));
+  expected.push_back(return_entry(97'624, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

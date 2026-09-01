@@ -565,6 +565,7 @@ SHA256_BLOCK_BYTES = 64
 SHA256_PAD_BYTES = 9          # 0x80 plus an 8-byte big-endian bit length
 COMMITTED_SYSCALL_BASE_GAS = 50
 COMMITTED_SHA256_BLOCK_GAS = 22
+COMMITTED_SHA256_STREAM_GAS = 26
 
 
 def sha256_blocks(byte_len):
