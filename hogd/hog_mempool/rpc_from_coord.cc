@@ -136,10 +136,10 @@ SchedGatewaySubmitOutcome
 submit_outcome_for_auth(AuthErrorCode code)
 {
   if (code == AuthErrorCode::kAuthSuccess) {
-    return SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted;
+    return SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted;
   }
   if (code == AuthErrorCode::kAuthFailed) {
-    return SchedGatewaySubmitOutcome::SchedGatewaySubmitRejected;
+    return SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected;
   }
   if (code == AuthErrorCode::kAuthStaleBlockHeight) {
     return SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
@@ -285,7 +285,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         record_submitted_unvetted(txs->size());
         outcomes->resize(txs->size());
         std::fill(outcomes->begin(), outcomes->end(),
-                  SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+                  SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
         original_indices->reserve(txs->size());
         for (size_t i = 0; i < txs->size(); i++) {
           original_indices->push_back(i);
@@ -341,7 +341,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           const SchedGatewaySubmitOutcome outcome =
               submit_outcome_for_auth(code);
           if (outcome ==
-              SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted) {
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted) {
             authenticated_txs.push_back(std::move((*txs)[i]));
             authenticated_indices.push_back(original_idx);
           }
@@ -362,7 +362,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
       [&]() -> x23::Async<void> {
         // Authentication must run first: a bad signing of a body that is
         // already pending is still rejected, while an authenticated duplicate
-        // remains accepted without consuming another capacity slot.
+        // remains admitted without consuming another capacity slot.
         const ssize_t scheduler_size = scheduler_->size();
         const bool already_full = scheduler_size >= mempool_tx_size_limit_;
         size_t num_slots_left =
@@ -430,7 +430,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           const SchedGatewaySubmitOutcome outcome = add_outcomes[i];
           (*outcomes)[(*original_indices)[i]] = outcome;
           if (outcome ==
-              SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted) {
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted) {
             admitted_txs.push_back(std::move((*txs)[i]));
           }
         }

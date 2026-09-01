@@ -480,7 +480,7 @@ x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
   SchedGatewaySubmitOutcomeBatch outcomes(
-      txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+      txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and

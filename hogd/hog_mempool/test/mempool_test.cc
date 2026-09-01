@@ -853,7 +853,7 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
   ASSERT_EQ(outcomes.size(), txs.size());
   for (size_t i = 0; i < mempool_tx_size_limit; i++) {
     EXPECT_EQ(outcomes[i],
-              SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   }
   EXPECT_EQ(outcomes.back(),
             SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
@@ -878,14 +878,14 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
   EXPECT_EQ(MempoolMetrics::instance().rejected_capacity_rpc_count.value(),
             capacity_before + 1);
 
-  // A valid duplicate is zero-growth and remains idempotently accepted even
+  // A valid duplicate is zero-growth and remains idempotently admitted even
   // when no capacity slots remain.
   const SchedGatewaySubmitOutcomeBatch duplicate =
       gateway.schedgateway_submit_tx_batch_with_outcomes(
           t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   ASSERT_EQ(duplicate.size(), 1UL);
   EXPECT_EQ(duplicate[0],
-            SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
             mempool_tx_size_limit);
 }
@@ -902,14 +902,14 @@ TEST(Mempool, SubmitUnvettedCapacityCountsOnlyDistinctNewBodies)
       gateway.schedgateway_submit_tx_batch_with_outcomes(
           t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   ASSERT_EQ(first.size(), 1UL);
-  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
   const SchedGatewaySubmitOutcomeBatch outcomes =
       gateway.schedgateway_submit_tx_batch_with_outcomes(t_to_parallel_batch(
           SignedTransactionBatch{txs[0], txs[1], txs[2]})())();
   ASSERT_EQ(outcomes.size(), 3UL);
-  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
-  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(outcomes[2],
             SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 2UL);
@@ -927,8 +927,8 @@ TEST(Mempool, SubmitUnvettedCapacityCountsSameRequestDuplicateOnce)
       gateway.schedgateway_submit_tx_batch_with_outcomes(
           t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[0]})())();
   ASSERT_EQ(outcomes.size(), 2UL);
-  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
-  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
@@ -3161,10 +3161,11 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
       gateway.schedgateway_submit_tx_batch_with_outcomes(t_to_parallel_batch(
           SignedTransactionBatch{poisoned_tx, good_tx})())();
   ASSERT_EQ(mixed_outcomes.size(), 2UL);
-  EXPECT_EQ(mixed_outcomes[0],
-            SchedGatewaySubmitOutcome::SchedGatewaySubmitRejected);
+  EXPECT_EQ(
+      mixed_outcomes[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
   EXPECT_EQ(mixed_outcomes[1],
-            SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
   // Rejection is request-scoped rather than retained under the shared hash.
@@ -3172,8 +3173,9 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
       gateway.schedgateway_submit_tx_batch_with_outcomes(
           t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
   ASSERT_EQ(rejected_again.size(), 1UL);
-  EXPECT_EQ(rejected_again[0],
-            SchedGatewaySubmitOutcome::SchedGatewaySubmitRejected);
+  EXPECT_EQ(
+      rejected_again[0],
+      SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 

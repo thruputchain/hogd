@@ -58,7 +58,7 @@ TEST(Scheduler, AddVettedTx)
   const SchedGatewaySubmitOutcomeBatch outcomes =
       scheduler->add_txs({txs[0]})();
   ASSERT_EQ(outcomes.size(), 1UL);
-  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
@@ -140,14 +140,14 @@ TEST(Scheduler, AddVettedTxDuplicate)
   EXPECT_EQ(scheduler->size(), 0UL);
   const SchedGatewaySubmitOutcomeBatch first = scheduler->add_txs({txs[0]})();
   ASSERT_EQ(first.size(), 1UL);
-  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
   // Now add the transaction a second time.
   const SchedGatewaySubmitOutcomeBatch duplicate =
       scheduler->add_txs({txs[0]})();
   ASSERT_EQ(duplicate.size(), 1UL);
   EXPECT_EQ(duplicate[0],
-            SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
