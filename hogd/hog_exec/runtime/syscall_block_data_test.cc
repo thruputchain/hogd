@@ -338,10 +338,14 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
         // Never reached: admission refuses the transaction first. Kept as a
-        // tripwire -- succeeding here would mean the mismatch went unnoticed
-        // and a contract ran against a height nobody agreed on.
+        // tripwire -- reporting success here would mean the mismatch went
+        // unnoticed and a contract ran against a height nobody agreed on.
         BlockHeight block_height = 0;
-        (void)ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        if (status.has_value() &&
+            status.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
         return {};
       });
 
