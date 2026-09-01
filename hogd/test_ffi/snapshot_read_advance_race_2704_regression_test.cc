@@ -97,7 +97,8 @@ TEST(TestBindingsTest, SnapshotReadAndAdvanceNewBlockExcludeEachOther)
     ASSERT_TRUE(borrow.held());
     EXPECT_TRUE(typed_db->has_open_handlers());
 
-    EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
+    EXPECT_EQ(advance_new_block(db, nullptr),
+              kTestFFIErrorCodeUnrecoverableError);
   }
 
   EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);

@@ -10,6 +10,7 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
@@ -159,6 +160,33 @@ TEST(TestBindingsTest, AdvanceWithATimepointPinsIt)
   ASSERT_EQ(g_observed_timepoints.size(), 2u);
   EXPECT_EQ(g_observed_timepoints[0], pinned);
   EXPECT_EQ(g_observed_timepoints[1], pinned);
+}
+
+// The commit path builds its ConsensusValue from scratch, so a field it does
+// not set is committed as zero however the block actually executed. That is
+// how the network hash went missing (#3756); the timepoint sat in the same
+// gap, leaving the committed header claiming 0 for a block whose contracts had
+// run against a real value.
+//
+// Read back through the next block's snapshot cache, whose db tip *is* the
+// committed parent.
+TEST(TestBindingsTest, AdvanceCommitsTheTimepointItRanWith)
+{
+  const uint64_t pinned = 1'767'225'600'000'000'000ULL;
+
+  void *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  // Open a block on `pinned`, then advance again so that block is committed.
+  ASSERT_EQ(advance_new_block(db, &pinned), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
+
+  auto *typed_db = reinterpret_cast<DBContext *>(db);
+  auto tip = typed_db->get_snapshot().try_get_db_tip();
+  ASSERT_TRUE(tip.has_value());
+  ASSERT_NE(*tip, nullptr);
+  EXPECT_EQ((*tip)->value.proposal_header.block_timepoint, pinned);
 }
 
 } // namespace hogd

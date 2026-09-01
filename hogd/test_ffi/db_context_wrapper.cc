@@ -137,9 +137,14 @@ DBContext::advance_new_block(BlockExecutionMode mode,
           "advance_new_block: dbsched_close_snapshot failed");
     }
 
+    // block_timepoint_ still holds the outgoing block's value here; the new
+    // block's is assigned below. Without this the committed header records 0
+    // while the contracts in that block executed against something else, so
+    // anything reading the block back disagrees with what ran in it.
     ConsensusValue value{};
     value.proposal_header.block_height = current_block_id_;
     value.proposal_header.network_hash = network_hash_;
+    value.proposal_header.block_timepoint = block_timepoint_;
     res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(

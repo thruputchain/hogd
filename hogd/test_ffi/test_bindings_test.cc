@@ -3970,7 +3970,8 @@ TEST(TestBindingsTest, AdvanceBlockRejectedWhileHandlerOpen)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   // Advancing the block while the handler is open is rejected.
-  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
 
   // After the handler is closed, advancing the block succeeds.
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),

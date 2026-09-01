@@ -100,7 +100,8 @@ TEST(TestBindingsTest, OpenSyscallHandlerRefusedDuringLifecycleTransition)
 
     // A second transition is refused for the same reason: the two lifecycle
     // operations are exclusive of each other, not just of open handlers.
-    EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
+    EXPECT_EQ(advance_new_block(db, nullptr),
+              kTestFFIErrorCodeUnrecoverableError);
   }
 
   // The transition is over; handler admission works again.

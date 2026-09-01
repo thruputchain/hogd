@@ -64,7 +64,8 @@ TEST(TestBindingsTest, FailedCloseAfterBlockAdvancePoisonsDb)
 
   // With the guard gone, only the poison stops advance_new_block() from driving
   // the scheduler over the orphaned InvokeTX. It must be rejected.
-  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
 }
 
 } // namespace hogd

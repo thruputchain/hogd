@@ -39,7 +39,8 @@ TEST(TestBindingsTest, AdvanceAndFreeOpenHandlerGuardsReturnStructuredError)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   // Both guards reject while the handler borrows the DB.
-  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
   EXPECT_EQ(free_db(db), kTestFFIErrorCodeUnrecoverableError);
 
   // Closing the handler releases the borrow; both operations then succeed.
