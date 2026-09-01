@@ -41,6 +41,7 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/syscall_kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
+#include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
