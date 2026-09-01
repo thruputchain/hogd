@@ -15,6 +15,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"

@@ -256,20 +256,24 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  auto prepared =
+  auto prepared_res =
       syscall_handler->resolve_prepared_contract(deployed_contract_hash.hash);
-  if (!prepared.has_value()) [[unlikely]] {
-    return prepared.error();
+  if (!prepared_res.has_value()) [[unlikely]] {
+    return prepared_res.error();
   }
-  if (prepared.value() == nullptr || !prepared.value()->rv32.has_value())
-      [[unlikely]] {
+  const PreparedContract *prepared = *prepared_res;
+  if (prepared == nullptr) [[unlikely]] {
+    error("Unrecoverable: Contract lookup failed: {}",
+          show_byte_array(deployed_contract_hash.hash));
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+  if (!prepared->rv32.has_value()) [[unlikely]] {
     error("Unrecoverable: rv32 contract is not translatable: {}",
           show_byte_array(deployed_contract_hash.hash));
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  return std::make_unique<Rv32Runtime>(&*prepared.value()->rv32,
-                                       syscall_handler);
+  return std::make_unique<Rv32Runtime>(&*prepared->rv32, syscall_handler);
 }
 
 } // namespace hogd
