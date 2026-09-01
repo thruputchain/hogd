@@ -460,6 +460,19 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   return insert_tx_into_runqueue(tx_hash, value);
 }
 
+bool
+Scheduler::is_pending(const SignedTransaction &tx)
+{
+  const TransactionHash tx_hash = sha256(tx.tx);
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{
+      .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+      .tx_hash = tx_hash,
+  };
+  const auto [account_state, lock] = get_account_state(account);
+  return account_state->txs.contains(key);
+}
+
 x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {

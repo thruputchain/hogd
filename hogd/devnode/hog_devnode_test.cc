@@ -1,3 +1,5 @@
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -204,6 +206,31 @@ close_if_open(int &fd)
     close(fd);
     fd = -1;
   }
+}
+
+std::uint16_t
+pick_unused_loopback_port()
+{
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    throw std::runtime_error(errno_message("socket", errno));
+  }
+  Defer close_fd([&] { close_if_open(fd); });
+
+  sockaddr_in address{};
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  address.sin_port = 0;
+  if (::bind(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) !=
+      0) {
+    throw std::runtime_error(errno_message("bind", errno));
+  }
+  socklen_t address_len = sizeof(address);
+  if (::getsockname(fd, reinterpret_cast<sockaddr *>(&address), &address_len) !=
+      0) {
+    throw std::runtime_error(errno_message("getsockname", errno));
+  }
+  return ntohs(address.sin_port);
 }
 
 std::string
@@ -1211,13 +1238,15 @@ expect_startup_failure(std::vector<std::string> args,
 
 TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
 {
-  HogDevnodeProcess process = HogDevnodeProcess::start();
+  const std::uint16_t requested_scheduler_port = pick_unused_loopback_port();
+  HogDevnodeProcess process = HogDevnodeProcess::start(
+      {"--scheduler-port", std::to_string(requested_scheduler_port)});
   Readiness readiness = process.wait_for_readiness();
 
   EXPECT_EQ(readiness.network_hash,
             "0000000000000000000000000000000000000000000000000000000000000000");
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
-  EXPECT_GT(readiness.scheduler.port, 0);
+  EXPECT_EQ(readiness.scheduler.port, requested_scheduler_port);
   EXPECT_EQ(readiness.scheduler_gateway.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler_gateway.port, 0);
   EXPECT_NE(readiness.scheduler_gateway.port, readiness.scheduler.port);

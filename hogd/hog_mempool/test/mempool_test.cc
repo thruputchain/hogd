@@ -877,6 +877,59 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
       malformed_before);
   EXPECT_EQ(MempoolMetrics::instance().rejected_capacity_rpc_count.value(),
             capacity_before + 1);
+
+  // A valid duplicate is zero-growth and remains idempotently accepted even
+  // when no capacity slots remain.
+  const SchedGatewaySubmitOutcomeBatch duplicate =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(duplicate.size(), 1UL);
+  EXPECT_EQ(duplicate[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
+            mempool_tx_size_limit);
+}
+
+TEST(Mempool, SubmitUnvettedCapacityCountsOnlyDistinctNewBodies)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/2);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  const SchedGatewaySubmitOutcomeBatch first =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(first.size(), 1UL);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(t_to_parallel_batch(
+          SignedTransactionBatch{txs[0], txs[1], txs[2]})())();
+  ASSERT_EQ(outcomes.size(), 3UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(outcomes[2],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 2UL);
+}
+
+TEST(Mempool, SubmitUnvettedCapacityCountsSameRequestDuplicateOnce)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/1);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[0]})())();
+  ASSERT_EQ(outcomes.size(), 2UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(outcomes[1], SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
 TEST(Mempool, SubmitVetted)
@@ -3066,7 +3119,10 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
-  MempoolTestInfra server;
+  // One free slot makes this a regression for capacity-before-auth prefix
+  // truncation: the invalid first signing must not starve the valid tail.
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/1);
 
   AddressAuthData auth_data = get_default_account();
   const Ed25519SecretKey private_key =

@@ -311,51 +311,8 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                co_return;
                              });
 
-  auto capacity_node = submit_dag.async<void>(
-      "enforce capacity", submit_dag.after(lock_commit_node),
-      [&, commit_guard]() -> x23::Async<void> {
-        // [scheduler_->size()] may have changed since we last checked it above,
-        // so we read it again here. Importantly, we do this while holding
-        // [commit_lock_] to ensure that concurrent RPCs cannot push us beyond
-        // the mempool tx capacity limit.
-        ssize_t scheduler_size = scheduler_->size();
-        if (scheduler_size >= mempool_tx_size_limit_) {
-          MempoolMetrics::instance().rejected_capacity_rpc_count.increment();
-          info("submit_unvetted rejected txs as the mempool has too many "
-               "pending txs");
-          // [commit_guard] is a smart pointer that has a [reset()] method just
-          // like [x23::CoroGuard]. clang-tidy prefers that we dereference
-          // [commit_guard] with [*] below rather than write
-          // [commit_guard->reset()], just so that this is more readable.
-          (*commit_guard).reset();
-          std::fill(outcomes->begin(), outcomes->end(),
-                    SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
-          submit_dag.fail(x23::DagFailureKind::Cancelled, "enforce capacity");
-          co_return;
-        }
-        ssize_t num_slots_left = mempool_tx_size_limit_ - scheduler_size;
-        CHECK_GE(num_slots_left, 0L);
-        if (std::cmp_less(num_slots_left, txs->size())) {
-          // The submitted txs will bring the mempool beyond its pending tx
-          // capacity limit, so we discard the extra txs.
-          //
-          // We CHECK above that [num_slots_left] is >= 0, so it is safe to cast
-          // it to size_t.
-          const auto resize_to = static_cast<size_t>(num_slots_left);
-          const size_t num_discarded = txs->size() - resize_to;
-
-          MempoolMetrics::instance().discarded_capacity_tx_count.increment(
-              num_discarded);
-          std::fill(outcomes->begin() + resize_to, outcomes->end(),
-                    SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
-          txs->resize(resize_to);
-          original_indices->resize(resize_to);
-        }
-        co_return;
-      });
-
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
-      "verify transactions", submit_dag.after(capacity_node),
+      "verify transactions", submit_dag.after(lock_commit_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
         const BlockHeight verify_height = scheduler_->current_block();
         co_return co_await auth_client_->authmempool_verify_transactions(
@@ -400,8 +357,63 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         co_return;
       });
 
+  auto capacity_node = submit_dag.async<void>(
+      "enforce capacity", submit_dag.after(prune_node),
+      [&]() -> x23::Async<void> {
+        // Authentication must run first: a bad signing of a body that is
+        // already pending is still rejected, while an authenticated duplicate
+        // remains accepted without consuming another capacity slot.
+        const ssize_t scheduler_size = scheduler_->size();
+        const bool already_full = scheduler_size >= mempool_tx_size_limit_;
+        size_t num_slots_left =
+            already_full
+                ? 0
+                : static_cast<size_t>(mempool_tx_size_limit_ - scheduler_size);
+
+        SignedTransactionBatch capacity_txs;
+        x23::Vec<size_t> capacity_indices;
+        capacity_txs.reserve(txs->size());
+        capacity_indices.reserve(txs->size());
+        std::unordered_set<TransactionHash, SipHash24Hasher>
+            selected_new_hashes;
+        size_t num_discarded = 0;
+        for (size_t i = 0; i < txs->size(); i++) {
+          const TransactionHash tx_hash = sha256((*txs)[i].tx);
+          const bool already_pending = selected_new_hashes.contains(tx_hash) ||
+                                       scheduler_->is_pending((*txs)[i]);
+          if (already_pending || num_slots_left > 0) {
+            if (!already_pending) {
+              num_slots_left--;
+              selected_new_hashes.insert(tx_hash);
+            }
+            capacity_txs.push_back(std::move((*txs)[i]));
+            capacity_indices.push_back((*original_indices)[i]);
+          }
+          else {
+            (*outcomes)[(*original_indices)[i]] =
+                SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+            num_discarded++;
+          }
+        }
+
+        if (num_discarded > 0) {
+          if (already_full) {
+            MempoolMetrics::instance().rejected_capacity_rpc_count.increment();
+            info("submit_unvetted rejected new txs as the mempool has too many "
+                 "pending txs");
+          }
+          else {
+            MempoolMetrics::instance().discarded_capacity_tx_count.increment(
+                num_discarded);
+          }
+        }
+        *txs = std::move(capacity_txs);
+        *original_indices = std::move(capacity_indices);
+        co_return;
+      });
+
   auto add_node = submit_dag.async<void>(
-      "add txs", submit_dag.after(prune_node),
+      "add txs", submit_dag.after(capacity_node),
       [&, commit_guard, original_indices, outcomes]() -> x23::Async<void> {
         // Careful: it is tempting to overlap the overhead of
         // [authmempool_verify_transactions()] with that of

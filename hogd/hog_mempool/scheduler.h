@@ -166,6 +166,11 @@ public:
     current_block_.store(height, std::memory_order_relaxed);
   }
 
+  // Returns whether this transaction body is already pending in the account's
+  // runqueue or stranded set. Callers must authenticate the submitted signed
+  // encoding before treating an existing body as accepted.
+  bool is_pending(const SignedTransaction &tx);
+
   // The number of txs in the scheduler, including both those of the runqueue
   // and those that are stranded.
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
