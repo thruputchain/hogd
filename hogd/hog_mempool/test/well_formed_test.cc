@@ -1,10 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <cstddef>
-#include <cstdint>
-
 #include "contract.hh"
-#include "ffi_enums.hh"
 #include "hogd/hog_mempool/well_formed.h"
 #include "transaction.hh"
 
@@ -12,24 +8,19 @@ namespace hogd {
 
 namespace {
 
+// is_tx_well_formed() reads only the contract type, so these fixtures set
+// nothing else: no blob, no native contract id. Anything more would be state
+// the predicate never looks at.
 Contract
-make_rv32_contract(uint8_t fill)
+make_rv32_contract()
 {
-  Contract contract(ContractType::kRv32);
-  contract.rv32_contract().data.resize_uninitialized(16);
-  for (size_t i = 0; i < contract.rv32_contract().data.size(); ++i) {
-    contract.rv32_contract().data[i] = static_cast<uint8_t>(i + fill);
-  }
-  return contract;
+  return Contract(ContractType::kRv32);
 }
 
 Contract
 make_native_contract()
 {
-  Contract contract(ContractType::kNative);
-  contract.native_contract_id() =
-      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
-  return contract;
+  return Contract(ContractType::kNative);
 }
 
 } // namespace
@@ -45,13 +36,13 @@ TEST(WellFormedTest, TransactionWithNoAttachmentsIsWellFormed)
 TEST(WellFormedTest, Rv32AttachmentsAreWellFormed)
 {
   SignedTransaction tx{};
-  tx.tx.contracts_to_deploy.push_back(make_rv32_contract(1));
-  tx.tx.contracts_to_deploy.push_back(make_rv32_contract(2));
+  tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
+  tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
   EXPECT_TRUE(is_tx_well_formed(tx));
 }
 
 // The condition this filter exists for: hog_exec refuses an attached native
-// contract, so the mempool must not admit one.
+// contract, so the mempool must not admit one into a block we propose.
 TEST(WellFormedTest, NativeAttachmentIsNotWellFormed)
 {
   SignedTransaction tx{};
@@ -63,9 +54,9 @@ TEST(WellFormedTest, NativeAttachmentIsNotWellFormed)
 TEST(WellFormedTest, NativeAttachmentAmongRv32OnesIsNotWellFormed)
 {
   SignedTransaction tx{};
-  tx.tx.contracts_to_deploy.push_back(make_rv32_contract(1));
+  tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
   tx.tx.contracts_to_deploy.push_back(make_native_contract());
-  tx.tx.contracts_to_deploy.push_back(make_rv32_contract(2));
+  tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
   EXPECT_FALSE(is_tx_well_formed(tx));
 }
 
