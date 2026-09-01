@@ -255,8 +255,9 @@ TEST(TestBindingsTest, UnderBudgetChildFinishesParentInvokeAsSuccess)
   ASSERT_EQ(handler.ffi_error_code, kTestFFIErrorCodeNone);
   ASSERT_NE(handler.syscall_handler, nullptr);
 
-  // One gas unit of headroom above what the child will spend.
-  constexpr GasAmount kParentGas = kShaGas + 1;
+  // One gas unit of headroom above what the child will spend plus the crossing
+  // the parent's own Invoke pays for reaching it.
+  constexpr GasAmount kParentGas = kShaGas + kSyscallBaseCost + 1;
   ASSERT_EQ(open_frame(handler.syscall_handler,
                        make_invocation(ContractAddress{0xA0}, 0x1111,
                                        kParentGas)),
@@ -298,7 +299,8 @@ TEST(TestBindingsTest, UnderBudgetChildFinishesParentInvokeAsSuccess)
   auto const &invoke_trace = trace.system_calls[0];
   EXPECT_EQ(invoke_trace.body.syscall_number(), SyscallNo::kInvoke);
   EXPECT_EQ(invoke_trace.gas_remaining_at_start, kParentGas);
-  EXPECT_EQ(invoke_trace.gas_remaining_at_end, kParentGas - kShaGas);
+  EXPECT_EQ(invoke_trace.gas_remaining_at_end,
+            kParentGas - kShaGas - kSyscallBaseCost);
   EXPECT_EQ(invoke_trace.status.error(), HostFnErrorCode::NoneOrRecoverable);
   EXPECT_EQ(invoke_trace.status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeNone);

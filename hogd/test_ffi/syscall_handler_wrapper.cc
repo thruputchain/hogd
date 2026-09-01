@@ -7,6 +7,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/ffi_data_buffer.h"
@@ -272,7 +273,22 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   auto finish_pending_trace = [&](HostFnStatus<SyscallErrorCode> status) {
     if (syscall_trace_pending) {
       syscall_trace_pending = false;
-      to_handler().finish_syscall_trace(status, current_gas);
+      // No child frame ran, but production still charges the crossing: a
+      // refused Invoke reached the handler through syscall_entry() like any
+      // other. A caller left short by that charge goes out of gas, which
+      // outranks the refusal it was about to be told about -- the same
+      // rewrite wrap_after_parse()'s gas epilogue makes, and with the same
+      // exclusion for a SystemError, which ends the transaction outright.
+      GasAmount gas_remaining = current_gas;
+      if (auto *runtime = get_mock_runtime()) {
+        auto *gas_runtime = dynamic_cast<MockGasRuntime *>(runtime);
+        CHECK(gas_runtime != nullptr);
+        if (!gas_runtime->consume_gas(kSyscallBaseCost) && status.has_value()) {
+          status = HostFnError{HostFnErrorCode::OutOfGas};
+        }
+        gas_remaining = gas_runtime->gas_remaining();
+      }
+      to_handler().finish_syscall_trace(status, gas_remaining);
     }
   };
   // try/catch: this runs during unwinding, where an escaping throw terminates.
@@ -344,9 +360,9 @@ SyscallHandlerContext::start_mock_invocation_frame(Invocation const &invocation,
   // flag bits (#3302) and reentrance (#3301). Auth-token ownership is vacuous
   // until the API below can pass tokens. Only locals have been computed by this
   // point, so a refusal pushes no frame and the caller owes no finish; the
-  // caller's synthetic kInvoke is traced with production's syscall error and no
-  // gas charged, matching a refused kInvoke. Closed before the error() log,
-  // which can throw.
+  // caller's synthetic kInvoke is traced with production's syscall error and
+  // charged only the crossing, matching a refused kInvoke. Closed before the
+  // error() log, which can throw.
   auto admitted =
       to_handler().validate_new_invocation(invocation.invoked_address,
                                            frame_flags,
@@ -537,6 +553,17 @@ SyscallHandlerContext::finish_mock_invocation_frame(
   result += frame_result;
   GasAmount total_gas_consumed = result.gas_consumed_;
 
+  // What the parent pays: everything the child spent, plus the crossing its own
+  // Invoke made to get there. Reported separately from total_gas_consumed,
+  // which is the child frame's own spend and is what the caller is handed back.
+  // Saturating, so a child that already spent the maximum cannot wrap the
+  // parent's charge down to something it can afford.
+  const GasAmount parent_charge =
+      total_gas_consumed >
+              std::numeric_limits<GasAmount>::max() - kSyscallBaseCost
+          ? std::numeric_limits<GasAmount>::max()
+          : total_gas_consumed + kSyscallBaseCost;
+
   // Debit the parent for the child frame. MockGasRuntime::consume_gas() reports
   // false exactly when the charge meets or exceeds what the parent had left,
   // which is production's `gas_consumed >= gas_remaining` out-of-gas condition
@@ -553,7 +580,7 @@ SyscallHandlerContext::finish_mock_invocation_frame(
     // guest execution would (see the override at the top of this function).
     // parent_out_of_gas is the local copy used for the synthetic kInvoke status
     // just below.
-    parent_out_of_gas = !gas_runtime->consume_gas(total_gas_consumed);
+    parent_out_of_gas = !gas_runtime->consume_gas(parent_charge);
     gas_remaining = gas_runtime->gas_remaining();
   }
 

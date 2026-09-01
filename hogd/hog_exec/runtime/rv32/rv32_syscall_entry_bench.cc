@@ -76,6 +76,11 @@ namespace hogd {
 namespace {
 
 constexpr uint64_t kPlentyOfGas = 1'000'000'000;
+// The mock serves a genesis tip at height 0, so the executing block is 1.
+constexpr BlockExecutionContext kBenchBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1'700'000'000,
+};
 constexpr uint32_t kGuestMemoryBytes = rv32::kMaxMemoryBytes;
 // Output pointers the guest hands the syscall. Two, because GetCalldataLen
 // writes through two.
@@ -167,7 +172,9 @@ public:
         x23::HostPort{"localhost", event_exec_port});
     event_server_.open_block(0)();
     runtime_context_ = std::make_unique<NoChildRuntimeContext>();
-    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(0, *db_proxy_);
+    snapshot_cache_ =
+        std::make_unique<StorageSnapshotCache>(0, kBenchBlockExecution,
+                                               *db_proxy_);
     handler_ = std::make_unique<SystemCallHandler>(
         Transaction{}, *snapshot_cache_,
         PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
