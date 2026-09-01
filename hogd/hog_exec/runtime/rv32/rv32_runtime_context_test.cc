@@ -958,7 +958,9 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -1003,7 +1005,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -1049,7 +1053,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
