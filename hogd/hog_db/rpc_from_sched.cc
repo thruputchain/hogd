@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sys/socket.h>
@@ -85,16 +86,25 @@ HogDbSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
   co_return ret;
 }
 
-x23::Async<DbSchedResult>
-HogDbSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
+DbSchedResult
+HogDbSchedRpc::write_hog_ages_locked(const HogAgeBatch &ages)
 {
+  // A ramdb write pass: must not overlap commit_block()'s sync (#3397).
+  std::scoped_lock write_pass(ctx_.ramdb_write_pass_lock());
+
   HogDbDAO &db = ctx_.get_db();
   for (const HogAge &age : ages) {
     if (!db.write_address_average_hog_age(age)) {
-      co_return DbSchedResult::DbSchedResultError;
+      return DbSchedResult::DbSchedResultError;
     }
   }
-  co_return DbSchedResult::DbSchedResultOK;
+  return DbSchedResult::DbSchedResultOK;
+}
+
+x23::Async<DbSchedResult>
+HogDbSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
+{
+  co_return write_hog_ages_locked(ages);
 }
 
 x23::Async<DbAddressAuthDataBatchResult>
@@ -139,6 +149,13 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
                             PerThreadARC<BlockTX> *btx,
                             const StorageLongHash &db_hash)
 {
+  // This whole function is one ramdb write pass ending in sync(): the
+  // changeset apply, the dbtip update, and the commit/snapshot. Holding
+  // the pass lock throughout keeps other write passes (the hog-age batch)
+  // from overlapping the sync (#3397). No co_await may run inside this
+  // scope: commit_block must stay synchronous.
+  std::scoped_lock write_pass(ctx_.ramdb_write_pass_lock());
+
   // check if already committed.
   if (ctx_.get_tip().id == id) {
     error("tried to commit the same block '{}' more than once", id);
