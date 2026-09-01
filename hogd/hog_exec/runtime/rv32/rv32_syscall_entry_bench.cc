@@ -18,6 +18,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -748,6 +749,60 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
                              benchmark::Counter::kInvert);
 }
 
+// What Copy costs as the frame's stream table fills, driven against
+// HashBuffers directly rather than through the syscall path. Two reasons for
+// going under the syscall: the table's size limit is max_sha256_buffers, which
+// is network config -- "a choice, not a protocol default", per
+// stock_network_config() -- so a chain can set it far above this repo's 8 and
+// the schedule has to hold at whatever it is; and the mock snapshot server this
+// fixture talks to serves the stock value, so the syscall path cannot sweep it.
+// The syscall adds only the crossing on top, which is priced already.
+//
+// Each iteration fills a fresh table: one seeded stream, then `occupancy`
+// copies into slots that do not exist yet, which is the allocating path and the
+// one a contract chooses by picking fresh destination indices. Reported per
+// copy, so the rows are directly comparable and a per-copy cost that grows with
+// occupancy shows up as a rising number rather than a bigger total.
+void
+bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
+{
+  const std::array<std::byte, 32> data{};
+  int64_t copies = 0;
+  for (auto _ : state) {
+    HashBuffers buffers(occupancy + 1);
+    auto seeded = buffers.update(0, data, /*reset=*/true);
+    benchmark::DoNotOptimize(seeded);
+    for (uint32_t slot = 1; slot <= occupancy; ++slot) {
+      auto copied = buffers.copy(0, slot);
+      benchmark::DoNotOptimize(copied);
+    }
+    benchmark::ClobberMemory();
+    copies += occupancy;
+  }
+  state.SetItemsProcessed(copies);
+}
+
+// The same question on the other path that creates a slot. A reset update to an
+// index with no stream emplaces exactly as copy does, and SHA256UpdateCost
+// charges whole blocks only -- so a zero-byte reset update creates a stream for
+// no body gas at all. If slot creation needs pricing, it needs it here too.
+void
+bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
+{
+  const std::array<std::byte, 32> data{};
+  int64_t creations = 0;
+  for (auto _ : state) {
+    HashBuffers buffers(occupancy + 1);
+    for (uint32_t slot = 0; slot < occupancy; ++slot) {
+      auto created = buffers.update(slot, data, /*reset=*/true);
+      benchmark::DoNotOptimize(created);
+    }
+    benchmark::ClobberMemory();
+    creations += occupancy;
+  }
+  state.SetItemsProcessed(creations);
+}
+
 void
 register_benchmarks()
 {
@@ -792,6 +847,14 @@ register_benchmarks()
                                bm_syscall_entry_sequence,
                                std::vector<SyscallCall>{sha256_update_call(0)},
                                sha256_copy_new_slot_pair());
+  for (const uint32_t occupancy : {1U, 8U, 64U, 512U, 4096U, 32768U}) {
+    benchmark::RegisterBenchmark(
+        ("buffers/CopyFill/" + std::to_string(occupancy)).c_str(),
+        bm_hash_buffers_fill, occupancy);
+    benchmark::RegisterBenchmark(
+        ("buffers/UpdateFill/" + std::to_string(occupancy)).c_str(),
+        bm_hash_buffers_update_fill, occupancy);
+  }
   benchmark::RegisterBenchmark("vm/SHA256Update/1024", bm_syscall_vm,
                                sha256_update_call(1024));
 
