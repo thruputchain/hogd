@@ -74,8 +74,14 @@ sum_hogs(const HogAge &age)
   return partial + received;
 }
 
+// [address] is the address the row was keyed and read under. Diagnostics must
+// use it rather than the embedded age.address: the two can disagree on a
+// tampered row while the XDR stays valid, and read_address_average_hog_age()
+// does not cross-check them, so trusting the payload could send an operator
+// to repair an address that is not the corrupt one.
 HogDbStatus<void>
-reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
+reconcile_address_hog_age_helper(const Address &address,
+                                 const uint128_t balance, const HogAge &age,
                                  HogDbDAO &db)
 {
   const std::optional<uint128_t> summed = sum_hogs(age);
@@ -84,7 +90,7 @@ reconcile_address_hog_age_helper(const uint128_t balance, const HogAge &age,
           "overflow uint128 when summed. Refusing to reconcile; the durable "
           "hog age state for this address must be repaired or the volume "
           "replaced.",
-          encode_hex(Address(age.address).as_bytes()),
+          encode_hex(address.as_bytes()),
           from_xdr(age.num_hogs[kHogAgeGroupToSchedule]),
           from_xdr(age.num_hogs[kHogAgeGroupAlreadyScheduled]),
           from_xdr(age.num_hogs[kHogAgeGroupReceived]));
@@ -159,7 +165,7 @@ reconcile_address_hog_age(HogDbDAO &db, const Address &address)
     return age.error();
   }
 
-  return reconcile_address_hog_age_helper(*balance, *age, db);
+  return reconcile_address_hog_age_helper(address, *balance, *age, db);
 }
 
 } // namespace
