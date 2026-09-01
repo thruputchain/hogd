@@ -313,15 +313,14 @@ SystemCallHandler::perform_initial_validation()
       cumulative_invoke_result_.result_ = InvokeError{res};
       return {};
     }
-    // Keep the image verification produced: for rv32, verifying an attachment
-    // *is* translating it, and keeping it is what stops the first
-    // same-transaction invocation from lowering the identical bytes again,
-    // both passes outside transaction gas (#3536). A runtime with nothing to
-    // prepare -- native, and the stub contexts tests install -- verifies
-    // successfully while leaving `prepared` empty, so cache nothing for it.
-    if (prepared.rv32.has_value()) {
-      local_preparations_.emplace(hash, std::move(prepared));
-    }
+    // rv32 is the only type that reaches here -- native is rejected above and
+    // an unregistered type fails verification -- and for rv32 verifying an
+    // attachment *is* translating it, so a successful verification always
+    // yields an image. Keep it: this is what stops the first same-transaction
+    // invocation from lowering the identical bytes again, both passes outside
+    // transaction gas (#3536).
+    CHECK(prepared.rv32.has_value());
+    local_preparations_.emplace(hash, std::move(prepared));
   }
   return {};
 }
