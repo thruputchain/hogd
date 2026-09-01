@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -3296,7 +3297,9 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
               outputs.frame_status != InvocationFrameStatusCode::Fault) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (gas_used != 50) {
+          // The child's whole 50-gas limit, plus the crossing this invoke
+          // syscall pays on top of it.
+          if (gas_used != 50 + kSyscallBaseCost) {
             return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
