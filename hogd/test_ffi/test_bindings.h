@@ -9,8 +9,8 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 27
-#define TEST_FFI_VERSION_PATCH 1
+#define TEST_FFI_VERSION_MINOR 28
+#define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
 // ==================
@@ -209,7 +209,17 @@ struct GetNetworkConfigResult get_network_config(void *db);
 struct GetSnapshotStorageItemResult
 get_snapshot_storage_item(void *db, struct FFISerializedAddressAndKey addrkey);
 
-enum TestFFIErrorCode advance_new_block(void *db);
+// Opens the next block. `block_timepoint` is that block's timepoint in Unix
+// nanoseconds, as a real chain's header carries; NULL takes the current wall
+// clock. Pass a value to pin it, which is how a test drives contract logic
+// keyed on time.
+//
+// A block may not be older than the one it follows. A timepoint earlier than
+// the open block's is rejected with kTestFFIErrorCodeInvalidArgument and
+// advances nothing, so the DB is left exactly as it was and the caller can
+// retry. Equal is allowed.
+enum TestFFIErrorCode advance_new_block(void *db,
+                                        const uint64_t *block_timepoint);
 
 struct OpenRuntimeContextResult {
   void *context;
