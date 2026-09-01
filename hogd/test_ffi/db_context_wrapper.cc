@@ -108,7 +108,7 @@ DBContext::block_execution_context() const
     throw std::runtime_error("block_execution_context: get_db_tip failed");
   }
   return BlockExecutionContext{
-      .block_height = (*tip)->value.proposal_header.block_height + 1,
+      .block_height = tip->value.proposal_header.block_height + 1,
       .block_timepoint = 1'700'000'000,
   };
 }

@@ -99,6 +99,9 @@ BlockManager::commit_block(BlockID id)
       blocks_to_gc.insert(blocks_to_gc.end(), r.begin(), r.end());
     }
     last_committed_id_ = id;
+    // A committed block is always a direct child of the previously committed
+    // one (checked above), so its height is exactly one more.
+    last_committed_height_ += 1;
 
     // Now unlink all the children of the new last committed block,
     // telling them to read from the database as the state parent.
@@ -154,6 +157,13 @@ BlockManager::committed_tip_id()
 {
   std::shared_lock lock(mtx_);
   return last_committed_id_;
+}
+
+BlockHeight
+BlockManager::committed_tip_height()
+{
+  std::shared_lock lock(mtx_);
+  return last_committed_height_;
 }
 
 bool
@@ -215,6 +225,9 @@ BlockManager::initialize_genesis_configuration(
   }
 
   initialized_genesis_ = true;
+  // Genesis is the block at height 0; everything committed on top of it counts
+  // up from there.
+  last_committed_height_ = 0;
 
   default_wallet_.emplace(config.default_wallet);
   network_config_.emplace(config.network_config);

@@ -433,7 +433,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightIsTraced)
 
   auto const &traced = call.body.get_block_height();
   ASSERT_NE(traced.outputs, nullptr);
-  EXPECT_EQ(traced.outputs->block_height, kExpectedHeight);
+  EXPECT_EQ(traced.outputs->result, kExpectedHeight);
 }
 
 TEST_F(SyscallBlockDataTest, GetBlockTimepointIsTraced)

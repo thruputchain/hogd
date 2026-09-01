@@ -144,7 +144,7 @@ public:
       panic("Failed to read db tip for block {}", block_number_);
     }
     return BlockExecutionContext{
-        .block_height = (*tip)->value.proposal_header.block_height + 1,
+        .block_height = tip->value.proposal_header.block_height + 1,
         .block_timepoint = 1'700'000'000,
     };
   }

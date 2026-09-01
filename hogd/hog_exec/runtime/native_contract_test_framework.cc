@@ -41,12 +41,13 @@ NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
   }
   {
     ConsensusValue value{};
-    value.proposal_header.block_height = block_number_;
+    value.proposal_header.block_height = committed_height_ + 1;
     auto r =
         coord_wrapper_->client().dbsched_commit_snapshot(block_number_, value);
     if (r.result() != DbSchedResult::DbSchedResultOK) {
       return std::unexpected(r.result());
     }
+    committed_height_ += 1;
   }
   close_event_block(block_number_);
   dbtip_block_id_ = block_number_;

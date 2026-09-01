@@ -80,13 +80,21 @@ protected:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
 
-  SystemCallHandler make_handler(Transaction const &tx,
-                                 StorageSnapshotCache &snapshot,
+  SystemCallHandler make_handler(Transaction tx, StorageSnapshotCache &snapshot,
                                  BlockID block_id, TransactionID tx_id,
                                  RuntimeContext &runtime_context)
   {
     assert(db_proxy_ != nullptr);
     assert(event_server_proxy_ != nullptr);
+
+    // None of these tests is about replay expiry, and none of them sets a
+    // uniquifier. A default-constructed one expires at height 0, which the
+    // executor rejects during initial validation -- the mock tip puts the
+    // block under test at height 1. Stamp one that outlives the block,
+    // leaving an explicit choice alone.
+    if (tx.uniquifier.block_expiry_height == 0) {
+      tx.uniquifier.block_expiry_height = 1'000'000;
+    }
 
     return SystemCallHandler(
         tx, snapshot, PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
