@@ -1925,6 +1925,68 @@ TEST(Mempool, ProposalUsesTransactionRoot)
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
 
+// Blocks only move forward in time. The block timepoint is fixed before
+// execution and reaches every executor through the block execution context, so
+// a block whose timepoint predates the one it follows makes the chain move into
+// its own past, and contracts keyed on time see it.
+//
+// On the nomination side that is a local coordinator handing us a bad context.
+// On the validation side it is another proposer deciding that time runs
+// backwards for us, which is why the check cannot live only in the proposer.
+TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().schedulercoord_submit_unvetted(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent_tip = get_tip.db_tip();
+
+  // Commit a block carrying a timepoint, so the tip has one to be behind.
+  constexpr TimePoint kTipTimepoint = 1'000'000;
+  SchedulerProposalResult res_propose =
+      propose_block(server, parent_tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(res_propose.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const Proposal committed = res_propose.proposed_block().proposal;
+  ASSERT_EQ(committed.header.block_timepoint, kTipTimepoint);
+  ASSERT_EQ(commit_block(server, parent_tip, res_propose.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip tip = get_tip.db_tip();
+  ASSERT_EQ(tip.value.proposal_header.block_timepoint, kTipTimepoint);
+
+  // Nominating behind the tip is refused.
+  EXPECT_EQ(propose_block(server, tip,
+                          ProposalContext{.block_timepoint = kTipTimepoint - 1})
+                .outcome(),
+            SchedulerProposalOutcome::SchedulerProposalError);
+
+  // Equal is allowed: two blocks sharing a timepoint is implausible, not
+  // incoherent. This also leaves the mempool able to nominate afterwards,
+  // showing the refusal above did not wedge it.
+  SchedulerProposalResult equal =
+      propose_block(server, tip,
+                    ProposalContext{.block_timepoint = kTipTimepoint});
+  ASSERT_EQ(equal.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // A peer's proposal behind the tip is invalid, not merely late.
+  Proposal backwards = equal.proposed_block().proposal;
+  backwards.header.block_timepoint = kTipTimepoint - 1;
+  EXPECT_EQ(server.mempool_coord_rpc()
+                .schedulercoord_validate_block(tip.id, std::move(backwards))()
+                .outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+}
+
 TEST(Mempool, ProposeBlockReturnsClosedRootsAndContext)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
