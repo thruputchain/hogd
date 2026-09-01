@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 #include "auth_rpc.hh"
 #include "contract.hh"
@@ -28,6 +29,14 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+// A block was advanced with a timepoint earlier than the block it follows.
+// Its own type so the FFI layer can report a caller's bad argument as one,
+// rather than folding it in with the internal failures advancing can hit.
+class BackwardsTimepointError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 // Database-related context for the test environment.
 // Provides appropriate methods for manipulating the evolution
@@ -59,8 +68,13 @@ public:
   // it, which is how a test drives contract logic keyed on time: deadlines,
   // expiry, vesting, rate limits.
   //
-  // Nothing requires successive timepoints to increase. A test pinning them
-  // owns that ordering; the wall clock supplies it on its own.
+  // A block may not be older than the one it follows: a timepoint earlier
+  // than the open block's throws BackwardsTimepointError and advances
+  // nothing, so a refused advance leaves the DB exactly as it was. Equal is
+  // allowed -- two blocks sharing a nanosecond is implausible rather than
+  // incoherent. The wall clock is checked the same way as a pinned value; it
+  // is not normally capable of going backwards, and quietly clamping it would
+  // hide the clock stepping under a running test.
   void advance_new_block(
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       std::optional<TimePoint> block_timepoint = std::nullopt);

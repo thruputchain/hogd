@@ -75,6 +75,8 @@ invoke_reading_timepoint(void *db, void *rc, ContractAddress const &addr)
   EXPECT_EQ(close_syscall_handler(syscall_handler), kTestFFIErrorCodeNone);
 }
 
+constexpr uint64_t kOneHourNanos = 3'600'000'000'000ULL;
+
 TimePoint
 now_nanos()
 {
@@ -136,9 +138,10 @@ TEST(TestBindingsTest, AdvanceWithATimepointPinsIt)
 {
   g_observed_timepoints.clear();
 
-  // 2026-01-01T00:00:00Z in Unix nanoseconds, far enough from any wall clock
-  // this runs under that a host ignoring the argument fails.
-  const uint64_t pinned = 1'767'225'600'000'000'000ULL;
+  // An hour ahead of now. Ahead rather than an absolute date because the DB
+  // opens its first block on the wall clock and blocks may not move backwards;
+  // far enough from it that a host ignoring the argument fails.
+  const uint64_t pinned = now_nanos() + kOneHourNanos;
 
   void *db = make_db();
   ASSERT_NE(db, nullptr);
@@ -172,7 +175,8 @@ TEST(TestBindingsTest, AdvanceWithATimepointPinsIt)
 // committed parent.
 TEST(TestBindingsTest, AdvanceCommitsTheTimepointItRanWith)
 {
-  const uint64_t pinned = 1'767'225'600'000'000'000ULL;
+  const uint64_t pinned = now_nanos() + kOneHourNanos;
+  const uint64_t next = pinned + kOneHourNanos;
 
   void *db = make_db();
   ASSERT_NE(db, nullptr);
@@ -180,13 +184,53 @@ TEST(TestBindingsTest, AdvanceCommitsTheTimepointItRanWith)
 
   // Open a block on `pinned`, then advance again so that block is committed.
   ASSERT_EQ(advance_new_block(db, &pinned), kTestFFIErrorCodeNone);
-  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, &next), kTestFFIErrorCodeNone);
 
   auto *typed_db = reinterpret_cast<DBContext *>(db);
   auto tip = typed_db->get_snapshot().try_get_db_tip();
   ASSERT_TRUE(tip.has_value());
   ASSERT_NE(*tip, nullptr);
   EXPECT_EQ((*tip)->value.proposal_header.block_timepoint, pinned);
+}
+
+// A block may not be older than the one it follows: time running backwards
+// across a commit is incoherent for anything reading the chain back, and on a
+// harness a pinned value that predates the open block is a test's mistake
+// rather than an internal failure -- hence InvalidArgument, not Unrecoverable.
+//
+// The check runs before anything is closed or committed, so a refused advance
+// leaves the DB exactly as it was.
+TEST(TestBindingsTest, AdvanceRejectsABackwardsTimepoint)
+{
+  g_observed_timepoints.clear();
+
+  const uint64_t pinned = now_nanos() + kOneHourNanos;
+  const uint64_t earlier = pinned - kOneHourNanos / 2;
+  const uint64_t later = pinned + kOneHourNanos;
+
+  void *db = make_db();
+  ASSERT_NE(db, nullptr);
+  x23::Defer d([db] { free_db(db); });
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d2([rc] { close_runtime_context(rc); });
+
+  ContractAddress deployment_addr =
+      deploy_mock_contract(db, rc, 1, mock_contract_read_timepoint, nullptr);
+
+  ASSERT_EQ(advance_new_block(db, &pinned), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, &earlier), kTestFFIErrorCodeInvalidArgument);
+
+  // Equal is allowed -- implausible, but not incoherent.
+  EXPECT_EQ(advance_new_block(db, &pinned), kTestFFIErrorCodeNone);
+
+  // The DB is still usable after the refusal, and still on a block whose
+  // timepoint is the one that was accepted.
+  EXPECT_EQ(advance_new_block(db, &later), kTestFFIErrorCodeNone);
+  invoke_reading_timepoint(db, rc, deployment_addr);
+  ASSERT_EQ(g_observed_timepoints.size(), 1u);
+  EXPECT_EQ(g_observed_timepoints[0], later);
 }
 
 } // namespace hogd

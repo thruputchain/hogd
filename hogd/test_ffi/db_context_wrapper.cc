@@ -130,6 +130,17 @@ void
 DBContext::advance_new_block(BlockExecutionMode mode,
                              std::optional<TimePoint> block_timepoint)
 {
+  // Decided before anything is closed or committed: a refused advance must
+  // leave the DB usable, not half-torn-down.
+  const TimePoint next_timepoint =
+      block_timepoint.value_or(wall_clock_timepoint());
+  if (next_timepoint < block_timepoint_) {
+    throw BackwardsTimepointError(
+        std::format("advance_new_block: block timepoint {} is earlier than "
+                    "the block it follows ({})",
+                    next_timepoint, block_timepoint_));
+  }
+
   if (current_block_id_ > 0) {
     auto res = db_sched_client_.dbsched_close_snapshot(current_block_id_);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -162,7 +173,7 @@ DBContext::advance_new_block(BlockExecutionMode mode,
   }
 
   current_block_id_++;
-  block_timepoint_ = block_timepoint.value_or(wall_clock_timepoint());
+  block_timepoint_ = next_timepoint;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_,
                                              block_execution_context(),

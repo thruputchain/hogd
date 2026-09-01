@@ -225,6 +225,7 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
 {
   DbTip new_tip;
   bool network_hash_mismatch = false;
+  bool timepoint_went_backwards = false;
   tip_.with([&](DbTip &tip) {
     // The network hash is fixed for the life of the chain, but it lives in
     // the consensus value, which this replaces wholesale rather than carrying
@@ -239,6 +240,18 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
       network_hash_mismatch = true;
       return;
     }
+    // Blocks only move forward in time. The timepoint reaches the db the same
+    // way the network hash does -- carried on a consensus value that replaces
+    // the tip wholesale -- so the same class of caller bug puts an older
+    // timepoint on a newer block, and anything reading the chain back then
+    // sees time run backwards across a commit. Equal is left alone: two
+    // blocks sharing a nanosecond is implausible, not incoherent.
+    if (tip.value.proposal_header.block_height >= 0 &&
+        value.proposal_header.block_timepoint <
+            tip.value.proposal_header.block_timepoint) {
+      timepoint_went_backwards = true;
+      return;
+    }
     tip.value = std::move(value);
     tip.storage_long_hash = db_hash;
     tip.id = bid;
@@ -250,6 +263,12 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
   if (network_hash_mismatch) [[unlikely]] {
     error("Refusing to commit block {}: its consensus value carries a "
           "different network hash than the committed tip",
+          bid);
+    return HogDbError(HogDbCode::kInternal);
+  }
+  if (timepoint_went_backwards) [[unlikely]] {
+    error("Refusing to commit block {}: its consensus value carries a "
+          "timepoint earlier than the committed tip's",
           bid);
     return HogDbError(HogDbCode::kInternal);
   }

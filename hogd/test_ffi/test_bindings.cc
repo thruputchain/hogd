@@ -503,6 +503,11 @@ advance_new_block(void *db, const uint64_t *block_timepoint) noexcept
                                ? std::optional<TimePoint>(*block_timepoint)
                                : std::nullopt);
     return kTestFFIErrorCodeNone;
+  } catch (BackwardsTimepointError const &e) {
+    // The caller's argument, not an internal failure: nothing was advanced, so
+    // the DB is still usable and the caller can retry with a sane timepoint.
+    log_error("error advancing new block: {}", e);
+    return kTestFFIErrorCodeInvalidArgument;
   } catch (std::exception const &e) {
     log_error("error advancing new block: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
