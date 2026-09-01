@@ -291,6 +291,124 @@ def check_joinable(bench, calibration):
     return problems
 
 
+# --- independent cross-check against `openssl speed` -------------------------
+#
+# What each comparison can establish differs, so each carries its own tolerance
+# rather than one shared "close enough".
+#
+# SHA256 is the same code on both sides: hogd/crypto/crypto.h calls
+# SHA256_Init/Update/Final, so the syscall and openssl run one libcrypto's
+# compression function. The per-byte terms should agree closely, and a real gap
+# means the benchmark is timing something other than hashing.
+#
+# ed25519 is not: hogd verifies with curve25519-dalek and OpenSSL 3.0 has its
+# own implementation, several times slower than dalek's vectorised backends, so
+# a factor apart is expected and the tolerance has to be loose enough to allow
+# it. That makes this the weaker of the two checks, and it is worth being clear
+# about what it can still catch: a row that is not doing the work at all --
+# hoisted out of the timing loop, measuring a no-op, wired to the wrong syscall
+# -- lands orders of magnitude out, not a factor. It is a backstop, not a
+# validation of the implementation. A row that takes ed25519's cheap rejection
+# path is caught earlier and far more sharply: verification fails, the syscall
+# returns an error, and the benchmark skips the row rather than timing it.
+SHA256_CROSSCHECK_TOLERANCE = 0.25
+ED25519_CROSSCHECK_FACTOR = 10.0
+
+
+def parse_openssl_speed(data):
+    """Rates out of `openssl speed -mr` output.
+
+    Returns {"sha256": {block_size: bytes_per_second}, "ed25519": {...}}.
+
+    Reads the machine-readable +H/+F lines rather than the human table, which
+    has been relaid out more than once across OpenSSL releases.
+    """
+    sizes = []
+    sha256 = {}
+    ed25519 = {}
+    for line in data.get("raw", []):
+        fields = line.split(":")
+        if fields[0] == "+H":
+            sizes = [int(f) for f in fields[1:] if f.strip().isdigit()]
+        elif fields[0] == "+F" and "sha256" in fields:
+            tail = fields[fields.index("sha256") + 1:]
+            rates = [float(f) for f in tail if f]
+            sha256 = dict(zip(sizes, rates))
+        elif fields[0] == "+F6" and "Ed25519" in fields:
+            rest = fields[fields.index("Ed25519") + 1:]
+            if len(rest) >= 2:
+                ed25519 = {"sign_per_second": float(rest[0]),
+                           "verify_per_second": float(rest[1])}
+    return {"sha256": sha256, "ed25519": ed25519}
+
+
+def print_crosscheck(data, openssl):
+    measured = rows(data)
+    speed = parse_openssl_speed(openssl)
+    print()
+    print("cross-check against openssl speed "
+          f"({openssl.get('openssl_version', 'unknown version')})")
+    print("-" * 76)
+
+    lines = []
+    sha_rates = speed["sha256"]
+    fit = fit_sha256(sha256_points(measured))
+    if sha_rates and fit:
+        # openssl's own per-call overhead is amortised away at its largest
+        # block, which is where its number is closest to pure compression --
+        # the same thing hogd's *slope* isolates by construction.
+        block = max(sha_rates)
+        openssl_ns = 1e9 / sha_rates[block]
+        ours_ns = fit[1]
+        ratio = ours_ns / openssl_ns
+        ok = abs(ratio - 1.0) <= SHA256_CROSSCHECK_TOLERANCE
+        lines.append(("SHA256 ns/byte", f"{openssl_ns:.4f}", f"{ours_ns:.4f}",
+                      ratio, ok,
+                      f"openssl at {block}-byte blocks vs hogd's sweep slope; "
+                      "same libcrypto, so these should agree"))
+
+    verify = speed["ed25519"].get("verify_per_second")
+    ours = [row for name, row in measured.items()
+            if name.startswith("entry/VerifySignature/")]
+    if verify and ours:
+        # The cheapest row: the shortest message is the purest constant, and
+        # openssl times a short fixed message too.
+        ours_ns = min(row["real_time"] for row in ours)
+        openssl_ns = 1e9 / verify
+        ratio = ours_ns / openssl_ns
+        low = 1.0 / ED25519_CROSSCHECK_FACTOR
+        ok = low <= ratio <= ED25519_CROSSCHECK_FACTOR
+        lines.append(("ed25519 verify ns", f"{openssl_ns:.0f}",
+                      f"{ours_ns:.0f}",
+                      ratio, ok,
+                      "different implementations (OpenSSL vs "
+                      "curve25519-dalek); an order of magnitude is the test"))
+
+    if not lines:
+        print("  nothing comparable in this pair of files")
+        return 0
+
+    print(f"  {'primitive':<20}{'openssl':>12}{'hogd':>12}"
+          f"{'ratio':>9}  verdict")
+    all_ok = True
+    for label, theirs, ours_text, ratio, ok, note in lines:
+        print(f"  {label:<20}{theirs:>12}{ours_text:>12}{ratio:>8.2f}x  "
+              f"{'ok' if ok else 'INVESTIGATE'}")
+        print(f"    {note}")
+        all_ok = all_ok and ok
+    if not all_ok:
+        print()
+        print("  A ratio outside tolerance does not by itself mean the gas")
+        print("  numbers are wrong -- but it does mean this run cannot vouch")
+        print("  for them, and the row should be explained before adopting.")
+    # Deliberately still success. This is a sanity check on a measurement, not
+    # a gate on one: an OpenSSL upgrade on the bench host can move these ratios
+    # without anything being wrong with hogd, and failing the calibration job
+    # over that would cost the opcode numbers running beside it. The word
+    # INVESTIGATE in the log is the signal.
+    return 0
+
+
 # The ecall crossing is a fixed cost of order 10ns, so subtracting entry from
 # vm only recovers it while both are measured far more precisely than their
 # difference. For a syscall that does real work -- an ed25519 verify, a 4KiB
@@ -712,6 +830,11 @@ def main():
                              "headroom is the rounding, which at resolution 1 "
                              "is a few percent -- narrower than this "
                              "benchmark reproduces to on a shared host.")
+    parser.add_argument("--crosscheck", metavar="OPENSSL_JSON",
+                        help="openssl speed JSON from scripts/"
+                             "rv32_openssl_speed.sh, run on the same host; "
+                             "prints an independent check of the SHA256 and "
+                             "ed25519 numbers")
     args = parser.parse_args()
 
     runs = [load(path) for path in args.json]
@@ -723,13 +846,31 @@ def main():
                 "--schedule needs --gas CALIBRATION: gas is one currency, and "
                 "the unit comes from the opcode calibration's baseline "
                 "instruction measured on the same host")
-        return print_schedule(runs[0], load(args.gas), args.resolution,
-                              args.margin / 100.0)
-    if len(runs) == 2:
+        status = print_schedule(runs[0], load(args.gas), args.resolution,
+                                args.margin / 100.0)
+    elif len(runs) == 2:
+        if args.crosscheck:
+            parser.error("--crosscheck applies to a single run, not a "
+                         "comparison of two")
         return print_comparison(runs[0], runs[1])
-    if len(runs) != 1:
+    elif len(runs) != 1:
         parser.error("pass one JSON file, or two to compare")
-    return print_table(runs[0])
+    else:
+        status = print_table(runs[0])
+    if args.crosscheck and status == 0:
+        # Tolerate a missing or unreadable file rather than raising. The check
+        # is optional by construction: the schedule runs the openssl step with
+        # `|| true`, so a host without openssl -- or an openssl whose `speed`
+        # rejects one of the algorithms -- reaches here with nothing to read.
+        # Failing on that would turn a skipped sanity check into a traceback
+        # and a non-zero exit on a run whose numbers are perfectly good.
+        try:
+            crosscheck = load(args.crosscheck)
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"\nno cross-check: {error}", file=sys.stderr)
+        else:
+            status = print_crosscheck(runs[0], crosscheck)
+    return status
 
 
 if __name__ == "__main__":

@@ -587,6 +587,10 @@ scripts/rv32_syscall_bench.sh $B --out /tmp/sys.json
 scripts/rv32_syscall_report.py /tmp/sys.json                    # what it costs
 scripts/rv32_syscall_report.py /tmp/sys.json --gas /tmp/gas.json --schedule
 scripts/rv32_syscall_report.py before.json after.json           # what moved
+
+# An independent check on the two primitives that do real work.
+scripts/rv32_openssl_speed.sh --out /tmp/openssl.json
+scripts/rv32_syscall_report.py /tmp/sys.json --crosscheck /tmp/openssl.json
 ```
 
 `--schedule` refuses without `--gas`, and refuses a `--gas` file whose engine
@@ -596,6 +600,48 @@ that unit is the baseline instruction the opcode calibration measured, and
 joining two hosts' numbers produces a complete, plausible schedule that is wrong
 by whatever the two machines differ by. The check is the only thing standing
 between a careful measurement and a confidently mispriced one.
+
+### Checking the measurement against something else
+
+The benchmark times hogd's own code, which means a mistake in the harness
+surfaces as a plausible number rather than as a failure. That is not
+hypothetical: a `VerifySignature` row shipped verifying a signature over the
+wrong message, took ed25519's cheap rejection path, and reported it as the cost
+of verifying. Numbers that look reasonable are the failure mode to design
+against.
+
+`scripts/rv32_openssl_speed.sh` runs `openssl speed` on the same host with the
+same pinning, and `--crosscheck` puts the two side by side:
+
+```
+  primitive                openssl        hogd    ratio  verdict
+  SHA256 ns/byte            2.5256      2.5397    1.01x  ok
+  ed25519 verify ns         116632       39832    0.34x  ok
+```
+
+The two halves are worth very different amounts, and the report says which is
+which rather than presenting one number.
+
+**SHA256 is the sharp check.** `hogd/crypto/crypto.h` calls
+`SHA256_Init/Update/Final`, so the syscall and `openssl speed sha256` run the
+same compression function out of the same libcrypto. The per-byte terms should
+agree to a few percent, and they do. A real gap here means the benchmark is
+timing something other than hashing.
+
+**ed25519 is a backstop, not a validation.** hogd verifies with
+curve25519-dalek and OpenSSL 3.0 has its own implementation, severalfold slower
+than dalek's vectorised backends -- so a factor apart is expected and the
+tolerance has to allow it. What it still catches is a row that is not doing the
+work at all: hoisted out of the timing loop, measuring a no-op, wired to the
+wrong syscall. Those land orders of magnitude out. The rejection path that
+actually bit us is caught earlier and far more sharply -- verification fails,
+the syscall returns an error, and the benchmark skips the row instead of timing
+it.
+
+A failed cross-check prints `INVESTIGATE` and still exits 0. It is a sanity
+check on a measurement, not a gate on one: an OpenSSL upgrade on the bench host
+can move these ratios without anything being wrong with hogd, and failing the
+job over that would cost the opcode calibration running beside it.
 
 The **RV32 Gas Calibration** workflow runs both binaries on the bench pool and
 prints the proposal there, which is where a schedule that becomes a protocol

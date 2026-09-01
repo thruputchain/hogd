@@ -126,8 +126,19 @@ if [ "{{ .mode }}" = "reference" ]; then
     --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
     || true
   grep -vE 'Connecting to event server|Opening block' syscall_bench.log || true
-  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+
+  # An independent measurement of the same two primitives, on the same host and
+  # with the same pinning. The benchmark times hogd's own code, so a harness
+  # mistake shows up as a plausible number rather than as a failure -- one
+  # VerifySignature row shipped timing ed25519's rejection path. openssl is the
+  # second opinion. SHA256 is the sharp half of it: crypto.h calls
+  # SHA256_Init/Update/Final, so both sides run one libcrypto and the per-byte
+  # terms should agree closely.
+  ./scripts/rv32_openssl_speed.sh --out ${HOG_DUMP_DIR}/rv32-openssl-speed.json \
     || true
+
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --crosscheck ${HOG_DUMP_DIR}/rv32-openssl-speed.json || true
 
   # The point of running this here rather than on a laptop: syscall gas is a
   # protocol constant and has to come from the machine class that runs the
@@ -191,8 +202,12 @@ else
     --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
     || true
   grep -vE 'Connecting to event server|Opening block' syscall_bench.log || true
-  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+
+  # The same independent check as reference mode; see the note there.
+  ./scripts/rv32_openssl_speed.sh --out ${HOG_DUMP_DIR}/rv32-openssl-speed.json \
     || true
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --crosscheck ${HOG_DUMP_DIR}/rv32-openssl-speed.json || true
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
     --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule || true
 
@@ -241,6 +256,19 @@ file_measurement() {
       ${HOG_DUMP_DIR}/rv32-syscall-bench.json || return $?
   else
     echo 'no syscall benchmark output to file'
+  fi
+
+  # The openssl cross-check, filed for the same reason as the other two: it is
+  # a measurement of this host on this night, and the value of a sanity check
+  # is mostly in its history. A ratio that has been 1.01x for months and is
+  # suddenly 1.4x says something changed on the bench host, which a single run
+  # in isolation cannot.
+  if [ -s ${HOG_DUMP_DIR}/rv32-openssl-speed.json ]; then
+    echo 'log the openssl cross-check'
+    ./scripts/log_metric.sh rv32-openssl-speed \
+      ${HOG_DUMP_DIR}/rv32-openssl-speed.json || return $?
+  else
+    echo 'no openssl cross-check output to file'
   fi
 
   echo 'commit metrics'
