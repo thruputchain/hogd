@@ -27,14 +27,12 @@ namespace hogd {
 // Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
-  ExecutorContext(ExecutionMode mode, BlockID id,
-                  BlockExecutionContext const &block_execution,
-                  DatabaseProxy &db_proxy,
+  ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
                   std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                   EventServerProxy &event_server_proxy,
                   DispatchPool &worker_pool)
-    : mode_(mode), block_id_(id), block_execution_(block_execution),
-      db_proxy_(db_proxy), event_server_proxy_(event_server_proxy),
+    : mode_(mode), block_id_(id), db_proxy_(db_proxy),
+      event_server_proxy_(event_server_proxy),
       snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
   {}
 
@@ -48,7 +46,7 @@ public:
 
   BlockExecutionContext const &block_execution() const
   {
-    return block_execution_;
+    return snapshot_cache_->block_execution_context();
   }
 
   x23::Async<ExecProposeBatchResult>
@@ -92,8 +90,6 @@ private:
 
   const ExecutionMode mode_;
   const BlockID block_id_;
-  // Also held by the snapshot cache, but that is extracted at teardown.
-  const BlockExecutionContext block_execution_;
   DatabaseProxy &db_proxy_;
   EventServerProxy &event_server_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;

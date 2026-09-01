@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -93,8 +94,13 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
-    // block_execution_context_ is left alone: get_snapshot_cache() re-arms it,
-    // and a stale one is caught by the height check in init_db_tip().
+    // Poison rather than leave the last block's context behind:
+    // get_snapshot_cache() re-arms it, and anything that reads it before then
+    // gets an obviously-wrong height rather than a plausible stale one.
+    block_execution_context_ = BlockExecutionContext{
+        .block_height = std::numeric_limits<BlockHeight>::min(),
+        .block_timepoint = 0,
+    };
     release_db_tip();
   }
 

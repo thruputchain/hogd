@@ -2281,7 +2281,7 @@ SystemCallHandler::get_block_height() const
   return db_tip()->value.proposal_header.block_height + 1;
 }
 
-NetworkHash
+NetworkHash const &
 SystemCallHandler::get_network_hash() const
 {
   // Identical in every header, so the parent tip's copy is already this

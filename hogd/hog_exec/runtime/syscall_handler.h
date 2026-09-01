@@ -412,13 +412,10 @@ public:
   // Served off the tip this handler pinned at entry (see init_db_tip()), so
   // reading one cannot fail and cannot touch the shared snapshot cache.
   BlockHeight get_block_height() const;
-  NetworkHash get_network_hash() const;
+  NetworkHash const &get_network_hash() const;
 
-  // Served from the BlockExecutionContext the block was opened with, not from
-  // the tip: for an open block the tip is the parent, whose timepoint belongs
-  // to the previous block. Unlike the two above this stays fallible -- the
-  // view path and the test and bench harnesses build a snapshot cache without
-  // an executor, so there is no context and no honest answer to give.
+  // Served from the BlockExecutionContext the block was opened with: for an
+  // open block the tip is the parent, whose timepoint is the previous block's.
   TimePoint get_block_timepoint() const;
 
   // == General access methods ==
