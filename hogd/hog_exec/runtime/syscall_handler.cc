@@ -155,8 +155,7 @@ SystemCallHandler::init_db_tip() const
   // the test harnesses open no block and carry no context, and skip this.
   auto const &block_execution = snapshot_cache_.block_execution_context();
   if (block_execution.has_value()) {
-    const BlockHeight derived =
-        (*tip)->value.proposal_header.block_height + 1;
+    const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
     if (block_execution->block_height != derived) [[unlikely]] {
       error("Block height mismatch: scheduler supplied {}, db tip implies {}",
             block_execution->block_height, derived);

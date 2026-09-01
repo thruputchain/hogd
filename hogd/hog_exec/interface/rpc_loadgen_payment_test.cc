@@ -46,7 +46,6 @@ constexpr hogd::BlockExecutionContext kTestBlockExecution{
 };
 } // namespace
 
-
 namespace hogd {
 
 class RpcLoadgenPaymentTest : public ::testing::Test {
@@ -143,7 +142,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Open the proposal block
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
+  auto open_res =
+      client_.executorsched_open_proposal_block(test_block_id,
+                                                kTestBlockExecution);
   ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
   // Open corresponding db block
@@ -208,7 +209,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Open the proposal block
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
+  auto open_res =
+      client_.executorsched_open_proposal_block(test_block_id,
+                                                kTestBlockExecution);
   ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
   // Open corresponding db block

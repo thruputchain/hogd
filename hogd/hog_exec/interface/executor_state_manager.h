@@ -46,12 +46,10 @@ public:
   // return ExecResultOk if successful, or ExecResultSystemError if
   // the block_id already exists and is of a different mode.
   // These increase the reference count of the executor context
-  x23::Async<ExecResult>
-  open_proposal(BlockID new_proposal_id,
-                BlockExecutionContext block_execution);
-  x23::Async<ExecResult>
-  open_validation(BlockID new_validation_id,
-                  BlockExecutionContext block_execution);
+  x23::Async<ExecResult> open_proposal(BlockID new_proposal_id,
+                                       BlockExecutionContext block_execution);
+  x23::Async<ExecResult> open_validation(BlockID new_validation_id,
+                                         BlockExecutionContext block_execution);
   // Decreases the reference count of the executor context.
   x23::Async<ExecResult> remove_block(BlockID block_id);
 

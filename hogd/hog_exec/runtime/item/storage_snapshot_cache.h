@@ -83,8 +83,7 @@ public:
     return block_execution_context_;
   }
 
-  void
-  set_block_execution_context(BlockExecutionContext const &block_execution)
+  void set_block_execution_context(BlockExecutionContext const &block_execution)
   {
     block_execution_context_ = block_execution;
   }

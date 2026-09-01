@@ -50,7 +50,6 @@ constexpr hogd::BlockExecutionContext kTestBlockExecution{
 };
 } // namespace
 
-
 namespace hogd {
 
 namespace {
@@ -119,7 +118,9 @@ protected:
 
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
-    auto open_res = client_.executorsched_open_proposal_block(block_id, kTestBlockExecution);
+    auto open_res =
+        client_.executorsched_open_proposal_block(block_id,
+                                                  kTestBlockExecution);
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
     auto db_res = db_client_.dbsched_create_snapshot(

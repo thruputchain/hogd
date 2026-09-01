@@ -65,7 +65,6 @@ constexpr hogd::BlockExecutionContext kTestBlockExecution{
 };
 } // namespace
 
-
 namespace hogd {
 
 namespace {
@@ -234,7 +233,8 @@ open_block(db_sched_client_t &db_sched_client,
   for (auto &exec_client : exec_clients) {
     [](auto &exec_client, uint64_t block_number,
        std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
-      co_await exec_client.executorsched_open_proposal_block(block_number, kTestBlockExecution);
+      co_await exec_client.executorsched_open_proposal_block(
+          block_number, kTestBlockExecution);
       if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
         cb();
       }

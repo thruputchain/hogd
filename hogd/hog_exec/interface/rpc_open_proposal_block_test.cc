@@ -46,7 +46,6 @@ constexpr hogd::BlockExecutionContext kTestBlockExecution{
 };
 } // namespace
 
-
 namespace hogd {
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -119,7 +118,8 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockBeforeInit)
   BlockID test_block_id = 123;
 
   // Call open_proposal_block before init - should fail
-  auto result = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
+  auto result = client_.executorsched_open_proposal_block(test_block_id,
+                                                          kTestBlockExecution);
 
   // Should return system error since executor is not initialized
   EXPECT_EQ(result, ExecResult::ExecResultSystemError);
@@ -143,7 +143,8 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockAfterInit)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Call open_proposal_block after init - should succeed
-  auto result = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
+  auto result = client_.executorsched_open_proposal_block(test_block_id,
+                                                          kTestBlockExecution);
 
   // Should return OK since executor is now initialized
   EXPECT_EQ(result, ExecResult::ExecResultOK);
@@ -166,9 +167,12 @@ TEST_F(RpcOpenProposalBlockTest, TestOpenProposalBlockMultipleCalls)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Call open_proposal_block multiple times - should all succeed
-  auto result1 = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
-  auto result2 = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
-  auto result3 = client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution);
+  auto result1 = client_.executorsched_open_proposal_block(test_block_id,
+                                                           kTestBlockExecution);
+  auto result2 = client_.executorsched_open_proposal_block(test_block_id,
+                                                           kTestBlockExecution);
+  auto result3 = client_.executorsched_open_proposal_block(test_block_id,
+                                                           kTestBlockExecution);
 
   // open corresponding db block
   // Without this, the executor's calls to lookup deployed contracts will fail
@@ -239,7 +243,8 @@ TEST_F(RpcOpenProposalBlockTest, TestProposeBatch)
   // Initialize the executor with a shard pointing to our mock database server
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
-  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id, kTestBlockExecution),
+  EXPECT_EQ(client_.executorsched_open_proposal_block(test_block_id,
+                                                      kTestBlockExecution),
             ExecResult::ExecResultOK);
 
   SignedTransactionBatch txs = {SignedTransaction{}, SignedTransaction{},

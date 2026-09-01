@@ -582,8 +582,7 @@ private:
       x23::span<bool> ret);
 
   x23::Async<ExecResult>
-  open_proposal_block(BlockID block_id,
-                      BlockExecutionContext block_execution,
+  open_proposal_block(BlockID block_id, BlockExecutionContext block_execution,
                       size_t executor_idx);
 
   struct InitializeBlockNodes {
@@ -654,8 +653,7 @@ private:
                                   const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<ExecResult>
-  open_validation_block(BlockID block_id,
-                        BlockExecutionContext block_execution,
+  open_validation_block(BlockID block_id, BlockExecutionContext block_execution,
                         size_t executor_idx);
 
   static void record_submitted_vetted(size_t count);

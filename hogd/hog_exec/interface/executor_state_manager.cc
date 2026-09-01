@@ -126,7 +126,7 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
 
 x23::Async<ExecResult>
 ExecutorStateManager::open_proposal(BlockID new_proposal_id,
-                                   BlockExecutionContext block_execution)
+                                    BlockExecutionContext block_execution)
 {
   return open_block(new_proposal_id, ExecutionMode::kProposing,
                     block_execution);
@@ -134,7 +134,7 @@ ExecutorStateManager::open_proposal(BlockID new_proposal_id,
 
 x23::Async<ExecResult>
 ExecutorStateManager::open_validation(BlockID new_validation_id,
-                                     BlockExecutionContext block_execution)
+                                      BlockExecutionContext block_execution)
 {
   return open_block(new_validation_id, ExecutionMode::kValidating,
                     block_execution);
