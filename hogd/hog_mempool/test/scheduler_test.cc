@@ -359,7 +359,7 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
 // directly (as the RemoveFromRunqueue* tests do to model a block commit). In an
 // assert-enabled build it aborts at scheduler.cc:1172; it is expected to fail
 // until the scheduler uses the tolerant erase_ready_account() helper here.
-TEST(Scheduler, CommitTouchingExcludedAccountAbortsRemoveFromScheduler)
+TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);

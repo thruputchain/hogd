@@ -1196,7 +1196,7 @@ TEST(Mempool, NominateTxWithError)
 }
 
 // RPC-level companion to
-// Scheduler.CommitTouchingExcludedAccountAbortsRemoveFromScheduler (in
+// Scheduler.CommitTouchingExcludedAccountRemovesFromScheduler (in
 // scheduler_test.cc). This drives mempool audit Finding 2 entirely through the
 // coordinator's public RPC surface -- no direct scheduler access -- so it shows
 // the abort is reachable by an honest node using normal APIs. It aborts on
@@ -1224,7 +1224,7 @@ TEST(Mempool, NominateTxWithError)
 // test is expected to fail until the scheduler tolerates an absent account on
 // this path (erase_ready_account). If the account were not excluded, the commit
 // would return SchedulerCommitOK and this test would pass.
-TEST(Mempool, CommitOfExcludedAccountTxAbortsRemoveFromScheduler)
+TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
