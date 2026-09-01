@@ -121,12 +121,24 @@ get_lowered_sdk_smoke_metadata_path()
 }
 
 std::string
-artifact_format_fingerprint_hex()
+format_fingerprint_hex(uint64_t fingerprint)
 {
   std::ostringstream out;
-  out << "0x" << std::hex << std::setfill('0') << std::setw(16)
-      << rv32::kArtifactFormatFingerprint;
+  out << "0x" << std::hex << std::setfill('0') << std::setw(16) << fingerprint;
   return out.str();
+}
+
+// Every fingerprint a lowerer may report, current one first. More than one only
+// while kAcceptedGasSchedules carries a transitional entry.
+std::vector<std::string>
+accepted_format_fingerprints_hex()
+{
+  std::vector<std::string> accepted;
+  accepted.reserve(rv32::kAcceptedFormatFingerprints.size());
+  for (const uint64_t fingerprint : rv32::kAcceptedFormatFingerprints) {
+    accepted.push_back(format_fingerprint_hex(fingerprint));
+  }
+  return accepted;
 }
 
 Runtime::MethodID
@@ -972,8 +984,8 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
 
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
-  const GasAmount sha_gas = 9'981;
-  const GasAmount return_gas = 8'774;
+  const GasAmount sha_gas = 9'977;
+  const GasAmount return_gas = 8'770;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -1018,8 +1030,8 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   // The repeated-hash method hashes once and returns an empty buffer.
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
-  const GasAmount sha_gas = 9'979;
-  const GasAmount return_gas = 8'772;
+  const GasAmount sha_gas = 9'974;
+  const GasAmount return_gas = 8'767;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, {}));
@@ -1291,9 +1303,10 @@ TEST_F(Rv32RuntimeContextTest, GuestTrapsMapToDeterministic)
   // Instructions retired before the trap are metered; the trapping fetch or
   // access itself is charged too.
   expect_deterministic(make_bad_pc_image(), 1 * rv32::kBaseInstructionGas);
-  expect_deterministic(make_bad_memory_image(), 1 * rv32::kBaseInstructionGas);
+  // Both bad-memory images fault on an lw, which is priced as a wide load.
+  expect_deterministic(make_bad_memory_image(), rv32::kWideLoadGas);
   expect_deterministic(make_unaligned_oob_access_image(),
-                       2 * rv32::kBaseInstructionGas);
+                       rv32::kBaseInstructionGas + rv32::kWideLoadGas);
   expect_deterministic(make_breakpoint_image(), 1 * rv32::kBaseInstructionGas);
 }
 
@@ -1398,7 +1411,15 @@ TEST_F(Rv32RuntimeContextTest,
   // bugprone-unchecked-optional-access models `if (opt.has_value())` but not
   // gtest's ASSERT_TRUE, and it flags value() and operator* alike.
   if (fingerprint_text.has_value()) {
-    EXPECT_EQ(*fingerprint_text, artifact_format_fingerprint_hex());
+    // Accept any fingerprint in the transitional window, not just this build's:
+    // the lowerer that stamps the current gas schedule may not have rolled out
+    // yet, and its fingerprint folds that schedule. Narrows back to a single
+    // value when kAcceptedGasSchedules does.
+    const auto accepted = accepted_format_fingerprints_hex();
+    EXPECT_TRUE(std::ranges::contains(accepted, *fingerprint_text))
+        << "lowered metadata reports " << *fingerprint_text
+        << ", which is not an accepted engine fingerprint; this build's is "
+        << format_fingerprint_hex(rv32::kArtifactFormatFingerprint);
   }
   else {
     ADD_FAILURE() << "artifact_format_fingerprint must be a string";

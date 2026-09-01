@@ -409,8 +409,9 @@ public:
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
   // == Block statistics syscalls ==
-  // These are based on reading the db tip.
-  SystemStatus<BlockHeight> get_block_height() const;
+  // Served off the tip this handler pinned at entry (see init_db_tip()), so
+  // reading one cannot fail and cannot touch the shared snapshot cache.
+  BlockHeight get_block_height() const;
 
   // == General access methods ==
   //
@@ -484,19 +485,48 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
+  // The block's db tip, pinned on this handler at the transaction's first
+  // admission check (see init_db_tip()). Owned by snapshot_cache_ and stable
+  // for the whole block, so every later read of the executing block height,
+  // the network configuration, or the default wallet is a plain load off a
+  // thread-confined pointer -- no atomic, no fallible path, and no reason for
+  // a caller to reach into the shared cache while holding one of its locks.
+  //
+  // Mutable because it memoizes an immutable value: the const admission checks
+  // that run before any frame is pushed are what pin it.
+  mutable DbTip const *db_tip_ = nullptr;
+
   inline static bool debug_force_commit_abort_{false};
+
+  // Pin the block's db tip on this handler, if it is not pinned already.
+  // Idempotent, and called from every path that can reach a tip-derived
+  // value: perform_initial_validation() before the transaction body runs, and
+  // validate_new_invocation()/start_frame(), which together are the only ways
+  // a frame is admitted (the view and test-FFI paths enter at one or the
+  // other rather than through root_invoke()). The fetch itself can fail as a
+  // system error; every later read is infallible.
+  [[nodiscard]] SystemStatus<void> init_db_tip() const;
+
+  // The pinned tip. Every caller runs after an admission check that pinned it,
+  // so a null here is a missed pin point on a new entry path, not a runtime
+  // condition -- fail loudly rather than reading through null.
+  DbTip const *db_tip() const
+  {
+    CHECK_PTR(db_tip_);
+    return db_tip_;
+  }
 
   // True if the given replay uniquifier has already expired at the executing
   // block height -- i.e. the HogDb replay cache would reject it as a conflict.
   static bool replay_uniquifier_expired(Uniquifier const &uniquifier,
                                         BlockHeight executing_height);
   // Whether this handler's transaction has an already-expired replay uniquifier
-  // (reads the db tip via get_block_height(); a tip-read failure is
-  // propagated). Returns false for the test-harness constructor (no
-  // uniquifier). Used by perform_initial_validation() to reject the transaction
-  // before the body runs, and by try_commit_transaction()'s debug-only check
-  // that a proposal-mode ValidationFailure is in fact a bad expiry height.
-  SystemStatus<bool> replay_uniquifier_expired();
+  // (reads the executing height off the pinned tip). Returns false for the
+  // test-harness constructor (no uniquifier). Used by
+  // perform_initial_validation() to reject the transaction before the body
+  // runs, and by try_commit_transaction()'s debug-only check that a
+  // proposal-mode ValidationFailure is in fact a bad expiry height.
+  bool replay_uniquifier_expired() const;
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid, and that the replay

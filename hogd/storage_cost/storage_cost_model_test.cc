@@ -76,14 +76,6 @@ TEST(StorageCostModelTest, ContractDeploymentCostIncludesBase)
   };
   StorageCostModel model(xdr);
 
-  DeployedContractHash wasm_hash{.hash = {},
-                                 .contract_size = 100,
-                                 .contract_type = ContractType::kWasmi};
-  EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{13000});
-
-  wasm_hash.contract_size = 0;
-  EXPECT_EQ(model.get_deployment_cost(wasm_hash), int128_t{12000});
-
   DeployedContractHash rv32_hash{.hash = {},
                                  .contract_size = 100,
                                  .contract_type = ContractType::kRv32};

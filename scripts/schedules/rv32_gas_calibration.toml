@@ -1,0 +1,185 @@
+name = "rv32_gas_calibration"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git checkout -q {{ .git_commit }}
+
+source ./scripts/ci/configure_git_cache.sh
+
+# Only what a configure needs. The rv32_gas_calibrate target itself links just
+# the RV32 ISA core, but CMake configures the whole project before it can build
+# anything.
+git submodule update --init --recursive \
+   protocol \
+   external/rocksdb \
+   external/model-checker \
+   external/googletest \
+   external/benchmark \
+   external/crc32c \
+   external/blake3 \
+   external/corrosion \
+   built_contracts/integration_test_contracts
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+
+# Configure Release with an explicitly pinned compiler. Both halves matter.
+#
+# Release because the measured engine is the *compiled* interpreter: -O3,
+# -march, and LTO across the interpreter's translation units all reach the hot
+# path, and rv32_gas_calibrate refuses to measure anything else.
+#
+# Pinned compiler because the costs are a property of the generated code. The
+# engine fingerprint is deliberately compiler-independent, so it will not catch
+# a compiler change -- only the numbers move, silently. Every run recording the
+# same compiler is what makes them comparable over time.
+echo 'configure release'
+./scripts/build.sh -d build/release -t Release -c gcc -x "-DBUILD_BENCHMARKS=OFF" -n \
+  > configure.log 2>&1 || (cat configure.log && exit 1)
+
+echo 'build rv32_gas_calibrate'
+cmake --build build/release --parallel "$(nproc)" --target rv32_gas_calibrate \
+  > build.log 2>&1 || (cat build.log && exit 1)
+
+mkdir -p ${HOG_DUMP_DIR}
+
+CHECK_RESULT=0
+
+# `reference` produces the numbers and prints a reference file without gating;
+# that is how a new host is bootstrapped, since the committed reference holds
+# costs as ratios measured somewhere else. `check` (the default) gates.
+if [ "{{ .mode }}" = "reference" ]; then
+
+  echo 'running calibration (reference mode, not gating)'
+  ./scripts/rv32_gas_calibrate.sh build/release \
+    --out ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+
+  echo '===== per-opcode costs ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json
+
+  echo '===== validation workloads ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --workloads
+
+  echo '===== additivity: do the per-opcode costs predict real programs? ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json --predict
+
+  # The point of the whole harness. Gas costs have to come from the machine
+  # class that runs the chain, not from whatever laptop or container generated
+  # them, so print the proposal here where it is measured on bench hardware.
+  #
+  # One run: the report says so itself, and says which distinctions not to
+  # trust because of it. Dispatch this workflow a few times and pass the
+  # collected JSON to --schedule together before adopting anything -- it merges
+  # runs, takes the highest cost each context reached, and marks the cells that
+  # did not reproduce.
+  echo '===== proposed gas schedule from this host ====='
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+    --schedule
+
+  # Take the file, not the text below. This log is JSON-encoded on its way
+  # out, so a copy-paste of the printed block arrives with \u003e for > and
+  # \" for " -- which parses (comments are stripped) but leaves the
+  # regeneration command the file documents literally wrong.
+  echo '===== proposed reference.txt for this host ====='
+  echo 'To adopt: copy ${HOG_DUMP_DIR}/rv32-gas-reference.txt from this host'
+  echo 'over hogd/hog_exec/runtime/rv32/gas_calibration/reference.txt'
+  ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+    --emit-reference | tee ${HOG_DUMP_DIR}/rv32-gas-reference.txt
+
+else
+
+  echo 'running calibration and checking it against the committed reference'
+  ./scripts/rv32_gas_check.sh build/release \
+    --out ${HOG_DUMP_DIR}/rv32-gas-calibration.json > check.log 2>&1 \
+    || CHECK_RESULT=$?
+  cat check.log
+
+  if [ $CHECK_RESULT -ne 0 ]; then
+    # A failure here is one of two things, and the check output says which: the
+    # engine fingerprint moved (a fusion rule, gas cost, or run limit changed,
+    # so the calibration behind the current gas costs describes a different
+    # interpreter), or a guarded worst-case cost doubled relative to the
+    # baseline. Neither is fixed by regenerating the reference.
+    echo '===== per-opcode costs from the failing run ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json || true
+    echo '===== validation workloads ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+      --workloads || true
+    echo '===== additivity ====='
+    ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
+      --predict || true
+  fi
+
+fi
+
+# File the measurement before acting on the check. A run that failed the gate is
+# the one whose numbers history most wants, so the exit is held until after.
+#
+# The JSON rather than the rendered tables: every table above is a view of it
+# (./scripts/rv32_gas_report.py <file>), and --schedule merges several of these
+# files into one gas proposal. Filing the JSON is what lets that merge happen
+# from history rather than from shell access to the bench host.
+#
+# One file per commit, like every other metric here: a nightly re-run on a
+# commit main has not moved off replaces the previous sample rather than adding
+# to it. That is enough to merge several runs into a gas proposal -- runs are
+# comparable when the engine fingerprint matches, not when the commit does, so
+# the samples to merge are successive nights, not repeats of one night.
+file_measurement() {
+  # Absent when the calibration itself failed rather than the comparison -- a
+  # build that will not run, a machine that will not hold still. Nothing to
+  # file, and nothing wrong with the filing.
+  if [ ! -s ${HOG_DUMP_DIR}/rv32-gas-calibration.json ]; then
+    echo 'no calibration output to file'
+    return 0
+  fi
+
+  echo 'clone metrics history'
+  ./scripts/clone_metrics_history.sh || return $?
+
+  echo 'log the calibration'
+  ./scripts/log_metric.sh rv32-gas-calibration \
+    ${HOG_DUMP_DIR}/rv32-gas-calibration.json || return $?
+
+  echo 'commit metrics'
+  ./scripts/commit_metrics.sh
+}
+
+METRICS_RESULT=0
+file_measurement || METRICS_RESULT=$?
+
+# The gate's verdict outranks a filing failure: a drifted calibration is the
+# more urgent news, and its output is in the log above either way. But a filing
+# failure still has to fail the job -- this script runs under `set -x` alone, so
+# an unconditional `exit $CHECK_RESULT` would leave a green nightly that pushed
+# nothing, which is the one failure nobody would notice.
+if [ $CHECK_RESULT -ne 0 ]; then
+  exit $CHECK_RESULT
+fi
+
+exit $METRICS_RESULT
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .git_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+
+# hog10, like every other job that commits to metrics_history: the push
+# credentials live there, and a nightly time series wants the same silicon every
+# night. The gate itself does not need the pin -- the reference holds costs as
+# ratios to the baseline instruction measured in the same run, not nanoseconds.
+[jobs.host]
+metrics_1 = "hog10"

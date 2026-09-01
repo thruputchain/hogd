@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <functional>
@@ -11,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -188,7 +192,8 @@ protected:
     ASSERT_TRUE(db_.write_address_metadata(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("seed"))),
-                             .contract_size = 10}));
+                             .contract_size = 10,
+                             .contract_type = ContractType::kRv32}));
   }
 };
 
@@ -415,8 +420,9 @@ TEST_F(HogDbTest, DataAccessObject)
   uint32_t contract_size = test_code.size();
   SHA256Hash hash = sha256(std::as_bytes(std::span(test_code)));
   EXPECT_TRUE(db_.write_address_metadata(
-      addr,
-      DeployedContractHash{.hash = hash, .contract_size = contract_size}));
+      addr, DeployedContractHash{.hash = hash,
+                                 .contract_size = contract_size,
+                                 .contract_type = ContractType::kRv32}));
   auto rhash = db_.read_address_metadata(addr);
   EXPECT_TRUE(rhash);
   if (rhash) {
@@ -607,10 +613,10 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
   contract.native_contract_id() =
       static_cast<HogexecPrecompiledNativeContracts>(1);
 
-  ASSERT_TRUE(
-      db_.write_address_metadata(addr,
-                                 DeployedContractHash{.hash = sha256(contract),
-                                                      .contract_size = 10}));
+  ASSERT_TRUE(db_.write_address_metadata(
+      addr, DeployedContractHash{.hash = sha256(contract),
+                                 .contract_size = 10,
+                                 .contract_type = ContractType::kRv32}));
   ASSERT_TRUE(db_.write_address_balance(addr, 1000000));
 
   BlockHeight height = 1;
@@ -623,7 +629,9 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
 
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr2,
-      DeployedContractHash{.hash = sha256(contract), .contract_size = 10},
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32},
       std::to_underlying(StorageDeltaFlags::None)));
   ASSERT_TRUE(
       invoke_tx.request_nnint128(make_address_balance_item_key(addr), -100000,
@@ -633,7 +641,8 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
                                  std::to_underlying(StorageDeltaFlags::None)));
 
   DeployedContractHash deployed_hash{.hash = sha256(contract),
-                                     .contract_size = 10};
+                                     .contract_size = 10,
+                                     .contract_type = ContractType::kRv32};
   ASSERT_TRUE(invoke_tx.request_deploy_contract(
       addr3, deployed_hash, std::to_underlying(StorageDeltaFlags::None)));
   int128_t cost = cost_model_.get_deployment_cost(deployed_hash) +
@@ -993,6 +1002,28 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenBalanceIsNegative)
       make_hog_age(account, /*to_schedule=*/0,
                    /*already_scheduled=*/0,
                    /*received=*/0,
+                   /*to_schedule_age=*/10,
+                   /*already_scheduled_age=*/20,
+                   /*received_age=*/30)));
+
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
+TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
+{
+  constexpr uint128_t kMax = std::numeric_limits<uint128_t>::max();
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // kMax + 10 + 1 wraps to exactly 10, the persisted balance. An unchecked
+  // sum therefore reports this row as already reconciled and leaves it in
+  // place, and the corruption only surfaces later in the mempool scheduler.
+  ASSERT_TRUE(db_.write_address_average_hog_age(
+      make_hog_age(account, /*to_schedule=*/kMax,
+                   /*already_scheduled=*/10,
+                   /*received=*/1,
                    /*to_schedule_age=*/10,
                    /*already_scheduled_age=*/20,
                    /*received_age=*/30)));
@@ -1470,7 +1501,8 @@ TEST_F(HogDbTest, DbHashDeltaNewDeploymentLockMatchesFullStateHash)
     ASSERT_TRUE(invoke_tx.request_deploy_contract(
         addr,
         DeployedContractHash{.hash = sha256(std::as_bytes(std::span("deploy"))),
-                             .contract_size = 15},
+                             .contract_size = 15,
+                             .contract_type = ContractType::kRv32},
         std::to_underlying(StorageDeltaFlags::None)));
   });
 }
@@ -1525,7 +1557,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityBlockContentModificationChangesDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("x"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Create RCQ with entries across multiple blocks
   // Each block gets kEntriesPerBlock entries
@@ -1622,7 +1655,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("consume"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1709,7 +1743,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1803,7 +1838,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityExplicitDeletionRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1897,7 +1933,8 @@ TEST_F(HogDbTest,
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -1991,7 +2028,8 @@ TEST_F(HogDbTest, RCQBlockIntegrityTypeChangeNNIntRemovesAllBlocksFromDbHash)
   ASSERT_TRUE(db_.write_address_metadata(
       contract_addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("delete"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   constexpr size_t kEntriesPerBlock = 100;
   constexpr size_t kNumBlocks = 3;
@@ -2081,9 +2119,11 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
   // Setup contract on db_
   ASSERT_TRUE(db_.write_address_balance(contract_addr, 10'000'000));
   ASSERT_TRUE(db_.write_address_metadata(
-      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
-                                              std::span("rcq_consumed"))),
-                                          .contract_size = 10}));
+      contract_addr,
+      DeployedContractHash{.hash =
+                               sha256(std::as_bytes(std::span("rcq_consumed"))),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Create second database with identical base state
   ErrnoStatus<Directory> dir2 = Directory::open_temporary();
@@ -2096,9 +2136,11 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
 
   ASSERT_TRUE(db2.write_address_balance(contract_addr, 10'000'000));
   ASSERT_TRUE(db2.write_address_metadata(
-      contract_addr, DeployedContractHash{.hash = sha256(std::as_bytes(
-                                              std::span("rcq_consumed"))),
-                                          .contract_size = 10}));
+      contract_addr,
+      DeployedContractHash{.hash =
+                               sha256(std::as_bytes(std::span("rcq_consumed"))),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   // Insert RCQ entries on db_ over several blocks
   constexpr size_t kNumBlocks = 3;
@@ -3402,6 +3444,55 @@ TEST(InvokeTxKeyTest, SynchronizedMapRoundTrip)
   }
 }
 
+// commit_and_snapshot() lets ramdb's disk cleanup reclaim WAL that plain
+// commit() never can: snapshot coverage advances and the covered log files
+// are deleted (#3704).
+TEST(HogDbDaoSnapshotTest, CommitAndSnapshotReclaimsWal)
+{
+  // small WAL files so the snapshot recommendation floor is a few hundred
+  // KiB instead of kDiskLogCleanupRatio full-size files.
+  constexpr size_t kSmallLogFileThreshold = 64 * 1024;
+
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), Database::estimate_heap_size(10_MiB), 0,
+                     kSmallLogFileThreshold);
+  ASSERT_TRUE(db);
+  HogDbDAO dao{RAMDB(std::move(*db))};
+
+  EXPECT_FALSE(dao.snapshot_recommended());
+
+  // ~1 MiB of writes, past the floor.
+  RAMDB &ramdb = dao.get_ramdb();
+  const std::string value(256, 'v');
+  for (int i = 0; i < 4096; ++i) {
+    std::string key = "wal-key-" + std::to_string(i);
+    ASSERT_TRUE(ramdb.put(std::as_bytes(std::span(key)), 0,
+                          std::as_bytes(std::span(value))));
+  }
+  ASSERT_TRUE(dao.commit());
+  ASSERT_TRUE(dao.snapshot_recommended());
+
+  HogDbStatus<uint64_t> lsn = dao.commit_and_snapshot();
+  ASSERT_TRUE(lsn);
+  EXPECT_EQ(*lsn, 2U);
+
+  // the snapshot completes in the background; once durable, coverage
+  // advances and the next cleanup deletes the covered log files.
+  auto wait_until = [](auto &&pred) {
+    for (int i = 0; i < 500; ++i) {
+      if (pred())
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  };
+  EXPECT_TRUE(wait_until([&dao] { return !dao.snapshot_recommended(); }));
+  EXPECT_TRUE(wait_until(
+      [&dir] { return !dir->openat("0.log", O_RDONLY).has_value(); }));
+}
+
 // Tests that the fresh-balance guard in BalanceLock::try_atomic_change_lock
 // is evaluated per-lock-attempt, not against cumulative committed state.
 // A cumulative guard would be nondeterministic under concurrent InvokeTX
@@ -4218,7 +4309,8 @@ TEST_F(HogDbTest, StaleSiblingBytestringLockRejectsAfterSiblingCommit)
   ASSERT_TRUE(db_.write_address_metadata(
       addr,
       DeployedContractHash{.hash = sha256(std::as_bytes(std::span("stale"))),
-                           .contract_size = 10}));
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32}));
 
   PerThreadARC<BlockTX> block_a(
       db_, cost_model_, background_commit_worker_, 1,

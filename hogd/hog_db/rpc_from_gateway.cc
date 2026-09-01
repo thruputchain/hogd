@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <span>
-#include <string_view>
 #include <utility>
 
 // generated x23 headers
@@ -54,6 +53,7 @@ to_rpc_error(HogDbError err)
   case HogDbCode::kIO:
   case HogDbCode::kInvalidExecutorBehavior:
   case HogDbCode::kStaleBlock:
+  case HogDbCode::kBusy:
     return RPCError::kRPCUnrecoverable;
   }
   return RPCError::kRPCUnrecoverable;
@@ -145,8 +145,7 @@ read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
 DbGatewayIntroOutcome
 HogDbGatewayRpc::dbgateway_intro(ProtocolCommit const &protocol)
 {
-  if (std::string_view(protocol) !=
-      std::string_view(version::kHogdProtocol())) {
+  if (protocol != version::kHogdProtocol()) {
     return DbGatewayIntroOutcome::DbGatewayIntroMismatchedProtocol;
   }
   return DbGatewayIntroOutcome::DbGatewayIntroSuccess;

@@ -309,7 +309,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
-            mark_tx_failed_authentication(sha256((*txs)[i].tx));
             to_remove_indices.push_back(i);
           }
         }
@@ -454,7 +453,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
-            mark_tx_failed_authentication(sha256((*txs)[i].tx));
             to_remove_indices.push_back(i);
           }
         }
@@ -2312,15 +2310,6 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   auto check_validation_node = validation_dag.async<void>(
       "check validation chunks", validation_dag.after(prepare_validate_node),
       [&]() -> x23::Async<void> {
-        for (const TransactionHash &tx_hash : missing_tx_hashes) {
-          if (tx_failed_authentication(tx_hash)) {
-            co_await cancel_with_result(
-                SchedulerValidationOutcome::SchedulerValidationInvalid,
-                "check validation chunks");
-            co_return;
-          }
-        }
-
         if (!missing_tx_hashes.empty()) {
           dag_outcome =
               SchedulerValidationOutcome::SchedulerValidationMissingTxs;
@@ -2749,7 +2738,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
-        clear_expired_failed_authentication_txs();
 
         // We need to do two things:
         // 1. If the nominated block is not the committed block, we need to

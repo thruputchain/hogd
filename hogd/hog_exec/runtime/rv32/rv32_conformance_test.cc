@@ -10,6 +10,7 @@
 
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/machine.h"
+#include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
 
@@ -205,7 +206,7 @@ conformance_cases()
                 0x00000073U},
        .expected_pc = 28,
        .check_gas_consumed = true,
-       .expected_gas_consumed = 7,
+       .expected_gas_consumed = (6 * kBaseInstructionGas) + kWideLoadGas,
        .expected_regs = {{4, 0x00deadbeU}},
        .expected_memory = {{32, {0xef, 0xbe, 0xad, 0xde}}}},
       {.name = "unaligned_store_mutates_exactly_four_bytes",
@@ -226,7 +227,7 @@ conformance_cases()
        .expected_halted = true,
        .expected_pc = 4,
        .check_gas_consumed = true,
-       .expected_gas_consumed = 2,
+       .expected_gas_consumed = kBaseInstructionGas + kWideLoadGas,
        .expected_regs = {{2, 0}}},
       {.name = "taken_branch_to_bad_pc_traps_after_gas",
        .code = {addi(1, 0, 1), b_type(0, 1, 1, 12), addi(2, 0, 1)},
@@ -236,7 +237,7 @@ conformance_cases()
        .expected_halted = true,
        .expected_pc = 4,
        .check_gas_consumed = true,
-       .expected_gas_consumed = 2,
+       .expected_gas_consumed = kBaseInstructionGas + kBranchInstructionGas,
        .expected_regs = {{2, 0}}},
       {.name = "out_of_gas_has_no_partial_mutation",
        .code = {addi(1, 0, 1), 0x00000073U},

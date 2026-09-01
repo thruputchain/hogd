@@ -637,10 +637,6 @@ public:
     case ContractType::kMockTest:
       contract_size = 0;
       break;
-    case ContractType::kWasmi:
-      contract_size =
-          static_cast<uint32_t>(contract->wasmi_contract().data.size());
-      break;
     case ContractType::kRv32:
       contract_size =
           static_cast<uint32_t>(contract->rv32_contract().data.size());

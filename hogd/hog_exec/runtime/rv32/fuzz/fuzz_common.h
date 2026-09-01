@@ -28,7 +28,7 @@ inline constexpr uint32_t kFuzzMemCap = 4096;
 // at least the largest single-instruction gas so a valid split always exists;
 // carving below that floor would just be silently clamped back up.
 inline constexpr uint32_t kFuzzMinRunGasCap =
-    static_cast<uint32_t>(kDivInstructionGas);
+    static_cast<uint32_t>(kMaxInstructionGas);
 static_assert(kFuzzMinRunGasCap <= kMaxRunGas);
 // Run length <= gas budget (every instruction costs >= 1 gas), so a budget
 // below the traced step window guarantees the canonical trace_execution reaches

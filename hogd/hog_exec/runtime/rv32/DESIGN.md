@@ -68,6 +68,12 @@ Instruction gas costs live in `program.h`. The artifact gas digest in
 `artifact.h` folds those instruction costs together with the host syscall gas
 schedule, so artifacts built against a different gas table are rejected.
 
+The costs themselves are placeholders. `gas_calibration/` measures what the
+production engine actually costs per instruction so they can be set from data;
+see its README for the method and `docs/rv32/rv32-gas-calibration.md` for
+results. It is a measurement harness, not a source of truth the build depends
+on -- changing a cost is still a coordinated gas-schedule update.
+
 `Machine` meters per instruction. `ThreadedMachine` meters straight-line runs:
 the lowering step records the total gas for a run, and `enter_run()` charges it
 once before executing the run body. Control-flow and host boundary instructions
@@ -133,6 +139,12 @@ The test strategy is deliberately redundant:
 
 For consensus-sensitive changes, prefer a narrow regression test near the
 changed layer plus at least one cross-engine check.
+
+`gas_calibration/rv32_gas_calibration_test.cc` covers the calibration harness
+itself: that its kernels encode the opcodes they claim (checked against the
+production decoder), that they execute exactly the work they are credited with,
+and that its lowering audit both passes on non-fusible bodies and fails on
+fusible ones.
 
 Two local-only libFuzzer targets live under `fuzz/` (built with
 `-DBUILD_FUZZERS=ON`, excluded from CI). `rv32_fuzz_artifact` drives the

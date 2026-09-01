@@ -25,6 +25,11 @@
   - Initial Release benchmark baseline versus wasmi.
 - [rv32-conformance-and-performance.md](rv32-conformance-and-performance.md)
   - In-tree conformance scope and Linux-review benchmark counters.
+- [rv32-gas-calibration.md](rv32-gas-calibration.md)
+  - How instruction gas costs get measured rather than guessed, what the first
+    run found, and what has to be true before the schedule changes.
+  - Method and limits live next to the code in
+    `runtime/rv32/gas_calibration/README.md`.
 - [rv32-upstream-test-plan.md](rv32-upstream-test-plan.md)
   - Step-by-step plan for using upstream `riscv-tests` artifacts, rejection
     fixtures, and benchmark workloads.

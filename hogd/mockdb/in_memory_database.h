@@ -85,9 +85,9 @@ public:
     case ContractType::kMockTest:
       contract_size = 0;
       break;
-    case ContractType::kWasmi:
+    case ContractType::kRv32:
       contract_size =
-          static_cast<uint32_t>(contract->wasmi_contract().data.size());
+          static_cast<uint32_t>(contract->rv32_contract().data.size());
       break;
     default:
       assert(false);
@@ -97,7 +97,9 @@ public:
 
     write_deployment(addr,
                      DeployedContractHash{.hash = contract_hash,
-                                          .contract_size = contract_size},
+                                          .contract_size = contract_size,
+                                          .contract_type =
+                                              contract->contract_type()},
                      nullptr);
   }
 

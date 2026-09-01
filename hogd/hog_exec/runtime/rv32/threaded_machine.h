@@ -62,8 +62,10 @@ using Handler = StepResult (*)(Ctx, const Slot *, uint8_t *, uint32_t,
 // this, which (a) keeps gas_to_run within its uint16 field and (b) bounds the
 // maximum speculative overdraft a deficit run can incur (enter_run_deficit),
 // since at most one run ever runs in deficit. A single instruction's gas is
-// <= 8 (kDivInstructionGas) << kMaxRunGas, so a valid split always exists.
+// <= kMaxInstructionGas << kMaxRunGas, so a valid split always exists.
 inline constexpr uint32_t kMaxRunGas = 10000;
+static_assert(kMaxInstructionGas <= kMaxRunGas);
+static_assert(kMaxRunGas <= UINT16_MAX);
 
 // The narrow-imm + rs2 arm of Slot's operand union (see Slot below for why the
 // two can share a word). Declared out of line rather than as an unnamed struct
@@ -120,14 +122,14 @@ public:
   // always uses the default kMaxRunGas. Tests and the engine-diff fuzzer pass
   // smaller caps so break carriers (and their refund/deficit seams) appear in
   // short programs instead of requiring >kMaxRunGas of straight-line gas. It
-  // is clamped to [kDivInstructionGas, kMaxRunGas]: the floor keeps a valid
+  // is clamped to [kMaxInstructionGas, kMaxRunGas]: the floor keeps a valid
   // split for every single instruction, the ceiling keeps gas_to_run within
   // its uint16 field and the deficit overdraft bound.
   [[nodiscard]] static std::expected<ThreadedMachinePreInstantiation,
                                      ProgramError>
   create(std::span<const uint8_t> code, std::span<const uint8_t> memory,
          uint32_t memory_start, uint32_t total_memory_size, bool trace,
-         uint32_t max_run_gas = kMaxRunGas);
+         uint32_t max_run_gas = kMaxRunGas, bool fuse = true);
 
   ThreadedMachinePreInstantiation(ThreadedMachinePreInstantiation &&) noexcept =
       default;
@@ -1865,10 +1867,10 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
                                         std::span<const uint8_t> memory,
                                         uint32_t memory_start,
                                         uint32_t total_memory_size, bool trace,
-                                        uint32_t max_run_gas)
+                                        uint32_t max_run_gas, bool fuse)
 {
   max_run_gas = std::clamp<uint32_t>(max_run_gas,
-                                     static_cast<uint32_t>(kDivInstructionGas),
+                                     static_cast<uint32_t>(kMaxInstructionGas),
                                      kMaxRunGas);
   const auto program = ThreadedProgram::create(code);
   if (!program.has_value()) {
@@ -2006,12 +2008,16 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // consumed as a fusion tail (`next_fused`) -- a slot belongs to at most one
     // pair. The tail slot keeps its standalone handler and gas_to_run as the
     // branch-in fallback; fusion is behavior-preserving and never changes gas.
+    //
+    // `fuse` is false only for the gas calibration, which prices a single
+    // opcode and needs the unfused dispatch count. Production takes the
+    // default.
     bool fused_here = false;
     // Do not fuse across a chunk boundary: a fused handler skips the
     // intervening enter_run, so a pair may not straddle a break carrier
     // (either as the pair's head or its tail). Break carriers are
     // astronomically rare, so this costs no measurable coverage.
-    if (i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
+    if (fuse && i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =

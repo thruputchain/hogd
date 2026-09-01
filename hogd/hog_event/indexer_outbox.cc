@@ -15,6 +15,7 @@
 #include <format>
 #include <limits>
 #include <optional>
+#include <set>
 #include <span>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string>
@@ -23,7 +24,6 @@
 #include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,6 +37,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "rpc_types.hh"
@@ -265,7 +266,7 @@ committed_record_info_from_header(const IndexerOutboxRecordHeader &header)
 {
   return {
       .block_height = header.block_height,
-      .protocol = std::string(header.protocol),
+      .protocol = header.protocol,
       .payload_byte_length = header.payload_byte_length,
       .consensus_hash = header.consensus_hash,
       .prev_hash = header.prev_hash,
@@ -289,6 +290,16 @@ make_header(const IndexerOutboxEpochOrigin &payload, size_t payload_size,
   header.record_identity.kind(
       IndexerOutboxRecordKind::IndexerOutboxEpochOrigin);
   return header;
+}
+
+// The protocol commit is a fixed-width token, so every IndexerOutboxEpochOrigin
+// field is fixed-width and its encoded payload size is a constant, independent
+// of field values. Recovery uses this to reject any epoch origin whose declared
+// payload is not exactly this size before hashing or materializing it.
+uint64_t
+epoch_origin_payload_byte_length()
+{
+  return x23::xdr_size(IndexerOutboxEpochOrigin{});
 }
 
 template<typename Payload>
@@ -388,10 +399,6 @@ indexer_outbox_file_size_for_payload(size_t payload_size)
 {
   if (payload_size > kMaxIndexerOutboxPayloadBytes) {
     return std::unexpected("indexer outbox payload exceeds durable limit");
-  }
-  if (std::string_view(version::kHogdProtocol()).size() >
-      kMaxIndexerOutboxProtocolCommitBytes) {
-    return std::unexpected("hogd protocol token exceeds outbox envelope limit");
   }
   IndexerOutboxRecordHeader header{};
   header.protocol = version::kHogdProtocol();
@@ -560,9 +567,9 @@ IndexerOutboxStore::committed_filename(BlockHeight block_height)
 }
 
 std::string
-IndexerOutboxStore::epoch_origin_filename(std::string_view protocol)
+IndexerOutboxStore::epoch_origin_filename(const ProtocolCommit &protocol)
 {
-  std::string identity(protocol);
+  std::string identity(protocol_text(protocol));
   for (char &c : identity) {
     const bool alphanumeric = (c >= 'a' && c <= 'z') ||
                               (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
@@ -701,7 +708,7 @@ IndexerOutboxStore::load_candidate(BlockID block_id) const
       header->record_identity.candidate_block_id() != block_id) {
     co_return std::unexpected("candidate outbox header identity mismatch");
   }
-  if (std::string_view(header->protocol) != version::kHogdProtocol()) {
+  if (header->protocol != version::kHogdProtocol()) {
     co_return std::unexpected("outbox protocol does not match this binary");
   }
   auto bytes = load_payload(filename, *header);
@@ -759,7 +766,7 @@ IndexerOutboxStore::enumerate_candidate_records_raw() const
     // candidate on the commit path.
     records.push_back({.block_id = header->record_identity.candidate_block_id(),
                        .block_height = header->block_height,
-                       .protocol = std::string(header->protocol),
+                       .protocol = header->protocol,
                        .payload_byte_length = header->payload_byte_length,
                        .payload_digest = header->payload_digest,
                        .event_root = header->event_root});
@@ -897,7 +904,7 @@ IndexerOutboxStore::publish_committed_stored(
     co_return std::unexpected("committed append cache was not initialized");
   }
   CommittedAppendCache &cache = committed_append_cache_.value();
-  const std::string_view current_protocol = version::kHogdProtocol();
+  const ProtocolCommit current_protocol = version::kHogdProtocol();
   const bool current_epoch_started =
       cache.latest && cache.latest->protocol == current_protocol;
   if (!current_epoch_started) {
@@ -987,7 +994,7 @@ IndexerOutboxStore::load_committed(BlockHeight block_height) const
 
 x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
 IndexerOutboxStore::load_committed_record(
-    BlockHeight block_height, std::string_view expected_protocol) const
+    BlockHeight block_height, const ProtocolCommit &expected_protocol) const
 {
   if (block_height < 0) {
     co_return std::unexpected("committed outbox height is negative");
@@ -997,7 +1004,7 @@ IndexerOutboxStore::load_committed_record(
   if (!header) {
     co_return std::unexpected(header.error());
   }
-  if (std::string_view(header->protocol) != expected_protocol) {
+  if (header->protocol != expected_protocol) {
     co_return std::unexpected("outbox protocol does not match expected epoch");
   }
   if (header->record_identity.kind() !=
@@ -1089,7 +1096,7 @@ IndexerOutboxStore::load_current_epoch_origin() const
   }
   if (header->record_identity.kind() !=
           IndexerOutboxRecordKind::IndexerOutboxEpochOrigin ||
-      std::string_view(header->protocol) != version::kHogdProtocol()) {
+      header->protocol != version::kHogdProtocol()) {
     return std::unexpected("invalid current indexer outbox epoch header");
   }
   auto bytes = load_payload(filename, *header);
@@ -1104,7 +1111,7 @@ IndexerOutboxStore::load_current_epoch_origin() const
   if (origin->format_version != kIndexerOutboxEnvelopeFormatVersion ||
       origin->epoch_sequence != header->epoch_sequence ||
       origin->origin.epoch_sequence != header->epoch_sequence ||
-      std::string_view(origin->origin.protocol) != version::kHogdProtocol() ||
+      origin->origin.protocol != version::kHogdProtocol() ||
       origin->origin.first_height < 0) {
     return std::unexpected("invalid current indexer outbox epoch origin");
   }
@@ -1242,8 +1249,8 @@ IndexerOutboxStore::validate_committed_history_unlocked(
     co_return std::unexpected(current_origin.error());
   }
 
-  const std::string current_protocol(version::kHogdProtocol());
-  std::unordered_set<std::string> seen_protocols;
+  const ProtocolCommit current_protocol = version::kHogdProtocol();
+  std::set<ProtocolCommit> seen_protocols;
   std::optional<size_t> current_origin_index;
   for (size_t i = 0; i < origins->size(); ++i) {
     const auto &origin = (*origins)[i];
@@ -1563,7 +1570,7 @@ IndexerOutboxStore::enumerate_epoch_origins_raw() const
     if (auto valid = validate_payload_digest(name, *header); !valid) {
       return std::unexpected(valid.error());
     }
-    origins.push_back({.protocol = std::string(header->protocol),
+    origins.push_back({.protocol = header->protocol,
                        .epoch_sequence = header->epoch_sequence,
                        .first_height = header->block_height,
                        .first_prev_hash = header->prev_hash,
@@ -1926,6 +1933,15 @@ IndexerOutboxStore::load_header(std::string_view filename) const
       header.payload_byte_length > kMaxIndexerOutboxPayloadBytes ||
       header.payload_byte_length != file_size - 4 - header_size) {
     return std::unexpected("indexer outbox header/file size mismatch");
+  }
+  // An epoch-origin payload is the fixed-size IndexerOutboxEpochOrigin struct
+  // for every protocol, so require its declared size to match exactly here --
+  // before enumeration hashes the declared payload or load materializes it --
+  // rather than letting the generic outbox payload cap apply. See #3691.
+  if (header.record_identity.kind() ==
+          IndexerOutboxRecordKind::IndexerOutboxEpochOrigin &&
+      header.payload_byte_length != epoch_origin_payload_byte_length()) {
+    return std::unexpected("epoch origin payload size mismatch");
   }
   return header;
 }

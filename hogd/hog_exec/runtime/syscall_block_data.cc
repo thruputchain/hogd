@@ -18,11 +18,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
                              BlockHeight &output_result)
 {
-  auto status = syscall_handler.get_block_height();
-  if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  output_result = *status;
+  output_result = syscall_handler.get_block_height();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetBlockHeight>()) {
