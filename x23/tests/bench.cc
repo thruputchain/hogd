@@ -20,8 +20,12 @@ void
 serialize_xdr(benchmark::State &state)
 {
   X x{};
-  for (auto _ : state)
-    x23::serialize(x);
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(x);
+    x23::Buf b = x23::serialize(x);
+    benchmark::DoNotOptimize(b.data());
+    benchmark::ClobberMemory();
+  }
 }
 BENCHMARK(serialize_xdr<std::tuple<>>);
 BENCHMARK(serialize_xdr<fix_4>);
@@ -34,8 +38,11 @@ deserialize_xdr(benchmark::State &state)
 {
   X x{};
   x23::Buf b = x23::serialize(x);
-  for (auto _ : state)
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(b);
     x23::deserialize(&x, b);
+    benchmark::DoNotOptimize(x);
+  }
 }
 BENCHMARK(deserialize_xdr<std::tuple<>>);
 BENCHMARK(deserialize_xdr<fix_4>);
