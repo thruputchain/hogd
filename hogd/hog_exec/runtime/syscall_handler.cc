@@ -300,13 +300,12 @@ SystemCallHandler::perform_initial_validation()
       cumulative_invoke_result_.result_ = InvokeError{res};
       return {};
     }
-    // Keep the image verification just produced. For rv32, verifying an
-    // attachment *is* translating it; without this the first same-transaction
-    // invocation of a deployed attachment lowered the identical bytes a second
-    // time, both passes outside transaction gas (#3536). Runtimes with nothing
-    // to prepare leave `prepared` empty, and an empty entry would be
-    // indistinguishable from the memoized could-not-prepare result, so only a
-    // real preparation is cached.
+    // Keep the image verification produced: for rv32, verifying an attachment
+    // *is* translating it, and keeping it is what stops the first
+    // same-transaction invocation from lowering the identical bytes again,
+    // both passes outside transaction gas (#3536). A runtime with nothing to
+    // prepare -- native, and the stub contexts tests install -- verifies
+    // successfully while leaving `prepared` empty, so cache nothing for it.
     if (prepared.rv32.has_value()) {
       local_preparations_.emplace(hash, std::move(prepared));
     }
