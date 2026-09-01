@@ -527,7 +527,6 @@ def print_table(data):
             print(f"measured: {base:.1f} ns + {per_byte:.4f} ns/byte "
                   f"(R2={r_squared:.4f})")
             print(f"charged:  {COMMITTED_SYSCALL_BASE_GAS} base + "
-                  f"{COMMITTED_SHA256_BASE_GAS} gas + "
                   f"{COMMITTED_SHA256_BLOCK_GAS} gas per "
                   f"{SHA256_BLOCK_BYTES}-byte block  (SHA256HashCost)")
             rates = [ns / int(measured[f'entry/SHA256/{size}'].get('gas', 0))
@@ -565,7 +564,6 @@ def print_table(data):
 SHA256_BLOCK_BYTES = 64
 SHA256_PAD_BYTES = 9          # 0x80 plus an 8-byte big-endian bit length
 COMMITTED_SYSCALL_BASE_GAS = 50
-COMMITTED_SHA256_BASE_GAS = 2
 COMMITTED_SHA256_BLOCK_GAS = 22
 
 
@@ -576,17 +574,25 @@ def sha256_blocks(byte_len):
 
 
 def committed_sha256_gas(byte_len):
-    return (COMMITTED_SYSCALL_BASE_GAS + COMMITTED_SHA256_BASE_GAS
+    return (COMMITTED_SYSCALL_BASE_GAS
             + COMMITTED_SHA256_BLOCK_GAS * sha256_blocks(byte_len))
 
 
 def fit_sha256_blocks(points):
     """Least squares against compression blocks: (base_ns, ns_per_block, r2).
 
-    The block is what SHA-256 actually does, and the measurement says so --
-    this fit lands at R2 = 1.000000 where the per-byte one merely rounds to it.
-    Fitting the real unit is also what removes the need for a rate denominator:
-    a per-byte price is a fraction no integer can express, and the divisor that
+    The block is what SHA-256 actually does. R2 is reported but is close to
+    useless as a verdict here: the sweep spans 1 to 513 blocks, so one point
+    carries two thirds of the x-variance and any roughly linear model scores
+    ~1.0. The diagnostic that discriminates is the billed-to-measured ratio
+    across the sweep, printed by --schedule.
+
+    The intercept is reported for the same reason and trusted no further. Every
+    point hashes at least one block, since SHA-256 always compresses its
+    padding, so base_ns extrapolates to a block count no call can have.
+
+    Fitting the block is also what removes the need for a rate denominator: a
+    per-byte price is a fraction no integer can express, and the divisor that
     would fix it is exactly the sort of billing-relevant constant that is easy
     to leave out of the gas-schedule digest.
     """
@@ -846,7 +852,7 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
             now = committed_sha256_gas(size)
             flat = (proposal["base_gas"] + sha["base_gas"] +
                     sha["flat_byte_gas"] * size)
-            proposed = (proposal["base_gas"] + sha.get("block_base_gas", 0) +
+            proposed = (proposal["base_gas"] +
                         sha.get("block_gas", 0) * sha256_blocks(size))
             for key, gas in (("now", now), ("flat", flat),
                              ("proposed", proposed)):
@@ -870,12 +876,19 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     print(f"constexpr static uint64_t kSyscallBaseCost = "
           f"{proposal['base_gas']};")
     if sha and "block_gas" in sha:
-        print(f"constexpr static uint64_t kSHA256HashBaseCost = "
-              f"{sha['block_base_gas']};"
-              f"   // committed: {COMMITTED_SHA256_BASE_GAS}")
         print(f"constexpr static uint64_t kSHA256HashBlockCost = "
               f"{sha['block_gas']};"
               f"  // committed: {COMMITTED_SHA256_BLOCK_GAS}")
+        print()
+        # Reported, not proposed. The schedule charges no per-call base for
+        # SHA256: every call compresses at least its padding block, so this
+        # extrapolates below the sweep and is not a quantity the run measures.
+        # Watch it anyway -- if it ever grows past a few gas, the block model
+        # has stopped describing the syscall and the schedule should say so.
+        print(f"  fit residual over the crossing and the first block: "
+              f"{sha['block_base_gas']} gas "
+              f"({sha['block_base_ns']:.1f} ns intercept, "
+              f"crossing {proposal['base_ns']:.1f} ns). Not charged.")
         print()
         print("  SHA256HashCost charges")
         print(f"    base + block_cost * ceil((bytes + {SHA256_PAD_BYTES})"

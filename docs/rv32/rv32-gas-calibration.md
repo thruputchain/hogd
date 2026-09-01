@@ -716,11 +716,11 @@ pricing is the rule the opcode schedule already follows. One gas of it is
 already charged as the `ecall` instruction, so the proposal subtracts it rather
 than billing the crossing twice.
 
-**SHA256's base is its excess over the crossing, not its total.** The 111.4 ns
-is the fit's intercept over the whole size sweep, not the 115.9 ns measured at
-zero bytes -- different quantities, agreeing to 4%. Of it, about 79 ns is the
-crossing every syscall already pays, leaving 32.2 ns of SHA256's own work.
-Charging its full base as well would bill the crossing twice.
+**SHA256 gets no base of its own.** The fit's intercept is ~111 ns, of which
+about 79 ns is the crossing every syscall already pays and about 35 ns is the
+one compression block SHA-256 performs on any input, padding included. What is
+left is a couple of nanoseconds, and it is not a quantity this sweep measures --
+see below.
 
 
 ### What landed
@@ -730,20 +730,42 @@ The schedule committed in `gas_cost_table.h`, measured on hog10 (run
 
 ```
 constexpr static uint64_t kSyscallBaseCost         = 50;
-constexpr static uint64_t kSHA256HashBaseCost      = 2;
 constexpr static uint64_t kSHA256HashBlockCost     = 22;
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 ```
 
 **Per compression block, not per byte.** SHA-256 works in fixed 64-byte blocks
-and the measurement follows that exactly: 34.53 ns per block at R2 = 1.000000,
-where the per-byte fit only rounds to 1.0000. Pricing the real unit is also
-what removed the divisor. A per-byte price is 0.33 gas, a fraction no integer
+and the measurement follows that: 34.53 ns per block, billing within 1.02x of
+measured across the whole sweep. Pricing the real unit is also what removed the
+divisor. A per-byte price is 0.33 gas, a fraction no integer
 expresses, and the denominator that would fix it is precisely the sort of
 billing-relevant constant that is easy to leave out of the digest -- the hazard
 this document flagged before the schedule was written. In the block model there
 is no denominator to forget: the 64 is SHA-256's, not a policy knob.
+
+**No per-call base, and R2 is not why.** An earlier draft of this schedule
+carried `kSHA256HashBaseCost = 2` and cited R2 = 1.000000 as the evidence for
+the block model. The R2 does not support that reading. The sweep runs
+{0, 32, 256, 1024, 4096, 16384, 32768} bytes, which is block counts
+{1, 1, 5, 17, 65, 257, 513}: the 32768-byte point alone carries about two
+thirds of the x-variance, and the y-variance is dominated by the same point. R2
+prints 1.000000 there for a residual of roughly 4-5 ns RMS -- 0.03% at the top
+of the sweep and about 4% at the 117 ns bottom, which is precisely where an
+intercept is determined. Any roughly linear model scores ~1.0 on a sweep this
+wide. The diagnostic that discriminates is the billed-to-measured ratio, which
+is why the table below is the evidence and R2 is no longer quoted.
+
+The base went with it, for a stronger reason than noise. `blocks(n)` is never
+zero -- SHA-256 always compresses its padding, so even the empty input runs one
+block, and no point in the sweep sits at the intercept. It is an extrapolation
+to a block count no call can have. What it was estimating is what remains of a
+117 ns call once the crossing (81 ns) and that first block (35 ns) are paid:
+about 2 ns, inside the fit's own residual. `SHA256Finalize` writes the same
+32-byte digest to guest memory and carries no base either, so a base was not a
+rule the schedule followed in any case. The report still prints the residual as
+a diagnostic -- if it ever grows past a few gas, the block model has stopped
+describing the syscall.
 
 Every constant the cost functions read is an entry in
 `kSyscallGasCostSchedule`, so all of them are hashed. Block *geometry* -- the
@@ -754,9 +776,9 @@ How it bills against what was measured, crossing included:
 
 | row | measured ns | charged | ratio |
 |---|---|---|---|
-| `SHA256/0` | 117.4 | 75 gas | 1.04x |
-| `SHA256/1024` | 673.2 | 427 gas | 1.03x |
-| `SHA256/32768` | 17798.4 | 11339 gas | 1.03x |
+| `SHA256/0` | 117.4 | 73 gas | 1.01x |
+| `SHA256/1024` | 673.2 | 425 gas | 1.03x |
+| `SHA256/32768` | 17798.4 | 11337 gas | 1.03x |
 | `SHA256Update/4096` | 2286.0 | 1459 gas | 1.04x |
 | `SHA256Finalize` | 114.0 | 73 gas | 1.04x |
 | `VerifySignature/0` | 28635.5 | 17932 gas | 1.02x |

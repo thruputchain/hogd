@@ -30,13 +30,19 @@ namespace hogd {
 // this is the remainder.
 constexpr static uint64_t kSyscallBaseCost = 50;
 
-// Per compression block, which is the unit SHA-256 works in and what the
-// measurement fits (R^2 = 1.000000). Also avoids a per-byte rate, which is a
-// fraction needing a divisor -- one more billing-relevant constant to keep in
-// the digest.
+// Per compression block, which is the unit SHA-256 works in. Charged across
+// the whole sweep the billed-to-measured ratio stays within 1.02x, which is
+// the check that matters; the fit's R^2 is not, since a sweep spanning 1 to
+// 513 blocks would report ~1.0 for any roughly linear model. Pricing the block
+// also avoids a per-byte rate, which is a fraction needing a divisor -- one
+// more billing-relevant constant to keep in the digest.
+//
+// There is no separate per-call base. Every point in the sweep hashes at least
+// one block, since SHA-256 always compresses its padding, so an intercept is an
+// extrapolation to a block count no call can have. What the measurement leaves
+// once the crossing and that first block are accounted for is ~2 ns of a 117 ns
+// call, which is inside the fit's own residual.
 constexpr static uint64_t kSHA256HashBlockCost = 22;
-// What the syscall costs beyond the crossing and its blocks.
-constexpr static uint64_t kSHA256HashBaseCost = 2;
 
 // ed25519, which this schedule prices for the first time. The curve arithmetic
 // dominates; the block term covers hashing the message, and is needed because
@@ -90,8 +96,7 @@ constexpr static auto SaturatingCost = [](uint64_t base, uint64_t per_block,
 };
 
 constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
-  return SaturatingCost(kSHA256HashBaseCost, kSHA256HashBlockCost,
-                        SHA256BlockCount(bytes_len));
+  return SaturatingCost(0, kSHA256HashBlockCost, SHA256BlockCount(bytes_len));
 };
 
 // Whole blocks only: a partial tail stays buffered and is charged by whichever
@@ -128,9 +133,8 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
-    {.name = u8"SHA256HashBase", .cost = kSHA256HashBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Copy", .cost = kSHA256CopyCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},

@@ -291,7 +291,7 @@ TEST_F(TraceShapeTest, Sha256WrapperTraceIsExact)
                    99'616 - SHA256HashCost(input.size()) - kSyscallBaseCost,
                    std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'356, expected_hash));
+  expected.push_back(return_entry(99'358, expected_hash));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
@@ -327,7 +327,7 @@ TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(output.return_buffer().empty());
 
-  const std::array<GasAmount, kRepeat> sha256_gas = {99'546, 99'458, 99'370};
+  const std::array<GasAmount, kRepeat> sha256_gas = {99'546, 99'460, 99'374};
   SyscallTraceVec expected;
   expected.push_back(get_calldata_len_entry(
       99'885, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
@@ -340,7 +340,7 @@ TEST_F(TraceShapeTest, Sha256RepeatedMultiMethodDispatchTraceIsExact)
         make_entry(gas, gas - SHA256HashCost(input.size()) - kSyscallBaseCost,
                    std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'227, {}));
+  expected.push_back(return_entry(99'233, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
