@@ -118,9 +118,14 @@ if [ "{{ .mode }}" = "reference" ]; then
   # the benchmark mid-write, and the truncated JSON then crashed the report and
   # took the whole run down with it.
   echo '===== syscall costs on the production entry path ====='
+  # The benchmark's own console output is always shown, not only on failure.
+  # A row the benchmark skips prints its reason there and nowhere else, and the
+  # binary still exits 0 -- so hiding this log on success is how a run reports
+  # a syscall it could not measure without ever saying why.
   ./scripts/rv32_syscall_bench.sh build/release \
     --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
-    || cat syscall_bench.log
+    || true
+  grep -vE 'Connecting to event server|Opening block' syscall_bench.log || true
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
     || true
 
@@ -184,7 +189,8 @@ else
   echo '===== syscall costs on the production entry path ====='
   ./scripts/rv32_syscall_bench.sh build/release \
     --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
-    || cat syscall_bench.log
+    || true
+  grep -vE 'Connecting to event server|Opening block' syscall_bench.log || true
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
     || true
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \

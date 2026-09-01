@@ -48,6 +48,22 @@ ECALL_INSTRUCTION_GAS = 1
 # resolve a slope; below this the fit is measuring its own intercept.
 MIN_SWEEP_POINTS = 4
 
+# A syscall counts as crossing-dominated -- and so contributes to the one
+# shared base cost -- when it costs no more than this multiple of the cheapest
+# syscall measured.
+#
+# The shared base rests on an argument that only holds for such syscalls: they
+# land within a few percent of each other because what is being priced is the
+# crossing and not the handler. A syscall that does real work breaks that
+# argument, and taking a max over the lot silently prices every syscall at the
+# dearest one -- which is how a bench-pool run proposed 17646 gas for every
+# syscall in the table, that being what an ed25519 verification costs.
+#
+# 1.5x rather than something tighter: the reads spread about 11% on hog10 and
+# more on a noisy host, and a syscall doing so little extra work that it hides
+# inside that spread is one the shared base can honestly cover.
+CROSSING_DOMINATED_FACTOR = 1.5
+
 # Denominators a per-unit charge may use: cost = ceil(n * numerator /
 # denominator). Powers of two so the division is exact and cheap, up to
 # SHA256's own 64-byte block -- past which the charge stops tracking input size
@@ -91,18 +107,42 @@ def rows(data):
 
     Google Benchmark emits per-repetition rows plus aggregates; the runner asks
     for aggregates only, but a hand-run file may have either.
+
+    Rows the benchmark failed are dropped rather than reported. A skipped row
+    still appears in the JSON, with a real name and a real_time of zero, and a
+    reader -- or worse, the schedule builder -- has no way to tell that zero
+    from a measurement. One bench-pool run proposed a shared syscall base of
+    17646 gas because two failed VerifySignature rows sat in the table looking
+    like data.
     """
     medians = {}
     plain = {}
     for entry in data.get("benchmarks", []):
         name = entry.get("run_name") or entry.get("name")
-        if not name:
+        if not name or entry.get("error_occurred"):
             continue
         if entry.get("aggregate_name") == "median":
             medians[name] = entry
         elif "aggregate_name" not in entry:
             plain[name] = entry
     return plain | medians
+
+
+def failed_rows(data):
+    """Rows the benchmark skipped, with the reason it gave.
+
+    Reported separately and prominently: a syscall that could not be measured
+    is the most important line in the file, because everything else is complete
+    enough to look finished without it.
+    """
+    seen = {}
+    for entry in data.get("benchmarks", []):
+        if not entry.get("error_occurred"):
+            continue
+        name = entry.get("run_name") or entry.get("name")
+        if name:
+            seen.setdefault(name, entry.get("error_message", ""))
+    return seen
 
 
 def stddevs(data):
@@ -307,6 +347,14 @@ def print_table(data):
                       f"{max(rates):.4f} ({max(rates) / min(rates):.0f}x "
                       "spread within one syscall)")
 
+    skipped = failed_rows(data)
+    if skipped:
+        print()
+        print(f"{len(skipped)} row(s) FAILED and are excluded from every "
+              "number above:")
+        for name, message in sorted(skipped.items()):
+            print(f"  {name}: {message}")
+
     free = [name for name in syscall_names(measured)
             if int(measured["entry/" + name].get("gas", 0)) == 0]
     if free:
@@ -336,13 +384,8 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
     proposal = {"unit_ns": unit, "baseline_ns": baseline,
                 "resolution": resolution, "margin": margin, "syscalls": {}}
 
-    # The shared base every syscall pays.
-    #
-    # The measurement is what justifies one constant rather than thirty: the
-    # stateless reads land within a few percent of each other, so what is being
-    # priced is the crossing, not the handler. Take the worst of them, because
-    # a base every syscall pays has to cover the dearest one it is paying for.
-    worst_name, worst_ns = None, 0.0
+    # Every measured syscall, with what a guest actually causes: the vm row
+    # where there is one -- crossing included -- and the entry row otherwise.
     for name in syscall_names(measured):
         vm_row = measured.get("vm/" + name)
         ns = vm_ns_per_call(vm_row) if vm_row else measured["entry/" + name][
@@ -352,10 +395,28 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
             "vm_ns": ns,
             "current_gas": int(measured["entry/" + name].get("gas", 0)),
         }
-        if ns > worst_ns:
-            worst_name, worst_ns = name, ns
-    if worst_name is None:
+    if not proposal["syscalls"]:
         return None
+
+    # Split them: the ones whose cost is the crossing, and the ones that do
+    # work of their own. Only the first group can be covered by a single shared
+    # constant, and only the second needs a cost of its own -- so the split is
+    # the schedule's shape, not a presentational choice.
+    cheapest = min(row["vm_ns"] for row in proposal["syscalls"].values())
+    crossing = {name: row for name, row in proposal["syscalls"].items()
+                if row["vm_ns"] <= cheapest * CROSSING_DOMINATED_FACTOR}
+    heavy = {name: row for name, row in proposal["syscalls"].items()
+             if name not in crossing}
+    proposal["crossing"] = sorted(crossing)
+    proposal["heavy"] = {
+        name: {**row, "own_ns": max(0.0, row["vm_ns"] - max(
+            r["vm_ns"] for r in crossing.values()))}
+        for name, row in sorted(heavy.items())}
+
+    # Worst case within the crossing-dominated group: a base every syscall pays
+    # has to cover the dearest one it is paying for.
+    worst_name = max(crossing, key=lambda n: crossing[n]["vm_ns"])
+    worst_ns = crossing[worst_name]["vm_ns"]
     # The ecall instruction is already charged by kInstructionGasSchedule, so
     # host gas covers the rest. Subtracting it is the difference between
     # pricing the crossing once and pricing it twice.
@@ -413,6 +474,12 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
+    skipped = failed_rows(bench)
+    if skipped:
+        print(f"WARNING: {len(skipped)} row(s) failed and are excluded:")
+        for name, message in sorted(skipped.items()):
+            print(f"  {name}: {message}")
+        print()
     proposal = build_schedule(bench, calibration, resolution, margin)
     if proposal is None:
         print("not enough measured rows to build a schedule", file=sys.stderr)
@@ -429,9 +496,17 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
               f"{'gas proposed':>14}")
     print(header)
     print("-" * len(header))
-    for name, row in sorted(proposal["syscalls"].items()):
+    for name in proposal["crossing"]:
+        row = proposal["syscalls"][name]
         print(f"{name:<28}{row['vm_ns']:>10.1f}{row['current_gas']:>9}"
               f"{proposal['base_gas']:>14}")
+    unit = proposal["unit_ns"]
+    for name, row in proposal["heavy"].items():
+        # base + its own work, rounded up once on the total rather than twice.
+        total = max(1, math.ceil(row["vm_ns"] / unit - 1e-9)) - \
+            ECALL_INSTRUCTION_GAS
+        print(f"{name:<28}{row['vm_ns']:>10.1f}{row['current_gas']:>9}"
+              f"{total:>14}  = base + {total - proposal['base_gas']}")
     print()
     # How much room the proposal leaves over the dearest thing it has to
     # cover. Worth printing because rounding up to the next whole gas is the
@@ -454,6 +529,20 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     print("One constant rather than one per syscall because that is what the")
     print("measurement says: these land within a few percent of each other, so")
     print("what is being priced is the crossing and not the handler.")
+    if proposal["heavy"]:
+        print()
+        print(f"{len(proposal['heavy'])} syscall(s) cost more than "
+              f"{CROSSING_DOMINATED_FACTOR:g}x the cheapest, so they do work "
+              "the shared base")
+        print("cannot cover and need a cost of their own on top of it:")
+        for name, row in proposal["heavy"].items():
+            own_gas = max(1, math.ceil(row["own_ns"] / unit - 1e-9))
+            print(f"  {name:<26}{row['own_ns']:>9.1f} ns of its own "
+                  f"-> {own_gas} gas above the base")
+        print("A single shared constant taken over all of them would price "
+              "every")
+        print("syscall at the dearest, which is the bug this split exists to "
+              "prevent.")
     print(f"({ECALL_INSTRUCTION_GAS} gas of it is already charged as the ecall")
     print("instruction, and is subtracted rather than billed twice.)")
 

@@ -85,9 +85,14 @@ constexpr uint32_t kOutputAddressB = 0x0800;
 constexpr uint32_t kInputAddress = 0x1000;
 // Signature, public key and message for VerifySignature, below the hashing
 // input so the two never overlap.
+// Three 64-byte signature slots need 192 bytes, so the public key sits above
+// them with room to spare. The first bench-pool run put the key at 0x0980,
+// exactly where the third signature lands, and the 1024-byte row verified a
+// clobbered signature -- caught only because an erroring syscall fails its row
+// rather than being timed. Sized from the constants rather than spelled out, so
+// adding a swept length cannot silently overrun again.
 constexpr uint32_t kSignatureAddress = 0x0900;
-constexpr uint32_t kPublicKeyAddress = 0x0980;
-constexpr uint32_t kMessageAddress = 0x0A00;
+constexpr uint32_t kSignatureStride = 64;
 // Message lengths VerifySignature is measured over. Each needs its OWN
 // signature: a signature is over one exact byte string, so verifying a prefix
 // of the signed message fails -- correctly, and on a rejection path far cheaper
@@ -95,13 +100,20 @@ constexpr uint32_t kMessageAddress = 0x0A00;
 // against it is what the first bench-pool run died on.
 inline constexpr std::array<uint32_t, 3> kVerifyMessageBytes = {0, 64, 1024};
 constexpr uint32_t kMaxMessageBytes = 1024;
-// Per-length signatures, laid out back to back below the message buffer.
-constexpr uint32_t kSignatureStride = 64;
+
 constexpr uint32_t
 signature_address(size_t index)
 {
   return kSignatureAddress + static_cast<uint32_t>(index) * kSignatureStride;
 }
+
+// Everything after the signatures is placed relative to them.
+constexpr uint32_t kPublicKeyAddress =
+    kSignatureAddress + kVerifyMessageBytes.size() * kSignatureStride;
+constexpr uint32_t kPublicKeyBytes = 32;
+constexpr uint32_t kMessageAddress = kPublicKeyAddress + kPublicKeyBytes;
+static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
+              "VerifySignature's material must not run into the hashing input");
 // Hasher slots. HashBuffers caps live streams at the network config's
 // max_sha256_buffers (8 here), and Copy needs a distinct destination, so two
 // low indices are enough and stay well inside the cap.
