@@ -69,7 +69,8 @@ mock_contract_read_network_hash(void * /*unused*/, uint64_t method_number)
 //
 // A contract binding an off-chain signed message to this network needs the
 // value it reads and the value signatures are verified against to be the same,
-// so this pins that what create_db() is given is what a contract sees.
+// so this pins that what create_db() is given is what a contract sees -- on a
+// block past genesis, since only genesis went through the configuration.
 TEST(TestBindingsTest, GenesisCarriesTheConfiguredNetworkHash)
 {
   const NetworkHash expected = test_network_hash();
@@ -89,6 +90,11 @@ TEST(TestBindingsTest, GenesisCarriesTheConfiguredNetworkHash)
 
   ContractAddress deployment_addr =
       deploy_mock_contract(db, rc, 1, mock_contract_read_network_hash, nullptr);
+
+  // Advance past genesis. The commit path replaces the persisted tip value
+  // wholesale, so a committed value that omits the network hash puts the chain
+  // back on network zero for every block after the first.
+  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
 
   SignedTransaction stx{
       .tx = {.invocation =
