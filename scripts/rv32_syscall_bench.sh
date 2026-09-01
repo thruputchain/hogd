@@ -148,8 +148,8 @@ fi
 # Aggregates only: the report reads medians, and the per-repetition rows are
 # noise in a file meant to be committed to a metrics history.
 ARGS=(--benchmark_repetitions="${REPETITIONS}"
-      --benchmark_report_aggregates_only=true
-      --benchmark_min_time=0.5s)
+  --benchmark_report_aggregates_only=true
+  --benchmark_min_time=0.5s)
 if [[ -n "${OUT_PATH}" ]]; then
   ARGS+=(--benchmark_out="${OUT_PATH}" --benchmark_out_format=json)
 else
