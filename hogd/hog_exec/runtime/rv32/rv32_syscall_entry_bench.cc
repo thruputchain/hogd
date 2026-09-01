@@ -768,9 +768,14 @@ register_benchmarks()
                                      .c_str(),
                                  bm_syscall_entry, verify_signature_call(i));
   }
-  // One length through the VM, to price the ecall crossing against a call
-  // whose own cost dwarfs it.
-  benchmark::RegisterBenchmark("vm/VerifySignature", bm_syscall_vm,
+  // One length through the VM. Named with its length like every other vm row,
+  // because the report pairs vm to entry by name -- an unsuffixed name matches
+  // no entry row and the measurement is silently dropped from the table.
+  benchmark::RegisterBenchmark(("vm/VerifySignature/" +
+                                std::to_string(
+                                    kVerifyMessageBytes[kVerifyVmRow]))
+                                   .c_str(),
+                               bm_syscall_vm,
                                verify_signature_call(kVerifyVmRow));
 }
 

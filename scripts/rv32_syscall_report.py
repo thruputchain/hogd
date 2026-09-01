@@ -291,6 +291,32 @@ def check_joinable(bench, calibration):
     return problems
 
 
+# The ecall crossing is a fixed cost of order 10ns, so subtracting entry from
+# vm only recovers it while both are measured far more precisely than their
+# difference. For a syscall that does real work -- an ed25519 verify, a 4KiB
+# hash -- the two are large, noisy and nearly equal, and the subtraction is
+# dominated by run-to-run spread: it produced a 5.7us crossing and a *negative*
+# one in the same table. Report the number only when the run's own stddevs say
+# it is resolvable, and otherwise say so rather than printing noise.
+SEAM_SIGMA = 3.0
+
+
+def seam_text(name, entry_ns, entry_sd, vm_ns, vm_row, sd):
+    difference = vm_ns - entry_ns
+    vm_sd = sd.get("vm/" + name, {}).get("real_time", 0.0)
+    # vm rows time a whole batch of calls, so their stddev is in batch units.
+    # Scale it per call, exactly as vm_ns_per_call scales the mean.
+    calls = calls_per_vm_run(vm_row)
+    if calls:
+        vm_sd /= calls
+    noise = SEAM_SIGMA * math.hypot(entry_sd, vm_sd)
+    # A run with no repetitions carries no stddevs at all; there is nothing to
+    # test against, so show the difference and let the reader judge.
+    if noise == 0.0 or abs(difference) > noise:
+        return f"{difference:.1f}"
+    return "~0"
+
+
 def print_table(data):
     measured = rows(data)
     sd = stddevs(data)
@@ -305,7 +331,7 @@ def print_table(data):
     print(f"fingerprint: {ctx.get('engine_fingerprint', '?')}")
     print()
 
-    header = (f"{'syscall':<28}{'entry ns':>10}{'±':>7}{'vm ns/call':>12}"
+    header = (f"{'syscall':<28}{'entry ns':>11}{'±':>9}{'vm ns/call':>12}"
               f"{'seam':>8}{'gas':>8}")
     print(header)
     print("-" * len(header))
@@ -315,15 +341,16 @@ def print_table(data):
         vm_row = measured.get("vm/" + name)
         vm = vm_ns_per_call(vm_row) if vm_row else None
         vm_text = f"{vm:>12.1f}" if vm else f"{'-':>12}"
-        seam_text = f"{vm - entry['real_time']:>8.1f}" if vm else f"{'-':>8}"
+        crossing = seam_text(name, entry["real_time"], error, vm, vm_row, sd) \
+            if vm else "-"
         gas = int(entry.get("gas", 0))
-        print(f"{name:<28}{entry['real_time']:>10.1f}{error:>7.2f}"
-              f"{vm_text}{seam_text}{gas:>8}")
+        print(f"{name:<28}{entry['real_time']:>11.1f}{error:>9.2f}"
+              f"{vm_text}{crossing:>8}{gas:>8}")
 
     points = sha256_points(measured)
     if points:
         print()
-        header = (f"{'SHA256 bytes':<28}{'entry ns':>10}{'±':>7}{'gas':>12}"
+        header = (f"{'SHA256 bytes':<28}{'entry ns':>11}{'±':>9}{'gas':>12}"
                   f"{'ns/gas':>10}")
         print(header)
         print("-" * len(header))
@@ -331,7 +358,7 @@ def print_table(data):
             error = sd.get(f"entry/SHA256/{size}", {}).get("real_time", 0.0)
             gas = int(measured[f"entry/SHA256/{size}"].get("gas", 0))
             rate = ns / gas if gas else float("inf")
-            print(f"{size:<28}{ns:>10.1f}{error:>7.2f}{gas:>12}{rate:>10.4f}")
+            print(f"{size:<28}{ns:>11.1f}{error:>9.2f}{gas:>12}{rate:>10.4f}")
         fit = fit_sha256(points)
         if fit:
             base, per_byte, r_squared = fit
