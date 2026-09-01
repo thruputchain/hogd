@@ -111,11 +111,18 @@ if [ "{{ .mode }}" = "reference" ]; then
   # nanoseconds come from the benchmark and the gas unit from the calibration's
   # baseline instruction, and a join across hosts would produce a complete,
   # plausible, wrong schedule.
+  # Never fails the job, in either mode. Syscall costs are not gated -- there
+  # is no committed reference for them -- so a syscall row that cannot run is
+  # news to read in the log, not a reason to lose the opcode calibration that
+  # ran beside it. Learned the hard way: one bad VerifySignature row aborted
+  # the benchmark mid-write, and the truncated JSON then crashed the report and
+  # took the whole run down with it.
   echo '===== syscall costs on the production entry path ====='
   ./scripts/rv32_syscall_bench.sh build/release \
     --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
     || cat syscall_bench.log
-  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    || true
 
   # The point of running this here rather than on a laptop: syscall gas is a
   # protocol constant and has to come from the machine class that runs the
@@ -129,11 +136,12 @@ if [ "{{ .mode }}" = "reference" ]; then
   # and leaves the choice to whoever adopts them.
   echo '===== proposed syscall gas costs from this host (no margin) ====='
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
-    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule
+    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule || true
 
   echo '===== the same, with a 5% margin ====='
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
-    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule --margin 5
+    --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule --margin 5 \
+    || true
 
   echo '===== proposed reference.txt for this host ====='
   echo 'To adopt: copy ${HOG_DUMP_DIR}/rv32-gas-reference.txt from this host'

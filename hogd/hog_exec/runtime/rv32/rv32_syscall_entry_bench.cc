@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <memory>
 #include <print>
 #include <span>
@@ -86,8 +87,21 @@ constexpr uint32_t kInputAddress = 0x1000;
 // input so the two never overlap.
 constexpr uint32_t kSignatureAddress = 0x0900;
 constexpr uint32_t kPublicKeyAddress = 0x0980;
-constexpr uint32_t kMessageAddress = 0x09C0;
-constexpr uint32_t kMessageBytes = 64;
+constexpr uint32_t kMessageAddress = 0x0A00;
+// Message lengths VerifySignature is measured over. Each needs its OWN
+// signature: a signature is over one exact byte string, so verifying a prefix
+// of the signed message fails -- correctly, and on a rejection path far cheaper
+// than the one being priced. Signing only the longest and sweeping lengths
+// against it is what the first bench-pool run died on.
+inline constexpr std::array<uint32_t, 3> kVerifyMessageBytes = {0, 64, 1024};
+constexpr uint32_t kMaxMessageBytes = 1024;
+// Per-length signatures, laid out back to back below the message buffer.
+constexpr uint32_t kSignatureStride = 64;
+constexpr uint32_t
+signature_address(size_t index)
+{
+  return kSignatureAddress + static_cast<uint32_t>(index) * kSignatureStride;
+}
 // Hasher slots. HashBuffers caps live streams at the network config's
 // max_sha256_buffers (8 here), and Copy needs a distinct destination, so two
 // low indices are enough and stay well inside the cap.
@@ -351,17 +365,23 @@ make_guest_memory()
   }
   const auto [public_key, secret_key] = ed25519_keygen_from_seed(seed);
 
-  std::array<uint8_t, kMessageBytes> message = {};
+  std::array<uint8_t, kMaxMessageBytes> message = {};
   for (size_t i = 0; i < message.size(); ++i) {
     message[i] = static_cast<uint8_t>(i * 7U + 1U);
   }
-  const auto signature =
-      ed25519_sign(secret_key, std::as_bytes(std::span(message)));
-  if (!signature.has_value()) {
-    std::abort();
-  }
 
-  std::ranges::copy(*signature, memory.begin() + kSignatureAddress);
+  // One signature per swept length, each over exactly the prefix that length
+  // names, so every measured call verifies rather than rejects.
+  for (size_t i = 0; i < kVerifyMessageBytes.size(); ++i) {
+    const auto bytes = kVerifyMessageBytes[i];
+    const auto signature =
+        ed25519_sign(secret_key,
+                     std::as_bytes(std::span(message).first(bytes)));
+    if (!signature.has_value()) {
+      std::abort();
+    }
+    std::ranges::copy(*signature, memory.begin() + signature_address(i));
+  }
   std::ranges::copy(public_key, memory.begin() + kPublicKeyAddress);
   std::ranges::copy(message, memory.begin() + kMessageAddress);
   return memory;
@@ -372,7 +392,24 @@ make_guest_memory()
 //
 // Returns the gas the syscall declared, so the benchmark can report the price
 // beside the cost rather than leaving the reader to look it up.
-uint64_t
+// A syscall's result: the gas it declared, or why it did not run.
+//
+// Errors are reported rather than aborted. An erroring syscall took a different
+// path than the one being priced -- a rejected argument, a frame that was never
+// started -- so its timing must not be published either way. But aborting takes
+// the whole process with it, and on the first bench-pool run one bad row
+// (a VerifySignature call whose message length did not match its signature)
+// killed the binary mid-write, truncated the JSON, and cost every other row in
+// the run. Google Benchmark can fail one row and keep the rest, which is
+// strictly better: the failure is visible, named, and contained.
+struct SyscallOutcome {
+  bool ok = false;
+  uint64_t gas = 0;
+  int error = 0;
+  bool host_error = false;
+};
+
+SyscallOutcome
 invoke_syscall_entry(SystemCallHandler &handler, std::span<uint8_t> memory,
                      const SyscallCall &call)
 {
@@ -388,16 +425,17 @@ invoke_syscall_entry(SystemCallHandler &handler, std::span<uint8_t> memory,
   // an unparsed argument, a frame that was never started -- and would report a
   // confident number for the wrong work.
   if (!host_result.has_value()) {
-    std::println(stderr, "{}: host error {}", call.name,
-                 static_cast<int>(host_result.error().code()));
-    std::abort();
+    return {.ok = false,
+            .gas = gas_consumed,
+            .error = static_cast<int>(host_result.error().code()),
+            .host_error = true};
   }
   if (*host_result != SyscallErrorCode::kSyscallErrorCodeNone) {
-    std::println(stderr, "{}: syscall error {}", call.name,
-                 static_cast<int>(*host_result));
-    std::abort();
+    return {.ok = false,
+            .gas = gas_consumed,
+            .error = static_cast<int>(*host_result)};
   }
-  return gas_consumed;
+  return {.ok = true, .gas = gas_consumed};
 }
 
 // One fixture for the whole process.
@@ -415,6 +453,18 @@ shared_fixture()
   return fixture;
 }
 
+// Fail one benchmark row, naming the syscall and the code, and leave the rest
+// of the run alone.
+void
+fail_row(benchmark::State &state, const SyscallCall &call,
+         const SyscallOutcome &outcome)
+{
+  state.SkipWithError(
+      std::format("{}: {} {}", call.name,
+                  outcome.host_error ? "host error" : "syscall error",
+                  outcome.error));
+}
+
 void
 bm_syscall_entry(benchmark::State &state, SyscallCall call)
 {
@@ -423,14 +473,21 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   const std::span<uint8_t> memory_span(memory);
 
   // Warm the tip cache and any lazily built handler state before timing, so
-  // the first iteration is not a different measurement from the rest.
-  const uint64_t gas =
+  // the first iteration is not a different measurement from the rest -- and so
+  // a syscall that cannot run fails the row here, before any timing is
+  // published.
+  const SyscallOutcome warm =
       invoke_syscall_entry(fixture.handler(), memory_span, call);
+  if (!warm.ok) {
+    fail_row(state, call, warm);
+    return;
+  }
+  const uint64_t gas = warm.gas;
 
   int64_t calls = 0;
   for (auto _ : state) {
     benchmark::DoNotOptimize(
-        invoke_syscall_entry(fixture.handler(), memory_span, call));
+        invoke_syscall_entry(fixture.handler(), memory_span, call).gas);
     benchmark::DoNotOptimize(memory.data());
     benchmark::ClobberMemory();
     ++calls;
@@ -466,17 +523,30 @@ bm_syscall_entry_sequence(benchmark::State &state,
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
 
-  for (const SyscallCall &call : setup) {
-    (void)invoke_syscall_entry(fixture.handler(), memory_span, call);
-  }
-  // Warm anything the first call of the timed sequence would build lazily, so
-  // the first iteration is not a different measurement from the rest.
+  const auto run_all = [&](const std::vector<SyscallCall> &calls,
+                           uint64_t *gas_out) -> bool {
+    for (const SyscallCall &call : calls) {
+      const SyscallOutcome outcome =
+          invoke_syscall_entry(fixture.handler(), memory_span, call);
+      if (!outcome.ok) {
+        fail_row(state, call, outcome);
+        return false;
+      }
+      if (gas_out != nullptr) {
+        *gas_out += outcome.gas;
+      }
+    }
+    return true;
+  };
+
+  // Setup, then one warm pass of the timed sequence, then setup again to
+  // restore whatever that pass consumed -- Finalize erases its stream, so the
+  // warm pass leaves the handler in the state the first timed iteration
+  // expects only if setup runs after it too.
   uint64_t gas = 0;
-  for (const SyscallCall &call : timed) {
-    gas += invoke_syscall_entry(fixture.handler(), memory_span, call);
-  }
-  for (const SyscallCall &call : setup) {
-    (void)invoke_syscall_entry(fixture.handler(), memory_span, call);
+  if (!run_all(setup, nullptr) || !run_all(timed, &gas) ||
+      !run_all(setup, nullptr)) {
+    return;
   }
 
   int64_t iterations = 0;
@@ -487,7 +557,7 @@ bm_syscall_entry_sequence(benchmark::State &state,
   for (auto _ : state) {
     for (const SyscallCall &call : timed) {
       benchmark::DoNotOptimize(
-          invoke_syscall_entry(fixture.handler(), memory_span, call));
+          invoke_syscall_entry(fixture.handler(), memory_span, call).gas);
     }
     benchmark::ClobberMemory();
     ++iterations;
@@ -593,7 +663,10 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
                         pending->a2, pending->a3, pending->a4, pending->a5,
                         pending->a6, pending->a7)();
       if (!host_result.has_value()) {
-        std::abort();
+        state.SkipWithError(
+            std::format("{}: host error {}", call.name,
+                        static_cast<int>(host_result.error().code())));
+        return;
       }
       if (*host_result != SyscallErrorCode::kSyscallErrorCodeNone) {
         // The terminal call: an unknown syscall number, which is how the
@@ -606,7 +679,9 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
                                           gas_consumed));
     }
     if (served != kIterationsPerRun) {
-      std::abort();
+      state.SkipWithError(std::format("{}: guest made {} calls, expected {}",
+                                      call.name, served, kIterationsPerRun));
+      return;
     }
     calls += static_cast<int64_t>(served);
   }
@@ -664,13 +739,14 @@ register_benchmarks()
   // Signature verification. The message sweep is short because the cost is
   // dominated by the curve arithmetic rather than by hashing the message --
   // which is itself the finding, if it holds.
-  for (const uint32_t bytes : {0U, kMessageBytes}) {
-    benchmark::RegisterBenchmark(
-        ("entry/VerifySignature/" + std::to_string(bytes)).c_str(),
-        bm_syscall_entry, verify_signature_call(bytes));
+  for (size_t i = 0; i < kVerifyMessageBytes.size(); ++i) {
+    benchmark::RegisterBenchmark(("entry/VerifySignature/" +
+                                  std::to_string(kVerifyMessageBytes[i]))
+                                     .c_str(),
+                                 bm_syscall_entry, verify_signature_call(i));
   }
   benchmark::RegisterBenchmark("vm/VerifySignature", bm_syscall_vm,
-                               verify_signature_call(kMessageBytes));
+                               verify_signature_call(1));
 }
 
 // Everything needed to know whether this run is comparable with another one,
