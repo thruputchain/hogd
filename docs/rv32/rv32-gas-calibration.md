@@ -767,6 +767,22 @@ rule the schedule followed in any case. The report still prints the residual as
 a diagnostic -- if it ever grows past a few gas, the block model has stopped
 describing the syscall.
 
+**`SHA256Copy` is not in the schedule either.** It carried an explicit
+`kSHA256CopyCost = 0` whose comment said the crossing covers it. Zero is
+almost certainly the right price -- `HashBuffers::copy` runs no compression
+function, and the map insert it does perform on a new destination slot is
+bounded at `max_sha256_buffers` (8 by default) per frame, each of those calls
+having paid a crossing. But the row that was supposed to establish that
+measured the wrong thing: `entry/SHA256Copy` repeats one fixed
+(source, destination) pair, so the warm pass creates the destination and every
+timed iteration after it takes the assignment branch, never the allocating one.
+A zero-valued entry in a hashed schedule asserts a measurement that was not
+made, so the entry is gone and Copy falls through to the default the schedule
+already states: the crossing and nothing more. `entry/SHA256CopyNewSlot+Finalize`
+now pairs the copy with a finalize that erases the destination, putting the
+insert back in the timed loop, so the next calibration run prices the path a
+guest can actually choose.
+
 Every constant the cost functions read is an entry in
 `kSyscallGasCostSchedule`, so all of them are hashed. Block *geometry* -- the
 64, the 9-byte padding tail -- is static_asserted rather than hashed, because a

@@ -109,9 +109,6 @@ constexpr static auto SHA256UpdateCost = [](uint64_t bytes_len) -> uint64_t {
 // Finalize compresses the padding block the streaming path has not yet done.
 constexpr static uint64_t kSHA256FinalizeCost = kSHA256HashBlockCost;
 
-// Copy clones a hasher's state: no compression, and the crossing covers it.
-constexpr static uint64_t kSHA256CopyCost = 0;
-
 constexpr static auto VerifySignatureCost =
     [](uint64_t message_len) -> uint64_t {
   const uint64_t hashed = message_len > UINT64_MAX - kEd25519HashedPrefixBytes
@@ -133,10 +130,9 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 6> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
-    {.name = u8"SHA256Copy", .cost = kSHA256CopyCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},

@@ -170,8 +170,7 @@ push_static_key_entries(SyscallTraceVec &expected,
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = 0;
     body.sha256_copy().inputs.dst_index = 1;
-    expected.push_back(make_entry(gas[2],
-                                  gas[2] - kSHA256CopyCost - kSyscallBaseCost,
+    expected.push_back(make_entry(gas[2], gas[2] - kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
   {

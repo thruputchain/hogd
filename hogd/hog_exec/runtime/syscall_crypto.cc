@@ -62,8 +62,13 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
     return {r.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{kSHA256CopyCost}};
+  // No body charge: Copy runs no compression function. What it does do -- a
+  // map insert when the destination slot is new -- is bounded at
+  // max_sha256_buffers slots per frame, and each of those calls paid the
+  // crossing to get here. That allocation is not free, and this schedule does
+  // not claim it is; it claims the crossing already covers it, which is a
+  // weaker and cheaper thing to be right about.
+  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

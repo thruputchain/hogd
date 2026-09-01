@@ -327,6 +327,13 @@ sha256_update_call(uint32_t bytes)
   return call;
 }
 
+SyscallCall
+sha256_finalize_call(uint32_t slot)
+{
+  return make_call("SHA256Finalize", SyscallNo::kSHA256Finalize,
+                   {slot, kOutputAddressA});
+}
+
 // Finalize erases the stream it finalizes, so it cannot repeat on its own: the
 // second call in a loop would find no stream and take an error path. The pair
 // is what a guest issues anyway, and subtracting the measured Update/0 row
@@ -334,9 +341,7 @@ sha256_update_call(uint32_t bytes)
 std::vector<SyscallCall>
 sha256_finalize_pair()
 {
-  return {sha256_update_call(0),
-          make_call("SHA256Finalize", SyscallNo::kSHA256Finalize,
-                    {kHashSlot, kOutputAddressA})};
+  return {sha256_update_call(0), sha256_finalize_call(kHashSlot)};
 }
 
 // Copy clones a live hasher into another slot. Needs a source stream to exist,
@@ -347,6 +352,24 @@ sha256_copy_call()
 {
   return make_call("SHA256Copy", SyscallNo::kSHA256Copy,
                    {kHashSlot, kHashSlotCopy});
+}
+
+// The other half of Copy, and the dearer one. HashBuffers::copy takes two
+// paths: a destination that already exists is an assignment over its stream,
+// and one that does not is an insert into the frame's stream map -- an
+// allocation. Repeating sha256_copy_call() measures only the first, because
+// the warm pass creates the destination and every timed iteration after it
+// finds the slot there. Finalizing the destination erases it, so pairing the
+// two puts the insert back in the loop. Subtract the Finalize row to read
+// Copy's allocating path alone.
+//
+// Which path a guest takes is its own choice, so the schedule has to hold for
+// the dearer one. It charges Copy nothing beyond the crossing; this row is
+// what would catch that going wrong.
+std::vector<SyscallCall>
+sha256_copy_new_slot_pair()
+{
+  return {sha256_copy_call(), sha256_finalize_call(kHashSlotCopy)};
 }
 
 // VerifySignature(scheme, signature, public_key, message). Seven argument
@@ -763,6 +786,10 @@ register_benchmarks()
   benchmark::RegisterBenchmark("entry/SHA256Copy", bm_syscall_entry_sequence,
                                std::vector<SyscallCall>{sha256_update_call(0)},
                                std::vector<SyscallCall>{sha256_copy_call()});
+  benchmark::RegisterBenchmark("entry/SHA256CopyNewSlot+Finalize",
+                               bm_syscall_entry_sequence,
+                               std::vector<SyscallCall>{sha256_update_call(0)},
+                               sha256_copy_new_slot_pair());
   benchmark::RegisterBenchmark("vm/SHA256Update/1024", bm_syscall_vm,
                                sha256_update_call(1024));
 
