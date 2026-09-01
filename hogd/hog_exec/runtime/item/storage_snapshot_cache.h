@@ -60,14 +60,13 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  SystemStatus<const Contract *>
-  try_get_contract_by_hash(SHA256Hash const &hash);
-  // The image this cache built when it loaded `hash`, so callers reuse it
-  // rather than preparing the same bytes again. Borrowed: node-stable and
-  // valid for the block, so it outlives any transaction's runtimes. Returns
-  // nullptr (wrapped) for a negative lookup.
-  SystemStatus<const PreparedContract *>
-  try_get_prepared_contract(SHA256Hash const &hash);
+  // The cached contract for `hash`: its code and the image this cache built
+  // when it loaded it, so callers reuse that image rather than preparing the
+  // same bytes again. Borrowed -- node-stable and valid for the block, so it
+  // outlives any transaction's runtimes. Returns nullptr (wrapped) for a
+  // negative lookup.
+  SystemStatus<const ContractCacheEntry *>
+  try_get_contract_entry(SHA256Hash const &hash);
   SystemStatus<const DeployedContract *>
   try_get_deployed_contract(ContractAddress const &addr);
   SystemStatus<const SnapshotStorageItem *>
@@ -94,10 +93,6 @@ public:
 
 private:
   void release_db_tip();
-  // Lookup/insert/eager-translate the contract entry for `hash`. Returns
-  // nullptr (wrapped) for a negative lookup.
-  SystemStatus<const ContractCacheEntry *>
-  get_contract_entry(SHA256Hash const &hash);
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.

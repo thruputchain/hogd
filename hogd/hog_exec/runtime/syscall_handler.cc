@@ -1353,7 +1353,11 @@ SystemCallHandler::resolve_prepared_contract(SHA256Hash const &hash)
   // Anything else is already committed, and the snapshot cache prepared it
   // eagerly when it loaded it. Borrow that image rather than building a second
   // one from the same bytes (#3536).
-  return snapshot_cache_.try_get_prepared_contract(hash);
+  auto entry = snapshot_cache_.try_get_contract_entry(hash);
+  if (!entry.has_value()) {
+    return entry.error();
+  }
+  return entry.value() != nullptr ? &entry.value()->prepared : nullptr;
 }
 
 SystemStatus<const Contract *>
@@ -1367,15 +1371,11 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
     return it->second.get();
   }
 
-  auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
-  if (!snapshot_res.has_value()) {
-    return snapshot_res.error();
+  auto entry = snapshot_cache_.try_get_contract_entry(hash);
+  if (!entry.has_value()) {
+    return entry.error();
   }
-  auto &snapshot_contract = *snapshot_res;
-  if (snapshot_contract != nullptr) {
-    return snapshot_contract;
-  }
-  return nullptr;
+  return entry.value() != nullptr ? &entry.value()->contract : nullptr;
 }
 
 SystemStatus<std::unique_ptr<Runtime>>

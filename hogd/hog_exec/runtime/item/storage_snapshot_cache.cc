@@ -33,7 +33,7 @@ StorageSnapshotCache::~StorageSnapshotCache()
 }
 
 SystemStatus<const ContractCacheEntry *>
-StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
+StorageSnapshotCache::try_get_contract_entry(SHA256Hash const &hash)
 {
   {
     // Use shared lock for read-only cache lookup
@@ -84,26 +84,6 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
   return obj2->has_value() ? &**obj2 : nullptr;
 }
 
-SystemStatus<const Contract *>
-StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
-{
-  auto entry = get_contract_entry(hash);
-  if (!entry) {
-    return entry.error();
-  }
-  return entry.value() ? &entry.value()->contract : nullptr;
-}
-
-SystemStatus<const PreparedContract *>
-StorageSnapshotCache::try_get_prepared_contract(SHA256Hash const &hash)
-{
-  auto entry = get_contract_entry(hash);
-  if (!entry) {
-    return entry.error();
-  }
-  return entry.value() ? &entry.value()->prepared : nullptr;
-}
-
 SystemStatus<const DeployedContract *>
 StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
 {
@@ -124,7 +104,7 @@ StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
   if (db_res.value()) {
     DeployedContractHash meta = db_res.value().value();
     // Eagerly warm + translate the contract code; back-point at its entry.
-    auto entry = get_contract_entry(meta.hash);
+    auto entry = try_get_contract_entry(meta.hash);
     if (!entry) {
       return entry.error();
     }

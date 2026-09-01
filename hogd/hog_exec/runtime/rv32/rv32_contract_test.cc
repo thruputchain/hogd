@@ -106,9 +106,9 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
   EXPECT_EQ(deployed.value()->hash.contract_type, ContractType::kRv32);
   EXPECT_TRUE(deployed.value()->entry->prepared.rv32.has_value());
   // Back-pointer aliases the contract-cache entry the hash lookup returns.
-  auto by_hash = cache->try_get_contract_by_hash(deployed.value()->hash.hash);
+  auto by_hash = cache->try_get_contract_entry(deployed.value()->hash.hash);
   ASSERT_TRUE(by_hash.has_value());
-  EXPECT_EQ(&deployed.value()->entry->contract, by_hash.value());
+  EXPECT_EQ(deployed.value()->entry, by_hash.value());
 }
 
 // Verifies the actual returned value: fibonacci(10) == 55, decoded from the
