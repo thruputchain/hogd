@@ -1,5 +1,4 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
-#include "hogd/hog_mempool/well_formed.h"
 
 #include <algorithm>
 #include <atomic>
@@ -45,6 +44,7 @@
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/hog_mempool/well_formed.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -245,31 +245,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
-  auto well_formed_node = submit_dag.async<void>(
-      "prune not-well-formed", submit_dag.after(decode_node),
-      [&]() -> x23::Async<void> {
-        // Drop what the executor would certainly reject, before the batch
-        // takes mempool slots or an auth round-trip. See is_tx_well_formed().
-        x23::Vec<size_t> to_remove_indices;
-        for (size_t i = 0; i < txs->size(); i++) {
-          if (!is_tx_well_formed((*txs)[i])) {
-            to_remove_indices.push_back(i);
-          }
-        }
-        if (!to_remove_indices.empty()) {
-          MempoolMetrics::instance()
-              .rejected_not_well_formed_tx_count.increment(
-                  to_remove_indices.size());
-          info("submit_unvetted dropped {} transactions that are not well "
-               "formed",
-               to_remove_indices.size());
-          remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
-        }
-        co_return;
-      });
-
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(well_formed_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -316,6 +293,24 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(capacity_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {
+        // Drop what the executor would certainly reject before it costs an
+        // auth round-trip.
+        x23::Vec<size_t> to_remove_indices;
+        for (size_t i = 0; i < txs->size(); i++) {
+          if (!MempoolAdmission::is_tx_well_formed((*txs)[i])) {
+            to_remove_indices.push_back(i);
+          }
+        }
+        if (!to_remove_indices.empty()) {
+          MempoolMetrics::instance()
+              .rejected_not_well_formed_tx_count.increment(
+                  to_remove_indices.size());
+          info("submit_unvetted dropped {} transactions that are not well "
+               "formed",
+               to_remove_indices.size());
+          remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+        }
+
         const BlockHeight verify_height = scheduler_->current_block();
         co_return co_await auth_client_->authmempool_verify_transactions(
             verify_height, *txs);
@@ -453,13 +448,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
-  // No well-formedness filter here, deliberately. Vetted txs arrive from the
-  // coordinator to let this node validate a block a peer proposed, so dropping
-  // one makes that block permanently unvalidatable by this mempool -- the same
-  // wedge the capacity check above is skipped to avoid. hog_exec already
-  // handles it: a native attachment reaching the executor in validation mode
-  // is a proposer-attributable ValidationFailure, which is the correct verdict
-  // on a peer's block and is not ours to pre-empt.
   auto lock_commit_node =
       submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
                              [&, commit_guard]() -> x23::Async<void> {
@@ -467,6 +455,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
                                co_return;
                              });
 
+  // No well-formedness check here, unlike submit_unvetted: dropping a vetted
+  // tx leaves the peer block it belongs to permanently unvalidatable by this
+  // mempool, the same wedge the capacity check above is skipped to avoid.
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(lock_commit_node),
       [&]() -> x23::Async<AuthErrorCodeBatch> {

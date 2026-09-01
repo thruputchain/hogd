@@ -29,7 +29,7 @@ make_native_contract()
 TEST(WellFormedTest, TransactionWithNoAttachmentsIsWellFormed)
 {
   SignedTransaction tx{};
-  EXPECT_TRUE(is_tx_well_formed(tx));
+  EXPECT_TRUE(MempoolAdmission::is_tx_well_formed(tx));
 }
 
 // rv32 is the only contract type a transaction may attach.
@@ -38,7 +38,7 @@ TEST(WellFormedTest, Rv32AttachmentsAreWellFormed)
   SignedTransaction tx{};
   tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
   tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
-  EXPECT_TRUE(is_tx_well_formed(tx));
+  EXPECT_TRUE(MempoolAdmission::is_tx_well_formed(tx));
 }
 
 // The condition this filter exists for: hog_exec refuses an attached native
@@ -47,7 +47,7 @@ TEST(WellFormedTest, NativeAttachmentIsNotWellFormed)
 {
   SignedTransaction tx{};
   tx.tx.contracts_to_deploy.push_back(make_native_contract());
-  EXPECT_FALSE(is_tx_well_formed(tx));
+  EXPECT_FALSE(MempoolAdmission::is_tx_well_formed(tx));
 }
 
 // One bad attachment condemns the transaction, wherever it sits in the list.
@@ -57,7 +57,7 @@ TEST(WellFormedTest, NativeAttachmentAmongRv32OnesIsNotWellFormed)
   tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
   tx.tx.contracts_to_deploy.push_back(make_native_contract());
   tx.tx.contracts_to_deploy.push_back(make_rv32_contract());
-  EXPECT_FALSE(is_tx_well_formed(tx));
+  EXPECT_FALSE(MempoolAdmission::is_tx_well_formed(tx));
 }
 
 } // namespace hogd

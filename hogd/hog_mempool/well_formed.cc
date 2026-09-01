@@ -8,10 +8,10 @@
 namespace hogd {
 
 bool
-is_tx_well_formed(SignedTransaction const &tx)
+MempoolAdmission::is_tx_well_formed(const SignedTransaction &tx)
 {
   return std::ranges::all_of(tx.tx.contracts_to_deploy,
-                             [](Contract const &contract) {
+                             [](const Contract &contract) {
                                return contract.contract_type() !=
                                       ContractType::kNative;
                              });
