@@ -331,9 +331,11 @@ footprint_bound(AuthDataChangeArgs const & /*auth*/)
 // with the delta, so it is bounded from the entry counts (each entry charged
 // kXdrMax<QueueEntry>) rather than the type maximum -- the latter is the full
 // per-tx observation cap, far above a typical delta. The overhead term covers
-// the past-consume struct and the array/optional framing words.
+// the consume struct's fixed fields (the past-consume cursor and the consumed
+// count) and the array/optional framing words.
 constexpr size_t kRcqDeltaOverhead =
-    kXdrMax<RetrocausalQueuePastBlockConsumeDelta> + (4 * kXdrWord);
+    kXdrMax<RetrocausalQueuePastBlockConsumeDelta> + kXdrMax<uint64_t> +
+    (4 * kXdrWord);
 
 inline size_t
 footprint_bound(RetrocausalQueueDelta const &rq)

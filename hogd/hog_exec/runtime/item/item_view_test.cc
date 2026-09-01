@@ -650,23 +650,21 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
 // live count, both taken from the snapshot metadata without reading a block.
 TEST_F(ItemViewTest, MakeFullyConsumedItemReportsLiveEntriesAsConsumed)
 {
-  auto item = make_rcq_item();
-
-  auto queue = make_queue({
-      {make_test_queue_entry(1), make_test_queue_entry(2)},
-      {make_test_queue_entry(3), make_test_queue_entry(4)},
-  });
-  ASSERT_EQ(queue.get_live_entries(), 4);
-  ASSERT_EQ(queue.get_max_live_block_num(), 2);
-
-  StorageCostModel cost_model(12000, 1, 5, 5, 0);
-  server_->impl()->setup_create_item(AddressAndKey{},
-                                     StorageItemWrapper(std::move(queue),
-                                                        &cost_model));
-  ASSERT_EQ(item->type(), ItemViewType::kRetrocausalQueue);
+  // Snapshot metadata for a queue whose four live entries sit in blocks 1
+  // and 2. Only the metadata matters here: the consume-to-tail delta must
+  // come from it without touching a block.
+  AddressAndKey addrkey{};
+  WireStorageItem wire(StorageItemType::kItemTypeRetrocausalQueue);
+  wire.metadata().live_entries = 4;
+  wire.metadata().max_live_block_num = 2;
+  auto entry = SnapshotStorageItem::make_variant(std::move(wire), addrkey.key);
+  ASSERT_TRUE(entry.has_value());
+  SnapshotStorageItem item(std::move(entry).value(), std::move(addrkey),
+                           BlockID{1}, *db_proxy_);
+  ASSERT_EQ(item.type(), ItemViewType::kRetrocausalQueue);
 
   auto fully_consumed =
-      RetrocausalQueueItem::make_fully_consumed_item(*item, {});
+      RetrocausalQueueItem::make_fully_consumed_item(item, {});
   auto delta = fully_consumed.get_delta();
 
   ASSERT_TRUE(delta.retrocausal_queue().consume);
