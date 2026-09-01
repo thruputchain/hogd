@@ -15,8 +15,8 @@
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
-#include "sched_coord.hh"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/x23/async.h"
@@ -50,7 +50,7 @@ public:
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<SchedulerSubmitOutcomeBatch>
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
   add_txs(const x23::XdrVec<SignedTransaction> &txs);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);

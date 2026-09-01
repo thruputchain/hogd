@@ -34,6 +34,7 @@
 #include "hogd/hog_mempool/rpc_from_db.h"
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
+#include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/shared.h"
 #include "transaction.hh"
 #include "x23/async.h"
@@ -59,9 +60,14 @@ public:
   HogDevnodeNode &operator=(HogDevnodeNode &&) = delete;
 
   std::string const &bind_host() const { return bind_host_; }
-  // The supervisor calls this the scheduler endpoint; hogd exposes it through
-  // the coordinator-facing SchedulerCoord1 RPC server.
+  // Coordinator control-plane endpoint used by the local block driver.
   std::uint16_t scheduler_port() const { return mempool_coord_server_.port(); }
+  // Public scheduler gateway endpoint used for transaction submission and
+  // pending-state reads.
+  std::uint16_t scheduler_gateway_port() const
+  {
+    return mempool_gateway_server_.port();
+  }
   // Advertised in the runtime manifest as the `indexer` endpoint.
   std::uint16_t read_port() const
   {
@@ -188,6 +194,7 @@ private:
       RpcServer<MempoolCoordinatorRpc>(
           sched_db_server_->impl(), mempool_auth_server_->impl(), network_hash_,
           MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+  MempoolGatewayServer mempool_gateway_server_{mempool_coord_server_.impl()};
   RpcServer<MempoolEventRpc> sched_event_server_;
   RpcServer<MempoolExecutorRpc> sched_exec_server_;
 

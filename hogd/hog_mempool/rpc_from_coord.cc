@@ -132,19 +132,19 @@ record_metric_cleanup(F &&f) noexcept
   }
 }
 
-SchedulerSubmitOutcome
+SchedGatewaySubmitOutcome
 submit_outcome_for_auth(AuthErrorCode code)
 {
   if (code == AuthErrorCode::kAuthSuccess) {
-    return SchedulerSubmitOutcome::SchedulerSubmitAccepted;
+    return SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted;
   }
   if (code == AuthErrorCode::kAuthFailed) {
-    return SchedulerSubmitOutcome::SchedulerSubmitRejected;
+    return SchedGatewaySubmitOutcome::SchedGatewaySubmitRejected;
   }
   if (code == AuthErrorCode::kAuthStaleBlockHeight) {
-    return SchedulerSubmitOutcome::SchedulerSubmitRetryable;
+    return SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
   }
-  return SchedulerSubmitOutcome::SchedulerSubmitInternalError;
+  return SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
 }
 
 } // namespace
@@ -243,8 +243,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   co_return;
 }
 
-x23::Async<SchedulerSubmitOutcomeBatch>
-MempoolCoordinatorRpc::schedulercoord_submit_unvetted_with_outcomes(
+x23::Async<SchedGatewaySubmitOutcomeBatch>
+MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
     ParallelSignedTransactionBatch batch)
 {
   ElapsedTimer timer;
@@ -258,13 +258,13 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted_with_outcomes(
                                      /*malformed_is_protocol_error=*/true);
 }
 
-x23::Async<SchedulerSubmitOutcomeBatch>
+x23::Async<SchedGatewaySubmitOutcomeBatch>
 MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                        bool malformed_is_protocol_error)
 {
   auto txs = std::make_shared<SignedTransactionBatch>();
   auto original_indices = std::make_shared<x23::Vec<size_t>>();
-  auto outcomes = std::make_shared<SchedulerSubmitOutcomeBatch>();
+  auto outcomes = std::make_shared<SchedGatewaySubmitOutcomeBatch>();
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
 
@@ -285,7 +285,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         record_submitted_unvetted(txs->size());
         outcomes->resize(txs->size());
         std::fill(outcomes->begin(), outcomes->end(),
-                  SchedulerSubmitOutcome::SchedulerSubmitAccepted);
+                  SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
         original_indices->reserve(txs->size());
         for (size_t i = 0; i < txs->size(); i++) {
           original_indices->push_back(i);
@@ -298,7 +298,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
       [&]() -> x23::Async<void> {
         if (!ready()) {
           std::fill(outcomes->begin(), outcomes->end(),
-                    SchedulerSubmitOutcome::SchedulerSubmitRetryable);
+                    SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
           submit_dag.fail(x23::DagFailureKind::Cancelled, "check readiness");
         }
         co_return;
@@ -329,7 +329,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           // [commit_guard->reset()], just so that this is more readable.
           (*commit_guard).reset();
           std::fill(outcomes->begin(), outcomes->end(),
-                    SchedulerSubmitOutcome::SchedulerSubmitRetryable);
+                    SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
           submit_dag.fail(x23::DagFailureKind::Cancelled, "enforce capacity");
           co_return;
         }
@@ -347,7 +347,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           MempoolMetrics::instance().discarded_capacity_tx_count.increment(
               num_discarded);
           std::fill(outcomes->begin() + resize_to, outcomes->end(),
-                    SchedulerSubmitOutcome::SchedulerSubmitRetryable);
+                    SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
           txs->resize(resize_to);
           original_indices->resize(resize_to);
         }
@@ -381,8 +381,10 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           const size_t original_idx = (*original_indices)[i];
-          const SchedulerSubmitOutcome outcome = submit_outcome_for_auth(code);
-          if (outcome == SchedulerSubmitOutcome::SchedulerSubmitAccepted) {
+          const SchedGatewaySubmitOutcome outcome =
+              submit_outcome_for_auth(code);
+          if (outcome ==
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted) {
             authenticated_txs.push_back(std::move((*txs)[i]));
             authenticated_indices.push_back(original_idx);
           }
@@ -406,16 +408,17 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         // [scheduler_->add_txs()] (and then after remove any unverified txs
         // from the scheduler). But this would make the txs visible to
         // nominate() and validate() before the txs have been verified.
-        const SchedulerSubmitOutcomeBatch add_outcomes =
+        const SchedGatewaySubmitOutcomeBatch add_outcomes =
             co_await scheduler_->add_txs(*txs);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
         SignedTransactionBatch admitted_txs;
         admitted_txs.reserve(txs->size());
         for (size_t i = 0; i < add_outcomes.size(); i++) {
-          const SchedulerSubmitOutcome outcome = add_outcomes[i];
+          const SchedGatewaySubmitOutcome outcome = add_outcomes[i];
           (*outcomes)[(*original_indices)[i]] = outcome;
-          if (outcome == SchedulerSubmitOutcome::SchedulerSubmitAccepted) {
+          if (outcome ==
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted) {
             admitted_txs.push_back(std::move((*txs)[i]));
           }
         }

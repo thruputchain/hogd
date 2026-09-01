@@ -523,6 +523,7 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Genesis bootstrap payloads can be larger than the transport default.
     mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    mempool_gateway_server_->max_message_size_ = kDevRpcMaxMessageSize;
     mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
 
     // Start the mempool RPC servers. All of the subsystems register with the
@@ -533,6 +534,8 @@ HogDevnodeNode::HogDevnodeNode(
     sched_exec_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_coord_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    mempool_gateway_server_.start_server(
         make_bind_host_port(bind_host_, requested_scheduler_port));
     mempool_auth_server_->start_server(
         make_bind_host_port(bind_host_, /*port=*/0));

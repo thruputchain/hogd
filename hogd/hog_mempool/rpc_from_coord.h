@@ -47,6 +47,7 @@
 #include "proposal.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_gateway.hh"
 #include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -197,9 +198,10 @@ public:
   x23::Async<void>
   schedulercoord_submit_unvetted(ParallelSignedTransactionBatch batch);
 
-  x23::Async<SchedulerSubmitOutcomeBatch>
-  schedulercoord_submit_unvetted_with_outcomes(
-      ParallelSignedTransactionBatch batch);
+  // Gateway-facing admission helper. This is deliberately not part of the
+  // coordinator RPC service; MempoolGatewayRpc exposes it as SchedGateway1.
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  submit_unvetted_with_outcomes(ParallelSignedTransactionBatch batch);
 
   // Submit a vetted tx.
   x23::Async<void>
@@ -423,7 +425,7 @@ public:
   }
 
 private:
-  x23::Async<SchedulerSubmitOutcomeBatch>
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,
                   bool malformed_is_protocol_error);
 

@@ -460,11 +460,11 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   return insert_tx_into_runqueue(tx_hash, value);
 }
 
-x23::Async<SchedulerSubmitOutcomeBatch>
+x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
-  SchedulerSubmitOutcomeBatch outcomes(
-      txs.size(), SchedulerSubmitOutcome::SchedulerSubmitAccepted);
+  SchedGatewaySubmitOutcomeBatch outcomes(
+      txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
 
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
@@ -481,7 +481,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
-           SchedulerSubmitOutcomeBatch &outcomes,
+           SchedGatewaySubmitOutcomeBatch &outcomes,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
@@ -495,7 +495,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
               info("scheduler: dropping tx after hog-age lookup failed for {}",
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
               outcomes[tx_idx] =
-                  SchedulerSubmitOutcome::SchedulerSubmitInternalError;
+                  SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
               continue;
             }
             if (scheduler.add_txs_helper(txs[tx_idx])) {

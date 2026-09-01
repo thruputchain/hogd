@@ -61,6 +61,7 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_event.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "validator.hh"
@@ -176,29 +177,33 @@ TEST(Mempool, SubmitUnvettedWithOutcomesBeforeReadyPreservesCardinality)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  MempoolGatewayRpc gateway(&coordinator);
   SignedTransactionBatch txs;
   txs.resize(2);
 
-  const SchedulerSubmitOutcomeBatch outcomes =
-      coordinator.schedulercoord_submit_unvetted_with_outcomes(
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(
           t_to_parallel_batch(txs)())();
 
   ASSERT_EQ(outcomes.size(), txs.size());
-  EXPECT_EQ(outcomes[0], SchedulerSubmitOutcome::SchedulerSubmitRetryable);
-  EXPECT_EQ(outcomes[1], SchedulerSubmitOutcome::SchedulerSubmitRetryable);
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+  EXPECT_EQ(outcomes[1],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
 }
 
 TEST(Mempool, SubmitUnvettedWithOutcomesRejectsMalformedBatch)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  MempoolGatewayRpc gateway(&coordinator);
   SignedTransactionBatch txs;
   txs.resize(1);
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(txs)();
   ASSERT_EQ(batch.segment_tokens.size(), 1UL);
   batch.segment_tokens[0]++;
 
-  EXPECT_THROW(coordinator.schedulercoord_submit_unvetted_with_outcomes(
+  EXPECT_THROW(gateway.schedgateway_submit_tx_batch_with_outcomes(
                    std::move(batch))(),
                std::runtime_error);
 }
@@ -842,14 +847,16 @@ TEST(Mempool, SubmitUnvettedMempoolMaxCapacityLimit)
 
   ParallelSignedTransactionBatch batch =
       t_to_parallel_batch(SignedTransactionBatch{txs})();
-  const SchedulerSubmitOutcomeBatch outcomes =
-      server.mempool_coord_rpc().schedulercoord_submit_unvetted_with_outcomes(
-          std::move(batch))();
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(std::move(batch))();
   ASSERT_EQ(outcomes.size(), txs.size());
   for (size_t i = 0; i < mempool_tx_size_limit; i++) {
-    EXPECT_EQ(outcomes[i], SchedulerSubmitOutcome::SchedulerSubmitAccepted);
+    EXPECT_EQ(outcomes[i],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
   }
-  EXPECT_EQ(outcomes.back(), SchedulerSubmitOutcome::SchedulerSubmitRetryable);
+  EXPECT_EQ(outcomes.back(),
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(),
             mempool_tx_size_limit);
 
@@ -3093,21 +3100,24 @@ TEST(Mempool, RejectedSigningDoesNotBlockValidSigning)
 
   // One request may contain both signings. Its results stay aligned to the
   // exact signed encodings even though both entries share a transaction hash.
-  const SchedulerSubmitOutcomeBatch mixed_outcomes =
-      server.mempool_coord_rpc().schedulercoord_submit_unvetted_with_outcomes(
-          t_to_parallel_batch(
-              SignedTransactionBatch{poisoned_tx, good_tx})())();
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  const SchedGatewaySubmitOutcomeBatch mixed_outcomes =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(t_to_parallel_batch(
+          SignedTransactionBatch{poisoned_tx, good_tx})())();
   ASSERT_EQ(mixed_outcomes.size(), 2UL);
-  EXPECT_EQ(mixed_outcomes[0], SchedulerSubmitOutcome::SchedulerSubmitRejected);
-  EXPECT_EQ(mixed_outcomes[1], SchedulerSubmitOutcome::SchedulerSubmitAccepted);
+  EXPECT_EQ(mixed_outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRejected);
+  EXPECT_EQ(mixed_outcomes[1],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAccepted);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
   // Rejection is request-scoped rather than retained under the shared hash.
-  const SchedulerSubmitOutcomeBatch rejected_again =
-      server.mempool_coord_rpc().schedulercoord_submit_unvetted_with_outcomes(
+  const SchedGatewaySubmitOutcomeBatch rejected_again =
+      gateway.schedgateway_submit_tx_batch_with_outcomes(
           t_to_parallel_batch(SignedTransactionBatch{poisoned_tx})())();
   ASSERT_EQ(rejected_again.size(), 1UL);
-  EXPECT_EQ(rejected_again[0], SchedulerSubmitOutcome::SchedulerSubmitRejected);
+  EXPECT_EQ(rejected_again[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRejected);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
