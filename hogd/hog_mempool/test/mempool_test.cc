@@ -1,5 +1,6 @@
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <future>
@@ -3495,7 +3496,7 @@ TEST(Mempool, TxsetHashAcceptsDistinctHashes)
   std::optional<SHA256Hash> txset_hash =
       MempoolCoordinatorRpc::try_get_txset_hash(tx_hashes);
   ASSERT_TRUE(txset_hash.has_value());
-  EXPECT_EQ(*txset_hash, MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
+  EXPECT_EQ(txset_hash, MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
 }
 
 TEST(Mempool, ValidateDuplicateProposalHashesIsRejected)
