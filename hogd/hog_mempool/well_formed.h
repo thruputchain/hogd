@@ -11,11 +11,19 @@ namespace hogd {
 // gives one place to point at for "what does the mempool consider a
 // well-formed transaction".
 //
-// It is a filter, not the authority. The executor re-checks everything that
-// matters for consensus, because a transaction can also arrive in a block
-// proposed by another node, which never passes through this mempool. What
-// this buys is that a transaction we would certainly reject later does not
-// occupy a mempool slot, get authenticated, or reach a block we propose.
+// It is a filter, not the authority, and it applies to *unvetted*
+// submissions only -- the ones a client sends us, which we might put in a
+// block we propose. What it buys is that a transaction we would certainly
+// reject later does not occupy a mempool slot, get authenticated, or reach a
+// block we propose.
+//
+// Do not apply it to vetted submissions. Those arrive from the coordinator so
+// this node can validate a block a *peer* proposed, and dropping one makes
+// that block permanently unvalidatable here -- the same wedge
+// schedulercoord_submit_vetted() skips its capacity check to avoid. hog_exec
+// judges that case correctly on its own: a native attachment reaching the
+// executor in validation mode is a proposer-attributable ValidationFailure.
+// Filtering what we propose is ours; judging what a peer proposed is not.
 //
 // Conditions:
 //
