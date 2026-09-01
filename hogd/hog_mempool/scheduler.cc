@@ -1093,7 +1093,6 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   co_await default_coropoll().pool_.bg();
 
   static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
-  accounts.clear();
 
   ElapsedTimer timer;
 
@@ -1105,6 +1104,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
+  // [accounts] is static and therefore reused my multiple threads, so we wait
+  // to call [clear()] on it until after we have acquired the lock.
+  accounts.clear();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -1169,7 +1171,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+      ready_accounts_.erase(get_account_key(account));
     }
   });
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
