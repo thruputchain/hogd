@@ -761,8 +761,15 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
 // Each iteration fills a fresh table: one seeded stream, then `occupancy`
 // copies into slots that do not exist yet, which is the allocating path and the
 // one a contract chooses by picking fresh destination indices. Reported per
-// copy, so the rows are directly comparable and a per-copy cost that grows with
-// occupancy shows up as a rising number rather than a bigger total.
+// copy, so a per-copy cost that grows with occupancy shows up as a rising
+// number rather than a bigger total.
+//
+// Read the plateau, not the small rows. The denominator counts copies, but the
+// numerator also carries the per-iteration setup this harness cannot hoist out:
+// constructing the table, the seed update -- itself a slot creation -- and
+// destroying every node at the end. The /0 row is exactly that setup and
+// nothing else, so it is what to subtract; at occupancy 1 it is most of the
+// number, and by 64 it has vanished into the noise.
 void
 bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
 {
@@ -786,6 +793,9 @@ bm_hash_buffers_fill(benchmark::State &state, uint32_t occupancy)
 // index with no stream emplaces exactly as copy does, and SHA256UpdateCost
 // charges whole blocks only -- so a zero-byte reset update creates a stream for
 // no body gas at all. If slot creation needs pricing, it needs it here too.
+//
+// No seed here, so its /0 row is the bare table construct and destroy, and its
+// small rows are correspondingly less distorted than the copy sweep's.
 void
 bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
 {
@@ -847,7 +857,7 @@ register_benchmarks()
                                bm_syscall_entry_sequence,
                                std::vector<SyscallCall>{sha256_update_call(0)},
                                sha256_copy_new_slot_pair());
-  for (const uint32_t occupancy : {1U, 8U, 64U, 512U, 4096U, 32768U}) {
+  for (const uint32_t occupancy : {0U, 1U, 8U, 64U, 512U, 4096U, 32768U}) {
     benchmark::RegisterBenchmark(
         ("buffers/CopyFill/" + std::to_string(occupancy)).c_str(),
         bm_hash_buffers_fill, occupancy);
