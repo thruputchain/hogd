@@ -502,6 +502,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             1);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 1);
   EXPECT_TRUE(
       delta.retrocausal_queue().consume->current_block_consumed.empty());
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
@@ -518,6 +519,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             0);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 2);
 
   res = rcq_item.get_next_item(mode, true);
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
@@ -531,6 +533,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             1);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 3);
   EXPECT_TRUE(
       delta.retrocausal_queue().consume->current_block_consumed.empty());
 }
@@ -559,6 +562,7 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             0);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 0);
   EXPECT_EQ(read_entries(
                 delta.retrocausal_queue().consume->current_block_consumed),
             (std::vector<uint32_t>{7}));
@@ -633,10 +637,47 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
   auto delta = fully_consumed.get_delta();
 
   ASSERT_TRUE(delta.retrocausal_queue().consume);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 0);
   EXPECT_EQ(read_entries(
                 delta.retrocausal_queue().consume->current_block_consumed),
             (std::vector<uint32_t>{42, 99}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
+}
+
+// A delete-then-recreate of a nonempty persisted queue consumes to the tail.
+// The cursor jumps to the last live block and the count is the block-start
+// live count, both taken from the snapshot metadata without reading a block.
+TEST_F(ItemViewTest, MakeFullyConsumedItemReportsLiveEntriesAsConsumed)
+{
+  auto item = make_rcq_item();
+
+  auto queue = make_queue({
+      {make_test_queue_entry(1), make_test_queue_entry(2)},
+      {make_test_queue_entry(3), make_test_queue_entry(4)},
+  });
+  ASSERT_EQ(queue.get_live_entries(), 4);
+  ASSERT_EQ(queue.get_max_live_block_num(), 2);
+
+  StorageCostModel cost_model(12000, 1, 5, 5, 0);
+  server_->impl()->setup_create_item(AddressAndKey{},
+                                     StorageItemWrapper(std::move(queue),
+                                                        &cost_model));
+  ASSERT_EQ(item->type(), ItemViewType::kRetrocausalQueue);
+
+  auto fully_consumed =
+      RetrocausalQueueItem::make_fully_consumed_item(*item, {});
+  auto delta = fully_consumed.get_delta();
+
+  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  EXPECT_EQ(delta.retrocausal_queue()
+                .consume->past_block_consume.max_fully_consumed_block_number,
+            2);
+  EXPECT_EQ(delta.retrocausal_queue()
+                .consume->past_block_consume.partial_consumed_number,
+            0);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 4);
+  EXPECT_TRUE(
+      delta.retrocausal_queue().consume->current_block_consumed.empty());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

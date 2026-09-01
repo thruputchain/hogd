@@ -137,9 +137,6 @@ private:
   // count of retrocausally consumed entries from other transactions
   uint16_t locally_consumed_index_ = 0;
 
-  // For (in future PR) tracking storage costs
-  uint32_t past_block_consumed_count_ = 0;
-
   const SnapshotStorageItem *base_item_;
 };
 

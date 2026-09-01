@@ -179,16 +179,23 @@ RetrocausalQueueItem::make_fully_consumed_item(
        base_item.retrocausal_queue_metadata().live_entries > 0);
 
   if (need_consume_delta) {
+    // Consume to the tail. The cursor jumps to the last live block and the
+    // count is every live past-block entry, which the block-start metadata
+    // already holds; HogDb checks the two against each other without reading
+    // a single block row.
     RetrocausalQueuePastBlockConsumeDelta past_consume = {
         .max_fully_consumed_block_number = 0,
         .partial_consumed_number = 0,
     };
+    uint64_t past_consumed_count = 0;
     if (base_item.type() == ItemViewType::kRetrocausalQueue) {
       auto const &meta = base_item.retrocausal_queue_metadata();
       past_consume.max_fully_consumed_block_number = meta.max_live_block_num;
+      past_consumed_count = meta.live_entries;
     }
     item.queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
         .past_block_consume = past_consume,
+        .past_block_consumed_count = past_consumed_count,
         .current_block_consumed = std::move(consumed_entries),
     });
   }
@@ -211,6 +218,7 @@ RetrocausalQueueItem::construct_consume_delta()
 
   queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
       .past_block_consume = past_consume,
+      .past_block_consumed_count = 0,
       .current_block_consumed = {},
   });
 }
@@ -302,7 +310,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
             .max_fully_consumed_block_number = next_block->block_number;
         queue_delta_.consume->past_block_consume.partial_consumed_number = 0;
       }
-      past_block_consumed_count_++;
+      queue_delta_.consume->past_block_consumed_count++;
     }
 
     // Pointer into the snapshot block, which outlives the transaction.
