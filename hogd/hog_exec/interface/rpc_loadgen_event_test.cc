@@ -40,14 +40,19 @@
 #include "x23/vec.h"
 
 namespace {
-// These tests exercise the executor's block state machine, not the
-// block's contents, so any consistent context will do. It has to be the
-// same value for every open of a given block: open_block rejects a
-// reopen whose context disagrees.
-constexpr hogd::BlockExecutionContext kTestBlockExecution{
-    .block_height = 1,
-    .block_timepoint = 1,
-};
+// The block's height must be the one the block will actually commit --
+// close_block records block_height = the block id, and the executor checks
+// the supplied height against the tip it reads, so a fixed constant only
+// agrees for the first block. The timepoint is not cross-checked against
+// anything, so a stand-in is fine.
+constexpr hogd::BlockExecutionContext
+test_block_execution(uint64_t block_height)
+{
+  return hogd::BlockExecutionContext{
+      .block_height = static_cast<hogd::BlockHeight>(block_height),
+      .block_timepoint = 1,
+  };
+}
 } // namespace
 
 namespace hogd {
@@ -118,9 +123,8 @@ protected:
 
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
-    auto open_res =
-        client_.executorsched_open_proposal_block(block_id,
-                                                  kTestBlockExecution);
+    auto open_res = client_.executorsched_open_proposal_block(
+        block_id, test_block_execution(block_id));
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
     auto db_res = db_client_.dbsched_create_snapshot(
