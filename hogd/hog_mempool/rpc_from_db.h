@@ -76,13 +76,11 @@ public:
     //
     // These writes must also never overlap ramdb's sync() for the *next*
     // block's commit (Database::sync()'s precondition); otherwise ramdb
-    // state is corrupted. No lock provides that ordering here:
-    // [pending_hog_age_update_lock_] is released before this write runs.
-    // What serializes them today is that this write and
-    // [dbsched_commit_snapshot] travel on the same db_sched connection and
-    // hog_db runs its handlers inline on that connection's reader
-    // coroutine, so the two never execute concurrently (#3397); ramdb's
-    // [write_record()] CHECKs the invariant. As a side note, it is okay for
+    // state is corrupted. [pending_hog_age_update_lock_] does not provide
+    // that ordering — it is released before this write runs. hog_db
+    // serializes its ramdb write passes with
+    // [RPCContext::ramdb_write_pass_lock()], and ramdb's [write_record()]
+    // CHECKs the invariant (#3397). As a side note, it is okay for
     // [commit_snapshot()] and [abandon_snapshot()] to race. We ensure that
     // [scheduler_->write_all_average_hog_ages_to_db()] completes before we
     // update [scheduler_->transfer_finished_], so we do not need to worry
