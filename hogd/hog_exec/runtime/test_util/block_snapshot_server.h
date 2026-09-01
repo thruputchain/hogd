@@ -39,7 +39,14 @@ class BlockSnapshotRpc {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
-  BlockSnapshotRpc(BlockID block_id) : block_id_(block_id) {}
+  // A BlockID says nothing about chain position (in production it is a
+  // nanosecond timestamp), so the tip height is tracked separately.
+  BlockSnapshotRpc(BlockID block_id, BlockHeight tip_block_height = 0)
+    : block_id_(block_id), tip_block_height_(tip_block_height)
+  {}
+
+  // The height the open block claims; what the executor cross-checks against.
+  BlockHeight open_block_height() const { return tip_block_height_ + 1; }
 
   static void db_snapshot_read_null();
 
@@ -77,13 +84,12 @@ public:
 
     // Fake parent dbtip. get_db_tip returns the *parent* of the open block, so
     // the tip's id must differ from block_id_ (DatabaseProxy::get_db_tip
-    // rejects a tip whose id equals the requested block). Model the parent as
-    // one block back.
+    // rejects a tip whose id equals the requested block); block_id_ - 1 is
+    // just a convenient distinct id, unrelated to the height.
     ExpectedDBTip out;
     out.error(RPCError::kRPCNone);
     ConsensusValue value{};
-    value.proposal_header.block_height =
-        static_cast<BlockHeight>(block_id_) - 1;
+    value.proposal_header.block_height = tip_block_height_;
     value.proposal_header.txs_hash = sha256(block_id_);
     out.db_tip() =
         DbTip{.id = block_id_ - 1,
@@ -135,6 +141,7 @@ public:
 
 private:
   BlockID block_id_;
+  BlockHeight tip_block_height_;
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract, SipHash24Hasher>>
@@ -166,7 +173,9 @@ static_assert(
 
 class BlockSnapshotServer : public RpcServer<BlockSnapshotRpc> {
 public:
-  BlockSnapshotServer(BlockID block_id) : RpcServer(block_id) {}
+  BlockSnapshotServer(BlockID block_id, BlockHeight tip_block_height = 0)
+    : RpcServer(block_id, tip_block_height)
+  {}
 };
 
 } // namespace hogd

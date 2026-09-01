@@ -47,6 +47,9 @@ public:
             Contract const &genesis_root_contract,
             NetworkConfig const &network_config);
 
+  // Height is the tip's plus one, read off the tip rather than a block id.
+  BlockExecutionContext block_execution_context() const;
+
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
 

@@ -147,6 +147,18 @@ SystemCallHandler::init_db_tip() const
   if (!tip.has_value()) {
     return std::unexpected(tip.error());
   }
+  // The height the block was opened with must agree with the tip we are about
+  // to pin, or this node is executing a different block than it is building.
+  // Checked here, the transaction's one fallible tip read, so every later
+  // height read stays a plain load.
+  auto const &block_execution = snapshot_cache_.block_execution_context();
+  const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
+  if (block_execution.block_height != derived) [[unlikely]] {
+    error("Block height mismatch: opened with {}, db tip implies {}",
+          block_execution.block_height, derived);
+    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
+  }
+
   // Owned by the snapshot cache and stable until the cache is recycled for a
   // new block, which cannot happen while this transaction is executing.
   db_tip_ = *tip;
@@ -2267,6 +2279,22 @@ SystemCallHandler::get_block_height() const
   // timelocks) must observe the executing height, matching the replay-cache
   // expiry check.
   return db_tip()->value.proposal_header.block_height + 1;
+}
+
+NetworkHash const &
+SystemCallHandler::get_network_hash() const
+{
+  // Identical in every header, so the parent tip's copy is already this
+  // block's value, no adjustment needed.
+  return db_tip()->value.proposal_header.network_hash;
+}
+
+TimePoint
+SystemCallHandler::get_block_timepoint() const
+{
+  // Not derivable from the tip: for an open block that is the parent, whose
+  // timepoint is the previous block's.
+  return snapshot_cache_.block_execution_context().block_timepoint;
 }
 
 // == Auth token syscalls ==

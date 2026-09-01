@@ -1478,6 +1478,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
   auto &snapshot = snapshot_res.value();
 
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
+                                      framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
 
   Invocation invocation{
@@ -1546,7 +1547,9 @@ TEST_F(ViewTest, SelfTipBlockIdAbandonedBeforeBodyRuns)
   framework_.advance_block();
 
   DbTip tip = framework_.get_db_tip();
-  StorageSnapshotCache snapshot_cache(tip.id, framework_.get_db_proxy());
+  StorageSnapshotCache snapshot_cache(tip.id,
+                                      framework_.get_block_execution_context(),
+                                      framework_.get_db_proxy());
 
   Invocation invocation{
       .invoked_address = kNativeAddr,
@@ -1613,6 +1616,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
   framework_.advance_block();
 
   StorageSnapshotCache snapshot_cache(snapshot.viewing_block_id,
+                                      framework_.get_block_execution_context(),
                                       framework_.get_db_proxy());
 
   Invocation invocation{

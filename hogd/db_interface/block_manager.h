@@ -43,6 +43,9 @@ public:
   // child block.
   BlockID committed_tip_id();
 
+  // -1 before genesis, 0 once genesis is loaded, one more per commit.
+  BlockHeight committed_tip_height();
+
   // new_id should be a new, never-before-used ID.
   // returns true if new_id is successfully linked to the parent.
   // Otherwise the parent id is no longer a valid block to link to.
@@ -126,6 +129,8 @@ private:
   // this lets us push the work of garbage collection outside the critical
   // section of the lock.
   std::vector<std::shared_ptr<BlockState>> remove_subtree(BlockID root);
+
+  BlockHeight last_committed_height_ = -1;
 
   std::shared_mutex mtx_;
   bool initialized_genesis_ = false;

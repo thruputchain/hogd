@@ -593,6 +593,20 @@ public:
     return *r;
   }
 
+  // What an executor would open the current block with. Tracked rather than
+  // read off the tip so block-open costs no rpc: some tests shrink the rpc
+  // message limit, and an added get_db_tip() there fails them. The timepoint
+  // is a stand-in; nothing cross-checks it.
+  BlockExecutionContext get_block_execution_context() const
+  {
+    return BlockExecutionContext{
+        .block_height = committed_height_ + 1,
+        .block_timepoint = kTestBlockTimepoint,
+    };
+  }
+
+  static constexpr TimePoint kTestBlockTimepoint = 1'700'000'000;
+
   PerTransactionEventServerProxy
   make_new_per_tx_event_server_proxy(TransactionID tx_id)
   {
@@ -700,7 +714,9 @@ private:
     }
     open_event_block(block_number_);
     storage_snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+        std::make_unique<StorageSnapshotCache>(block_number_,
+                                               get_block_execution_context(),
+                                               *db_proxy_);
   }
 
   void open_event_block(BlockID block_id);
@@ -762,6 +778,9 @@ private:
   uint64_t next_uniquifier_nonce_ = 0;
   BlockID block_number_ = 0;
   BlockID dbtip_block_id_ = 0;
+  // Genesis commits at 0. Only try_advance_block() commits, so discard_block()
+  // and reject_block() move block_number_ on without moving this.
+  BlockHeight committed_height_ = 0;
 
   std::unique_ptr<CoordWrapper> coord_wrapper_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
