@@ -1347,25 +1347,20 @@ SystemCallHandler::get_or_create_local_preparation(SHA256Hash const &hash,
 {
   auto it = local_preparations_.find(hash);
   if (it != local_preparations_.end()) {
-    // Cached result -- an empty preparation memoizes a contract that could not
-    // be prepared, so we never retry it.
     return &it->second;
   }
 
-  // Attached contracts are prepared once during perform_initial_validation and
-  // land in the map above, so they never reach here (#3536). What does is a
-  // transaction-local deployment of an already-committed hash, which
-  // resolve_contract serves from the block-scoped snapshot cache. That entry
-  // carries its own eager translation, but resolve_contract exposes only the
-  // Contract, so it is rebuilt here; routing the snapshot entry's image
-  // through resolve_contract would close that case too.
+  // Attachments are prepared during perform_initial_validation and hit the
+  // map above, so only a transaction-local deployment of an already-committed
+  // hash reaches here. The snapshot entry serving it carries its own eager
+  // translation, but resolve_contract exposes only the Contract, so it is
+  // rebuilt; routing that image through resolve_contract would avoid this.
   auto [inserted, _] = local_preparations_.try_emplace(hash);
-  if (runtime_context_.verify_contract(contract, inserted->second) !=
-      InvokeErrorCode::None) {
-    // The entry stays empty, memoizing the failure so we never retry it; the
-    // caller turns a preparation-less entry into its own error.
-    inserted->second = PreparedContract{};
-  }
+  const InvokeErrorCode res =
+      runtime_context_.verify_contract(contract, inserted->second);
+  // Only an already-committed contract reaches here, and committing one
+  // required preparing it, so preparing it again cannot fail.
+  CHECK(res == InvokeErrorCode::None);
   return &inserted->second;
 }
 

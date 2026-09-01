@@ -412,13 +412,11 @@ public:
   // returns nullptr if the contract does not exist
   SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
 
-  // Returns the preparation for a transaction-local deployment. Attachments
-  // are prepared by perform_initial_validation, so this normally just borrows
-  // that image; a transaction-local deployment of an already-committed hash is
-  // not an attachment and is prepared here on first use. The returned pointer
-  // is owned by this handler (node-stable for the transaction's lifetime) and
-  // borrowed by the Runtime built from it. `contract` must be the contract for
-  // `hash`. Returns nullptr if the contract cannot be prepared.
+  // Returns the preparation for a transaction-local deployment, borrowing the
+  // one perform_initial_validation built for an attachment or preparing an
+  // already-committed contract on first use. The returned pointer is owned by
+  // this handler (node-stable for the transaction's lifetime) and borrowed by
+  // the Runtime built from it. `contract` must be the contract for `hash`.
   const PreparedContract *
   get_or_create_local_preparation(SHA256Hash const &hash,
                                   Contract const &contract);
@@ -457,14 +455,12 @@ private:
       newly_created_contracts_;
 
   // Per-transaction cache of prepared contracts for transaction-local
-  // deployments (which are not in the block-scoped StorageSnapshotCache).
-  // Attached contracts are inserted by perform_initial_validation, which
-  // verifies them by preparing them and keeps that image rather than building
-  // it again at first invocation (#3536); anything else is filled lazily.
-  // Keyed by contract hash; an empty mapped value memoizes a contract that
-  // could not be prepared, so we never retry it. Entries are node-stable and
-  // borrowed by the Runtimes built from them, so they must outlive those
-  // runtimes -- they live for the whole transaction.
+  // deployments, which are not in the block-scoped StorageSnapshotCache.
+  // Keyed by contract hash. Attachments are inserted by
+  // perform_initial_validation, which keeps the image it built to verify them
+  // rather than building it again at first invocation (#3536). Entries are
+  // node-stable and borrowed by the Runtimes built from them, so they outlive
+  // those runtimes -- they live for the whole transaction.
   std::unordered_map<SHA256Hash, PreparedContract, SipHash24Hasher>
       local_preparations_;
 
