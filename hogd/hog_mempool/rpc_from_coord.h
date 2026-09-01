@@ -197,6 +197,10 @@ public:
   x23::Async<void>
   schedulercoord_submit_unvetted(ParallelSignedTransactionBatch batch);
 
+  x23::Async<SchedulerSubmitOutcomeBatch>
+  schedulercoord_submit_unvetted_with_outcomes(
+      ParallelSignedTransactionBatch batch);
+
   // Submit a vetted tx.
   x23::Async<void>
   schedulercoord_submit_vetted(ValidatorID validator_id,
@@ -419,6 +423,10 @@ public:
   }
 
 private:
+  x23::Async<SchedulerSubmitOutcomeBatch>
+  submit_unvetted(ParallelSignedTransactionBatch batch,
+                  bool malformed_is_protocol_error);
+
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
   // NOLINTNEXTLINE(bugprone-exception-escape)

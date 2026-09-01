@@ -54,7 +54,9 @@ TEST(Scheduler, AddVettedTx)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedulerSubmitOutcomeBatch outcomes = scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedulerSubmitOutcome::SchedulerSubmitAccepted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
@@ -71,8 +73,10 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
-  scheduler->add_txs({txs[0]})();
+  const SchedulerSubmitOutcomeBatch outcomes = scheduler->add_txs({txs[0]})();
 
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedulerSubmitOutcome::SchedulerSubmitInternalError);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
@@ -118,10 +122,14 @@ TEST(Scheduler, AddVettedTxDuplicate)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedulerSubmitOutcomeBatch first = scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(first.size(), 1UL);
+  EXPECT_EQ(first[0], SchedulerSubmitOutcome::SchedulerSubmitAccepted);
   EXPECT_EQ(scheduler->size(), 1UL);
   // Now add the transaction a second time.
-  scheduler->add_txs({txs[0]})();
+  const SchedulerSubmitOutcomeBatch duplicate = scheduler->add_txs({txs[0]})();
+  ASSERT_EQ(duplicate.size(), 1UL);
+  EXPECT_EQ(duplicate[0], SchedulerSubmitOutcome::SchedulerSubmitAccepted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 

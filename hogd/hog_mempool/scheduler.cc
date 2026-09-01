@@ -460,9 +460,12 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
   return insert_tx_into_runqueue(tx_hash, value);
 }
 
-x23::Async<void>
+x23::Async<SchedulerSubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
 {
+  SchedulerSubmitOutcomeBatch outcomes(
+      txs.size(), SchedulerSubmitOutcome::SchedulerSubmitAccepted);
+
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
@@ -478,16 +481,21 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
         [](const ChunkRange *chunk,
            const x23::XdrVec<hogd::SignedTransaction> &txs,
            const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
+           SchedulerSubmitOutcomeBatch &outcomes,
            Scheduler &scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           size_t num_added = 0;
           for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
             if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The account for this tx does not exist in our copy of hog_db,
-              // so we silently drop the tx.
-              info("scheduler: dropping tx for unknown account {}",
+              // The DB RPC currently cannot distinguish an unknown account
+              // from a transient or internal read failure. Authentication
+              // rejects unknown accounts before this path, so conservatively
+              // report the ambiguous scheduler-side failure as internal.
+              info("scheduler: dropping tx after hog-age lookup failed for {}",
                    show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+              outcomes[tx_idx] =
+                  SchedulerSubmitOutcome::SchedulerSubmitInternalError;
               continue;
             }
             if (scheduler.add_txs_helper(txs[tx_idx])) {
@@ -496,7 +504,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
           }
           scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
           co_return;
-        }(&chunk, txs, missing, *this));
+        }(&chunk, txs, missing, outcomes, *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -516,6 +524,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   }
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  co_return outcomes;
 }
 
 void

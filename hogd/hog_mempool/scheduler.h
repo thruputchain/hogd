@@ -15,6 +15,7 @@
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
+#include "sched_coord.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -40,16 +41,17 @@ public:
     co_return;
   }
 
-  // Adds txs to the scheduler. Adding the same tx multiple times is okay; the
-  // scheduler detects and silently drops the duplicates rather than enqueue
-  // them.
+  // Adds txs to the scheduler and returns one admission outcome per tx, in
+  // input order. Adding the same tx multiple times is okay; a duplicate that
+  // is already pending is reported as accepted rather than enqueued again.
   //
   // This method will cycle the groups for an account if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
-  x23::Async<void> add_txs(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<SchedulerSubmitOutcomeBatch>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs);
 
   x23::Async<void> process_transfers(const HogsTransferred &transfer);
 

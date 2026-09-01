@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -131,6 +132,21 @@ record_metric_cleanup(F &&f) noexcept
   }
 }
 
+SchedulerSubmitOutcome
+submit_outcome_for_auth(AuthErrorCode code)
+{
+  if (code == AuthErrorCode::kAuthSuccess) {
+    return SchedulerSubmitOutcome::SchedulerSubmitAccepted;
+  }
+  if (code == AuthErrorCode::kAuthFailed) {
+    return SchedulerSubmitOutcome::SchedulerSubmitRejected;
+  }
+  if (code == AuthErrorCode::kAuthStaleBlockHeight) {
+    return SchedulerSubmitOutcome::SchedulerSubmitRetryable;
+  }
+  return SchedulerSubmitOutcome::SchedulerSubmitInternalError;
+}
+
 } // namespace
 
 void
@@ -209,7 +225,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
   if (!ready()) {
     co_return;
   }
-
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
@@ -217,15 +232,39 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           mempool_duration_ms(timer.elapsed()));
     });
   });
-
   if (scheduler_->size() >= mempool_tx_size_limit_) {
     MempoolMetrics::instance().rejected_capacity_rpc_count.increment();
     info(
         "submit_unvetted rejected txs as the mempool has too many pending txs");
     co_return;
   }
+  co_await submit_unvetted(std::move(batch),
+                           /*malformed_is_protocol_error=*/false);
+  co_return;
+}
 
+x23::Async<SchedulerSubmitOutcomeBatch>
+MempoolCoordinatorRpc::schedulercoord_submit_unvetted_with_outcomes(
+    ParallelSignedTransactionBatch batch)
+{
+  ElapsedTimer timer;
+  x23::Defer record_duration([&] {
+    record_metric_cleanup([&] {
+      MempoolMetrics::instance().last_submit_unvetted_duration_ms.record(
+          mempool_duration_ms(timer.elapsed()));
+    });
+  });
+  co_return co_await submit_unvetted(std::move(batch),
+                                     /*malformed_is_protocol_error=*/true);
+}
+
+x23::Async<SchedulerSubmitOutcomeBatch>
+MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
+                                       bool malformed_is_protocol_error)
+{
   auto txs = std::make_shared<SignedTransactionBatch>();
+  auto original_indices = std::make_shared<x23::Vec<size_t>>();
+  auto outcomes = std::make_shared<SchedulerSubmitOutcomeBatch>();
   auto commit_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
 
@@ -237,15 +276,36 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
           info("submit_unvetted rejected malformed transaction batch");
+          if (malformed_is_protocol_error) {
+            throw std::runtime_error("malformed unvetted transaction batch");
+          }
           submit_dag.fail(x23::DagFailureKind::Cancelled, "decode batch");
           co_return;
         }
         record_submitted_unvetted(txs->size());
+        outcomes->resize(txs->size());
+        std::fill(outcomes->begin(), outcomes->end(),
+                  SchedulerSubmitOutcome::SchedulerSubmitAccepted);
+        original_indices->reserve(txs->size());
+        for (size_t i = 0; i < txs->size(); i++) {
+          original_indices->push_back(i);
+        }
+        co_return;
+      });
+
+  auto ready_node = submit_dag.async<void>(
+      "check readiness", submit_dag.after(decode_node),
+      [&]() -> x23::Async<void> {
+        if (!ready()) {
+          std::fill(outcomes->begin(), outcomes->end(),
+                    SchedulerSubmitOutcome::SchedulerSubmitRetryable);
+          submit_dag.fail(x23::DagFailureKind::Cancelled, "check readiness");
+        }
         co_return;
       });
 
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(ready_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -268,6 +328,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
           // [commit_guard] with [*] below rather than write
           // [commit_guard->reset()], just so that this is more readable.
           (*commit_guard).reset();
+          std::fill(outcomes->begin(), outcomes->end(),
+                    SchedulerSubmitOutcome::SchedulerSubmitRetryable);
           submit_dag.fail(x23::DagFailureKind::Cancelled, "enforce capacity");
           co_return;
         }
@@ -284,7 +346,10 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
           MempoolMetrics::instance().discarded_capacity_tx_count.increment(
               num_discarded);
+          std::fill(outcomes->begin() + resize_to, outcomes->end(),
+                    SchedulerSubmitOutcome::SchedulerSubmitRetryable);
           txs->resize(resize_to);
+          original_indices->resize(resize_to);
         }
         co_return;
       });
@@ -304,54 +369,57 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         // Auth is a trusted component and must return exactly one result per
         // submitted transaction; otherwise we cannot attribute auth results to
         // transactions and must not admit the batch.
-        CHECK_EQ(auth_ret.size(), txs->size());
-        x23::Vec<size_t> to_remove_indices;
+        if (auth_ret.size() != txs->size()) {
+          throw std::runtime_error(
+              "authentication returned the wrong number of outcomes");
+        }
+        SignedTransactionBatch authenticated_txs;
+        x23::Vec<size_t> authenticated_indices;
+        authenticated_txs.reserve(txs->size());
+        authenticated_indices.reserve(txs->size());
+        size_t num_auth_failures = 0;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
-          if (code != AuthErrorCode::kAuthSuccess) {
-            to_remove_indices.push_back(i);
+          const size_t original_idx = (*original_indices)[i];
+          const SchedulerSubmitOutcome outcome = submit_outcome_for_auth(code);
+          if (outcome == SchedulerSubmitOutcome::SchedulerSubmitAccepted) {
+            authenticated_txs.push_back(std::move((*txs)[i]));
+            authenticated_indices.push_back(original_idx);
+          }
+          else {
+            (*outcomes)[original_idx] = outcome;
+            num_auth_failures++;
           }
         }
         MempoolMetrics::instance().auth_failed_tx_count.increment(
-            to_remove_indices.size());
-        if (!to_remove_indices.empty()) {
-          remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
-        }
+            num_auth_failures);
+        *txs = std::move(authenticated_txs);
+        *original_indices = std::move(authenticated_indices);
         co_return;
       });
 
-  submit_dag.async<void>(
-      "launch vetted notify", submit_dag.after(prune_node),
-      [&, txs]() -> x23::Async<void> {
-        pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
-        [](MempoolCoordinatorRpc &coord,
-           std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
-          // We serialize and send the response in a detached coroutine so that
-          // we can release [commit_lock_] as soon as [add_txs()] is finished
-          // below. Serializing and sending the response takes longer than
-          // [add_txs()] and does not require holding [commit_lock_].
-
-          // TODO(jhumphri): We could avoid serializing [txs] and reuse [batch]
-          // if we do not remove any txs above. I am not sure this is the common
-          // case though.
-          ParallelBatch response;
-          co_await t_to_parallel_batch(*txs, response);
-          co_await coord.coord_client_->coordscheduler_notify_vetted(response);
-          coord.pending_detached_coroutines_.fetch_sub(
-              1, std::memory_order_release);
-        }(*this, txs);
-        co_return;
-      });
-
-  submit_dag.async<void>(
+  auto add_node = submit_dag.async<void>(
       "add txs", submit_dag.after(prune_node),
-      [&, commit_guard]() -> x23::Async<void> {
+      [&, commit_guard, original_indices, outcomes]() -> x23::Async<void> {
         // Careful: it is tempting to overlap the overhead of
         // [authmempool_verify_transactions()] with that of
         // [scheduler_->add_txs()] (and then after remove any unverified txs
         // from the scheduler). But this would make the txs visible to
         // nominate() and validate() before the txs have been verified.
-        co_await scheduler_->add_txs(*txs);
+        const SchedulerSubmitOutcomeBatch add_outcomes =
+            co_await scheduler_->add_txs(*txs);
+        CHECK_EQ(add_outcomes.size(), txs->size());
+        CHECK_EQ(original_indices->size(), txs->size());
+        SignedTransactionBatch admitted_txs;
+        admitted_txs.reserve(txs->size());
+        for (size_t i = 0; i < add_outcomes.size(); i++) {
+          const SchedulerSubmitOutcome outcome = add_outcomes[i];
+          (*outcomes)[(*original_indices)[i]] = outcome;
+          if (outcome == SchedulerSubmitOutcome::SchedulerSubmitAccepted) {
+            admitted_txs.push_back(std::move((*txs)[i]));
+          }
+        }
+        *txs = std::move(admitted_txs);
         MempoolMetrics::instance().accepted_unvetted_tx_count.increment(
             txs->size());
         // [commit_guard] is a smart pointer that has a [reset()] method just
@@ -359,6 +427,23 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         // [commit_guard] with [*] below rather than write
         // [commit_guard->reset()], just so that this is more readable.
         (*commit_guard).reset();
+        co_return;
+      });
+
+  submit_dag.async<void>(
+      "launch vetted notify", submit_dag.after(add_node),
+      [&, txs]() -> x23::Async<void> {
+        pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
+        [](MempoolCoordinatorRpc &coord,
+           std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
+          // We serialize and send the response in a detached coroutine so that
+          // the admission RPC does not wait on the coordinator notification.
+          ParallelBatch response;
+          co_await t_to_parallel_batch(*txs, response);
+          co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+          coord.pending_detached_coroutines_.fetch_sub(
+              1, std::memory_order_release);
+        }(*this, txs);
         co_return;
       });
 
@@ -376,7 +461,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     std::ofstream graph_dot(dot_path, std::ios::out | std::ios::trunc);
     graph_dot << submit_dag.dot();
   }
-  co_return;
+  co_return std::move(*outcomes);
 }
 
 x23::Async<void>
