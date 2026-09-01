@@ -118,6 +118,7 @@ add_x23_gtest(nmvec)
 add_x23_gtest(max_message_size)
 add_x23_gtest(srpc_sockio_regression)
 add_x23_gtest(shutdown)
+add_x23_gtest(rpc_drain)
 add_x23_gtest(sync)
 add_x23_gtest(threadpool)
 add_x23_gtest(detached)
@@ -128,6 +129,7 @@ add_x23_gtest(refcnt)
 
 if(GOOGLETEST_PATH)
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
+set_tests_properties(rpc_drain PROPERTIES TIMEOUT 30)
 # threadpool gets the same budget as the stress tests above rather than
 # shutdown's 10s.  DestructionWakeupStress creates and destroys 10000
 # thread pools, and its cost tracks the host's CPU count (a pool

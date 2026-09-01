@@ -7,6 +7,7 @@
 #include <expected>
 #include <sys/socket.h>
 #include <utility>
+#include <vector>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
@@ -42,10 +43,24 @@ RpcStreamImpl::fail()
   if (!ss_.request_stop())
     return;
 
+  // request_stop above makes this the only thread to get here, so the
+  // set can only lose this connection once.  Our caller's reference
+  // keeps us alive as the set drops its own.
+  if (RpcConnSet *cs = std::exchange(connset_, nullptr))
+    cs->erase(this);
+
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
   cp_->poison(fd_);
+}
+
+void
+RpcStreamImpl::drain()
+{
+  while (unsigned n = ncalls_.load(std::memory_order_acquire))
+    ncalls_.wait(n, std::memory_order_acquire);
+  cp_->wdrain(fd_);
 }
 
 Async<std::expected<std::uint32_t, Errno>>
@@ -157,15 +172,19 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
+        // The guard lives until the reply has been queued, so that
+        // drain() knows a call is still outstanding even while the
+        // server method itself is running.
+        CallGuard guard{*this};
         auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())
           cp_->dwrite(fd_, awaiter.await_resume());
         else
-          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
-            self->cp_->dwrite(self->fd_, co_await awaitable);
-          }(*this, std::move(awaitable));
+          [](CallGuard guard, auto awaitable) -> Detached {
+            guard->cp_->dwrite(guard->fd_, co_await awaitable);
+          }(std::move(guard), std::move(awaitable));
       }
       else
         send_msg(res);
@@ -174,3 +193,54 @@ RpcStreamImpl::reader(SLOC_ARG0)
 }
 
 } // namespace x23::detail
+
+namespace x23 {
+
+RpcConnSet::~RpcConnSet()
+{
+  auto p = conns_.take();
+  while (!p->empty())
+    p.wait(empty_);
+}
+
+void
+RpcConnSet::insert(detail::RpcStreamImpl &s)
+{
+  x23assert(!s.connset_);
+  s.connset_ = this;
+  conns_->emplace(&s, RefPtr{s});
+}
+
+void
+RpcConnSet::erase(detail::RpcStreamImpl *s)
+{
+  // Drop our reference outside the lock: it can be the last one, and
+  // destroying a stream runs code that wants the lock.
+  RefPtr<detail::RpcStreamImpl> conn;
+  auto p = conns_.take();
+  if (auto it = p->find(s); it != p->end()) {
+    conn = std::move(it->second);
+    p->erase(it);
+  }
+  // Notify while still holding the lock.  The destructor waits under
+  // the same lock, so notifying after releasing it could touch an
+  // empty_ that the destructor has already gone on to destroy.
+  if (p->empty())
+    empty_.notify_all();
+  p.reset();
+}
+
+void
+RpcConnSet::drain()
+{
+  std::vector<RefPtr<detail::RpcStreamImpl>> conns;
+  conns_.with([&conns](ConnMap &m) {
+    conns.reserve(m.size());
+    for (const auto &[_p, conn] : m)
+      conns.emplace_back(conn);
+  });
+  for (const auto &conn : conns)
+    conn->drain();
+}
+
+} // namespace x23

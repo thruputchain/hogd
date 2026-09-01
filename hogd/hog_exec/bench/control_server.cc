@@ -1,7 +1,6 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
-#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdlib>
@@ -574,7 +573,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   control_server.start_server(*control_port);
   control_server->impl()->wait_for_shutdown();
 
-  // This is a temporary bandaid until issue #597 is resolved.
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  // The shutdown RPC signalled us from its own handler, so its reply is
+  // still on its way out.  Wait for it before the destructor tears the
+  // connections down.
+  control_server.drain();
   return 0;
 }

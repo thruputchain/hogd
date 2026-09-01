@@ -114,6 +114,15 @@ Correct shutdown sequence (matches production `RpcServer` pattern):
 5. Destroy CoroPoll (`cp.reset()`)
 6. Destroy ThreadPool (`pool.reset()`)
 
+**Graceful shutdown** — a server that shuts itself down in response to an
+RPC must send that RPC's reply first, and steps 3 and 5 above both throw
+buffered replies away. Register each connection in an `RpcConnSet` as you
+configure it, then between steps 2 and 3 call `conns.drain()`, which waits
+for the calls in flight to finish and for `CoroPoll::wdrain` to hand their
+replies to the kernel. Both drains block the calling thread, so neither
+belongs in a coroutine running on the pool. hogd wraps this as
+`RpcServer::drain()`.
+
 ## Coroutine internals — known pitfalls
 
 **Suspend-point index race**: The compiler writes a 2-byte suspend-point index to the coroutine frame *between* `final_suspend()` returning its awaiter and `await_suspend()` being called on that awaiter. Any state publication in `final_suspend()` that allows another thread to destroy the coroutine frame creates a data race with this write. The fix pattern: defer publication to `await_suspend()`, which runs after the suspend-point write. See `Awaitable<T>`'s `TailCoro` and issue #1022.

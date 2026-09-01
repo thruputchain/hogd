@@ -207,6 +207,13 @@ CoroPoll::dwrite(BorrowedFd fd, Buf data)
   return 0;
 }
 
+void
+CoroPoll::wdrain(BorrowedFd fd)
+{
+  if (auto w = get_writer(fd))
+    w->drain(*this, fd);
+}
+
 Async<std::expected<void, Errno>>
 CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
 {

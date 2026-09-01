@@ -44,10 +44,7 @@ public:
 
   ~RpcServer()
   {
-    if (int lfd = listen_fd_; lfd != x23::kInvalidFd) {
-      cp_.poison(lfd);
-      listen_fd_.wait(lfd);
-    }
+    stop_accepting();
 
     {
       auto ptr = fdgen_.take();
@@ -56,6 +53,19 @@ public:
     }
 
     destroy_wait();
+  }
+
+  // Stop accepting new connections, then wait for the calls already in
+  // flight to run to completion and for their replies to reach the
+  // kernel.  Servers that shut themselves down in response to an RPC
+  // need this before they exit, since the destructor below poisons the
+  // connections, which throws buffered replies away.  It blocks the
+  // calling thread, and it waits on the clients too--a client that
+  // never reads its reply holds it up.
+  void drain()
+  {
+    stop_accepting();
+    conns_.drain();
   }
 
   std::pair<uint16_t, x23::UniqueFd> bind_server(uint16_t port)
@@ -98,6 +108,7 @@ public:
                          [self = x23::RefPtr(*this),
                           _d = x23::Defer([this] { eof(); })](auto c) {
                            c->max_message_size = self->max_message_size_;
+                           self->conns_.insert(*c);
                            self->fdgen_->insert_or_assign(c->get_fd(),
                                                           self->cp_.generation(
                                                               c->get_fd()));
@@ -125,10 +136,22 @@ public:
 
 private:
   Impl impl_;
+  // Connections leave the set when they fail, which is what poisoning
+  // their file descriptors above makes them do, so by the time
+  // destroy_wait() returns the set is empty.
+  x23::RpcConnSet conns_;
   x23::MVar<std::map<int, uint64_t>> fdgen_;
   bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};
+
+  void stop_accepting() noexcept
+  {
+    if (int lfd = listen_fd_; lfd != x23::kInvalidFd) {
+      cp_.poison(lfd);
+      listen_fd_.wait(lfd);
+    }
+  }
 
   void eof() noexcept
   {

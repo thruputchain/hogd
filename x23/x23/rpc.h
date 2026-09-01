@@ -83,6 +83,7 @@
 #include <atomic>
 #include <cassert>
 #include <concepts>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -310,6 +311,8 @@ template<typename T, typename VersMeta, typename... ExtraArgs>
 concept implements_async_rpc =
     implements_rpc<T, VersMeta, MaybeAsync, ExtraArgs...>;
 
+class RpcConnSet;
+
 namespace detail {
 class RpcStreamImpl : public RefCount {
 public:
@@ -319,6 +322,14 @@ public:
 
   void fail();
   int get_fd() const { return fd_.get(); }
+
+  // Wait for the calls this stream is currently serving to run to
+  // completion and for their replies to reach the kernel.  Blocks the
+  // calling thread, so never call it from a coroutine running in the
+  // thread pool, and call it before poisoning or closing the socket,
+  // which would throw the replies away.  See RpcConnSet::drain for
+  // how a server uses this at shutdown.
+  void drain();
 
 protected:
   UniqueFd fd_;
@@ -339,6 +350,19 @@ private:
   };
   MVar<ClientState> cstate_;
 
+  // Calls dispatched to a server whose replies have not yet been
+  // queued for writing.  drain() waits for this to reach zero.
+  std::atomic<unsigned> ncalls_{0};
+
+  // Set by RpcConnSet::insert, cleared by fail().  The set holds a
+  // reference to this stream until then, and won't let itself be
+  // destroyed while it still holds one, so this stays valid.
+  RpcConnSet *connset_{};
+
+  // Holds ncalls_ up across a server call and the queuing of its
+  // reply.  Defined below, since it holds a RefPtr to us.
+  class CallGuard;
+
   void send_msg(const rpc_msg &msg, const is_xdr_type auto &...x)
   {
     cp_->awrite(fd_, make_record(msg, x...));
@@ -348,8 +372,81 @@ private:
   Async<Errno> read_record(Buf *b SLOC_DECL);
 
   friend class RefCount;
+  friend class x23::RpcConnSet;
+};
+
+// When the reply isn't ready right away, the guard gets moved into a
+// coroutine frame, so it carries its own reference to the stream
+// rather than relying on the order in which the compiler destroys the
+// other parameter copies.
+class RpcStreamImpl::CallGuard {
+public:
+  explicit CallGuard(RpcStreamImpl &s) noexcept : s_(s)
+  {
+    s_->ncalls_.fetch_add(1, std::memory_order_relaxed);
+  }
+  CallGuard(CallGuard &&) noexcept = default;
+  ~CallGuard()
+  {
+    if (s_ && s_->ncalls_.fetch_sub(1, std::memory_order_release) == 1)
+      s_->ncalls_.notify_all();
+  }
+
+  RpcStreamImpl *operator->() const noexcept { return s_.get(); }
+
+private:
+  RefPtr<RpcStreamImpl> s_;
 };
 } // namespace detail
+
+// The set of connections a server is currently serving, so that its
+// shutdown path can wait for in-flight calls to finish and for their
+// replies to reach the kernel before it tears anything down.
+// Register each connection as you configure it:
+//
+//     RpcConnSet conns;
+//     auto [port, lfd] = tcp_rpc_server(cp, 0, [&conns, &impl](auto c) {
+//         conns.insert(*c);
+//         c->server(&impl);
+//       });
+//
+//     // ... and to shut the server down:
+//     cp.poison(lfd); // stop accepting new connections
+//     conns.drain();  // let the calls in flight finish replying
+//
+// A connection removes itself when it fails or the peer closes it, so
+// the set doesn't accumulate dead connections.
+class RpcConnSet {
+public:
+  RpcConnSet() noexcept = default;
+  RpcConnSet(RpcConnSet &&) = delete;
+
+  // Connections stay in the set until they fail, and point back at it
+  // the whole time, so the destructor waits for the set to empty out.
+  // Poison the connections' file descriptors (or destroy the CoroPoll)
+  // first, which is what makes their readers fail.
+  ~RpcConnSet();
+
+  // Add a connection to the set.  Call this before the stream starts
+  // serving, i.e., while you still hold its configurator.
+  void insert(detail::RpcStreamImpl &s);
+
+  // Wait for every connection in the set to finish the calls it is
+  // serving and write the replies.  Blocks the calling thread, so
+  // never call it from a coroutine running in the thread pool.  Poison
+  // the listening socket first, or a new connection can arrive after
+  // drain has already walked the set.
+  void drain();
+
+private:
+  friend class detail::RpcStreamImpl;
+  void erase(detail::RpcStreamImpl *s);
+
+  using ConnMap =
+      std::map<detail::RpcStreamImpl *, RefPtr<detail::RpcStreamImpl>>;
+  MVar<ConnMap> conns_;
+  std::condition_variable empty_;
+};
 
 template<typename Logger = RpcNoLogger>
 struct RpcStream : public detail::RpcStreamImpl {
