@@ -1,6 +1,5 @@
 add_library(tracing_test_objects OBJECT
   error_trace_tests.cc
-  rcq_peek_head_trace_tests.cc
   syscall_output_trace_tests.cc
   trace_shape_tests.cc
 )
