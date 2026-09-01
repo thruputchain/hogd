@@ -594,16 +594,18 @@ public:
   }
 
   // The context an executor would have opened the current block with. The
-  // executor cross-checks the height against the tip it pins, so this has to
-  // be the height the block will claim: the committed tip's height plus one.
-  // The framework commits block_height = the block's id, so that is
-  // dbtip_block_id_ + 1 -- which is NOT block_number_ in general, because
-  // discard_block() and reject_block() advance block_number_ without moving
-  // the tip. The timepoint is a fixed stand-in; nothing cross-checks it.
+  // executor cross-checks the height against the tip it pins, so this reads
+  // the height off that same tip -- the one definition of the executing
+  // block's height, and immune to drifting from what init_db_tip() computes.
+  //
+  // Deliberately not derived from any block id: a BlockID is an opaque
+  // identifier (generate_block_id() returns a nanosecond timestamp) and says
+  // nothing about chain position. The timepoint is a fixed stand-in; nothing
+  // cross-checks it.
   BlockExecutionContext get_block_execution_context() const
   {
     return BlockExecutionContext{
-        .block_height = static_cast<BlockHeight>(dbtip_block_id_) + 1,
+        .block_height = get_db_tip().value.proposal_header.block_height + 1,
         .block_timepoint = kTestBlockTimepoint,
     };
   }

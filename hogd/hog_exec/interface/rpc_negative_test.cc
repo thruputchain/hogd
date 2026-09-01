@@ -64,9 +64,9 @@ test_block_execution(uint64_t block_height)
 }
 
 // For blocks opened on top of the genesis tip the fixture loads, which commits
-// at height 0. Tests served by a BlockSnapshotServer instead get a mock parent
-// one block back, so their height is the block's own id -- they build their
-// own with test_block_execution().
+// at height 0. Tests served by a BlockSnapshotServer instead take the height
+// from that server (open_block_height()); a BlockID says nothing about chain
+// position, so it is never the source of a height.
 constexpr hogd::BlockExecutionContext kTestBlockExecution =
     test_block_execution(1);
 } // namespace
@@ -489,11 +489,11 @@ TEST_F(RpcNegativeTest,
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
-  // The snapshot server serves a parent tip one block back, so the height
-  // this block will claim is its own id.
-  const auto block_execution = test_block_execution(block_id);
-  const auto probe_block_execution =
-      test_block_execution(recycle_probe_block_id);
+  // Ask the server what height its tip implies rather than deriving one from
+  // a block id: the two are unrelated (a production BlockID is a timestamp).
+  const auto block_execution =
+      test_block_execution(snapshot_server->impl()->open_block_height());
+  const auto probe_block_execution = block_execution;
 
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_validation_block(block_id,
@@ -562,11 +562,11 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
-  // The snapshot server serves a parent tip one block back, so the height
-  // this block will claim is its own id.
-  const auto block_execution = test_block_execution(block_id);
-  const auto probe_block_execution =
-      test_block_execution(recycle_probe_block_id);
+  // Ask the server what height its tip implies rather than deriving one from
+  // a block id: the two are unrelated (a production BlockID is a timestamp).
+  const auto block_execution =
+      test_block_execution(snapshot_server->impl()->open_block_height());
+  const auto probe_block_execution = block_execution;
 
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
@@ -741,11 +741,13 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
-  // The snapshot server serves a parent tip one block back, so the height
-  // this block will claim is its own id. Every open below reuses it: the
-  // reopen guard rejects a second open whose context disagrees, and these
-  // reopens are meant to be rejected for the closing state instead.
-  const auto block_execution = test_block_execution(block_id);
+  // Ask the server what height its tip implies rather than deriving one from
+  // a block id: the two are unrelated (a production BlockID is a timestamp).
+  // Every open below reuses this value: the reopen guard rejects a second
+  // open whose context disagrees, and these reopens are meant to be rejected
+  // for the closing state instead.
+  const auto block_execution =
+      test_block_execution(snapshot_server->impl()->open_block_height());
 
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,

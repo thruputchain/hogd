@@ -44,10 +44,7 @@
 namespace {
 // The executor checks the height the scheduler supplies against the one its db
 // tip implies, so the height has to be the parent's committed height plus one.
-// close_block records block_height = the block id, so that is the parent's id
-// plus one -- which is not the opened block's own id here, since these tests
-// jump to a distant block id for the block under test. The timepoint is not
-// cross-checked against anything, so a stand-in is fine.
+// The timepoint is not cross-checked against anything, so a stand-in is fine.
 constexpr hogd::BlockExecutionContext
 test_block_execution(uint64_t block_height)
 {
@@ -124,10 +121,16 @@ protected:
   }
   EventCard make_event_card() { return event_wrapper_.make_event_card(); }
 
+  // Heights are tracked explicitly rather than read off a block id: the two
+  // are unrelated (a production BlockID is a nanosecond timestamp), and these
+  // tests jump to a distant id for the block under test while its height just
+  // continues the chain.
+  BlockHeight committed_height_ = 0;
+
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
     auto open_res = client_.executorsched_open_proposal_block(
-        block_id, test_block_execution(parent_block_id + 1));
+        block_id, test_block_execution(committed_height_ + 1));
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
     auto db_res = db_client_.dbsched_create_snapshot(
@@ -144,18 +147,20 @@ protected:
     auto client_finish_res = client_.executorsched_finish_block(block_id);
     ASSERT_EQ(client_finish_res, ExecResult::ExecResultOK);
 
-    // We use [block_id] as the height as well.
+    const BlockHeight height = committed_height_ + 1;
     auto event_close_res =
-        event_client_.eventsched_close_block(block_id, block_id);
+        event_client_.eventsched_close_block(block_id, height);
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
     ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
 
     ConsensusValue value{};
-    value.proposal_header.block_height = block_id;
+    value.proposal_header.block_height = height;
     auto db_commit_res = db_client_.dbsched_commit_snapshot(block_id, value);
     ASSERT_EQ(db_commit_res.result(), DbSchedResult::DbSchedResultOK);
+
+    committed_height_ = height;
   }
 };
 

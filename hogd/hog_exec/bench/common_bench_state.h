@@ -133,6 +133,22 @@ public:
   // rejected at commit).
   BlockID block_height() const { return block_number_; }
 
+  // The context an executor would open the current block with. The height is
+  // read off the tip the executor will itself pin -- never derived from a
+  // block id, which is an opaque identifier and says nothing about chain
+  // position. Nothing cross-checks the timepoint, so a stand-in is fine.
+  BlockExecutionContext get_block_execution_context() const
+  {
+    auto tip = db_proxy_->get_db_tip(block_number_);
+    if (!tip.has_value()) {
+      panic("Failed to read db tip for block {}", block_number_);
+    }
+    return BlockExecutionContext{
+        .block_height = (*tip)->value.proposal_header.block_height + 1,
+        .block_timepoint = 1'700'000'000,
+    };
+  }
+
   // Replay-cache-safe uniquifier assignment for benchmarks.
   //
   // HogDb enforces unique Uniquifier consumption per invoked address, with at
@@ -273,10 +289,6 @@ private:
   uint16_t coord_port_;
 
   std::atomic<TransactionID> next_tx_id_ = 0;
-  // The bench chains parent = block - 1 and commits block_height = the
-  // block's id, so the height an executor would open with is block_number_.
-  // Nothing cross-checks the timepoint, so a fixed stand-in is fine.
-  static constexpr TimePoint kBenchBlockTimepoint = 1'700'000'000;
   BlockID block_number_ = 0;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
@@ -326,13 +338,10 @@ CommonBenchState::advance_block()
 
   block_number_++;
 
-  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
-      block_number_,
-      BlockExecutionContext{
-          .block_height = static_cast<BlockHeight>(block_number_),
-          .block_timepoint = kBenchBlockTimepoint,
-      },
-      *db_proxy_);
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 }
 
 // leaves the benchmark in a state where it's ready to execute transactions
@@ -381,13 +390,10 @@ CommonBenchState::run_genesis_configuration(
   }
 
   block_number_++;
-  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
-      block_number_,
-      BlockExecutionContext{
-          .block_height = static_cast<BlockHeight>(block_number_),
-          .block_timepoint = kBenchBlockTimepoint,
-      },
-      *db_proxy_);
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 
   open_event_block(block_number_);
 
@@ -432,13 +438,10 @@ CommonBenchState::run_genesis_configuration(
   }
 
   block_number_++;
-  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
-      block_number_,
-      BlockExecutionContext{
-          .block_height = static_cast<BlockHeight>(block_number_),
-          .block_timepoint = kBenchBlockTimepoint,
-      },
-      *db_proxy_);
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
   open_event_block(block_number_);
 
   auto runtime_context = make_hog_exec_context();

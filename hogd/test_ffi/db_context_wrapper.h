@@ -47,6 +47,11 @@ public:
             Contract const &genesis_root_contract,
             NetworkConfig const &network_config);
 
+  // The context an executor would open the current block with: the height is
+  // the tip's height plus one, read off the tip rather than derived from a
+  // block id (an opaque identifier that says nothing about chain position).
+  BlockExecutionContext block_execution_context() const;
+
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
 

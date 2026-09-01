@@ -100,6 +100,19 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
   advance_new_block();
 }
 
+BlockExecutionContext
+DBContext::block_execution_context() const
+{
+  auto tip = db_proxy_->get_db_tip(current_block_id_);
+  if (!tip.has_value()) {
+    throw std::runtime_error("block_execution_context: get_db_tip failed");
+  }
+  return BlockExecutionContext{
+      .block_height = (*tip)->value.proposal_header.block_height + 1,
+      .block_timepoint = 1'700'000'000,
+  };
+}
+
 void
 DBContext::advance_new_block(BlockExecutionMode mode)
 {
@@ -131,14 +144,10 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   current_block_id_++;
   snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
       current_block_id_,
-      // Parent is current_block_id_ - 1, committed at that height, so
-      // the height this block claims is its own id. Nothing
-      // cross-checks the timepoint.
-      BlockExecutionContext{
-          .block_height = static_cast<BlockHeight>(current_block_id_),
-          .block_timepoint = 1'700'000'000,
-      },
-      *db_proxy_);
+      // Read the height off the tip the executor will itself pin. A BlockID
+      // is an opaque identifier and says nothing about chain position, so it
+      // is never the source of a height. Nothing cross-checks the timepoint.
+      block_execution_context(), *db_proxy_);
   event_server_.open_block(current_block_id_)();
 }
 
