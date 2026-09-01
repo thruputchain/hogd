@@ -224,7 +224,21 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
                          const StorageLongHash &db_hash)
 {
   DbTip new_tip;
+  bool network_hash_mismatch = false;
   tip_.with([&](DbTip &tip) {
+    // The network hash is fixed for the life of the chain, but it lives in
+    // the consensus value, which this replaces wholesale rather than carrying
+    // forward the way default_wallet and network_config are. A caller that
+    // builds a value without it moves the chain onto network zero, and
+    // contracts reading GetNetworkHash then see a different network than
+    // signatures are verified against. Genesis installs it -- the tip before
+    // it is pre-genesis, at height -1 -- and every commit after must agree.
+    if (tip.value.proposal_header.block_height >= 0 &&
+        value.proposal_header.network_hash !=
+            tip.value.proposal_header.network_hash) {
+      network_hash_mismatch = true;
+      return;
+    }
     tip.value = std::move(value);
     tip.storage_long_hash = db_hash;
     tip.id = bid;
@@ -233,6 +247,12 @@ RPCContext::update_dbtip(BlockTXID bid, ConsensusValue value,
     current_committed_id_.store(bid, std::memory_order_release);
     new_tip = tip;
   });
+  if (network_hash_mismatch) [[unlikely]] {
+    error("Refusing to commit block {}: its consensus value carries a "
+          "different network hash than the committed tip",
+          bid);
+    return HogDbError(HogDbCode::kInternal);
+  }
   return get_db().write_dbtip(new_tip);
 }
 

@@ -253,6 +253,10 @@ private:
       DbSched1::client<x23::SRpcStream<x23::RpcLogger>::ClientRef>;
 
   BlockID current_block_id_ = 0;
+  // The network this chain belongs to. Every committed value carries it, not
+  // just genesis: the commit path replaces the persisted tip wholesale, so a
+  // value that omits it puts the chain back on network zero.
+  NetworkHash network_hash_;
 
   HogdbWrapper hog_db_wrapper_;
 

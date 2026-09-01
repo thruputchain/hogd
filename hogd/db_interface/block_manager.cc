@@ -228,6 +228,7 @@ BlockManager::initialize_genesis_configuration(
 
   default_wallet_.emplace(config.default_wallet);
   network_config_.emplace(config.network_config);
+  network_hash_.emplace(config.network_hash);
 
   cost_model_.emplace(config.storage_cost_model);
 
