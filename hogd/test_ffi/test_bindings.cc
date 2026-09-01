@@ -390,6 +390,15 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
               .ffi_error_code = kTestFFIErrorCodeDeserializeError};
     }
 
+    // get_snapshot_item() reads current_block_id_ and queries the snapshot that
+    // id names; advance_new_block() changes both. Borrow across the read so the
+    // two cannot interleave (issue #2704).
+    DBContext::Borrow borrow(*db_context);
+    if (!borrow.held()) {
+      return {.data = kNullBuffer,
+              .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+    }
+
     auto item = db_context->get_snapshot_item(deserialized_addrkey);
     if (!item.has_value()) {
       return {.data = kNullBuffer, .ffi_error_code = kTestFFIErrorCodeNone};

@@ -95,7 +95,8 @@ public:
   // state was admitted against state the operation then destroyed (issue
   // #3049). Both sides now decide under lifecycle_state_'s lock: a transition
   // is admitted only with no handler open and no other transition in flight,
-  // and a handler only with no transition in flight.
+  // and a handler only with no transition in flight. A standalone snapshot read
+  // borrows the same way for the length of the read (issue #2704); see Borrow.
 
   // Registers a handler's borrow of this DBContext. Returns false when a
   // lifecycle transition is in flight; the caller must not borrow DB state in
@@ -118,6 +119,33 @@ public:
       --state.open_handlers;
     });
   }
+
+  // Scoped borrow for a caller that reads block-scoped state without opening a
+  // handler: get_snapshot_storage_item() (issue #2704). Non-throwing, so a
+  // noexcept FFI entry point can turn a refusal into a structured error.
+  class Borrow {
+  public:
+    explicit Borrow(DBContext &db)
+      : db_(&db), held_(db.try_register_open_handler())
+    {}
+    ~Borrow()
+    {
+      if (held_) {
+        db_->unregister_open_handler();
+      }
+    }
+
+    Borrow(Borrow const &) = delete;
+    Borrow &operator=(Borrow const &) = delete;
+    Borrow(Borrow &&) = delete;
+    Borrow &operator=(Borrow &&) = delete;
+
+    bool held() const { return held_; }
+
+  private:
+    DBContext *db_;
+    bool held_;
+  };
 
   bool has_open_handlers() const { return lifecycle_state_->open_handlers > 0; }
 

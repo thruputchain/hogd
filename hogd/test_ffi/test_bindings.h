@@ -33,6 +33,10 @@ extern "C" {
 // borrows nothing and returns a null handler; retry it once the advance
 // returns.
 //
+// get_snapshot_storage_item() takes that same exclusion for the length of the
+// read, since it queries the snapshot an advance replaces: whichever of the two
+// arrives second is rejected, and either is fine to retry.
+//
 // free_db() is weaker, and no in-library guard can make it otherwise: it
 // destroys the `db` handle itself, so a call that is already inside the
 // library -- an open_syscall_handler() still deserializing its argument, say --
