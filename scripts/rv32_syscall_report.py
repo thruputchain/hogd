@@ -508,7 +508,10 @@ def print_table(data):
             print()
             print(f"measured: {base:.1f} ns + {per_byte:.4f} ns/byte "
                   f"(R2={r_squared:.4f})")
-            print("charged:  500 gas + 100 gas/byte  (SHA256HashCost)")
+            print(f"charged:  {COMMITTED_SYSCALL_BASE_GAS} base + "
+                  f"{COMMITTED_SHA256_BASE_GAS} gas + "
+                  f"{COMMITTED_SHA256_BLOCK_GAS} gas per "
+                  f"{SHA256_BLOCK_BYTES}-byte block  (SHA256HashCost)")
             rates = [ns / int(measured[f'entry/SHA256/{size}'].get('gas', 0))
                      for size, ns in points
                      if int(measured[f"entry/SHA256/{size}"].get("gas", 0))]
@@ -535,6 +538,58 @@ def print_table(data):
         print("Their cost is real and their price is not. --schedule proposes "
               "one.")
     return 0
+
+
+# SHA-256 geometry, and the schedule currently committed in
+# hogd/hog_exec/runtime/gas_cost_table.h. Mirrored here so the report can say
+# what a guest is billed today; they must move together with that header, which
+# is why they are named once rather than spelled inline at each use.
+SHA256_BLOCK_BYTES = 64
+SHA256_PAD_BYTES = 9          # 0x80 plus an 8-byte big-endian bit length
+COMMITTED_SYSCALL_BASE_GAS = 50
+COMMITTED_SHA256_BASE_GAS = 2
+COMMITTED_SHA256_BLOCK_GAS = 22
+
+
+def sha256_blocks(byte_len):
+    """Compression blocks a SHA-256 of this length performs, padding included."""
+    return (byte_len + SHA256_PAD_BYTES + SHA256_BLOCK_BYTES - 1) \
+        // SHA256_BLOCK_BYTES
+
+
+def committed_sha256_gas(byte_len):
+    return (COMMITTED_SYSCALL_BASE_GAS + COMMITTED_SHA256_BASE_GAS
+            + COMMITTED_SHA256_BLOCK_GAS * sha256_blocks(byte_len))
+
+
+def fit_sha256_blocks(points):
+    """Least squares against compression blocks: (base_ns, ns_per_block, r2).
+
+    The block is what SHA-256 actually does, and the measurement says so --
+    this fit lands at R2 = 1.000000 where the per-byte one merely rounds to it.
+    Fitting the real unit is also what removes the need for a rate denominator:
+    a per-byte price is a fraction no integer can express, and the divisor that
+    would fix it is exactly the sort of billing-relevant constant that is easy
+    to leave out of the gas-schedule digest.
+    """
+    if len(points) < MIN_SWEEP_POINTS:
+        return None
+    xs = [sha256_blocks(n) for n, _ in points]
+    ys = [ns for _, ns in points]
+    m = len(xs)
+    sx, sy = sum(xs), sum(ys)
+    sxx = sum(x * x for x in xs)
+    sxy = sum(x * y for x, y in zip(xs, ys))
+    denom = m * sxx - sx * sx
+    if denom == 0:
+        return None
+    slope = (m * sxy - sx * sy) / denom
+    intercept = (sy - slope * sx) / m
+    mean = sy / m
+    ss_tot = sum((y - mean) ** 2 for y in ys)
+    ss_res = sum((y - (intercept + slope * x)) ** 2 for x, y in zip(xs, ys))
+    r_squared = 1.0 if ss_tot == 0 else 1.0 - ss_res / ss_tot
+    return intercept, slope, r_squared
 
 
 def build_schedule(bench, calibration, resolution, margin=0.0):
@@ -632,6 +687,18 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
             "byte_denominator": denominator,
             "byte_overcharge": overcharge,
         }
+        block_fit = fit_sha256_blocks(sha256_points(measured))
+        if block_fit:
+            block_base_ns, per_block_ns, block_r2 = block_fit
+            block_excess_ns = max(0.0, block_base_ns - proposal["base_ns"])
+            proposal["sha256"].update({
+                "block_base_ns": block_base_ns,
+                "per_block_ns": per_block_ns,
+                "block_r_squared": block_r2,
+                "block_gas": to_gas(per_block_ns),
+                "block_base_gas": (to_gas(block_excess_ns)
+                                   if block_excess_ns > 0 else 0),
+            })
         proposal["sweep"] = sha256_points(measured)
     return proposal
 
@@ -750,12 +817,11 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
             # What the guest causes, not what the handler alone costs: the
             # crossing is part of the price being set.
             real = ns + proposal["seam_ns"]
-            now = 500 + 100 * size
+            now = committed_sha256_gas(size)
             flat = (proposal["base_gas"] + sha["base_gas"] +
                     sha["flat_byte_gas"] * size)
-            proposed = (proposal["base_gas"] + sha["base_gas"] +
-                        -(-sha["byte_numerator"] * size //
-                          sha["byte_denominator"]))
+            proposed = (proposal["base_gas"] + sha.get("block_base_gas", 0) +
+                        sha.get("block_gas", 0) * sha256_blocks(size))
             for key, gas in (("now", now), ("flat", flat),
                              ("proposed", proposed)):
                 rates[key].append(real / gas if gas else float("inf"))
@@ -777,34 +843,33 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     print("=" * 68)
     print(f"constexpr static uint64_t kSyscallBaseCost = "
           f"{proposal['base_gas']};")
-    if sha:
+    if sha and "block_gas" in sha:
         print(f"constexpr static uint64_t kSHA256HashBaseCost = "
-              f"{sha['base_gas']};   // was 500")
-        print(f"constexpr static uint64_t kSHA256HashByteCost = "
-              f"{sha['byte_numerator']};     // was 100")
-        if sha["byte_denominator"] > 1:
-            print(f"constexpr static uint64_t kSHA256HashByteDivisor = "
-                  f"{sha['byte_denominator']};  // new")
-            print()
-            print("  SHA256HashCost then charges")
-            print("    base + ceil(bytes * kSHA256HashByteCost /")
-            print("                kSHA256HashByteDivisor)")
-            print("  Ceiling, not truncation: rounding a charge down is the")
-            print("  unsafe direction, and integer division rounds down.")
-            print()
-            print("  READ THIS BEFORE ADOPTING THE DIVISOR. gas_schedule_digest()")
-            print("  in artifact.h hashes kSyscallGasCostSchedule's names and")
-            print("  costs -- not SHA256HashCost's formula. A divisor that is")
-            print("  only a constant in the lambda changes what every contract")
-            print("  is billed while the digest sits still, which is the exact")
-            print("  failure the digest exists to prevent. It has to be an")
-            print("  entry in kSyscallGasCostSchedule to be hashed.")
+              f"{sha['block_base_gas']};"
+              f"   // committed: {COMMITTED_SHA256_BASE_GAS}")
+        print(f"constexpr static uint64_t kSHA256HashBlockCost = "
+              f"{sha['block_gas']};"
+              f"  // committed: {COMMITTED_SHA256_BLOCK_GAS}")
+        print()
+        print("  SHA256HashCost charges")
+        print(f"    base + block_cost * ceil((bytes + {SHA256_PAD_BYTES})"
+              f" / {SHA256_BLOCK_BYTES})")
+        print("  Per compression block, because that is the unit SHA-256")
+        print(f"  actually works in: the fit is R2="
+              f"{sha.get('block_r_squared', 0):.6f} against blocks. It also")
+        print("  avoids a per-byte rate, which is a fraction no integer can")
+        print("  express -- and the divisor that would fix that is exactly the")
+        print("  kind of billing-relevant constant that is easy to leave out")
+        print("  of the digest. gas_schedule_digest() in artifact.h hashes")
+        print("  kSyscallGasCostSchedule's names and costs, not the formula,")
+        print("  so any constant the formula reads has to be an")
+        print("  entry in kSyscallGasCostSchedule to be hashed.")
     print()
-    print("kSyscallBaseCost is new: every syscall charges it, which is the")
-    print("change the measurement actually argues for. Adding it means adding")
-    print("an entry to kSyscallGasCostSchedule, which is folded into")
-    print("rv32::kGasScheduleDigest -- so the pinned digest in artifact.h and")
-    print("every committed RV32 artifact move in the same change.")
+    print("Changing any of these is a coordinated gas-schedule update: each")
+    print("is an entry in kSyscallGasCostSchedule, which is folded into")
+    print("rv32::kGasScheduleDigest -- so the pinned digest in artifact.h, the")
+    print("artifact format fingerprint derived from it, and any artifact")
+    print("stamped with the current schedule all move in the same change.")
     return 0
 
 

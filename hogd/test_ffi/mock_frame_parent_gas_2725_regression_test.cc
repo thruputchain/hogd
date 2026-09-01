@@ -72,9 +72,12 @@
 namespace hogd {
 namespace {
 
-// Gas a one-byte kSHA256 syscall costs. The tests size the parent frame around
-// this so the child's spend lands exactly on, or just under, the parent budget.
-constexpr GasAmount kShaGas = SHA256HashCost(1);
+// Gas a one-byte kSHA256 syscall costs, in total: what the body bills for the
+// hash plus the crossing every syscall pays, which wrap_after_parse_async adds
+// centrally. The tests size the parent frame around this so the child's spend
+// lands exactly on, or just under, the parent budget -- so it has to be the
+// whole charge, not just the body's share.
+constexpr GasAmount kShaGas = SHA256HashCost(1) + kSyscallBaseCost;
 
 Invocation
 make_invocation(ContractAddress address, uint64_t method, GasAmount gas_limit)

@@ -690,6 +690,10 @@ constexpr static uint64_t kSHA256HashByteCost = 11;    // was 100
 constexpr static uint64_t kSHA256HashByteDivisor = 32; // new
 ```
 
+That per-byte shape is what an earlier revision of the report proposed, and it
+is not what was committed. See **What landed** below: pricing per compression
+block says the same thing more accurately and removes the divisor entirely.
+
 hog10 is roughly 40% faster than the container these numbers were first taken on
 and far quieter with it: per-syscall standard deviations of 0.04-0.27 ns against
 0.2-2.2. The *shape* is identical -- one crossing cost that swamps every
@@ -717,6 +721,65 @@ is the fit's intercept over the whole size sweep, not the 115.9 ns measured at
 zero bytes -- different quantities, agreeing to 4%. Of it, about 79 ns is the
 crossing every syscall already pays, leaving 32.2 ns of SHA256's own work.
 Charging its full base as well would bill the crossing twice.
+
+
+### What landed
+
+The schedule committed in `gas_cost_table.h`, measured on hog10 (run
+33469060485) at a gas unit of 1.6241 ns:
+
+```
+constexpr static uint64_t kSyscallBaseCost         = 50;
+constexpr static uint64_t kSHA256HashBaseCost      = 2;
+constexpr static uint64_t kSHA256HashBlockCost     = 22;
+constexpr static uint64_t kVerifySignatureBaseCost = 17750;
+constexpr static uint64_t kVerifySignatureBlockCost = 131;
+```
+
+**Per compression block, not per byte.** SHA-256 works in fixed 64-byte blocks
+and the measurement follows that exactly: 34.53 ns per block at R2 = 1.000000,
+where the per-byte fit only rounds to 1.0000. Pricing the real unit is also
+what removed the divisor. A per-byte price is 0.33 gas, a fraction no integer
+expresses, and the denominator that would fix it is precisely the sort of
+billing-relevant constant that is easy to leave out of the digest -- the hazard
+this document flagged before the schedule was written. In the block model there
+is no denominator to forget: the 64 is SHA-256's, not a policy knob.
+
+Every constant the cost functions read is an entry in
+`kSyscallGasCostSchedule`, so all of them are hashed. Block *geometry* -- the
+64, the 9-byte padding tail -- is static_asserted rather than hashed, because a
+wrong value there is a bug in the cost model rather than a repricing of it.
+
+How it bills against what was measured, crossing included:
+
+| row | measured ns | charged | ratio |
+|---|---|---|---|
+| `SHA256/0` | 117.4 | 75 gas | 1.04x |
+| `SHA256/1024` | 673.2 | 427 gas | 1.03x |
+| `SHA256/32768` | 17798.4 | 11339 gas | 1.03x |
+| `SHA256Update/4096` | 2286.0 | 1459 gas | 1.04x |
+| `SHA256Finalize` | 114.0 | 73 gas | 1.04x |
+| `VerifySignature/0` | 28635.5 | 17932 gas | 1.02x |
+| `VerifySignature/1024` | 30631.7 | 18980 gas | 1.01x |
+| `GetBlockHeight` | 69.9 | 51 gas | 1.18x |
+
+Nothing undercharges, and the spread across a single syscall's argument range
+is 1.02x for SHA256 where the old schedule's was 43x.
+
+**Three things were free and are not any more.** `VerifySignature` did ~17.6k
+gas of real work for nothing. The incremental hash family -- `SHA256Update`,
+`SHA256Copy`, `SHA256Finalize` -- reached the same compression function as the
+one-shot at zero cost, so `SHA256Update(4096)` did the work of a
+410,100-gas `SHA256(4096)` for free. And the entry path itself was free however
+often it was crossed, which is what `kSyscallBaseCost` fixes; it is charged
+centrally in `wrap_after_parse_async` so a syscall added later cannot forget it
+and a call that faulted still pays for the entry it used.
+
+**A failed signature is charged.** `syscall_VerifySignature_inner` returned zero
+gas when verification failed, but ed25519 only exits early when the encoded
+point fails to decompress -- which the attacker choosing the signature
+controls. Billing failure at zero would have sold unbounded verification for
+the price of the crossing.
 
 ### The per-byte term cannot be an integer, and that is fixable cheaply
 
