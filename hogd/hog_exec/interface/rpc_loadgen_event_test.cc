@@ -42,11 +42,12 @@
 #include "x23/vec.h"
 
 namespace {
-// The block's height must be the one the block will actually commit --
-// close_block records block_height = the block id, and the executor checks
-// the supplied height against the tip it reads, so a fixed constant only
-// agrees for the first block. The timepoint is not cross-checked against
-// anything, so a stand-in is fine.
+// The executor checks the height the scheduler supplies against the one its db
+// tip implies, so the height has to be the parent's committed height plus one.
+// close_block records block_height = the block id, so that is the parent's id
+// plus one -- which is not the opened block's own id here, since these tests
+// jump to a distant block id for the block under test. The timepoint is not
+// cross-checked against anything, so a stand-in is fine.
 constexpr hogd::BlockExecutionContext
 test_block_execution(uint64_t block_height)
 {
@@ -126,7 +127,7 @@ protected:
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
     auto open_res = client_.executorsched_open_proposal_block(
-        block_id, test_block_execution(block_id));
+        block_id, test_block_execution(parent_block_id + 1));
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
     auto db_res = db_client_.dbsched_create_snapshot(

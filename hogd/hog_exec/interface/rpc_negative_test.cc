@@ -47,14 +47,28 @@
 #include "x23/vec.h"
 
 namespace {
-// These tests exercise the executor's block state machine, not the
-// block's contents, so any consistent context will do. It has to be the
-// same value for every open of a given block: open_block rejects a
-// reopen whose context disagrees.
-constexpr hogd::BlockExecutionContext kTestBlockExecution{
-    .block_height = 1,
-    .block_timepoint = 1,
-};
+// The executor cross-checks the height the scheduler supplies against the one
+// its db tip implies (the tip's height plus one), so a test's context has to
+// agree with whatever tip that test's db serves. The timepoint is not
+// cross-checked against anything, so a stand-in is fine.
+//
+// The context also has to be the same value for every open of a given block:
+// open_block rejects a reopen whose context disagrees.
+constexpr hogd::BlockExecutionContext
+test_block_execution(uint64_t block_height)
+{
+  return hogd::BlockExecutionContext{
+      .block_height = static_cast<hogd::BlockHeight>(block_height),
+      .block_timepoint = 1,
+  };
+}
+
+// For blocks opened on top of the genesis tip the fixture loads, which commits
+// at height 0. Tests served by a BlockSnapshotServer instead get a mock parent
+// one block back, so their height is the block's own id -- they build their
+// own with test_block_execution().
+constexpr hogd::BlockExecutionContext kTestBlockExecution =
+    test_block_execution(1);
 } // namespace
 
 namespace hogd {
@@ -475,9 +489,15 @@ TEST_F(RpcNegativeTest,
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
+  // The snapshot server serves a parent tip one block back, so the height
+  // this block will claim is its own id.
+  const auto block_execution = test_block_execution(block_id);
+  const auto probe_block_execution =
+      test_block_execution(recycle_probe_block_id);
+
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_validation_block(block_id,
-                                                        kTestBlockExecution),
+                                                        block_execution),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
@@ -511,7 +531,7 @@ TEST_F(RpcNegativeTest,
   // resuming this stalled validation then trips UAF or reads through the
   // wrong block snapshot. Sanitized builds catch that old behavior reliably.
   ASSERT_EQ(client_.executorsched_open_validation_block(recycle_probe_block_id,
-                                                        kTestBlockExecution),
+                                                        probe_block_execution),
             ExecResult::ExecResultOK);
   open_event_block(recycle_probe_block_id);
 
@@ -542,9 +562,15 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
+  // The snapshot server serves a parent tip one block back, so the height
+  // this block will claim is its own id.
+  const auto block_execution = test_block_execution(block_id);
+  const auto probe_block_execution =
+      test_block_execution(recycle_probe_block_id);
+
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
-                                                      kTestBlockExecution),
+                                                      block_execution),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
@@ -572,7 +598,7 @@ TEST_F(RpcNegativeTest, TestFinishBlockDoesNotRecycleSnapshotCacheDuringPropose)
   // can retarget the recycled snapshot cache. Sanitized builds should catch
   // that shutdown/GC regression here.
   ASSERT_EQ(client_.executorsched_open_proposal_block(recycle_probe_block_id,
-                                                      kTestBlockExecution),
+                                                      probe_block_execution),
             ExecResult::ExecResultOK);
   open_event_block(recycle_probe_block_id);
 
@@ -715,9 +741,15 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
     snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
   });
 
+  // The snapshot server serves a parent tip one block back, so the height
+  // this block will claim is its own id. Every open below reuses it: the
+  // reopen guard rejects a second open whose context disagrees, and these
+  // reopens are meant to be rejected for the closing state instead.
+  const auto block_execution = test_block_execution(block_id);
+
   init_executor(make_shard_card(snapshot_port));
   ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
-                                                      kTestBlockExecution),
+                                                      block_execution),
             ExecResult::ExecResultOK);
   open_event_block(block_id);
 
@@ -740,17 +772,17 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
 
   // The block is now closing: count 0, context alive via the stalled tx.
   EXPECT_EQ(client_.executorsched_open_proposal_block(block_id,
-                                                      kTestBlockExecution),
+                                                      block_execution),
             ExecResult::ExecResultSystemError);
   EXPECT_EQ(client_.executorsched_open_validation_block(block_id,
-                                                        kTestBlockExecution),
+                                                        block_execution),
             ExecResult::ExecResultSystemError);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultSystemError);
   // The stray finish must not have decremented the count: the reopen guard
   // still rejects.
   EXPECT_EQ(client_.executorsched_open_proposal_block(block_id,
-                                                      kTestBlockExecution),
+                                                      block_execution),
             ExecResult::ExecResultSystemError);
 
   snapshot_server->impl()->release_stalled_item(setup.stalled_addrkey);
@@ -762,7 +794,7 @@ TEST_F(RpcNegativeTest, TestSameBlockIdLifecycleWhileClosing)
   // The straggler resolved and its release_context ran gc, so the same id is
   // a fresh block again.
   ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
-                                                      kTestBlockExecution),
+                                                      block_execution),
             ExecResult::ExecResultOK);
   EXPECT_EQ(client_.executorsched_finish_block(block_id),
             ExecResult::ExecResultOK);
