@@ -356,7 +356,14 @@ public:
     }
   }
 
+  // Hashes a txset this node built itself. Fatal if [hashes] repeats a
+  // transaction hash.
   static SHA256Hash get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
+
+  // Hashes a txset that came off the wire. Returns nullopt if [hashes] repeats
+  // a transaction hash, which no well-formed nomination does.
+  static std::optional<SHA256Hash>
+  try_get_txset_hash(const x23::XdrVec<TransactionHash> &hashes);
 
   bool ready() const { return ready_.load(std::memory_order_acquire); }
 

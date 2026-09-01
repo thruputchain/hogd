@@ -3474,3 +3474,78 @@ main(int argc, char *argv[])
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+// A nomination that repeats a transaction hash decodes cleanly and keeps the
+// hash and nondeterministic-data counts equal, so it reaches txset hashing.
+// Building the txset is a set insertion, and the repeat is the one input that
+// fails it -- which used to abort the validator instead of voting the block
+// down. See https://github.com/groundhogchain/hogd/issues/2661.
+TEST(Mempool, TxsetHashRejectsDuplicateHashes)
+{
+  TransactionHashBatch tx_hashes{sha256(uint64_t{1}), sha256(uint64_t{1})};
+
+  EXPECT_FALSE(
+      MempoolCoordinatorRpc::try_get_txset_hash(tx_hashes).has_value());
+}
+
+TEST(Mempool, TxsetHashAcceptsDistinctHashes)
+{
+  TransactionHashBatch tx_hashes{sha256(uint64_t{1}), sha256(uint64_t{2})};
+
+  std::optional<SHA256Hash> txset_hash =
+      MempoolCoordinatorRpc::try_get_txset_hash(tx_hashes);
+  ASSERT_TRUE(txset_hash.has_value());
+  EXPECT_EQ(*txset_hash, MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
+}
+
+TEST(Mempool, ValidateDuplicateProposalHashesIsRejected)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // We reuse the proposed [Proposal] so the nomination names a transaction
+  // this node actually holds -- a nomination of unknown hashes is rejected as
+  // [SchedulerValidationMissingTxs] before the txset hash is ever compared.
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  TransactionHashBatch tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
+                                  kNoBatchSizeLimit)());
+  ASSERT_EQ(tx_hashes.size(), 1UL);
+  x23::XdrVec<NondeterministicProposalData> tx_nominations;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
+                                  tx_nominations, kNoBatchSizeLimit)());
+  ASSERT_EQ(tx_nominations.size(), 1UL);
+
+  // Repeating the sole transaction keeps both batches decodable and keeps
+  // their element counts equal, which is every structural property validation
+  // checks before it builds the txset.
+  proposal.transactions.hash = repeated_parallel_batch(tx_hashes, 2);
+  proposal.transactions.nondeterministic_data =
+      repeated_parallel_batch(tx_nominations, 2);
+
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  db_tip = get_tip.db_tip();
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+
+  SchedulerValidationResult res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationOutcome::SchedulerValidationInvalid);
+}
