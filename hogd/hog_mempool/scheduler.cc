@@ -1171,6 +1171,14 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
     const ContractAddress &account = kv.first;
     if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
+      // We do not CHECK that the account is removed from [ready_accounts_]
+      // because the account may not be currently in [ready_accounts_]. For
+      // example, if a tx is submitted that the contract does not have enough
+      // hogs for, the contract is removed from [ready_accounts_]. If other txs
+      // for that contract are committed in this block (maybe the contract had
+      // enough hogs for some of the txs but not all of them), then the line
+      // below will not remove [account] from [ready_accounts_] because the
+      // contract is already not in [ready_accounts_].
       ready_accounts_.erase(get_account_key(account));
     }
   });
