@@ -374,6 +374,132 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
   ASSERT_FALSE(handler.root_invoke().is_root_success());
 }
 
+// The two syscalls above are read-only and take no inputs, so their whole
+// contribution to a transaction trace is the value they returned. These pin
+// that the trace records it, and records the value the contract actually saw
+// -- a trace that reported a different height or timepoint than the block
+// executed against would misexplain every transaction replayed from it.
+TEST_F(SyscallBlockDataTest, GetBlockHeightIsTraced)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Built on top of the committed genesis tip (height 0).
+  constexpr BlockHeight kExpectedHeight = 1;
+
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        BlockHeight block_height = 0;
+        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+  handler.enable_tracing();
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+  ASSERT_EQ(trace->system_calls.size(), 1U);
+
+  auto const &call = trace->system_calls[0];
+  ASSERT_EQ(call.body.syscall_number(), SyscallNo::kGetBlockHeight);
+  ASSERT_EQ(call.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+
+  auto const &traced = call.body.get_block_height();
+  ASSERT_NE(traced.outputs, nullptr);
+  EXPECT_EQ(traced.outputs->block_height, kExpectedHeight);
+}
+
+TEST_F(SyscallBlockDataTest, GetBlockTimepointIsTraced)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Unlike the height, the timepoint is not derivable from the tip, so the
+  // traced value has to be the one the block was opened with. Set a distinct
+  // one so a trace echoing some other source (the parent's timepoint, a
+  // default) cannot pass.
+  constexpr TimePoint kExpectedTimepoint = 1'724'000'000;
+  get_storage_snapshot_cache()->set_block_execution_context(
+      BlockExecutionContext{.block_height = 1,
+                            .block_timepoint = kExpectedTimepoint});
+
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        TimePoint block_timepoint = 0;
+        auto status =
+            ctx.syscall<SyscallNo::kGetBlockTimepoint>(block_timepoint);
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *context);
+  handler.enable_tracing();
+
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+  ASSERT_EQ(trace->system_calls.size(), 1U);
+
+  auto const &call = trace->system_calls[0];
+  ASSERT_EQ(call.body.syscall_number(), SyscallNo::kGetBlockTimepoint);
+  ASSERT_EQ(call.status.syscall_return_code(),
+            SyscallErrorCode::kSyscallErrorCodeNone);
+
+  auto const &traced = call.body.get_block_timepoint();
+  ASSERT_NE(traced.outputs, nullptr);
+  EXPECT_EQ(traced.outputs->block_timepoint, kExpectedTimepoint);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

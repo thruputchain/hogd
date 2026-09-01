@@ -593,6 +593,23 @@ public:
     return *r;
   }
 
+  // The context an executor would have opened the current block with. The
+  // executor cross-checks the height against the tip it pins, so this has to
+  // be the height the block will claim: the committed tip's height plus one.
+  // The framework commits block_height = the block's id, so that is
+  // dbtip_block_id_ + 1 -- which is NOT block_number_ in general, because
+  // discard_block() and reject_block() advance block_number_ without moving
+  // the tip. The timepoint is a fixed stand-in; nothing cross-checks it.
+  BlockExecutionContext get_block_execution_context() const
+  {
+    return BlockExecutionContext{
+        .block_height = static_cast<BlockHeight>(dbtip_block_id_) + 1,
+        .block_timepoint = kTestBlockTimepoint,
+    };
+  }
+
+  static constexpr TimePoint kTestBlockTimepoint = 1'700'000'000;
+
   PerTransactionEventServerProxy
   make_new_per_tx_event_server_proxy(TransactionID tx_id)
   {
@@ -700,7 +717,9 @@ private:
     }
     open_event_block(block_number_);
     storage_snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+        std::make_unique<StorageSnapshotCache>(block_number_,
+                                               get_block_execution_context(),
+                                               *db_proxy_);
   }
 
   void open_event_block(BlockID block_id);

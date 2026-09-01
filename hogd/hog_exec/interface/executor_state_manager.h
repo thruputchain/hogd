@@ -78,7 +78,9 @@ private:
   stash_snapshot_cache(std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                        x23::CoroGuard const &g);
   std::unique_ptr<StorageSnapshotCache>
-  get_snapshot_cache(BlockID block_id, x23::CoroGuard const &g);
+  get_snapshot_cache(BlockID block_id,
+                     BlockExecutionContext const &block_execution,
+                     x23::CoroGuard const &g);
 
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id,

@@ -147,20 +147,17 @@ SystemCallHandler::init_db_tip() const
   if (!tip.has_value()) {
     return std::unexpected(tip.error());
   }
-  // When an executor opened this block the scheduler supplied the height the
-  // block will claim. It has to agree with the tip we are about to pin, or
-  // this node is executing against a different block than the one it is
-  // building. Checked here, at the transaction's one fallible tip read, so
-  // every later height read stays a plain infallible load. The view path and
-  // the test harnesses open no block and carry no context, and skip this.
+  // Whoever opened this block supplied the height it will claim. It has to
+  // agree with the tip we are about to pin, or this node is executing against
+  // a different block than the one it is building. Checked here, at the
+  // transaction's one fallible tip read, so every later height read stays a
+  // plain infallible load.
   auto const &block_execution = snapshot_cache_.block_execution_context();
-  if (block_execution.has_value()) {
-    const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
-    if (block_execution->block_height != derived) [[unlikely]] {
-      error("Block height mismatch: scheduler supplied {}, db tip implies {}",
-            block_execution->block_height, derived);
-      return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
-    }
+  const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
+  if (block_execution.block_height != derived) [[unlikely]] {
+    error("Block height mismatch: opened with {}, db tip implies {}",
+          block_execution.block_height, derived);
+    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
   }
 
   // Owned by the snapshot cache and stable until the cache is recycled for a
@@ -2297,23 +2294,15 @@ SystemCallHandler::get_network_hash() const
   return db_tip()->value.proposal_header.network_hash;
 }
 
-SystemStatus<TimePoint>
+TimePoint
 SystemCallHandler::get_block_timepoint() const
 {
   // Not recoverable from the tip at all: for an open block the tip is the
   // parent, whose timepoint belongs to the previous block. The only correct
-  // source is the context the scheduler opened the block with -- from the
-  // coordinator when proposing, and from the proposal's header when
-  // validating, so a proposer and its validators execute against the same
-  // value.
-  auto const &block_execution = snapshot_cache_.block_execution_context();
-  if (!block_execution.has_value()) [[unlikely]] {
-    // No executor opened this block (view queries, test and bench harnesses).
-    // There is no meaningful timepoint to report, and inventing one would be
-    // worse than refusing.
-    return SystemError{SystemErrorCode::Unrecoverable};
-  }
-  return block_execution->block_timepoint;
+  // source is the context the block was opened with -- from the coordinator
+  // when proposing, and from the proposal's header when validating, so a
+  // proposer and its validators execute against the same value.
+  return snapshot_cache_.block_execution_context().block_timepoint;
 }
 
 // == Auth token syscalls ==

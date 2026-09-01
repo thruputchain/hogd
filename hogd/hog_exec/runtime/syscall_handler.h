@@ -419,7 +419,7 @@ public:
   // to the previous block. Unlike the two above this stays fallible -- the
   // view path and the test and bench harnesses build a snapshot cache without
   // an executor, so there is no context and no honest answer to give.
-  SystemStatus<TimePoint> get_block_timepoint() const;
+  TimePoint get_block_timepoint() const;
 
   // == General access methods ==
   //

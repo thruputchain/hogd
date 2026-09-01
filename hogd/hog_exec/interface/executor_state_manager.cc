@@ -98,7 +98,7 @@ ExecutorStateManager::open_block(BlockID new_block_id, ExecutionMode mode,
   assert(event_server_proxy_);
 
   std::unique_ptr<StorageSnapshotCache> snapshot_cache =
-      get_snapshot_cache(new_block_id, g);
+      get_snapshot_cache(new_block_id, block_execution, g);
 
   [[maybe_unused]] auto [_, inserted] = active_blocks_.emplace(
       std::piecewise_construct, std::forward_as_tuple(new_block_id),
@@ -288,15 +288,21 @@ ExecutorStateManager::stash_snapshot_cache(
 }
 
 std::unique_ptr<StorageSnapshotCache>
-ExecutorStateManager::get_snapshot_cache(BlockID block_id,
-                                         x23::CoroGuard const & /*unused*/)
+ExecutorStateManager::get_snapshot_cache(
+    BlockID block_id, BlockExecutionContext const &block_execution,
+    x23::CoroGuard const & /*unused*/)
 {
   if (free_snapshot_caches_.empty()) {
-    return std::make_unique<StorageSnapshotCache>(block_id, *db_proxy_);
+    return std::make_unique<StorageSnapshotCache>(block_id, block_execution,
+                                                  *db_proxy_);
   }
   auto out = std::move(free_snapshot_caches_.back());
   CHECK(out != nullptr);
   out->set_block_id(block_id);
+  // A recycled cache still carries the previous block's context, so re-arm it
+  // here rather than anywhere later: this is the single point where a cache
+  // becomes this block's, whether it is fresh or reused.
+  out->set_block_execution_context(block_execution);
   free_snapshot_caches_.pop_back();
   return out;
 }

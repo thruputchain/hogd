@@ -63,7 +63,9 @@ NativeContractTestFramework::try_advance_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_shared<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 
   return closed_hash;
 }
@@ -132,7 +134,9 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_shared<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_shared<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 }
 
 StorageShortHash
@@ -172,7 +176,9 @@ NativeContractTestFramework::discard_block(BlockExecutionMode mode)
   open_event_block(block_number_);
 
   storage_snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 
   return closed_hash;
 }

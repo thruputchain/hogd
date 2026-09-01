@@ -47,6 +47,15 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
+// These tests drive contracts directly against a mock db rather than through
+// block admission, but a snapshot cache is always a cache for one specific
+// block execution, so they still name one. The mock serves a genesis tip at
+// height 0, so the block being executed is height 1.
+constexpr BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1'700'000'000,
+};
+
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
 protected:
@@ -88,7 +97,7 @@ protected:
 
 TEST_F(NativeContractTest, BasicInstantiate)
 {
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -328,7 +337,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressMiddle,
                                               kAddressEntry};
@@ -427,7 +436,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -564,7 +573,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -663,7 +672,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -801,7 +810,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
   auto context = make_context();
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -854,7 +863,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 // than reaching the panic in the deploy path.
 TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
 {
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract malicious_contract(ContractType::kNative);
   malicious_contract.native_contract_id() =
@@ -977,7 +986,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract parent_contract(ContractType::kNative);
   parent_contract.native_contract_id() =
@@ -1068,7 +1077,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
   ContractAddress address{};
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =

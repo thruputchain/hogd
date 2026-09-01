@@ -129,8 +129,16 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   }
 
   current_block_id_++;
-  snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
+  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
+      current_block_id_,
+      // Parent is current_block_id_ - 1, committed at that height, so
+      // the height this block claims is its own id. Nothing
+      // cross-checks the timepoint.
+      BlockExecutionContext{
+          .block_height = static_cast<BlockHeight>(current_block_id_),
+          .block_timepoint = 1'700'000'000,
+      },
+      *db_proxy_);
   event_server_.open_block(current_block_id_)();
 }
 

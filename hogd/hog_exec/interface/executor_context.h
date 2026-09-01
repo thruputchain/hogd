@@ -37,10 +37,11 @@ public:
       db_proxy_(db_proxy), event_server_proxy_(event_server_proxy),
       snapshot_cache_(std::move(snapshot_cache)), worker_pool_(worker_pool)
   {
-    // The syscall handlers read the block's own facts (its timepoint, and the
-    // height they cross-check against the tip) off the snapshot cache, which
-    // is what they are handed. Install it before any transaction can run.
-    snapshot_cache_->set_block_execution_context(block_execution_);
+    // The cache arrives already armed with this same context, by
+    // ExecutorStateManager::get_snapshot_cache() -- the one place a cache
+    // becomes a given block's, for both fresh and recycled caches. It is held
+    // here as well because the cache is extracted at teardown, and the reopen
+    // check still needs to compare against it.
   }
 
   // Disable copy and move

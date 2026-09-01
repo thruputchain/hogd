@@ -22,9 +22,11 @@
 
 namespace hogd {
 
-StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
-                                           DatabaseProxy &db_proxy)
-  : block_id_(block_id), db_proxy_(db_proxy)
+StorageSnapshotCache::StorageSnapshotCache(
+    BlockID block_id, BlockExecutionContext const &block_execution,
+    DatabaseProxy &db_proxy)
+  : block_id_(block_id), block_execution_context_(block_execution),
+    db_proxy_(db_proxy)
 {}
 
 StorageSnapshotCache::~StorageSnapshotCache()

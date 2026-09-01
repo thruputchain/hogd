@@ -46,11 +46,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetBlockTimepoint_inner(SystemCallHandler &syscall_handler,
                                 TimePoint &output_block_timepoint)
 {
-  auto status = syscall_handler.get_block_timepoint();
-  if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
-  }
-  output_block_timepoint = *status;
+  output_block_timepoint = syscall_handler.get_block_timepoint();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetBlockTimepoint>()) {

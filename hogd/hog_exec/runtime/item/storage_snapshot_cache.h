@@ -53,7 +53,9 @@ class DatabaseProxy;
 // (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
-  StorageSnapshotCache(BlockID block_id, DatabaseProxy &db_proxy);
+  StorageSnapshotCache(BlockID block_id,
+                       BlockExecutionContext const &block_execution,
+                       DatabaseProxy &db_proxy);
   // delete move and copy
   StorageSnapshotCache(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache(StorageSnapshotCache &&) = delete;
@@ -69,20 +71,22 @@ public:
 
   SystemStatus<const DbTip *> try_get_db_tip();
 
-  // The executing block's own facts, supplied by the scheduler when the block
-  // was opened. Distinct from everything above, which is read from the db tip
-  // -- and the tip, for an open block, is the *parent*. The height is
-  // recoverable from the parent (it is the tip's height plus one) but the
-  // timepoint is not: the parent's timepoint is the previous block's.
+  // The executing block's own facts, supplied by whoever opened the block.
+  // Distinct from everything above, which is read from the db tip -- and the
+  // tip, for an open block, is the *parent*. The height is recoverable from
+  // the parent (it is the tip's height plus one) but the timepoint is not:
+  // the parent's timepoint is the previous block's.
   //
-  // Empty when no executor opened this block: the view path and the test and
-  // bench harnesses build a snapshot cache directly. Callers must handle that
-  // rather than assume a context is present.
-  std::optional<BlockExecutionContext> const &block_execution_context() const
+  // Mandatory: a snapshot cache is always a cache for one specific block
+  // execution, so there is no state in which this is absent and a caller has
+  // to decide what to do about it.
+  BlockExecutionContext const &block_execution_context() const
   {
     return block_execution_context_;
   }
 
+  // Re-arms a recycled cache for its next block. Also used by tests that need
+  // to execute against a deliberately wrong context.
   void set_block_execution_context(BlockExecutionContext const &block_execution)
   {
     block_execution_context_ = block_execution;
@@ -96,11 +100,10 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
-    // Caches are pooled and reused across blocks, so this must be cleared
-    // with the rest: a context surviving into the next block would serve it
-    // the previous block's timepoint, silently and only under contracts that
-    // read it.
-    block_execution_context_.reset();
+    // block_execution_context_ is deliberately left alone: it is re-armed by
+    // whoever takes the cache out of the pool, and a stale one surviving into
+    // the next block cannot go unnoticed -- its height disagrees with the tip
+    // that block pins, which fails the transaction in init_db_tip().
     release_db_tip();
   }
 
@@ -142,10 +145,10 @@ private:
 
   BlockID block_id_;
 
-  // Set once when the block is opened, before any transaction runs, and
-  // cleared by reset() when the cache is recycled. Read-only for the life of
+  // Set when the block is opened, before any transaction runs, and re-armed
+  // when the cache is recycled for the next block. Read-only for the life of
   // the block, so unlike the tip it needs no synchronization.
-  std::optional<BlockExecutionContext> block_execution_context_;
+  BlockExecutionContext block_execution_context_;
   DatabaseProxy &db_proxy_;
 
   std::atomic<DbTip *> db_tip_ = nullptr;

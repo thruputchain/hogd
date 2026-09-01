@@ -273,6 +273,10 @@ private:
   uint16_t coord_port_;
 
   std::atomic<TransactionID> next_tx_id_ = 0;
+  // The bench chains parent = block - 1 and commits block_height = the
+  // block's id, so the height an executor would open with is block_number_.
+  // Nothing cross-checks the timepoint, so a fixed stand-in is fine.
+  static constexpr TimePoint kBenchBlockTimepoint = 1'700'000'000;
   BlockID block_number_ = 0;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
@@ -322,8 +326,13 @@ CommonBenchState::advance_block()
 
   block_number_++;
 
-  snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
+      block_number_,
+      BlockExecutionContext{
+          .block_height = static_cast<BlockHeight>(block_number_),
+          .block_timepoint = kBenchBlockTimepoint,
+      },
+      *db_proxy_);
 }
 
 // leaves the benchmark in a state where it's ready to execute transactions
@@ -372,8 +381,13 @@ CommonBenchState::run_genesis_configuration(
   }
 
   block_number_++;
-  snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
+      block_number_,
+      BlockExecutionContext{
+          .block_height = static_cast<BlockHeight>(block_number_),
+          .block_timepoint = kBenchBlockTimepoint,
+      },
+      *db_proxy_);
 
   open_event_block(block_number_);
 
@@ -418,8 +432,13 @@ CommonBenchState::run_genesis_configuration(
   }
 
   block_number_++;
-  snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(
+      block_number_,
+      BlockExecutionContext{
+          .block_height = static_cast<BlockHeight>(block_number_),
+          .block_timepoint = kBenchBlockTimepoint,
+      },
+      *db_proxy_);
   open_event_block(block_number_);
 
   auto runtime_context = make_hog_exec_context();
