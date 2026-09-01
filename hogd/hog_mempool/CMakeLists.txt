@@ -4,6 +4,7 @@ add_library(
   hog_mempool
   rpc_from_coord.cc
   scheduler.cc
+  well_formed.cc
 )
 target_link_libraries(
   hog_mempool

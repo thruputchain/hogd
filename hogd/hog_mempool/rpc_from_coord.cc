@@ -1,4 +1,5 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/well_formed.h"
 
 #include <algorithm>
 #include <atomic>
@@ -244,8 +245,31 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         co_return;
       });
 
+  auto well_formed_node = submit_dag.async<void>(
+      "prune not-well-formed", submit_dag.after(decode_node),
+      [&]() -> x23::Async<void> {
+        // Drop what the executor would certainly reject, before the batch
+        // takes mempool slots or an auth round-trip. See is_tx_well_formed().
+        x23::Vec<size_t> to_remove_indices;
+        for (size_t i = 0; i < txs->size(); i++) {
+          if (!is_tx_well_formed((*txs)[i])) {
+            to_remove_indices.push_back(i);
+          }
+        }
+        if (!to_remove_indices.empty()) {
+          MempoolMetrics::instance()
+              .rejected_not_well_formed_tx_count.increment(
+                  to_remove_indices.size());
+          info("submit_unvetted dropped {} transactions that are not well "
+               "formed",
+               to_remove_indices.size());
+          remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+        }
+        co_return;
+      });
+
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(well_formed_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
@@ -429,8 +453,31 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
+  auto well_formed_node = submit_dag.async<void>(
+      "prune not-well-formed", submit_dag.after(decode_node),
+      [&]() -> x23::Async<void> {
+        // Drop what the executor would certainly reject, before the batch
+        // takes mempool slots or an auth round-trip. See is_tx_well_formed().
+        x23::Vec<size_t> to_remove_indices;
+        for (size_t i = 0; i < txs->size(); i++) {
+          if (!is_tx_well_formed((*txs)[i])) {
+            to_remove_indices.push_back(i);
+          }
+        }
+        if (!to_remove_indices.empty()) {
+          MempoolMetrics::instance()
+              .rejected_not_well_formed_tx_count.increment(
+                  to_remove_indices.size());
+          info("submit_vetted dropped {} transactions that are not well "
+               "formed",
+               to_remove_indices.size());
+          remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
+        }
+        co_return;
+      });
+
   auto lock_commit_node =
-      submit_dag.async<void>("lock commit", submit_dag.after(decode_node),
+      submit_dag.async<void>("lock commit", submit_dag.after(well_formed_node),
                              [&, commit_guard]() -> x23::Async<void> {
                                co_await (*commit_guard)(commit_lock_);
                                co_return;
