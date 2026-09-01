@@ -262,18 +262,23 @@ DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
 Database::sync_and_snapshot(uint64_t begin_lsn)
 {
   // The map's mutation callback is a single slot, so at most one snapshot
-  // may run at a time. The acquire pairs with the release in the snapshot
-  // thread, ordering its max_snapshot_end_lsn_ update before the begin_lsn
-  // check below.
-  if (snapshot_running_.load(std::memory_order_acquire)) {
+  // may run at a time. The exchange claims the slot atomically: when calls
+  // race, exactly one proceeds and the rest return kBusy without reaching
+  // sync(). The acquire pairs with the release in the snapshot thread,
+  // ordering its max_snapshot_end_lsn_ update before the begin_lsn check
+  // below; every bail-out until the thread is spawned must release the
+  // claim.
+  if (snapshot_running_.exchange(true, std::memory_order_acq_rel)) {
     warn("rejecting snapshot from lsn {}: a snapshot is already in flight",
          begin_lsn);
     return DBError{DBCode::kBusy};
   }
 
   DBStatus<uint64_t> ret = sync();
-  if (!ret) [[unlikely]]
+  if (!ret) [[unlikely]] {
+    snapshot_running_.store(false, std::memory_order_release);
     return ret.error();
+  }
 
   notify_wal_grew();
 
@@ -283,6 +288,7 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
 
   if (begin_lsn > end_lsn) {
     warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
+    snapshot_running_.store(false, std::memory_order_release);
     return DBError{DBCode::kTooBig};
   }
 
@@ -294,6 +300,7 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     error("snapshot begin_lsn {} exceeds max snapshot coverage {}; "
           "this would create an unrecoverable gap",
           begin_lsn, max_snapshot_end_lsn_);
+    snapshot_running_.store(false, std::memory_order_release);
     return DBError{DBCode::kTooBig};
   }
 
@@ -305,9 +312,9 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
   auto promise = std::promise<DBStatus<void>>();
   std::future<DBStatus<void>> future = promise.get_future();
 
-  snapshot_running_.store(true, std::memory_order_relaxed);
   // Assignment joins the previous snapshot thread; it has already finished
-  // (snapshot_running_ was false), so the join is immediate.
+  // (it released the snapshot_running_ claim we now hold), so the join is
+  // immediate.
   snapshot_thread_ = std::jthread([this, path = std::move(path), begin_lsn,
                                    end_lsn, wal_bytes_at_sync, &setup_latch,
                                    promise = std::move(promise)]() mutable {

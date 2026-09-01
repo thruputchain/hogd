@@ -11,6 +11,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -545,6 +546,42 @@ TEST_F(DatabaseTest, SnapshotRejectsOverlapping)
   auto third = db_->sync_and_snapshot(0);
   ASSERT_TRUE(third);
   EXPECT_TRUE(third->second.get());
+  check_integrity();
+}
+
+// Racing sync_and_snapshot() calls admit at most one snapshot at a time:
+// losers return kBusy without syncing, and every admitted snapshot
+// completes.
+TEST_F(DatabaseTest, SnapshotConcurrentAdmission)
+{
+  insert_n(kInsertions);
+
+  constexpr int kThreads = 8;
+  std::atomic<int> busy{0};
+  std::vector<std::future<DBStatus<void>>> futures;
+  std::mutex futures_mutex;
+
+  {
+    std::vector<std::jthread> threads;
+    threads.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i) {
+      threads.emplace_back([this, &busy, &futures, &futures_mutex] {
+        auto ret = db_->sync_and_snapshot(0);
+        if (!ret) {
+          EXPECT_EQ(ret.error(), DBCode::kBusy);
+          busy.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        std::scoped_lock lk(futures_mutex);
+        futures.push_back(std::move(ret->second));
+      });
+    }
+  }
+
+  EXPECT_EQ(busy.load() + futures.size(), kThreads);
+  EXPECT_GE(futures.size(), 1U);
+  for (auto &f : futures)
+    EXPECT_TRUE(f.get());
   check_integrity();
 }
 
