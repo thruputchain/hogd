@@ -2,6 +2,7 @@
 
 #include <exception>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
