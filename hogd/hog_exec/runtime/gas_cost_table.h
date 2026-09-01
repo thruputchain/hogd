@@ -13,67 +13,47 @@ namespace hogd {
  * order is a coordinated gas-schedule update: update the pinned digest/version
  * deliberately and regenerate committed RV32 artifacts/lowerer constants.
  *
- * The costs below are measured rather than placeholders. They come from the
- * RV32 Gas Calibration workflow on the bench pool (hog10, run 33469060485),
- * which times the production syscall_entry path and converts nanoseconds into
- * gas via the baseline instruction the opcode calibration measured on the same
- * host -- 1.6241 ns at the time these were set. See
- * docs/rv32/rv32-gas-calibration.md.
+ * The costs are measured by the RV32 Gas Calibration workflow, which times the
+ * production syscall_entry path and converts nanoseconds to gas via the opcode
+ * calibration's baseline instruction. See docs/rv32/rv32-gas-calibration.md.
  *
- * EVERY constant that the cost functions below read must be an entry in
- * kSyscallGasCostSchedule, because that array is what the digest hashes. A
- * number that changes what a contract is billed while the digest sits still is
- * precisely the failure the digest exists to prevent. The one exception is the
- * block geometry -- kSHA256BlockBytes and friends -- which is not policy but
- * arithmetic fixed by the hash functions themselves; those are static_asserted
- * rather than hashed, and changing one would be a bug rather than a repricing.
+ * Every constant the cost functions read must be an entry in
+ * kSyscallGasCostSchedule, since that is what the digest hashes; a number that
+ * changes a contract's bill while the digest sits still is the failure the
+ * digest exists to prevent. Block geometry is the exception: it is fixed by the
+ * hash functions, so it is static_asserted rather than hashed.
  */
 
-// Every syscall pays this, whatever it then does. What is being priced is the
-// crossing itself -- the ecall barrier, argument parsing, the alias guard, the
-// coroutine frame -- and the measurement is that the cheapest syscalls all land
-// within a few percent of each other because that crossing, not the handler, is
-// what they cost. Measured at 82.0 ns for the dearest of them.
-//
-// One gas of it is already charged as the ecall instruction by the RV32
-// instruction schedule, so this is the remainder and the two sum to the
-// crossing.
+// Every syscall pays this: the crossing itself -- ecall barrier, argument
+// parsing, alias guard, coroutine frame -- which is what the cheapest syscalls
+// almost entirely consist of. The ecall instruction already charges 1 gas, so
+// this is the remainder.
 constexpr static uint64_t kSyscallBaseCost = 50;
 
-// SHA-256 compresses fixed 64-byte blocks, and the measurement follows that
-// shape exactly: 34.53 ns per block at R^2 = 1.000000 across a 0..32KiB sweep.
-// Pricing per block rather than per byte is not just tidier, it is what removes
-// the need for a rate denominator -- a per-byte rate of 0.34 gas cannot be
-// written as an integer, and the divisor that would fix it is exactly the kind
-// of billing-relevant constant that is easy to leave out of the digest.
+// Per compression block, which is the unit SHA-256 works in and what the
+// measurement fits (R^2 = 1.000000). Also avoids a per-byte rate, which is a
+// fraction needing a divisor -- one more billing-relevant constant to keep in
+// the digest.
 constexpr static uint64_t kSHA256HashBlockCost = 22;
-// What the syscall costs beyond the crossing and the blocks it compresses.
-// Small because the block term now carries the work that a per-byte model had
-// to hide in the base.
+// What the syscall costs beyond the crossing and its blocks.
 constexpr static uint64_t kSHA256HashBaseCost = 2;
 
-// ed25519 verification, which was charged nothing at all until this schedule
-// while doing ~17.6k gas of real work. The constant dominates: the curve
-// arithmetic is ~28.6us and the message contributes ~0.2us per 128-byte
-// SHA-512 block. The block term still has to be there, because the syscall
-// puts no bound on the message length.
+// ed25519, which this schedule prices for the first time. The curve arithmetic
+// dominates; the block term covers hashing the message, and is needed because
+// the syscall puts no bound on its length.
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
-// Block geometry, fixed by the hash functions rather than chosen. Not hashed
-// into the schedule: these are not prices, and a wrong value here would be a
-// bug in the cost model rather than a repricing of it.
+// Block geometry, fixed by the hash functions rather than chosen, so
+// static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
+// plus a length field: 9 bytes for SHA-256, 17 for SHA-512.
 constexpr static uint64_t kSHA256BlockBytes = 64;
-// SHA-256 padding is a single 0x80 byte followed by zeros and an 8-byte
-// big-endian bit length, so a message needs 9 bytes of room beyond itself and
-// the block count is ceil((len + 9) / 64).
 constexpr static uint64_t kSHA256PadBytes = 9;
 static_assert(kSHA256BlockBytes == 64 && kSHA256PadBytes == 9);
-// SHA-512 for ed25519, which hashes R || A || message: 128-byte blocks, and a
-// 17-byte padding tail (0x80 plus a 16-byte length).
+// ed25519 hashes R || A || message with SHA-512.
 constexpr static uint64_t kSHA512BlockBytes = 128;
 constexpr static uint64_t kSHA512PadBytes = 17;
 constexpr static uint64_t kEd25519HashedPrefixBytes = 64;
@@ -81,12 +61,10 @@ static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-// Blocks a hash of `message_bytes` compresses, padding block included. One
-// helper per hash, with its geometry baked in, rather than one taking the block
-// and padding sizes as arguments: three interchangeable uint64_t parameters is
-// a call any caller can get wrong in a way that silently misprices, and there
-// are only two hashes to write. The guard is against overflowing on a length
-// near the top of the range; the addition is the only place that could.
+// Blocks a hash compresses, padding included. One helper per hash rather than
+// one taking the geometry as arguments: three interchangeable uint64_t
+// parameters is a call that transposes silently. Guarded against overflow on a
+// length near the top of the range.
 constexpr static auto SHA256BlockCount =
     [](uint64_t message_bytes) -> uint64_t {
   if (message_bytes > UINT64_MAX - kSHA256PadBytes)
@@ -103,8 +81,7 @@ constexpr static auto SHA512BlockCount =
          kSHA512BlockBytes;
 };
 
-// Saturating, so a length chosen to overflow the product bills the maximum
-// rather than wrapping to something cheap.
+// Saturating: a length chosen to overflow must bill the maximum, not wrap.
 constexpr static auto SaturatingCost = [](uint64_t base, uint64_t per_block,
                                           uint64_t blocks) -> uint64_t {
   if (per_block != 0 && blocks > (UINT64_MAX - base) / per_block)
@@ -117,11 +94,9 @@ constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
                         SHA256BlockCount(bytes_len));
 };
 
-// Update compresses only the whole blocks it completes; a partial tail stays
-// buffered for a later call and is charged when that call completes it. Whole
-// blocks only, so this never charges for work not yet done -- and the buffered
-// carry it can under-count by is at most one block per call, far less than the
-// crossing that same call already paid.
+// Whole blocks only: a partial tail stays buffered and is charged by whichever
+// later call completes it. The carry this under-counts by is at most one block
+// per call, far less than the crossing that call already paid.
 constexpr static auto SHA256UpdateCost = [](uint64_t bytes_len) -> uint64_t {
   return SaturatingCost(0, kSHA256HashBlockCost, bytes_len / kSHA256BlockBytes);
 };
@@ -152,8 +127,7 @@ struct SyscallGasCostEntry {
 };
 
 // Every constant the cost functions above read. Syscalls not named here charge
-// kSyscallBaseCost and nothing more, which after this schedule is a price
-// rather than the zero it used to be.
+// kSyscallBaseCost and nothing more.
 constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBase", .cost = kSHA256HashBaseCost},

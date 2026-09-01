@@ -671,15 +671,10 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 
   auto [syscall_result, gas_consumed] = std::move(body_result);
 
-  // The crossing itself, charged here rather than in each body. Central for two
-  // reasons: a syscall added later cannot forget to pay it, and a call that
-  // faulted, aliased, or returned an error still used the entry path and so
-  // still owes it. Before this schedule every body billed its own gas and most
-  // billed zero, which made the entry path free however often it was crossed.
-  //
-  // Saturating, so a body that already billed the maximum (a length chosen to
-  // overflow a cost function) cannot wrap around to something cheap. The
-  // out-of-gas comparison below then sees the total including this.
+  // The crossing, charged here rather than in each body: a syscall added later
+  // cannot forget it, and a call that faulted or errored still used the entry
+  // path. Saturating, so a body that already billed the maximum cannot wrap to
+  // something cheap; the out-of-gas check below then sees the total.
   gas_consumed =
       WrappedGasAmount{gas_consumed.get() > UINT64_MAX - kSyscallBaseCost
                            ? UINT64_MAX

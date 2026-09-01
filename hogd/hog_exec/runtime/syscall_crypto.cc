@@ -99,19 +99,17 @@ syscall_VerifySignature_inner(int32_t input_scheme,
   switch (static_cast<CryptographicScheme>(input_scheme)) {
   case CryptographicScheme::Ed25519:
   {
-    // Wrong-sized key or signature is rejected on inspection, before any curve
-    // arithmetic, so it owes only the crossing every syscall pays.
+    // Rejected on inspection, before any curve arithmetic: owes only the
+    // crossing.
     if (input_public_key.size() != sizeof(Ed25519PublicKey) ||
         input_signature.size() != sizeof(Ed25519Signature)) {
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
-    // Charged whether verification succeeds or fails, because the work is the
-    // same either way. A rejected signature can cost as much as an accepted
-    // one -- ed25519 only exits early when the encoded point fails to
-    // decompress, which an attacker choosing the signature controls -- so
-    // billing failure at zero would let one buy unbounded verification for the
-    // price of the crossing.
+    // Charged whether or not verification succeeds: ed25519 only exits early
+    // when the encoded point fails to decompress, which the attacker choosing
+    // the signature controls, so a free failure path sells verification for
+    // the price of the crossing.
     const WrappedGasAmount gas{VerifySignatureCost(input_message.size())};
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
