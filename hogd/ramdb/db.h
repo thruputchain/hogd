@@ -155,9 +155,10 @@ public:
   // snapshot coverage will be rejected to prevent unrecoverable gaps.
   //
   // Same precondition as sync(): no put() or remove() may overlap this call.
-  // The snapshot itself runs on a thread owned by this Database; at most one
-  // may run at a time, and a call while one is in flight returns
-  // DBCode::kBusy. Destroying the Database awaits an in-flight snapshot.
+  // At most one snapshot may run at a time; admission is atomic, so when
+  // calls race, one proceeds (and alone bears sync()'s precondition) and
+  // the rest return DBCode::kBusy without syncing. The snapshot runs on a
+  // thread owned by this Database; destroying the Database awaits it.
   DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
   sync_and_snapshot(uint64_t begin_lsn);
 
@@ -235,11 +236,12 @@ private:
   // creating snapshot gaps that recovery cannot bridge.
   uint64_t max_snapshot_end_lsn_{0};
 
-  // True while a snapshot is in flight. sync_and_snapshot() rejects a new
-  // snapshot while one runs: the map's mutation callback is a single slot.
-  // The snapshot thread clears this with release ordering before publishing
-  // its result, so a caller that observes it false (acquire) also observes
-  // the thread's max_snapshot_end_lsn_ update.
+  // True while a snapshot is admitted or in flight: the map's mutation
+  // callback is a single slot. sync_and_snapshot() claims it with an atomic
+  // exchange, so racing calls admit exactly one. The snapshot thread (or an
+  // admitted call that bails out early) clears it with release ordering
+  // before publishing its result, so a caller that claims it (acquire) also
+  // observes the thread's max_snapshot_end_lsn_ update.
   std::atomic<bool> snapshot_running_{false};
 
   // WAL bytes already on disk when the database was opened. Counted as
