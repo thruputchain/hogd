@@ -16,6 +16,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
@@ -176,7 +177,8 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 }
 
 InvokeErrorCode
-Rv32Context::verify_contract(Contract const &contract) const
+Rv32Context::verify_contract(Contract const &contract,
+                             PreparedContract &out) const
 {
   if (contract.contract_type() != ContractType::kRv32) {
     return InvokeErrorCode::Deterministic;
@@ -188,9 +190,16 @@ Rv32Context::verify_contract(Contract const &contract) const
   // Rejecting non-translatable contracts at creation time is what makes the
   // "not translatable" path in make_new_runtime unreachable for a deployed
   // contract (so its Unrecoverable error is a true should-never-happen).
-  if (!Rv32Contract::create(contract.rv32_contract()).has_value()) {
+  //
+  // The translation is handed back rather than discarded: it is the whole
+  // product of verification, and the caller reuses it for a same-transaction
+  // deployment instead of lowering the identical bytes a second time (#3536).
+  std::optional<Rv32Contract> translated =
+      Rv32Contract::create(contract.rv32_contract());
+  if (!translated.has_value()) {
     return InvokeErrorCode::Deterministic;
   }
+  out.rv32 = std::move(translated);
   return InvokeErrorCode::None;
 }
 
@@ -245,16 +254,16 @@ Rv32Context::make_new_runtime(DeployedContract const &deployed_contract,
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  const Rv32Contract *translated =
-      syscall_handler->get_or_create_local_rv32_translation(
+  const PreparedContract *prepared =
+      syscall_handler->get_or_create_local_preparation(
           deployed_contract_hash.hash, *contract.value());
-  if (translated == nullptr) [[unlikely]] {
+  if (prepared == nullptr || !prepared->rv32.has_value()) [[unlikely]] {
     error("Unrecoverable: failed to translate rv32 contract: {}",
           show_byte_array(deployed_contract_hash.hash));
     return SystemError{SystemErrorCode::Unrecoverable};
   }
 
-  return std::make_unique<Rv32Runtime>(translated, syscall_handler);
+  return std::make_unique<Rv32Runtime>(&*prepared->rv32, syscall_handler);
 }
 
 } // namespace hogd

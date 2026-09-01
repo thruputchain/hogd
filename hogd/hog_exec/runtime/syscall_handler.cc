@@ -43,8 +43,8 @@
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/metrics.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -280,7 +280,7 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  for (auto const &[_, contract] : newly_created_contracts_) {
+  for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
     // runtime-agnostic, and rejecting here -- before any body execution --
     // guarantees commit_transaction never stages an oversized code row
@@ -292,12 +292,23 @@ SystemCallHandler::perform_initial_validation()
           InvokeError{InvokeErrorCode::Deterministic};
       return {};
     }
-    auto res = runtime_context_.verify_contract(*contract);
+    PreparedContract prepared;
+    auto res = runtime_context_.verify_contract(*contract, prepared);
     // TODO(geoff): gas costs for verifying contracts
     if (res != InvokeErrorCode::None) {
       error("Contract verification failed");
       cumulative_invoke_result_.result_ = InvokeError{res};
       return {};
+    }
+    // Keep the image verification just produced. For rv32, verifying an
+    // attachment *is* translating it; without this the first same-transaction
+    // invocation of a deployed attachment lowered the identical bytes a second
+    // time, both passes outside transaction gas (#3536). Runtimes with nothing
+    // to prepare leave `prepared` empty, and an empty entry would be
+    // indistinguishable from the memoized could-not-prepare result, so only a
+    // real preparation is cached.
+    if (prepared.rv32.has_value()) {
+      local_preparations_.emplace(hash, std::move(prepared));
     }
   }
   return {};
@@ -1330,24 +1341,32 @@ SystemCallHandler::~SystemCallHandler()
   }
 }
 
-const Rv32Contract *
-SystemCallHandler::get_or_create_local_rv32_translation(
-    SHA256Hash const &hash, Contract const &contract)
+const PreparedContract *
+SystemCallHandler::get_or_create_local_preparation(SHA256Hash const &hash,
+                                                   Contract const &contract)
 {
-  auto it = local_rv32_translations_.find(hash);
-  if (it != local_rv32_translations_.end()) {
-    // Cached result -- the pointer is null for a known non-translatable
-    // artifact, so we never retranslate.
-    return it->second.get();
+  auto it = local_preparations_.find(hash);
+  if (it != local_preparations_.end()) {
+    // Cached result -- an empty preparation memoizes a contract that could not
+    // be prepared, so we never retry it.
+    return &it->second;
   }
 
-  std::optional<Rv32Contract> translated =
-      Rv32Contract::create(contract.rv32_contract());
-  auto [inserted, _] = local_rv32_translations_.emplace(
-      hash, translated.has_value()
-                ? std::make_unique<Rv32Contract>(std::move(*translated))
-                : nullptr);
-  return inserted->second.get();
+  // Attached contracts are prepared once during perform_initial_validation and
+  // land in the map above, so they never reach here (#3536). What does is a
+  // transaction-local deployment of an already-committed hash, which
+  // resolve_contract serves from the block-scoped snapshot cache. That entry
+  // carries its own eager translation, but resolve_contract exposes only the
+  // Contract, so it is rebuilt here; routing the snapshot entry's image
+  // through resolve_contract would close that case too.
+  auto [inserted, _] = local_preparations_.try_emplace(hash);
+  if (runtime_context_.verify_contract(contract, inserted->second) !=
+      InvokeErrorCode::None) {
+    // The entry stays empty, memoizing the failure so we never retry it; the
+    // caller turns a preparation-less entry into its own error.
+    inserted->second = PreparedContract{};
+  }
+  return &inserted->second;
 }
 
 SystemStatus<const Contract *>

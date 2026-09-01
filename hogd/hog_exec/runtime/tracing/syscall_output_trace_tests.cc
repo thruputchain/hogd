@@ -81,7 +81,8 @@ make_entry(GasAmount gas_at_start, GasAmount gas_at_end, SyscallTraceBody body,
 // selective_deployment_test).
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*unused*/,
+                                  PreparedContract & /*out*/) const override
   {
     return InvokeErrorCode::None;
   }

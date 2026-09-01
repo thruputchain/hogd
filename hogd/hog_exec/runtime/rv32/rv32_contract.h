@@ -54,7 +54,9 @@ private:
 // cache. The context itself holds no per-contract state.
 class Rv32Context final : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const &contract) const override;
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  PreparedContract &out) const override;
+  using RuntimeContext::verify_contract;
 
   SystemStatus<std::unique_ptr<Runtime>>
   make_new_runtime(DeployedContract const &deployed_contract,

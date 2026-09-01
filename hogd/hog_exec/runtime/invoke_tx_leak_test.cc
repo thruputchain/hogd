@@ -44,7 +44,8 @@ namespace {
 
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*contract*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*contract*/,
+                                  PreparedContract & /*out*/) const override
   {
     return InvokeErrorCode::None;
   }

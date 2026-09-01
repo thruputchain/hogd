@@ -28,6 +28,7 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/transaction_stats.h"
@@ -47,10 +48,6 @@
 namespace hogd {
 
 class StorageSnapshotCache;
-// Defined in rv32/rv32_contract.h. Held only by pointer here (stored as
-// unique_ptr in the per-transaction translation cache), so a forward
-// declaration keeps the heavy rv32 header out of this widely-included one.
-class Rv32Contract;
 
 // TODO(geoff): root_invoke() validates any incoming wasm blobs.
 // We may later do that validation preemptively in the coordinator.
@@ -93,9 +90,6 @@ public:
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
-  // Defined out-of-line so the forward-declared Rv32Contract (held by
-  // unique_ptr in local_rv32_translations_) is complete at the point of
-  // destruction.
   ~SystemCallHandler();
 
   // Debug management operations
@@ -418,14 +412,16 @@ public:
   // returns nullptr if the contract does not exist
   SystemStatus<const Contract *> resolve_contract(SHA256Hash const &hash) const;
 
-  // Returns a translated rv32 contract for a transaction-local deployment,
-  // translating and caching it in this handler on first use. The returned
-  // pointer is owned by this handler (stable for the transaction's lifetime)
-  // and borrowed by the Rv32Runtime. `contract` must be the kRv32 contract for
-  // `hash`. Returns nullptr if translation fails.
-  const Rv32Contract *
-  get_or_create_local_rv32_translation(SHA256Hash const &hash,
-                                       Contract const &contract);
+  // Returns the preparation for a transaction-local deployment. Attachments
+  // are prepared by perform_initial_validation, so this normally just borrows
+  // that image; a transaction-local deployment of an already-committed hash is
+  // not an attachment and is prepared here on first use. The returned pointer
+  // is owned by this handler (node-stable for the transaction's lifetime) and
+  // borrowed by the Runtime built from it. `contract` must be the contract for
+  // `hash`. Returns nullptr if the contract cannot be prepared.
+  const PreparedContract *
+  get_or_create_local_preparation(SHA256Hash const &hash,
+                                  Contract const &contract);
 
   // == Error conversion methods ==
   static ExecResult to_exec_result(InvokeErrorCode error_code);
@@ -460,14 +456,17 @@ private:
                            SipHash24Hasher>
       newly_created_contracts_;
 
-  // Per-transaction cache of translated rv32 contracts for transaction-local
+  // Per-transaction cache of prepared contracts for transaction-local
   // deployments (which are not in the block-scoped StorageSnapshotCache).
-  // Filled lazily, keyed by contract hash; a null mapped value memoizes a
-  // non-translatable artifact so we never retranslate. Entries are node-stable
-  // and borrowed by Rv32Runtime, so they must outlive the runtimes -- they live
-  // for the whole transaction.
-  std::unordered_map<SHA256Hash, std::unique_ptr<Rv32Contract>, SipHash24Hasher>
-      local_rv32_translations_;
+  // Attached contracts are inserted by perform_initial_validation, which
+  // verifies them by preparing them and keeps that image rather than building
+  // it again at first invocation (#3536); anything else is filled lazily.
+  // Keyed by contract hash; an empty mapped value memoizes a contract that
+  // could not be prepared, so we never retry it. Entries are node-stable and
+  // borrowed by the Runtimes built from them, so they must outlive those
+  // runtimes -- they live for the whole transaction.
+  std::unordered_map<SHA256Hash, PreparedContract, SipHash24Hasher>
+      local_preparations_;
 
   ExecutionModeData execution_mode_data_;
 

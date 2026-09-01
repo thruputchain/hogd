@@ -6,9 +6,17 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "x23/format.h"
 
 namespace hogd {
+
+InvokeErrorCode
+RuntimeContext::verify_contract(Contract const &contract) const
+{
+  PreparedContract discarded;
+  return verify_contract(contract, discarded);
+}
 
 InvokeResult
 Runtime::invoke(MethodID method_id, uint64_t gas_limit)

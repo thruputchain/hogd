@@ -63,7 +63,8 @@ namespace {
 // Runtime.
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*unused*/,
+                                  PreparedContract & /*out*/) const override
   {
     return InvokeErrorCode::None;
   }
@@ -439,8 +440,9 @@ TEST_P(SelectiveDeploymentTest,
 }
 
 // A contract deployed via the deploy syscall is invokable in the same
-// transaction: the tx-local rv32 translation path translates on first use and
-// memoizes for the second invoke.
+// transaction. The attachment is translated once, when initial validation
+// verifies it, and both invokes borrow that image from the tx-local cache --
+// no invocation retranslates the artifact (#3536).
 TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
 {
   Contract fib_contract(ContractType::kRv32);
