@@ -63,12 +63,12 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
   std::optional<ContractCacheEntry> entry;
   if (db_res.value()) {
     Contract contract = std::move(db_res.value()).value();
-    std::optional<Rv32Contract> translated;
+    PreparedContract prepared;
     if (contract.contract_type() == ContractType::kRv32) {
-      translated = Rv32Contract::create(contract.rv32_contract());
+      prepared.rv32 = Rv32Contract::create(contract.rv32_contract());
     }
     entry.emplace(ContractCacheEntry{.contract = std::move(contract),
-                                     .translated = std::move(translated)});
+                                     .prepared = std::move(prepared)});
   }
 
   // TODO(geoff): If we decide to NOT reset the cache after every block,
@@ -92,6 +92,16 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     return entry.error();
   }
   return entry.value() ? &entry.value()->contract : nullptr;
+}
+
+SystemStatus<const PreparedContract *>
+StorageSnapshotCache::try_get_prepared_contract(SHA256Hash const &hash)
+{
+  auto entry = get_contract_entry(hash);
+  if (!entry) {
+    return entry.error();
+  }
+  return entry.value() ? &entry.value()->prepared : nullptr;
 }
 
 SystemStatus<const DeployedContract *>

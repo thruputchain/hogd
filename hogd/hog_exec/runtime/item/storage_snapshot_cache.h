@@ -16,19 +16,19 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
-#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
 
-// A cached contract: the bytecode plus, for translatable engines (rv32), its
-// eagerly-built ready-to-instantiate image. `translated` is nullopt for
-// non-rv32 contracts (and if translation failed -- treated as Unrecoverable by
-// the engine, matching prior behavior).
+// A cached contract: the bytecode plus, for engines that prepare one, its
+// eagerly-built ready-to-instantiate image. `prepared` is empty for engines
+// with nothing to prepare (and if preparation failed -- treated as
+// Unrecoverable by the engine, matching prior behavior).
 struct ContractCacheEntry {
   Contract contract;
-  std::optional<Rv32Contract> translated;
+  PreparedContract prepared;
 };
 
 class DatabaseProxy;
@@ -62,6 +62,12 @@ public:
 
   SystemStatus<const Contract *>
   try_get_contract_by_hash(SHA256Hash const &hash);
+  // The image this cache built when it loaded `hash`, so callers reuse it
+  // rather than preparing the same bytes again. Borrowed: node-stable and
+  // valid for the block, so it outlives any transaction's runtimes. Returns
+  // nullptr (wrapped) for a negative lookup.
+  SystemStatus<const PreparedContract *>
+  try_get_prepared_contract(SHA256Hash const &hash);
   SystemStatus<const DeployedContract *>
   try_get_deployed_contract(ContractAddress const &addr);
   SystemStatus<const SnapshotStorageItem *>

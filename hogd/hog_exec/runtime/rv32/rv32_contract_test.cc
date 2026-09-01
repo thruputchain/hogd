@@ -104,7 +104,7 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
   EXPECT_EQ(deployed.value()->hash.contract_type, ContractType::kRv32);
-  EXPECT_TRUE(deployed.value()->entry->translated.has_value());
+  EXPECT_TRUE(deployed.value()->entry->prepared.rv32.has_value());
   // Back-pointer aliases the contract-cache entry the hash lookup returns.
   auto by_hash = cache->try_get_contract_by_hash(deployed.value()->hash.hash);
   ASSERT_TRUE(by_hash.has_value());
@@ -641,7 +641,7 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
-  EXPECT_FALSE(deployed.value()->entry->translated.has_value());
+  EXPECT_FALSE(deployed.value()->entry->prepared.rv32.has_value());
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());

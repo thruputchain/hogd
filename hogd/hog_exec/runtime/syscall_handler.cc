@@ -1341,27 +1341,19 @@ SystemCallHandler::~SystemCallHandler()
   }
 }
 
-const PreparedContract *
-SystemCallHandler::get_or_create_local_preparation(SHA256Hash const &hash,
-                                                   Contract const &contract)
+SystemStatus<const PreparedContract *>
+SystemCallHandler::resolve_prepared_contract(SHA256Hash const &hash)
 {
+  // Attachments are prepared once, by perform_initial_validation.
   auto it = local_preparations_.find(hash);
   if (it != local_preparations_.end()) {
     return &it->second;
   }
 
-  // Attachments are prepared during perform_initial_validation and hit the
-  // map above, so only a transaction-local deployment of an already-committed
-  // hash reaches here. The snapshot entry serving it carries its own eager
-  // translation, but resolve_contract exposes only the Contract, so it is
-  // rebuilt; routing that image through resolve_contract would avoid this.
-  auto [inserted, _] = local_preparations_.try_emplace(hash);
-  const InvokeErrorCode res =
-      runtime_context_.verify_contract(contract, inserted->second);
-  // Only an already-committed contract reaches here, and committing one
-  // required preparing it, so preparing it again cannot fail.
-  CHECK(res == InvokeErrorCode::None);
-  return &inserted->second;
+  // Anything else is already committed, and the snapshot cache prepared it
+  // eagerly when it loaded it. Borrow that image rather than building a second
+  // one from the same bytes (#3536).
+  return snapshot_cache_.try_get_prepared_contract(hash);
 }
 
 SystemStatus<const Contract *>

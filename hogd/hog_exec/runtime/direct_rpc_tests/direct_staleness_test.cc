@@ -456,7 +456,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   ASSERT_TRUE(fresh_deploy_ptr.has_value());
   ASSERT_NE(fresh_deploy_ptr.value(), nullptr);
   EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract, fresh_contract.value());
-  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
+  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->prepared.rv32.has_value());
 
   EXPECT_TRUE(get_db_proxy()
                   .close_viewing_snapshot(snap2->viewing_block_id)
