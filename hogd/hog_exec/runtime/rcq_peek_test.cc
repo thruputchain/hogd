@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -814,6 +815,378 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
   EXPECT_TRUE(proposal_hash == validation_hash)
       << "proposal and validation must commit identical RCQ deltas after a "
          "contract handles the RCQ observation read-limit error (#3043)";
+}
+
+// #3611: The per-tx observation cap bounds only concurrent observations. A
+// self-inserted entry records no observation, so consuming it must succeed and
+// return its byte even once the cap is exceeded. Pre-fix, load_next_queue_entry
+// converted the read into kSyscallErrorCodeRetrocausalQueueReadLimitReached
+// after get_next_item had already advanced the materialized queue item, so the
+// contract got an error while the consume silently committed -- the byte was
+// dropped. This test crosses the cap, consumes a self entry, and asserts the
+// consume returns the byte and (from a later tx) actually committed.
+TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  NativeContractBuilder builder;
+  // method 12: insert one entry into each of kMaxConcurrentRcqReadsPerTx + 1
+  // distinct filler queues. Committing this tx first makes them current-block
+  // concurrent entries the attack tx below can observe to fill the cap.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      12, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
+          auto payload = static_cast<uint8_t>(i);
+          auto res = ctx.handler().retrocausal_queue_insert(
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+          if (!res.has_value()) {
+            return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+  // method 13: peek the fillers to fill the observation sequence to the cap and
+  // then cross it (setting the sticky cap flag), insert a self entry, then
+  // destructively consume that self entry. The self consume records no
+  // observation, so it must succeed and return the byte despite the cap.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      13, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto self_key =
+            NativeContractTestFramework::make_storage_key("self_rcq");
+        for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
+          auto peek =
+              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
+                                                      /*peek=*/true);
+          if (!peek.has_value()) {
+            return peek.error().to_invoke_error();
+          }
+          if (i < kMaxConcurrentRcqReadsPerTx) {
+            if (!peek.value().has_value() || peek.value().value().size() != 1) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          // The cap-crossing peek returns the read-limit error; the sticky flag
+          // is now set for the rest of the tx.
+          else if (peek.value().has_value() ||
+                   peek.value().error().code() !=
+                       SyscallErrorCode::
+                           kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        uint8_t secret = 0xA5;
+        auto insert = ctx.handler().retrocausal_queue_insert(
+            self_key, std::as_bytes(std::span(&secret, 1)));
+        if (!insert.has_value()) {
+          return insert.error().to_invoke_error();
+        }
+        if (!insert.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto consume =
+            ctx.handler().retrocausal_queue_consume(self_key, /*peek=*/false);
+        if (!consume.has_value()) {
+          return consume.error().to_invoke_error();
+        }
+        // The self entry is returned, not dropped behind a read-limit error.
+        if (!consume.value().has_value() ||
+            consume.value().value().size() != 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  // method 14: a fresh tx confirms the self entry was actually consumed (the
+  // successful consume committed), so the queue is now empty.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      14, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto self_key =
+            NativeContractTestFramework::make_storage_key("self_rcq");
+        auto peek =
+            ctx.handler().retrocausal_queue_consume(self_key, /*peek=*/true);
+        if (!peek.has_value()) {
+          return peek.error().to_invoke_error();
+        }
+        if (peek.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (peek.value().error().code() !=
+                SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry &&
+            peek.value().error().code() !=
+                SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto run = [&](uint32_t method) {
+    auto tx = Transaction{.invocation =
+                              Invocation{.invoked_address = contract_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()};
+    auto handler = make_new_system_call_handler(tx, *context);
+    return handler.root_invoke().is_root_success() &&
+           handler.try_commit_transaction() == ExecResult::ExecResultOK;
+  };
+
+  ASSERT_TRUE(run(12));
+  ASSERT_TRUE(run(13));
+  EXPECT_TRUE(run(14))
+      << "the self entry should have been consumed and committed by the "
+         "at-cap consume that returned it";
+}
+
+// #3611: The same holds for a past-block consume through the materialized-item
+// path (the issue names both self and past-block entries). A past-block read
+// records no observation, so consuming it must succeed and return its bytes
+// even once the cap is exceeded. A queue that carries a committed past-block
+// entry and is self-inserted into by the same tx is a materialized
+// RetrocausalQueueItem; pre-fix the capped consume advanced its past-block
+// cursor in place and returned a read-limit error, committing a consume of the
+// past-block entry the contract never saw.
+TEST_F(SyscallRcqPeekTest, PastBlockConsumeSucceedsAtObservationCap)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
+                                               int128_t{kTotalHogSupply});
+
+  NativeContractBuilder builder;
+  // method 20: insert a two-byte past-block entry into the target queue.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      20, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto target =
+            NativeContractTestFramework::make_storage_key("pastblk_q");
+        std::array<uint8_t, 2> past = {0xE0, 0xE1};
+        auto res = ctx.handler().retrocausal_queue_insert(target,
+                                                          std::as_bytes(
+                                                              std::span(past)));
+        if (!res.has_value()) {
+          return res.error().to_invoke_error();
+        }
+        if (!res.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  // method 21: insert one entry into each of kMaxConcurrentRcqReadsPerTx + 1
+  // filler queues (current-block concurrent entries for the attack tx).
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      21, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
+          auto payload = static_cast<uint8_t>(i);
+          auto res = ctx.handler().retrocausal_queue_insert(
+              make_obs_cap_key(i), std::as_bytes(std::span(&payload, 1)));
+          if (!res.has_value()) {
+            return res.error().to_invoke_error();
+          }
+          if (!res.value().has_value()) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        return {};
+      });
+  // method 22: cross the cap, self-insert a one-byte entry into the target
+  // (materializing it), then destructively consume it. The past-block entry is
+  // next in consume order; the consume must succeed and return that two-byte
+  // entry despite the cap.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      22, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto target =
+            NativeContractTestFramework::make_storage_key("pastblk_q");
+        for (uint32_t i = 0; i < kMaxConcurrentRcqReadsPerTx + 1; ++i) {
+          auto peek =
+              ctx.handler().retrocausal_queue_consume(make_obs_cap_key(i),
+                                                      /*peek=*/true);
+          if (!peek.has_value()) {
+            return peek.error().to_invoke_error();
+          }
+          if (i < kMaxConcurrentRcqReadsPerTx) {
+            if (!peek.value().has_value() || peek.value().value().size() != 1) {
+              return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          else if (peek.value().has_value() ||
+                   peek.value().error().code() !=
+                       SyscallErrorCode::
+                           kSyscallErrorCodeRetrocausalQueueReadLimitReached) {
+            return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        uint8_t self_byte = 0xA5;
+        auto insert = ctx.handler().retrocausal_queue_insert(
+            target, std::as_bytes(std::span(&self_byte, 1)));
+        if (!insert.has_value()) {
+          return insert.error().to_invoke_error();
+        }
+        if (!insert.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto consume =
+            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+        if (!consume.has_value()) {
+          return consume.error().to_invoke_error();
+        }
+        // The two-byte past-block entry is returned, not dropped.
+        if (!consume.value().has_value() ||
+            consume.value().value().size() != 2) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  // method 23: a fresh tx consumes the target again. The past-block entry was
+  // legitimately consumed above, so the only entry left is the one-byte self
+  // entry -- its length confirms the past-block consume committed and the self
+  // insert persisted.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      23, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto target =
+            NativeContractTestFramework::make_storage_key("pastblk_q");
+        auto consume =
+            ctx.handler().retrocausal_queue_consume(target, /*peek=*/false);
+        if (!consume.has_value()) {
+          return consume.error().to_invoke_error();
+        }
+        if (!consume.value().has_value() ||
+            consume.value().value().size() != 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto run = [&](uint32_t method) {
+    auto tx = Transaction{.invocation =
+                              Invocation{.invoked_address = contract_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()};
+    auto handler = make_new_system_call_handler(tx, *context);
+    return handler.root_invoke().is_root_success() &&
+           handler.try_commit_transaction() == ExecResult::ExecResultOK;
+  };
+
+  ASSERT_TRUE(run(20));
+  // Close the block so the target entry becomes a past-block entry.
+  advance_block();
+  ASSERT_TRUE(run(21));
+  ASSERT_TRUE(run(22));
+  // Close the block again so the remaining entries are all past-block: the
+  // verifying consume is then deterministic and independent of concurrent
+  // observation.
+  advance_block();
+  EXPECT_TRUE(run(23))
+      << "the past-block entry should have been consumed and committed by the "
+         "at-cap consume that returned it, leaving only the self entry";
+}
+
+// #3611: Suppressing the consume advance applies only at the cap. A below-cap
+// destructive consume through the materialized-item path must still advance and
+// commit normally -- this guards against the fix over-rejecting or failing to
+// consume when the cap has not been reached.
+TEST_F(SyscallRcqPeekTest, MaterializedSelfConsumeCommitsWhenBelowCap)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  NativeContractBuilder builder;
+  // method 30: insert a self entry into the queue (materializing it), then
+  // destructively consume it -- the entry must be returned.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      30, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto key = NativeContractTestFramework::make_storage_key("belowcap_q");
+        uint8_t payload = 0xC3;
+        auto insert = ctx.handler().retrocausal_queue_insert(
+            key, std::as_bytes(std::span(&payload, 1)));
+        if (!insert.has_value()) {
+          return insert.error().to_invoke_error();
+        }
+        if (!insert.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        auto consume =
+            ctx.handler().retrocausal_queue_consume(key, /*peek=*/false);
+        if (!consume.has_value()) {
+          return consume.error().to_invoke_error();
+        }
+        if (!consume.value().has_value() ||
+            consume.value().value().size() != 1) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+  // method 31: a fresh tx confirms the entry was actually consumed (the
+  // successful consume committed), so the queue is now empty.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      31, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        auto key = NativeContractTestFramework::make_storage_key("belowcap_q");
+        auto peek = ctx.handler().retrocausal_queue_consume(key, /*peek=*/true);
+        if (!peek.has_value()) {
+          return peek.error().to_invoke_error();
+        }
+        if (peek.value().has_value()) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (peek.value().error().code() !=
+                SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry &&
+            peek.value().error().code() !=
+                SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto run = [&](uint32_t method) {
+    auto tx = Transaction{.invocation =
+                              Invocation{.invoked_address = contract_addr,
+                                         .entrypoint =
+                                             entrypoint_from_method_id(method),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}},
+                          .uniquifier = make_new_uniquifier()};
+    auto handler = make_new_system_call_handler(tx, *context);
+    return handler.root_invoke().is_root_success() &&
+           handler.try_commit_transaction() == ExecResult::ExecResultOK;
+  };
+
+  ASSERT_TRUE(run(30));
+  EXPECT_TRUE(run(31))
+      << "a below-cap consume must actually commit the consume";
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
