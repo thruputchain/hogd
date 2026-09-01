@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -192,6 +193,11 @@ DiskWriter::write_worker(const std::stop_token &stoken)
 DBStatus<uint64_t>
 DiskWriter::sync()
 {
+  // See sync_active_ in disk_writer.h.
+  sync_active_.store(true, std::memory_order_relaxed);
+  Defer sync_guard{
+      [this] { sync_active_.store(false, std::memory_order_relaxed); }};
+
   std::unique_lock ul(to_disk_lock_);
 
   // Reserve the queue slots (one per dirty head plus the commit marker) before
@@ -208,6 +214,13 @@ DiskWriter::sync()
   // commit record. write_worker() may also still be writing full loglets
   // requested from enqueue_to_disk().
   for (WriteHead &h : heads_) {
+    // A writer that passed the sync_active_ CHECK before this sync began is
+    // still inside write_record() holding the head lock; that is the
+    // overlap the flag alone cannot see, so fail stop on it here. try_lock
+    // cannot deadlock with a writer blocked in enqueue_to_disk() on
+    // to_disk_lock_.
+    CHECK(h.lock.try_lock());
+    std::scoped_lock hl(std::adopt_lock, h.lock);
     if (!h.ll)
       continue;
     bytes_in_ += h.ll->get_bytes().size();

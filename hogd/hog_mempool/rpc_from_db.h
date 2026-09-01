@@ -74,15 +74,20 @@ public:
     // [scheduler_->pending_hog_age_update_lock_] lock acquired in
     // [schedulercoord_commit_block()] and [process_transfers()].
     //
-    // Additionally, we cannot have db writes race with snapshot commit as
-    // otherwise ramdb state will be corrupted (based on a conversation with
-    // Geoff and Ryan). Thus, we do these writes after the snapshot commit is
-    // complete (i.e., all [commit_handles] have been co_await'd). As a side
-    // note, it is okay for [commit_snapshot()] and [abandon_snapshot()] to
-    // race. We ensure that [scheduler_->write_all_average_hog_ages_to_db()]
-    // completes before we update [scheduler_->transfer_finished_], so we do not
-    // need to worry about these hog age writes updating with the *next* block
-    // commit either.
+    // These writes must also never overlap ramdb's sync() for the *next*
+    // block's commit (Database::sync()'s precondition); otherwise ramdb
+    // state is corrupted. No lock provides that ordering here:
+    // [pending_hog_age_update_lock_] is released before this write runs.
+    // What serializes them today is that this write and
+    // [dbsched_commit_snapshot] travel on the same db_sched connection and
+    // hog_db runs its handlers inline on that connection's reader
+    // coroutine, so the two never execute concurrently (#3397); ramdb's
+    // [write_record()] CHECKs the invariant. As a side note, it is okay for
+    // [commit_snapshot()] and [abandon_snapshot()] to race. We ensure that
+    // [scheduler_->write_all_average_hog_ages_to_db()] completes before we
+    // update [scheduler_->transfer_finished_], so we do not need to worry
+    // about these hog age writes updating with the *next* block commit
+    // either.
     co_await scheduler_->write_all_average_hog_ages_to_db();
 
     scheduler_->transfer_finished_.store(transfers.block);

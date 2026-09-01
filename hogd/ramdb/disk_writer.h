@@ -17,6 +17,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
@@ -148,6 +149,13 @@ private:
   // used to wake commit().
   std::condition_variable commit_cv_;
 
+  // True while sync() runs; write_record() CHECKs it is clear, in release
+  // builds too, since an overlapping write corrupts the WAL undetectably
+  // (#3397). Relaxed loads catch a write that starts during the sync; one
+  // already inside write_record() when the flag is set is caught by the
+  // try_lock CHECK in sync()'s head drain.
+  std::atomic<bool> sync_active_{false};
+
   // loglets that are currently being filled with changes to log to disk
   // (called "heads"). Items are sharded across the vector based on their
   // hash. When a head is full, it is added to the to_disk_ queue.
@@ -224,6 +232,8 @@ private:
 inline ScopedDiskWrite
 DiskWriter::write_record(size_t hash)
 {
+  // No write may overlap sync(); see sync_active_.
+  CHECK(!sync_active_.load(std::memory_order_relaxed));
   return ScopedDiskWrite(*this, hash);
 }
 
