@@ -28,6 +28,7 @@
 #include "hogd/hog_mempool/shared.h"
 #include "rpc_types.hh"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/corosync.h"
