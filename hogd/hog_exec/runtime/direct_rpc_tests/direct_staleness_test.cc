@@ -414,7 +414,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
                               get_block_execution_context(), get_db_proxy());
 
   // Warm negative contract lookup.
-  auto warm = cache1.try_get_contract_by_hash(missing_hash);
+  auto warm = cache1.try_get_contract_entry(missing_hash);
   ASSERT_TRUE(warm.has_value());
   EXPECT_EQ(warm.value(), nullptr);
 
@@ -431,7 +431,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   advance_block();
 
   // Stale cache still returns nulls.
-  auto stale_contract = cache1.try_get_contract_by_hash(missing_hash);
+  auto stale_contract = cache1.try_get_contract_entry(missing_hash);
   ASSERT_TRUE(stale_contract.has_value());
   EXPECT_EQ(stale_contract.value(), nullptr);
 
@@ -450,7 +450,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   EXPECT_NE(fresh_deploy.value(), nullptr);
 
   auto deployed_hash = sha256(*contract);
-  auto fresh_contract = cache2.try_get_contract_by_hash(deployed_hash);
+  auto fresh_contract = cache2.try_get_contract_entry(deployed_hash);
   ASSERT_TRUE(fresh_contract.has_value());
   EXPECT_NE(fresh_contract.value(), nullptr);
 
@@ -459,8 +459,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   auto fresh_deploy_ptr = cache2.try_get_deployed_contract(contract_addr);
   ASSERT_TRUE(fresh_deploy_ptr.has_value());
   ASSERT_NE(fresh_deploy_ptr.value(), nullptr);
-  EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract, fresh_contract.value());
-  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
+  EXPECT_EQ(fresh_deploy_ptr.value()->entry, fresh_contract.value());
+  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->prepared.rv32.has_value());
 
   EXPECT_TRUE(get_db_proxy()
                   .close_viewing_snapshot(snap2->viewing_block_id)

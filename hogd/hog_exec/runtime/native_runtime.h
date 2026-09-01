@@ -95,7 +95,10 @@ public:
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override
+  // Native contracts are registered at genesis, not translated: there is
+  // nothing to prepare, so `out` is left alone.
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  PreparedContract & /*out*/) const override
   {
     CHECK(contract.contract_type() == ContractType::kNative);
     if (contracts_.contains(
@@ -104,6 +107,7 @@ public:
     }
     return InvokeErrorCode::Deterministic;
   }
+  using RuntimeContext::verify_contract;
 
 private:
   const std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts_;
