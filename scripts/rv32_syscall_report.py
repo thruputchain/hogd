@@ -346,8 +346,31 @@ def print_crosscheck(data, openssl):
     measured = rows(data)
     speed = parse_openssl_speed(openssl)
     print()
+    # Same rule --gas already enforces: a cross-check across two machines is
+    # not a weaker check, it is a misleading one. Both numbers stay plausible
+    # and their ratio means nothing. This is not hypothetical -- a container
+    # migrated silicon mid-session and gained SHA-NI, and the resulting
+    # fresh-openssl-vs-stale-benchmark pair read as a 4x fault in hogd.
+    theirs = openssl.get("cpu_model")
+    ours = context(data).get("hogd_cpu_model")
+    if theirs and ours and theirs != ours:
+        print("no cross-check: these files are from different machines")
+        print(f"  benchmark: {ours}")
+        print(f"  openssl:   {theirs}")
+        print("  Re-run scripts/rv32_openssl_speed.sh on the host the "
+              "benchmark came from.")
+        return 0
     print("cross-check against openssl speed "
           f"({openssl.get('openssl_version', 'unknown version')})")
+    # The architecture flags only, and only when there are some. They are what
+    # explains the ed25519 row: a libcrypto built -march=x86-64 runs Ed25519 as
+    # generic C, while SHA256 is unaffected because its SHA-NI assembly is
+    # dispatched at runtime. The rest of a compiler line explains nothing, so a
+    # truncated one is noise -- the full string stays in the JSON either way.
+    march = [flag for flag in openssl.get("openssl_compiler", "").split()
+             if flag.startswith(("-march", "-mtune"))]
+    if march:
+        print(f"openssl built for: {' '.join(march)}")
     print("-" * 76)
 
     lines = []
@@ -381,8 +404,10 @@ def print_crosscheck(data, openssl):
         lines.append(("ed25519 verify ns", f"{openssl_ns:.0f}",
                       f"{ours_ns:.0f}",
                       ratio, ok,
-                      "different implementations (OpenSSL vs "
-                      "curve25519-dalek); an order of magnitude is the test"))
+                      "OpenSSL's Ed25519 is generic C with no vectorised "
+                      "backend, and a distro libcrypto is built for baseline "
+                      "x86-64; dalek gets target-cpu=native. A factor is "
+                      "expected -- an order of magnitude is the test"))
 
     if not lines:
         print("  nothing comparable in this pair of files")

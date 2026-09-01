@@ -614,10 +614,14 @@ against.
 same pinning, and `--crosscheck` puts the two side by side:
 
 ```
+cross-check against openssl speed (OpenSSL 3.6.3 9 Jun 2026)
+openssl built for: -march=x86-64 -mtune=generic
   primitive                openssl        hogd    ratio  verdict
-  SHA256 ns/byte            2.5256      2.5397    1.01x  ok
-  ed25519 verify ns         116632       39832    0.34x  ok
+  SHA256 ns/byte            0.5450      0.5396    0.99x  ok
+  ed25519 verify ns          96104       28635    0.30x  ok
 ```
+
+That is hog10, run 33469060485.
 
 The two halves are worth very different amounts, and the report says which is
 which rather than presenting one number.
@@ -628,15 +632,30 @@ same compression function out of the same libcrypto. The per-byte terms should
 agree to a few percent, and they do. A real gap here means the benchmark is
 timing something other than hashing.
 
-**ed25519 is a backstop, not a validation.** hogd verifies with
-curve25519-dalek and OpenSSL 3.0 has its own implementation, severalfold slower
-than dalek's vectorised backends -- so a factor apart is expected and the
-tolerance has to allow it. What it still catches is a row that is not doing the
+**ed25519 is a backstop, not a validation,** and the 0.30x above is worth
+understanding rather than waving through. Both halves run out of one libcrypto
+on one host, yet one matches to 1% and the other is 3.4x apart, because the two
+primitives are built differently *inside the same binary*: OpenSSL's SHA256 has
+hand-written SHA-NI assembly dispatched at run time, which `-march` cannot
+suppress, while its Ed25519 is generic C with no vectorised backend to dispatch
+to -- so the distro build's `-march=x86-64 -mtune=generic` binds it, and hogd's
+dalek gets `-C target-cpu=native` on a Zen 4 EPYC. The cycle counts confirm it
+exactly: 96.1us is ~298k cycles at 3.1GHz, textbook ref10 portable C, and
+28.6us is ~89k, textbook dalek AVX2/AVX512. Nothing is wrong with either
+number. A factor apart is expected and the tolerance has to allow it. What it still catches is a row that is not doing the
 work at all: hoisted out of the timing loop, measuring a no-op, wired to the
 wrong syscall. Those land orders of magnitude out. The rejection path that
 actually bit us is caught earlier and far more sharply -- verification fails,
 the syscall returns an error, and the benchmark skips the row instead of timing
 it.
+
+The two files must come from the same machine, and the report refuses the pair
+when they do not -- the same rule `--gas` enforces, and for the same reason. A
+ratio across two hosts is not a weaker check but a misleading one: both numbers
+stay individually plausible and only their ratio is nonsense. This is not
+hypothetical. A development container migrated to different silicon
+mid-session, gaining SHA-NI, and a fresh openssl run against a benchmark from
+the previous host read as a 4x fault in hogd.
 
 A failed cross-check prints `INVESTIGATE` and still exits 0. It is a sanity
 check on a measurement, not a gate on one: an OpenSSL upgrade on the bench host

@@ -116,7 +116,24 @@ fi
 emit() {
   printf '{\n'
   printf '  "openssl_version": "%s",\n' "$(openssl version)"
+  # How openssl itself was built, which is half the explanation for any ratio
+  # far from 1. A distro libcrypto is typically compiled -march=x86-64
+  # -mtune=generic; that does not touch SHA256, whose SHA-NI assembly is
+  # dispatched at runtime, but it does bind Ed25519, which has no vectorised
+  # backend to dispatch to. Recording it turns a puzzling ratio into a
+  # self-explaining one.
+  printf '  "openssl_compiler": "%s",\n' \
+    "$(openssl version -a | sed -n 's/^compiler: //p' | tr -d '"' |
+      cut -c1-400)"
   printf '  "seconds_per_algorithm": %s,\n' "${SECONDS_PER_ALGO}"
+  # Which machine this ran on. A ratio between two hosts is not a weaker check
+  # than a ratio on one -- it is a misleading one, and it costs real time: a
+  # development container migrated to different silicon mid-session, gaining
+  # SHA-NI, and a fresh openssl run against a stale benchmark read as a 4x
+  # discrepancy in hogd. The report refuses the pair rather than printing it.
+  printf '  "cpu_model": "%s",\n' \
+    "$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo | head -1)"
+  printf '  "host": "%s",\n' "$(hostname)"
   printf '  "pinned": "%s",\n' "${RUNNER[*]-}"
   printf '  "raw": [\n'
   local i
