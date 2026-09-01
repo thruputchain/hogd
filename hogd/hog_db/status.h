@@ -5,11 +5,9 @@
 
 #pragma once
 
-#include <cassert>
 #include <expected>
 #include <string>
 #include <system_error>
-#include <utility>
 
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -20,7 +18,8 @@ namespace hogd {
 // HogDbCode is an enum of hog_db error codes.
 enum class HogDbCode : uint8_t {
   //
-  // All of these are the same as DBCode
+  // These share names with DBCode; to_hog_db_error() maps each explicitly,
+  // so the numeric values are independent of DBCode's.
   //
 
   // The item was not found.
@@ -47,6 +46,9 @@ enum class HogDbCode : uint8_t {
   // Data corruption detected.
   kCorruption,
 
+  // The operation conflicts with one already in progress.
+  kBusy,
+
   //
   // After this point, these are all unique HogDbCodes
   //
@@ -66,9 +68,6 @@ enum class HogDbCode : uint8_t {
   // changed state that this block already read. The block should
   // be abandoned.
   kStaleBlock,
-
-  // The operation conflicts with one already in progress.
-  kBusy,
 };
 
 // HogDbCategory provides an error category for hog_db errors.
@@ -81,15 +80,33 @@ public:
 // HogDbError is the error object for hog_db errors.
 using HogDbError = EnumError<HogDbCode, HogDbCategory>;
 
-// to_db_error converts an DBError to a HogDbError.
+// to_hog_db_error converts a DBError to a HogDbError. The switch has no
+// default so a new DBCode fails -Wswitch until it is mapped here.
 inline HogDbError
 to_hog_db_error(DBError err)
 {
-  // kBusy sits past the shared numeric prefix of the two enums.
-  if (err.code() == DBCode::kBusy)
+  switch (err.code()) {
+  case DBCode::kNotFound:
+    return HogDbError(HogDbCode::kNotFound);
+  case DBCode::kExists:
+    return HogDbError(HogDbCode::kExists);
+  case DBCode::kTypeMismatch:
+    return HogDbError(HogDbCode::kTypeMismatch);
+  case DBCode::kTooBig:
+    return HogDbError(HogDbCode::kTooBig);
+  case DBCode::kNoMemory:
+    return HogDbError(HogDbCode::kNoMemory);
+  case DBCode::kInternal:
+    return HogDbError(HogDbCode::kInternal);
+  case DBCode::kIO:
+    return HogDbError(HogDbCode::kIO);
+  case DBCode::kCorruption:
+    return HogDbError(HogDbCode::kCorruption);
+  case DBCode::kBusy:
     return HogDbError(HogDbCode::kBusy);
-  assert(err.raw_code() <= std::to_underlying(HogDbCode::kCorruption));
-  return HogDbError(static_cast<HogDbCode>(err.raw_code()));
+  }
+  // An out-of-range DBCode is a caller bug; fail toward the generic error.
+  return HogDbError(HogDbCode::kInternal);
 }
 
 // Enable comparisons between HogDbCode and std::error_code.
