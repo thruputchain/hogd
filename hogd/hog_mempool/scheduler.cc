@@ -469,7 +469,10 @@ Scheduler::is_pending(const SignedTransaction &tx)
       .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
       .tx_hash = tx_hash,
   };
-  const auto [account_state, lock] = get_account_state(account);
+  const auto [account_state, lock] = accounts_.find(account);
+  if (account_state == nullptr) {
+    return false;
+  }
   return account_state->txs.contains(key);
 }
 

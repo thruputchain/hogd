@@ -92,6 +92,18 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   EXPECT_TRUE(scheduled.empty());
 }
 
+TEST(Scheduler, IsPendingReturnsFalseForUncachedAccount)
+{
+  const ContractAddress kUncachedAccount = make_account_address(99);
+  fib_client_t fib_client(kUncachedAccount);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  EXPECT_FALSE(scheduler->is_pending(txs[0]));
+}
+
 TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
