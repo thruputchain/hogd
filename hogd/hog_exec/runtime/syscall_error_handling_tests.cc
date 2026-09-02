@@ -16,6 +16,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -143,7 +144,7 @@ public:
                                            0)();
     ASSERT_FALSE(syscall_res.has_value());
     ASSERT_EQ(syscall_res.error().code(), Code);
-    ASSERT_EQ(gas_consumed, 1000);
+    ASSERT_EQ(gas_consumed, 1000 + kSyscallBaseCost);
 
     auto [syscall_res2, gas_consumed2] =
         wrap_outer<ErrorSyscallMeta<Code>>(handler, make_null_context(10),
@@ -372,10 +373,10 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
   // Gas is not consumed by the syscall.
-  // TODO(geoff): This will break when we add a default gas cost for the error
-  // handling (calling a non-readonly syscal in read-only mode should cost at
-  // least some gas)
-  ASSERT_EQ(gas_consumed, 0);
+  // Refused before the body ran, so nothing is billed for the work -- but the
+  // crossing was still paid, which is the "at least some gas" a TODO here used
+  // to ask for.
+  ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
   auto [syscall_res2, gas_consumed2] =
       wrap_outer<NoReturnReadOnlySyscallMeta>(handler, make_null_context(10),
@@ -383,8 +384,9 @@ TEST_F(SyscallErrorHandlingTest, NoReturnReadOnly)
                                               0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Exit);
-  // TODO(geoff): same as above
-  ASSERT_EQ(gas_consumed2, 0);
+  // The crossing again, but this frame had only 10 gas: what is reported back
+  // is clamped to what the frame actually had.
+  ASSERT_EQ(gas_consumed2, 10);
 }
 
 // WrappedGasAmount must not be implicitly constructible from int,
@@ -506,7 +508,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowingSyscallTranslatedToUnrecoverable)
           0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
-  ASSERT_EQ(gas_consumed, 0);
+  ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
@@ -528,7 +530,7 @@ TEST_F(SyscallErrorHandlingTest, NonStdExceptionTranslatedToUnrecoverable)
           0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
-  ASSERT_EQ(gas_consumed, 0);
+  ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
@@ -665,6 +667,60 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtZeroGasIsOutOfGas)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
 
+// Just under what the call costs. A zero-cost body still owes the crossing, so
+// there is now a band between zero gas and affording the call at all, and the
+// same `>=` has to reject all of it. gas_consumed is clamped to the budget:
+// the frame cannot be billed for more than it had.
+TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallBelowCrossingIsOutOfGas)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  constexpr GasAmount kBudget = kSyscallBaseCost - 1;
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<FreeSuccessSyscallMeta>(handler, make_null_context(kBudget),
+                                         kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                         0)();
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_consumed, kBudget);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
+// Exactly what the call costs, which is the inclusive edge: `>=` rejects it and
+// `>` would not. Affording a syscall down to its last gas would leave the frame
+// at zero having already mutated state, which is the same hazard the zero-gas
+// case above pins.
+TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtCrossingIsOutOfGas)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               std::span<uint32_t>{})
+                  .has_value());
+
+  auto [syscall_res, gas_consumed] =
+      wrap_outer<FreeSuccessSyscallMeta>(handler,
+                                         make_null_context(kSyscallBaseCost),
+                                         kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+                                         0)();
+  ASSERT_FALSE(syscall_res.has_value());
+  ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
+  ASSERT_EQ(gas_consumed, kSyscallBaseCost);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+}
+
 // The second half of the #1759 chain: Return is what carries the child frame's
 // outputs into the parent, and it is also zero-cost. At zero gas it must not
 // be allowed to report a successful frame return.
@@ -692,6 +748,11 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
 
 // The other side of the boundary: the rewrite must not swallow syscalls the
 // frame can actually afford, or every zero-cost syscall becomes unusable.
+//
+// "Zero-cost" is now about the body: it bills nothing, but the call still pays
+// kSyscallBaseCost for the crossing, which wrap_after_parse_async adds
+// centrally. So the affordable case is one gas above what the call costs, not
+// one gas above zero.
 TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
 {
   auto context = make_hog_exec_context();
@@ -703,13 +764,15 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
                                std::span<uint32_t>{})
                   .has_value());
 
+  constexpr GasAmount kCallCost = kSyscallBaseCost;
   auto [syscall_res, gas_consumed] =
-      wrap_outer<FreeSuccessSyscallMeta>(handler, make_null_context(1),
+      wrap_outer<FreeSuccessSyscallMeta>(handler,
+                                         make_null_context(kCallCost + 1),
                                          kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
                                          0)();
   ASSERT_TRUE(syscall_res.has_value());
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
-  ASSERT_EQ(gas_consumed, 0);
+  ASSERT_EQ(gas_consumed, kCallCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
@@ -727,23 +790,26 @@ TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
                                std::span<uint32_t>{})
                   .has_value());
 
+  // What the call costs: the body's fixed charge plus the crossing every
+  // syscall pays. That total, not the body's share, is where the boundary sits.
+  constexpr GasAmount kCallCost = kFixedSyscallCost + kSyscallBaseCost;
+
   auto [at_cost, gas_at_cost] =
-      wrap_outer<FixedCostSyscallMeta>(handler,
-                                       make_null_context(kFixedSyscallCost),
+      wrap_outer<FixedCostSyscallMeta>(handler, make_null_context(kCallCost),
                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
                                        0)();
   ASSERT_FALSE(at_cost.has_value());
   ASSERT_EQ(at_cost.error().code(), HostFnErrorCode::OutOfGas);
-  ASSERT_EQ(gas_at_cost, kFixedSyscallCost);
+  ASSERT_EQ(gas_at_cost, kCallCost);
 
   auto [above_cost, gas_above_cost] =
       wrap_outer<FixedCostSyscallMeta>(handler,
-                                       make_null_context(kFixedSyscallCost + 1),
+                                       make_null_context(kCallCost + 1),
                                        kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
                                        0)();
   ASSERT_TRUE(above_cost.has_value());
   ASSERT_EQ(*above_cost, SyscallErrorCode::kSyscallErrorCodeNone);
-  ASSERT_EQ(gas_above_cost, kFixedSyscallCost);
+  ASSERT_EQ(gas_above_cost, kCallCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
@@ -901,7 +967,7 @@ TEST_F(SyscallErrorHandlingTest, SuspendingSyscallBodyRoundTrips)
           0, 0)();
   ASSERT_TRUE(syscall_res.has_value());
   ASSERT_EQ(*syscall_res, SyscallErrorCode::kSyscallErrorCodeNone);
-  ASSERT_EQ(gas_consumed, 1000);
+  ASSERT_EQ(gas_consumed, 1000 + kSyscallBaseCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
@@ -948,7 +1014,7 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
           0, 0)();
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
-  ASSERT_EQ(gas_consumed, 0);
+  ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }

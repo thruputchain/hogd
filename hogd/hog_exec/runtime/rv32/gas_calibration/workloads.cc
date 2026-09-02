@@ -314,6 +314,9 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
   std::vector<BuiltWorkload> built;
   std::vector<std::unique_ptr<ThreadedMachinePreInstantiation>> programs;
   std::vector<MeasurementPoint> points;
+  // Workload kernels end on an ecall the halting host turns into a halt; no
+  // workload makes a host call of its own.
+  HaltHost halt_host;
 
   // Tune each workload's trip count on its own, then measure them together in
   // one interleaved schedule so they share whatever drift the host has.
@@ -336,7 +339,8 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     if (!seed_program.has_value()) {
       continue;
     }
-    trip_counts[workload.name] = tune_trip_count(*seed_program, 64, target_ns);
+    trip_counts[workload.name] =
+        tune_trip_count(*seed_program, halt_host, 64, target_ns);
   }
 
   std::vector<uint32_t> measured_trip_counts;
@@ -380,7 +384,8 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
                       .program = programs[i].get(),
                       .trip_count = measured_trip_counts[i]});
   }
-  measure_interleaved(points, {.repeats = repeats, .warmup_runs = warmup_runs});
+  measure_interleaved(points, halt_host,
+                      {.repeats = repeats, .warmup_runs = warmup_runs});
 
   for (size_t i = 0; i < results.size(); ++i) {
     results[i].ns_per_iteration = points[i].median();
