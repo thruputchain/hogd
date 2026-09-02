@@ -298,6 +298,29 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
+  // A chain bounds how many distinct contracts one transaction may attach.
+  // The bodies of the ones a contract goes on to deploy are committed as a
+  // single message at the end of the transaction, so without this an attached
+  // set large enough to overflow that message would only fail at commit --
+  // after the body ran and the root lock was taken -- where an oversized
+  // request is indistinguishable from a transport failure and is reported as
+  // unrecoverable (#2190).
+  //
+  // Counted over the deduplicated map rather than tx.contracts_to_deploy: a
+  // repeated contract is one entry in the commit batch, so charging it twice
+  // would reject a transaction whose batch does fit. Deterministic in both
+  // proposal and validation mode -- it is a function of the transaction bytes
+  // alone, so every node reaches the same verdict.
+  if (newly_created_contracts_.size() >
+      db_tip()->network_config.max_new_contracts_per_tx) {
+    error("Transaction attaches {} contracts; chain permits {}",
+          newly_created_contracts_.size(),
+          db_tip()->network_config.max_new_contracts_per_tx);
+    cumulative_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::Deterministic};
+    co_return SystemStatus<void>{};
+  }
+
   for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
     // runtime-agnostic, and rejecting here -- before any body execution --

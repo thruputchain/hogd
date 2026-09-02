@@ -19,6 +19,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -340,6 +341,21 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
       value.proposal_header.config_hash !=
           compute_config_hash(genesis_configuration)) {
     error("invalid genesis height, network hash, or config hash");
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A chain states max_new_contracts_per_tx itself, so a genesis can name a
+  // count whose worst-case commit batch the executor could not send to storage
+  // in one message. Reject it here, where the chain is being created, rather
+  // than let every oversized transaction fail as unrecoverable at commit
+  // (#2190).
+  if (const size_t admissible =
+          max_new_contracts_for_message_cap(kExecToDbMessageCap);
+      genesis_configuration.network_config.max_new_contracts_per_tx >
+      admissible) {
+    error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
+          "commit in one message",
+          genesis_configuration.network_config.max_new_contracts_per_tx,
+          admissible);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

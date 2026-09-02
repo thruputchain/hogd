@@ -187,6 +187,8 @@ write_network_config(json::Writer &w, NetworkConfig const &config)
   w.field("max_sha256_buffers", uint64_string(config.max_sha256_buffers));
   w.field("max_cross_invoke_depth",
           uint64_string(config.max_cross_invoke_depth));
+  w.field("max_new_contracts_per_tx",
+          uint64_string(config.max_new_contracts_per_tx));
 }
 
 std::string

@@ -23,6 +23,7 @@
 #include "genesis.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -120,6 +121,30 @@ load_stock_genesis_root_contract()
   return contract;
 }
 
+// RV32 contracts have a 64 KiB address space. Keep the decoded distribution
+// vector comfortably below that limit, including allocator and contract stack
+// space. A ceremony is one atomic height-1 block, but it may contain several
+// root transactions.
+constexpr std::size_t kDistributionsPerTransaction = 16;
+
+// max_new_contracts_per_tx for this repository's dev and test chains.
+//
+// Bounded below by kDistributionsPerTransaction -- a ceremony transaction
+// attaches one contract per distinct wallet artifact it distributes to, so
+// anything less would reject a chain's own genesis -- and above by what the
+// executor can commit in one message, which at the current cap is 63. Sitting
+// between them, 32 leaves a ceremony room to grow and still commits an
+// all-max-size batch at half the cap.
+constexpr uint32_t kStockMaxNewContractsPerTx = 32;
+
+static_assert(kStockMaxNewContractsPerTx >= kDistributionsPerTransaction,
+              "a genesis ceremony transaction must not exceed the attached "
+              "contract count its own chain admits");
+static_assert(kStockMaxNewContractsPerTx <=
+                  max_new_contracts_for_message_cap(kExecToDbMessageCap),
+              "the largest commit batch this admits must fit the executor's "
+              "message cap to storage");
+
 NetworkConfig
 stock_network_config()
 {
@@ -130,6 +155,7 @@ stock_network_config()
       .ext = ExtensionPoint(0),
       .max_sha256_buffers = 8,
       .max_cross_invoke_depth = 256,
+      .max_new_contracts_per_tx = kStockMaxNewContractsPerTx,
   };
 }
 
@@ -160,11 +186,6 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
   root_client_t client(kGenesisRootContractAddress);
   constexpr static GasAmount kDistributionGas =
       std::numeric_limits<GasAmount>::max();
-  // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
-  // vector comfortably below that limit, including allocator and contract
-  // stack space. A ceremony is one atomic height-1 block, but it may contain
-  // several root transactions.
-  constexpr static std::size_t kDistributionsPerTransaction = 16;
 
   // Every transaction executes independently against the height-0 snapshot,
   // so make each one self-funding. The minted funding is consumed by the rows
