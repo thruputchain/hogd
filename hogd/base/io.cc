@@ -125,9 +125,15 @@ sys_ftruncate(int fd, off_t length)
 inline std::string
 get_tmp_dir()
 {
-  // use TMPDIR environment variable, of /tmp if not found.
-  if (char *tmp = getenv("TMPDIR"); tmp != nullptr)
-    return std::string(tmp);
+  // Use the TMPDIR environment variable, or /tmp if not set. Callers append
+  // a file name directly, so the result always ends in a separator:
+  // TMPDIR=/var/tmp must not become /var/tmpramdb_XXXXXX.
+  if (char *tmp = getenv("TMPDIR"); tmp != nullptr && *tmp != '\0') {
+    std::string dir(tmp);
+    if (dir.back() != '/')
+      dir.push_back('/');
+    return dir;
+  }
   return "/tmp/";
 }
 

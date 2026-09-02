@@ -63,9 +63,14 @@ request_shutdown(int signal_number)
 ShutdownSignals
 block_shutdown_signal()
 {
+  // SIGTERM is what the node supervisor sends; SIGINT is what a developer
+  // running hog-devnode by hand (or Ctrl-C in a `groundhog node` terminal,
+  // which signals the whole process group) sends. Both must reach the
+  // orderly shutdown path so ephemeral state under TMPDIR is removed.
   sigset_t blocked_mask;
   CHECK_EQ(sigemptyset(&blocked_mask), 0);
   CHECK_EQ(sigaddset(&blocked_mask, SIGTERM), 0);
+  CHECK_EQ(sigaddset(&blocked_mask, SIGINT), 0);
 
   sigset_t suspend_mask;
   // Use pthread_sigmask (not sigprocmask, whose behavior is unspecified in a
@@ -74,6 +79,7 @@ block_shutdown_signal()
   // blocked mask; see hog_devnode_init.
   CHECK_EQ(pthread_sigmask(SIG_BLOCK, &blocked_mask, &suspend_mask), 0);
   CHECK_EQ(sigdelset(&suspend_mask, SIGTERM), 0);
+  CHECK_EQ(sigdelset(&suspend_mask, SIGINT), 0);
 
   return {.suspend_mask = suspend_mask};
 }
@@ -85,6 +91,7 @@ install_signal_handler()
   action.sa_handler = request_shutdown;
   CHECK_EQ(sigemptyset(&action.sa_mask), 0);
   CHECK_EQ(sigaction(SIGTERM, &action, nullptr), 0);
+  CHECK_EQ(sigaction(SIGINT, &action, nullptr), 0);
 }
 
 void
@@ -254,8 +261,11 @@ print_usage(FILE *stream, char *argv[])
 Start a local Groundhog development node.
 
 Options:
-  --listen-host <ip>             Host/interface for internal x23 services
-                                 [default: 127.0.0.1]
+  --listen-host <ip>             Literal IP address for the internal x23
+                                 services [default: 127.0.0.1]. Any
+                                 non-loopback address exposes unauthenticated
+                                 internal RPC servers; use it only on a
+                                 trusted network.
   --scheduler-port <port>        SchedulerCoord port; use 0 for an OS port
                                  [default: 0]
   --data-dir <dir>               Persist node state under this directory.
@@ -272,7 +282,7 @@ Options:
                                  dev-account and wallet shorthand flags
                                  conflict.
   --dev-accounts <count>         Deterministic user accounts, excluding dev-0
-                                 [default: 0]
+                                 [default: 0; `groundhog node` passes 10]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
                                  [default: groundhog-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per user account
@@ -290,6 +300,8 @@ Options:
 Environment:
   HOGD_LOG_FORMAT=json           Emit newline-delimited JSON logs to stderr.
                                  The default is human-readable stderr logs.
+  TMPDIR                         Parent directory for ephemeral node state
+                                 when --data-dir is omitted [default: /tmp].
 
 Readiness:
   stdout is reserved for the readiness line when --readiness stdout is used.
