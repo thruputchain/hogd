@@ -202,8 +202,12 @@ public:
 
   ~SyscallBenchFixture()
   {
-    (void)handler_->finish_frame(InvokeStatus<void>{}, std::move(inner_trace_));
-    (void)handler_->finish_frame(InvokeStatus<void>{}, std::move(outer_trace_));
+    // Completed, not discarded: finish_frame() returns a MaybeAsync, and
+    // dropping one on its Async arm abandons the coroutine unrun.
+    (void)handler_->finish_frame(InvokeStatus<void>{},
+                                 std::move(inner_trace_))();
+    (void)handler_->finish_frame(InvokeStatus<void>{},
+                                 std::move(outer_trace_))();
   }
 
   SyscallBenchFixture(const SyscallBenchFixture &) = delete;

@@ -695,7 +695,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallBelowCrossingIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, kBudget);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // Exactly what the call costs, which is the inclusive edge: `>=` rejects it and
@@ -722,7 +722,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallAtCrossingIsOutOfGas)
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::OutOfGas);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
 
-  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
 // The second half of the #1759 chain: Return is what carries the child frame's
