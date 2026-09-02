@@ -753,7 +753,7 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
     // override syscall_result (by returning Exit) in a subset
     // of the cases covered by the is_handleable_error guard.
     if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
-      // If the syscall cannot return to the wasm environment but the syscall
+      // If the syscall cannot return to the guest environment but the syscall
       // tried to return an error code, abort the entire call frame.
       if (runtime_log_level(LogLevel::kTrace)) {
         try {

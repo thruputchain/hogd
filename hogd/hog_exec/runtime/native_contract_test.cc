@@ -377,7 +377,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
   // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
   // a child that consumes 255 gas, while gas_limit 255 is converted to
-  // OutOfGas/DeterministicWasm and still charges the full child limit.
+  // OutOfGas/Deterministic and still charges the full child limit.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);

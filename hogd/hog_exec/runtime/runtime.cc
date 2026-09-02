@@ -56,12 +56,12 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.
-  // (The "consume fuel" operation is generally placed at the top of a basic
-  // block. As far as I can tell, this is the case for wasmi). We hide this
-  // detail by charging for the entire gas limit, if we reach an OutOfGas error.
+  // (The gas-charge operation is generally placed at the top of a basic
+  // block, as the RV32 threaded interpreter does.) We hide this detail by
+  // charging for the entire gas limit, if we reach an OutOfGas error.
   //
-  // This makes the behavior of the wasm runtime consistent with the behavior of
-  // consume_gas (defined in this file), which is what we use to consume gas
+  // This makes the behavior of the guest runtime consistent with the behavior
+  // of consume_gas (defined in this file), which is what we use to consume gas
   // within syscalls.
   if (!res.has_value() && res.error().code() == InvokeErrorCode::OutOfGas) {
     gas_consumed = gas_limit;

@@ -23,7 +23,7 @@
 namespace hogd {
 
 //
-// Test fixture for manual revert caller WASM contract tests
+// Test fixture for manual revert caller RV32 contract tests
 //
 class ManualRevertCallerRv32Test : public ::testing::TestWithParam<TestDB>,
                                    public NativeContractTestFramework {

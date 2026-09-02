@@ -558,8 +558,8 @@ TEST_F(SyscallErrorHandlingTest,
 // ---------------------------------------------------------------------------
 // A syscall entered with the frame's gas already exhausted must not succeed.
 //
-// A wasm engine can enter `marmot.syscall` with host-visible fuel already
-// saturated to zero: the fuel checkpoint that would have trapped the contract
+// A guest runtime can enter a syscall with host-visible gas already
+// saturated to zero: the gas checkpoint that would have trapped the contract
 // sits after the call boundary, not before it, so the first over-budget
 // operation the host sees is the syscall itself. wrap_after_parse is the
 // backstop -- it rewrites any handleable syscall result to OutOfGas once the
@@ -814,8 +814,8 @@ TEST_F(SyscallErrorHandlingTest, SyscallGasBoundaryIsInclusive)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr);
 }
 
-// The wasmtime trampoline does `set_fuel(gas_remaining - gas_consumed)` behind
-// an `assert!(gas_consumed <= gas_remaining)`. wrap_after_parse is what makes
+// A runtime trampoline that debits `gas_remaining - gas_consumed` behind an
+// `assert!(gas_consumed <= gas_remaining)` depends on wrap_after_parse to make
 // that subtraction safe: the gas it reports back is clamped to the gas the
 // frame actually had. Uncapped, a syscall entered on an over-consumed store
 // would abort the process from inside the FFI boundary.

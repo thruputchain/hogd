@@ -41,7 +41,7 @@ host_trap_code_to_invoke_status(uint32_t code)
     break;
   }
 
-  // Only fatal-class host trap codes mirror the WASM mapping here. Return,
+  // Only fatal-class host trap codes are mapped here. Return,
   // Exit, and OutOfGas are handled before HostTrap by SyscallBridgeHost and the
   // VM trap/halt status; seeing them as trap payloads is a fatal inconsistency.
   return InvokeError{InvokeErrorCode::Unrecoverable};

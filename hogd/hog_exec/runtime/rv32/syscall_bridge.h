@@ -9,7 +9,7 @@ namespace hogd::rv32 {
 
 // Register-native bridge ABI: the guest places the syscall number in a0 and up
 // to seven argument words in a1..a7, then executes ecall. Each RV32 register is
-// forwarded as one uint32_t syscall argument slot, matching the shared wasm32
+// forwarded as one uint32_t syscall argument slot, matching the shared 32-bit
 // syscall ABI. The shared parser interprets signed values from their two's
 // complement bit pattern, uses UINT32_MAX as the optional-pointer null
 // sentinel, and bounds-checks guest pointers and lengths against guest memory.

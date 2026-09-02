@@ -27,11 +27,11 @@
 #include "types.hh"
 
 //
-// WASM integration tests for manual frame revert functionality.
+// RV32 integration tests for manual frame revert functionality.
 //
 // These tests load and invoke the actual manual_revert_test contract
 // to verify that the SDK's Returnable trait properly triggers manual revert
-// at the WASM runtime level.
+// at the RV32 runtime level.
 //
 
 namespace hogd {
@@ -84,11 +84,11 @@ protected:
 };
 
 //
-// Test basic manual revert functionality through WASM contract.
+// Test basic manual revert functionality through RV32 contract.
 //
 // This integration test verifies the complete end-to-end flow:
 // - Loads the actual manual_revert_test contract
-// - Calls test_basic_manual_revert(should_revert=true) via WASM runtime
+// - Calls test_basic_manual_revert(should_revert=true) via RV32 runtime
 // - Verifies that the SDK's Returnable trait triggers manual revert
 // - Confirms that storage changes are reverted (check_storage_exists returns
 // false)
@@ -99,7 +99,7 @@ TEST_P(ManualRevertRv32Test, BasicManualRevert)
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
-  // Create a native contract that calls the WASM contract to test manual revert
+  // Create a native contract that calls the RV32 contract to test manual revert
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     // Call test_basic_manual_revert with should_revert=true
@@ -171,11 +171,11 @@ TEST_P(ManualRevertRv32Test, BasicManualRevert)
 }
 
 //
-// Test normal operation without revert through WASM contract.
+// Test normal operation without revert through RV32 contract.
 //
 // This test serves as a control to verify that when manual revert is NOT
 // triggered:
-// - The WASM contract executes normally
+// - The RV32 contract executes normally
 // - Storage changes are preserved (check_storage_exists returns true)
 // - The transaction commits successfully
 // - This validates that the manual revert behavior is intentional, not a side
@@ -186,7 +186,7 @@ TEST_P(ManualRevertRv32Test, BasicNoRevert)
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
 
-  // Create a native contract that calls the WASM contract without revert
+  // Create a native contract that calls the RV32 contract without revert
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
     // Call test_basic_manual_revert with should_revert=false
@@ -251,11 +251,11 @@ TEST_P(ManualRevertRv32Test, BasicNoRevert)
 }
 
 //
-// Test nested manual revert functionality through WASM contract.
+// Test nested manual revert functionality through RV32 contract.
 //
-// Tests the WASM contract's test_nested_manual_revert method which:
+// Tests the RV32 contract's test_nested_manual_revert method which:
 // - Calls an internal method that performs manual revert
-// - Verifies that nested manual revert works correctly through WASM
+// - Verifies that nested manual revert works correctly through RV32
 // - Ensures the outer method can handle the reverted inner call
 // - Validates that the SDK properly handles nested Result::Err scenarios
 //
@@ -319,7 +319,7 @@ TEST_P(ManualRevertRv32Test, NestedManualRevert)
 }
 
 //
-// Test different error types triggering manual revert through WASM contract.
+// Test different error types triggering manual revert through RV32 contract.
 //
 // This integration test verifies that the test_error_type_revert method:
 // - Properly handles different error types (1-4) via SDK's Returnable trait
@@ -334,7 +334,7 @@ TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
 
   // Test error types 1-4 (should all trigger manual revert)
   for (uint32_t error_type = 1; error_type <= 4; ++error_type) {
-    // Create a native contract that calls the WASM contract's error type method
+    // Create a native contract that calls the RV32 contract's error type method
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
     fns.emplace(
         0,
@@ -398,7 +398,7 @@ TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
 }
 
 //
-// Test normal operation (error type 0) through WASM contract.
+// Test normal operation (error type 0) through RV32 contract.
 //
 // This test verifies that when test_error_type_revert is called with
 // error_type=0:
@@ -467,14 +467,14 @@ TEST_P(ManualRevertRv32Test, ErrorTypeNoError)
 }
 
 //
-// Test storage operations with manual revert through WASM contract.
+// Test storage operations with manual revert through RV32 contract.
 //
 // This integration test verifies the test_storage_manual_revert method:
 // - When should_revert=true: writes multiple storage items then reverts all
 // changes
 // - When should_revert=false: writes storage items and preserves them
 // - Validates that manual revert properly handles multiple storage operations
-// - Confirms end-to-end storage revert functionality through WASM
+// - Confirms end-to-end storage revert functionality through RV32
 //
 TEST_P(ManualRevertRv32Test, StorageManualRevert)
 {

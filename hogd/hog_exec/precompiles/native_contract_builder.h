@@ -159,7 +159,7 @@ public:
         // Mirror the sdk entrypoint glue: an args-decode failure (parse
         // error, trailing bytes) or unconsumed forwarded auth handles
         // (builder contracts take no Signer args) aborts the frame with
-        // LibraryExn::Handling(DecodingArgs), byte-identical to a wasm
+        // LibraryExn::Handling(DecodingArgs), byte-identical to an RV32
         // contract's wrapper — not a plain frame fault. See
         // default_wallet_parity_test.cc's malformed-calldata cases.
         auto decoding_args_abort = [&ctx]() -> InvokeStatus<void> {

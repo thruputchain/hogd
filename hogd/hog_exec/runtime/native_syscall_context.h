@@ -23,7 +23,7 @@
 namespace hogd {
 
 // Routes native contract syscalls through wrap_after_parse, so they get
-// read-only enforcement, tracing, and gas accounting -- just like wasm
+// read-only enforcement, tracing, and gas accounting -- just like guest
 // contracts.
 class NativeSyscallContext {
 public:

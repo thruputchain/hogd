@@ -3207,7 +3207,7 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
             .entrypoint_id = 0,
             // The child frame starts with nothing to spend, so its first
             // syscall is entered with the gas already exhausted -- the state
-            // an over-budget wasm contract reaches at a call boundary.
+            // an over-budget guest contract reaches at a call boundary.
             .gas_limit = 0,
             .flags = 0,
         };
