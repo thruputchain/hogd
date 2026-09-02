@@ -1079,14 +1079,17 @@ parent frame adds 46.5 ns to every first touch, which is one more
 `AddressAndKey` hash and one more probe of a map that does not hold the key. At
 depth 16 that is already more than the touch itself; at the configured maximum
 of 256 frames a single first touch costs **12 µs -- 141 crossings -- charged as
-one crossing.** It is paid whether or not any parent holds the key, and in
-production no parent can: a contract cannot be re-entered, and contract-data
-keys are namespaced by the touching frame's address, so the walk finds a view
-only for keys of other kinds (balances, for instance). For NNInt it is a pure
-loss, and the obvious fix -- hash once and probe each frame with the
-precomputed hash, or track per-key which frames hold a view -- is an
-engineering change rather than a pricing one. Until it lands, the price has to
-include it.
+one crossing.** It is paid whether or not any parent holds the key, and it
+cannot simply be dropped: the reentrance ban keeps one contract from being live
+twice on the stack at once, but a contract invoked twice in sequence by the
+same caller has its first frame's views merged into the caller's frame at
+commit, and its second frame has to find them there. Native-token balances and
+the auth registry also read keys under addresses other than the active frame's.
+What can go is the cost: every probe re-hashes the 68-byte key and a miss
+visits every ancestor. Hashing once and probing with the precomputed hash, or
+one transaction-wide index from key to the deepest frame holding a view, would
+take it from 46 ns per frame to near nothing. That is an engineering change
+rather than a pricing one; until it lands, the price has to include the walk.
 
 **Writes are cheap to stage and paid for twice later.** A first-touch write
 costs what a no-load first touch costs; the syscall stages an item and stops.
