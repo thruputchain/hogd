@@ -1482,19 +1482,11 @@ register_benchmarks()
                                  /*commit_innermost=*/false,
                                  /*needs_seeded_keys=*/false);
   }
-  for (const uint32_t depth : depths) {
-    const std::span<const uint64_t> sweep =
-        depth == 1 ? std::span<const uint64_t>(deep_key_counts)
-                   : std::span<const uint64_t>(key_counts);
-    for (const uint64_t keys : sweep) {
-      benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
-                                               depth, keys),
-                                   bm_frame_sweep, depth, keys,
-                                   nnint_get_call(true), KeySpace::kFirstTouch,
-                                   /*commit_innermost=*/false,
-                                   /*needs_seeded_keys=*/true);
-    }
-  }
+  // The commit rows run before the seeded sweep below, not after: they
+  // measure a difference of two whole-iteration timings, so a process
+  // carrying the sweep's quarter-million resident items inflates both
+  // sides and the per-item figure with them. Ordering them first cost
+  // nothing and is what keeps that number about the merge.
   for (const uint64_t keys : key_counts) {
     // Two frames: a fresh parent for the child to commit into, so the merge
     // takes the insert path every iteration rather than the assignment path a
@@ -1510,6 +1502,20 @@ register_benchmarks()
                                  KeySpace::kMerge,
                                  /*commit_innermost=*/false,
                                  /*needs_seeded_keys=*/false);
+  }
+
+  for (const uint32_t depth : depths) {
+    const std::span<const uint64_t> sweep =
+        depth == 1 ? std::span<const uint64_t>(deep_key_counts)
+                   : std::span<const uint64_t>(key_counts);
+    for (const uint64_t keys : sweep) {
+      benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
+                                               depth, keys),
+                                   bm_frame_sweep, depth, keys,
+                                   nnint_get_call(true), KeySpace::kFirstTouch,
+                                   /*commit_innermost=*/false,
+                                   /*needs_seeded_keys=*/true);
+    }
   }
 
   // Last, because it leaves the shared snapshot cache a quarter-million
