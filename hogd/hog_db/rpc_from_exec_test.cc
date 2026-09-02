@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -402,6 +403,23 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
   auto r2 =
       rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, second);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
+}
+
+// A persistent contract-code row whose inline payload does not decode as a
+// Contract (e.g. tampered on-disk state) must surface as a structured
+// corruption error, not as an XDR decode exception unwinding across the
+// executor RPC boundary. See #3804.
+TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
+{
+  SHA256Hash hash{};
+  hash.fill(0x98);
+  constexpr std::array<std::byte, 3> kTruncatedContractXdr{std::byte{0},
+                                                           std::byte{0},
+                                                           std::byte{0}};
+  ASSERT_TRUE(ctx_->get_db().write_wasm_code(hash, kTruncatedContractXdr));
+
+  ExpectedContract result = rpc_->get_contract(BlockID{1}, hash);
+  EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
 }
 
 } // namespace
