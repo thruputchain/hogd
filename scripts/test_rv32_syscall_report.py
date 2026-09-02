@@ -40,6 +40,8 @@ def synthetic_run(push_ns=300.0, first_touch_ns=120.0, walk_ns=15.0,
         row("entry/GetBlockHeight", 70.0, gas=51),
         row("vm/GetBlockHeight", 100.0, items_per_second=5.12e9),
         row("entry/NNIntGet", 110.0, gas=51),
+        row("entry/NNIntGetNoLoad", 40.0, gas=51),
+        row("entry/NNIntSetAdd", 70.0, gas=51),
         row("cold/NNIntGet/iterations:20000", cold_ns, gas=51),
         row("cold/NNIntGet/iterations:20000", 12.5, aggregate="stddev"),
     ]
@@ -158,6 +160,49 @@ class StorageFitTest(unittest.TestCase):
         for _, _, _, per_item in self.summary["commits"]["NNIntSetAdd"]:
             self.assertAlmostEqual(per_item, 40.0, places=6)
 
+    def test_surcharge_subtracts_the_matching_warm_row(self):
+        # per-key at depth 1 is 120 and the warm entry/NNIntGet is 110, so the
+        # first touch itself is the 10 ns difference -- charging 120 on top of
+        # a table that already prices the warm call bills it twice.
+        first = self.summary["sweeps"]["NNIntGetFirstTouch"][1]
+        self.assertAlmostEqual(first["worst_ns"], 120.0, places=6)
+        self.assertAlmostEqual(first["warm_ns"], 110.0, places=6)
+        self.assertAlmostEqual(first["surcharge_ns"], 10.0, places=6)
+
+    def test_warm_row_mapping_covers_every_family(self):
+        self.assertEqual(report.warm_syscall_for("NNIntGetFirstTouch"),
+                         "NNIntGet")
+        self.assertEqual(report.warm_syscall_for("NNIntGetFirstTouchNoLoad"),
+                         "NNIntGetNoLoad")
+        self.assertEqual(report.warm_syscall_for("NNIntSetAddFirstTouch"),
+                         "NNIntSetAdd")
+        noload = self.summary["sweeps"]["NNIntGetFirstTouchNoLoad"][1]
+        self.assertAlmostEqual(noload["surcharge_ns"], 60.0 - 40.0, places=6)
+        write = self.summary["sweeps"]["NNIntSetAddFirstTouch"][1]
+        self.assertAlmostEqual(write["surcharge_ns"], 90.0 - 70.0, places=6)
+
+    def test_surcharge_floors_at_zero(self):
+        # A warm row dearer than the swept one is noise, not a negative cost.
+        run = synthetic_run()
+        for entry in run["benchmarks"]:
+            if entry["name"] == "entry/NNIntGet":
+                entry["real_time"] = 500.0
+        summary = report.storage_summary(report.rows(run), report.stddevs(run))
+        self.assertEqual(
+            summary["sweeps"]["NNIntGetFirstTouch"][1]["surcharge_ns"], 0.0)
+
+    def test_missing_warm_row_leaves_no_surcharge(self):
+        run = synthetic_run()
+        run["benchmarks"] = [e for e in run["benchmarks"]
+                             if e["name"] != "entry/NNIntGet"]
+        summary = report.storage_summary(report.rows(run), report.stddevs(run))
+        entry = summary["sweeps"]["NNIntGetFirstTouch"][1]
+        self.assertIn("worst_ns", entry)
+        self.assertNotIn("surcharge_ns", entry)
+        proposal = report.build_schedule(run, synthetic_calibration(1.6),
+                                         resolution=1)
+        self.assertNotIn("storage_first_touch_gas", proposal)
+
     def test_cold_rows_drop_the_iteration_suffix_and_keep_stddev(self):
         self.assertEqual(list(self.summary["cold"]), ["NNIntGet"])
         self.assertEqual(self.summary["cold"]["NNIntGet"], (25000.0, 12.5))
@@ -173,8 +218,10 @@ class StorageScheduleTest(unittest.TestCase):
         proposal = report.build_schedule(synthetic_run(),
                                          synthetic_calibration(1.6),
                                          resolution=1)
-        # ceil(120 / 1.6) = 75; ceil(15 / 1.6) = 10; ceil(40 / 1.6) = 25.
-        self.assertEqual(proposal["storage_first_touch_gas"], 75)
+        # The first touch is charged as its surcharge over the warm call:
+        # ceil((120 - 110) / 1.6) = 7, not ceil(120 / 1.6) = 75.
+        self.assertEqual(proposal["storage_first_touch_gas"], 7)
+        self.assertEqual(proposal["storage_first_touch_from"], "NNIntGet")
         self.assertEqual(proposal["storage_parent_frame_gas"], 10)
         self.assertEqual(proposal["storage_commit_item_gas"], 25)
 
@@ -201,7 +248,8 @@ class StorageScheduleTest(unittest.TestCase):
                                            synthetic_calibration(1.6),
                                            resolution=1)
         self.assertEqual(status, 0)
-        self.assertIn("kStorageFirstTouchCost = 75", out.getvalue())
+        self.assertIn("kStorageFirstTouchCost = 7;", out.getvalue())
+        self.assertIn("surcharge over a warm NNIntGet", out.getvalue())
 
     def test_not_flat_is_flagged(self):
         run = synthetic_run()

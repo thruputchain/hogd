@@ -243,6 +243,16 @@ def fit_sha256(points):
     return intercept, slope, r_squared
 
 
+def warm_syscall_for(family):
+    """The warm syscall row a first-touch family is the surcharge over.
+
+    `NNIntGetFirstTouch` is `NNIntGet` issued in a state where the frame holds
+    no view yet, so what it costs beyond the warm row is the first touch, and
+    the warm part is already priced in the syscall table.
+    """
+    return family.replace("FirstTouch", "")
+
+
 def storage_push_baselines(measured):
     """frame/Push/D rows: {depth: ns per iteration}."""
     baselines = {}
@@ -352,6 +362,18 @@ def storage_summary(measured, sd):
                 entry["worst_at"] = max(per_key, key=lambda p: p[1])[0]
                 entry["spread"] = max(costs) / min(costs)
                 entry["flat"] = entry["spread"] <= STORAGE_FLATNESS_TOLERANCE
+                # What the first touch adds to the same syscall made warm.
+                # The row above is the whole call -- crossing, ABI parse,
+                # handler and all -- because only the frames-only baseline was
+                # subtracted from it, and every one of those is already priced
+                # in the syscall table. A schedule that charged this row on top
+                # of that table would bill the warm call twice, so what a
+                # first-touch constant may carry is the difference.
+                warm = measured.get("entry/" + warm_syscall_for(family))
+                if warm:
+                    entry["warm_ns"] = warm["real_time"]
+                    entry["surcharge_ns"] = max(
+                        0.0, entry["worst_ns"] - warm["real_time"])
             summary["sweeps"].setdefault(family, {})[depth] = entry
     for family, rows_ in pairs.items():
         summary["commits"][family] = [
@@ -425,9 +447,22 @@ def print_storage(summary, unit_ns=None):
         print()
         print("ns/key is (iteration - frame/Push/depth) / K: what each of K "
               "first touches in one")
-        print("frame costs, at that K. NOT FLAT marks a spread past "
-              f"{STORAGE_FLATNESS_TOLERANCE:g}x; the dearest point")
-        print("is the one a schedule has to cover.")
+        print("frame costs, at that K -- the whole syscall, not the part that "
+              "is new. NOT FLAT marks")
+        print(f"a spread past {STORAGE_FLATNESS_TOLERANCE:g}x; the dearest "
+              "point is the one a schedule has to cover.")
+        for family, by_depth in sorted(summary["sweeps"].items()):
+            for depth, entry in sorted(by_depth.items()):
+                if "surcharge_ns" not in entry:
+                    continue
+                print(f"  {family} at depth {depth} is "
+                      f"{entry['worst_ns']:.1f} ns, of which "
+                      f"{entry['warm_ns']:.1f} is the warm "
+                      f"{warm_syscall_for(family)} the syscall table already "
+                      f"prices;")
+                print(f"    the first touch itself is "
+                      f"{entry['surcharge_ns']:.1f} ns.")
+                break
     walk = parent_walk_ns(summary)
     if walk:
         per_frame, shallow, deep, keys = walk
@@ -997,12 +1032,17 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         # warm call (which is in the syscall table above) plus this.
         first = storage["sweeps"].get("NNIntGetFirstTouch", {})
         shallow = min(first) if first else None
-        if shallow is not None and "worst_ns" in first[shallow]:
-            # The dearest point of the sweep at the shallowest depth: the
-            # per-frame walk is priced separately, and the cost in K is not
-            # flat, so worst-case pricing takes the worst K.
+        if shallow is not None and "surcharge_ns" in first[shallow]:
+            # The surcharge over the warm call, at the shallowest depth and the
+            # dearest K: the per-frame walk is priced separately, and the cost
+            # in K is not flat, so worst-case pricing takes the worst K. The
+            # warm call itself is already in the syscall table, so only the
+            # difference belongs here.
             proposal["storage_first_touch_gas"] = to_gas(
-                first[shallow]["worst_ns"])
+                first[shallow]["surcharge_ns"])
+            proposal["storage_first_touch_warm_ns"] = first[shallow]["warm_ns"]
+            proposal["storage_first_touch_from"] = warm_syscall_for(
+                "NNIntGetFirstTouch")
         walk = parent_walk_ns(storage)
         if walk:
             proposal["storage_parent_frame_gas"] = to_gas(walk[0])
@@ -1186,13 +1226,16 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  entry in kSyscallGasCostSchedule to be hashed.")
     if storage:
         print()
-        print("  Storage, measured and not yet priced. These are the dearest")
-        print("  points of the sweeps above, in gas; the shape they suggest,")
-        print("  with the constants it would need, is:")
+        print("  Storage, measured and not yet priced. These are charges on")
+        print("  top of the syscall table above, not replacements for it:")
         if "storage_first_touch_gas" in proposal:
             print(f"    kStorageFirstTouchCost = "
                   f"{proposal['storage_first_touch_gas']};   // new: per key "
                   "this tx has not touched, snapshot-cached")
+            print(f"      the surcharge over a warm "
+                  f"{proposal['storage_first_touch_from']} "
+                  f"({proposal['storage_first_touch_warm_ns']:.1f} ns), which "
+                  "the table already prices.")
         if "storage_parent_frame_gas" in proposal:
             print(f"    kStorageParentFrameCost = "
                   f"{proposal['storage_parent_frame_gas']};  // new: per "
