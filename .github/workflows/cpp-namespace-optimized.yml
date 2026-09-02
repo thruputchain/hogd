@@ -200,23 +200,6 @@ jobs:
           cd build/gcc
           ctest --output-on-failure --parallel $(nproc) --timeout 120
 
-      - name: Record native RPC compatibility evidence
-        if: always()
-        run: |
-          mkdir -p artifacts
-          ctest \
-            --test-dir build/gcc \
-            --tests-regex '^compat_probe$' \
-            --verbose \
-            2>&1 | tee artifacts/x23-compat-probe.txt
-
-      - name: Upload native RPC compatibility evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: x23-compat-probe-gcc-debug
-          path: artifacts/x23-compat-probe.txt
-
       - name: Print backtraces from timed-out tests
         if: failure()
         run: |
