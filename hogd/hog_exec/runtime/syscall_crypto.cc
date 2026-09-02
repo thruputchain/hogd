@@ -49,7 +49,16 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
     return {r.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // Whole blocks only, so this drops charges in two places: the carry from a
+  // previous call, which can push one more compression than floor() counts,
+  // and a tail of 56 bytes or more, whose padding spills a block that
+  // Finalize's flat one does not cover. Both are one block, and the call that
+  // caused them already paid the stream cost and the crossing -- more than the
+  // block is worth. Splitting cannot exploit it either: the block counts here
+  // and in SHA256HashCost differ by at most two, so streaming never undercuts
+  // the one-shot (Sha256GasModelTest pins that).
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{SHA256UpdateCost(input_buffer.size())}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -61,7 +70,8 @@ syscall_SHA256Copy_inner(SystemCallHandler &handler, uint32_t input_src_index,
     return {r.error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{kSHA256CopyCost}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -78,7 +88,8 @@ syscall_SHA256Finalize_inner(SystemCallHandler &handler, uint32_t input_index,
     trace_data->outputs.emplace(
         SyscallSHA256FinalizeOutputs{.hash = output_output});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{kSHA256FinalizeCost}};
 }
 
 // Verifies a cryptographic signature against a message using the provided
@@ -95,20 +106,29 @@ syscall_VerifySignature_inner(int32_t input_scheme,
 
   switch (static_cast<CryptographicScheme>(input_scheme)) {
   case CryptographicScheme::Ed25519:
+  {
+    // Rejected on inspection, before any curve arithmetic: owes only the
+    // crossing.
     if (input_public_key.size() != sizeof(Ed25519PublicKey) ||
         input_signature.size() != sizeof(Ed25519Signature)) {
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
+    // Charged whether or not verification succeeds: ed25519 only exits early
+    // when the encoded point fails to decompress, which the attacker choosing
+    // the signature controls, so a free failure path sells verification for
+    // the price of the crossing.
+    const WrappedGasAmount gas{VerifySignatureCost(input_message.size())};
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {
       trace("Signature verification failed");
-      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-              WrappedGasAmount{0}};
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, gas};
     }
-    return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+    return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
+  }
   default:
+    // An unknown scheme never reaches a primitive.
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }

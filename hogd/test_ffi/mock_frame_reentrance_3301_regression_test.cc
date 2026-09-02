@@ -14,6 +14,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "syscall.hh"
@@ -104,9 +105,10 @@ TEST(TestBindingsTest, ReentrantMockFrameRejectedAndTraced)
   EXPECT_EQ(invoke_trace.status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeReentrance);
 
-  // A refused invoke costs the caller nothing and produces no child frame.
+  // A refused invoke produces no child frame, but the caller still pays for
+  // the crossing: it reached the handler before being turned away.
   EXPECT_EQ(invoke_trace.gas_remaining_at_start, kFrameGas);
-  EXPECT_EQ(invoke_trace.gas_remaining_at_end, kFrameGas);
+  EXPECT_EQ(invoke_trace.gas_remaining_at_end, kFrameGas - kSyscallBaseCost);
   auto const &invoke_body = invoke_trace.body.invoke();
   EXPECT_EQ(invoke_body.inputs.address, kAddr);
   EXPECT_EQ(invoke_body.outputs, nullptr);

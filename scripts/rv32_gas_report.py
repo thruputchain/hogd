@@ -1117,6 +1117,92 @@ def print_comparison(before, after):
         percent = (delta / old * 100.0) if old else 0.0
         print(f"{key[0]:<{ow}}{key[1]:<26}{old:>10.4f}{new:>10.4f}"
               f"{delta:>+10.4f}{percent:>+8.1f}")
+
+    before_syscalls = {row["shape"]: row for row in syscall_rows(before)}
+    after_syscalls = {row["shape"]: row for row in syscall_rows(after)}
+    shared = before_syscalls.keys() & after_syscalls.keys()
+    if shared:
+        print()
+        header = (f"{'syscall shape':<20}{'before':>10}{'after':>10}"
+                  f"{'delta':>10}{'%':>8}")
+        print(header)
+        print("-" * len(header))
+        for shape in sorted(shared):
+            old_ns = before_syscalls[shape]["ns_per_call"]
+            new_ns = after_syscalls[shape]["ns_per_call"]
+            delta = new_ns - old_ns
+            percent = (delta / old_ns * 100.0) if old_ns else 0.0
+            print(f"{shape:<20}{old_ns:>10.3f}{new_ns:>10.3f}"
+                  f"{delta:>+10.3f}{percent:>+8.1f}")
+    return 0
+
+
+def syscall_rows(data):
+    """The measured seam shapes, in the order the harness ran them."""
+    return [row for row in (data.get("syscalls") or []) if row.get("usable")]
+
+
+def syscall_relative(row, baseline):
+    """Cost as a multiple of the baseline instruction, as the guards use.
+
+    Same reasoning as relative_cost: nanoseconds are a fact about one machine,
+    "a host crossing costs 18 baseline instructions" is a fact about the engine
+    and survives a change of runner well enough to gate on.
+    """
+    return row["ns_per_call"] / baseline if baseline > 0 else 0.0
+
+
+def print_syscalls(data):
+    """What the engine pays to leave the guest, call the host, and come back.
+
+    This is the ecall seam, not a syscall: the production path (argument
+    parsing, the coroutine frame every call allocates, SystemCallHandler) is
+    not linked into this harness and is not in these numbers. Read them as the
+    floor under every syscall's fixed cost, and read the gap between the shapes
+    as what the guest ABI and the host's writes add on top of it.
+    """
+    rows = data.get("syscalls") or []
+    if not rows:
+        print("no syscall shapes measured "
+              "(a pre-schema/2 run, or --no-syscalls)", file=sys.stderr)
+        return 1
+    baseline = baseline_ns(data)
+    header = (f"{'shape':<18}{'ns/call':>10}{'xbase':>8}{'marginal':>10}"
+              f"{'gas':>5}{'out B':>7}{'MAD':>7}  models")
+    print(header)
+    print("-" * len(header))
+    for row in rows:
+        if not row.get("usable"):
+            print(f"{row['shape']:<18}{'rejected':>10}  "
+                  f"{row.get('rejected_because', '')}")
+            continue
+        print(
+            f"{row['shape']:<18}{row['ns_per_call']:>10.3f}"
+            f"{syscall_relative(row, baseline):>8.1f}"
+            f"{row['ns_per_call_marginal']:>10.3f}"
+            f"{row['scheduled_gas_per_call']:>5}"
+            f"{row['output_bytes']:>7}{row['worst_relative_mad']:>7.3f}"
+            f"  {row['models']}"
+        )
+    usable = syscall_rows(data)
+    if not usable:
+        return 1
+    print()
+    print(f"baseline instruction: {baseline:.4f} ns")
+    cheapest = min(usable, key=lambda r: r["ns_per_call"])
+    dearest = max(usable, key=lambda r: r["ns_per_call"])
+    print(f"crossing: {cheapest['ns_per_call']:.2f} .. "
+          f"{dearest['ns_per_call']:.2f} ns "
+          f"({syscall_relative(cheapest, baseline):.0f}x .. "
+          f"{syscall_relative(dearest, baseline):.0f}x the baseline "
+          f"instruction)")
+    charged = max(row["scheduled_gas_per_call"] for row in usable)
+    print(f"charged:  {charged} gas per call, plus whatever host gas the "
+          f"syscall itself declares")
+    print()
+    print("The spread across the shapes is the whole of what the ABI and the")
+    print("host's own writes cost; the level is the crossing. When those two")
+    print("are far apart, output size is not a term a syscall's price needs.")
     return 0
 
 
@@ -1185,6 +1271,21 @@ def emit_reference(data):
             continue
         print(f"guard {cell['op']} {context_label(cell)} {ratio:.3f} "
               f"{cell['scheduled_gas']}")
+    syscalls = syscall_rows(data)
+    if syscalls:
+        print()
+        print("# The ecall seam: what leaving the guest, calling the host and")
+        print("# coming back costs, as a multiple of the same run's baseline")
+        print("# instruction. Not a syscall -- the production syscall path is")
+        print("# not linked into this harness -- so this is the floor under")
+        print("# every syscall's fixed cost, and it moves when the ecall")
+        print("# suspend/resume path does.")
+        print("#")
+        print("# guard_syscall <shape> <cost relative to baseline>")
+        for row in sorted(syscalls, key=lambda r: r["shape"]):
+            print(f"guard_syscall {row['shape']} "
+                  f"{syscall_relative(row, baseline):.3f}")
+
     rates = [w["ns_per_gas"] for w in data.get("workloads") or []
              if w["ns_per_gas"] > 0]
     if rates:
@@ -1197,8 +1298,9 @@ def emit_reference(data):
 
 
 def load_reference(path):
-    reference = {"guards": {}, "fingerprint": None, "source_digest": None,
-                 "spread": None, "tolerance": GUARD_TOLERANCE}
+    reference = {"guards": {}, "syscall_guards": {}, "fingerprint": None,
+                 "source_digest": None, "spread": None,
+                 "tolerance": GUARD_TOLERANCE}
     with open(path) as handle:
         for line in handle:
             line = line.split("#", 1)[0].strip()
@@ -1218,6 +1320,8 @@ def load_reference(path):
                     "ratio": float(fields[3]),
                     "gas": int(fields[4]),
                 }
+            elif fields[0] == "guard_syscall" and len(fields) == 3:
+                reference["syscall_guards"][fields[1]] = float(fields[2])
     return reference
 
 
@@ -1343,6 +1447,35 @@ def check_against_reference(data, reference_path):
                 "table."
             )
 
+    # Seam guards. Same tolerance and the same "not measured is not checked"
+    # rule as the opcode guards: a gate that passes without checking a guard
+    # reports coverage it did not provide.
+    #
+    # A reference with no guard_syscall lines is not a failure -- it predates
+    # the seam measurement, and the run that regenerates it will add them.
+    measured_syscalls = {row["shape"]: row for row in syscall_rows(data)}
+    for shape, guard_ratio in sorted(reference["syscall_guards"].items()):
+        row = measured_syscalls.get(shape)
+        if row is None:
+            failures.append(
+                f"syscall {shape}: not measured in this run, so this guard "
+                "was not checked.\n"
+                "  Either the run passed --no-syscalls or the sweep was "
+                "rejected; either way\n"
+                "  the gate cannot vouch for the cost of the crossing."
+            )
+            continue
+        ratio = syscall_relative(row, baseline)
+        limit = guard_ratio * (1.0 + tolerance)
+        if ratio > limit:
+            failures.append(
+                f"syscall {shape}: {ratio:.2f}x baseline, was "
+                f"{guard_ratio:.2f}x (limit {limit:.2f}x).\n"
+                "  The ecall suspend/resume path got more expensive relative "
+                "to the engine's\n"
+                "  own baseline. Every syscall the node makes pays this."
+            )
+
     rates = [w["ns_per_gas"] for w in data.get("workloads") or []
              if w["ns_per_gas"] > 0]
     if rates and reference["spread"]:
@@ -1360,7 +1493,8 @@ def check_against_reference(data, reference_path):
     print(f"  fingerprint: {fingerprint} "
           f"({'matches' if fingerprint == reference['fingerprint'] else 'DIFFERS FROM'}"
           f" reference)")
-    print(f"  guards:      {len(reference['guards'])}")
+    print(f"  guards:      {len(reference['guards'])} opcode, "
+          f"{len(reference['syscall_guards'])} syscall")
     print()
     for warning in warnings:
         print(f"WARN  {warning}")
@@ -1384,6 +1518,8 @@ def main():
                         help="print a proposed integer gas schedule")
     parser.add_argument("--workloads", action="store_true",
                         help="print the validation workload pricing table")
+    parser.add_argument("--syscalls", action="store_true",
+                        help="print the syscall dispatch (ecall seam) table")
     parser.add_argument("--predict", action="store_true",
                         help="check that summed per-opcode costs predict the "
                              "validation workloads")
@@ -1417,6 +1553,8 @@ def main():
         return print_prediction(runs[0])
     if args.workloads:
         return print_workloads(runs[0])
+    if args.syscalls:
+        return print_syscalls(runs[0])
     print_table(runs[0])
     return 0
 

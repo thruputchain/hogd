@@ -1063,13 +1063,15 @@ protected:
             run_capture_tx(kRv32SpenderAddr, rv32_result_key, ctx)};
   }
 
-  // Runs transfer_from(owner, distinct_recipient, transfer_amount) against both
+  // Runs transfer_from(owner, receiver, transfer_amount) against both
   // backends. The owner starts with `owner_balance` and grants the spender an
-  // allowance of `allowance`. The recipient is a distinct address from the
-  // owner. Returns {native_record, rv32_record}.
-  std::pair<CapturedRecord, CapturedRecord>
-  run_transfer_from_parity(uint128_t owner_balance, uint128_t allowance,
-                           uint128_t transfer_amount)
+  // allowance of `allowance`. The receivers default to a distinct address per
+  // backend; pass explicit addresses to aim the delegated transfer elsewhere
+  // (the all-zero address, say). Returns {native_record, rv32_record}.
+  std::pair<CapturedRecord, CapturedRecord> run_transfer_from_parity(
+      uint128_t owner_balance, uint128_t allowance, uint128_t transfer_amount,
+      ContractAddress native_receiver = kNativeTfRecipientAddr,
+      ContractAddress rv32_receiver = kRv32TfRecipientAddr)
   {
     auto native_result_key = make_storage_key("native_result");
     auto rv32_result_key = make_storage_key("rv32_result");
@@ -1110,7 +1112,7 @@ protected:
         native_spender_fns;
     native_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
                                       kNativeTokenAddr, native_result_key,
-                                      kNativeOwnerAddr, kNativeTfRecipientAddr,
+                                      kNativeOwnerAddr, native_receiver,
                                       make_amount(transfer_amount)));
     auto native_spender =
         std::make_unique<NativeContract>(std::move(native_spender_fns));
@@ -1119,7 +1121,7 @@ protected:
         rv32_spender_fns;
     rv32_spender_fns.emplace(0, make_capture_driver<u8"transfer_from">(
                                     kRv32TokenAddr, rv32_result_key,
-                                    kRv32OwnerAddr, kRv32TfRecipientAddr,
+                                    kRv32OwnerAddr, rv32_receiver,
                                     make_amount(transfer_amount)));
     auto rv32_spender =
         std::make_unique<NativeContract>(std::move(rv32_spender_fns));
@@ -1738,6 +1740,41 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferFromToRecipientParity)
             static_cast<uint8_t>(InvocationFrameStatusCode::Abort));
 }
 
+// A funded transfer_from aimed at the all-zero address. As with the direct
+// transfer above (issue #2135), neither backend guards the zero recipient: the
+// allowance is spent, the zero address is credited, and a standard
+// Transfer(owner, zero, amount) event is emitted. This locks in that the two
+// implementations agree on the delegated path too --- the amendment case on
+// that issue.
+TEST_F(Erc20ParityTest, TransferFromToZeroAddressParity)
+{
+  auto [native_record, rv32_record] = run_transfer_from_parity(
+      /*owner_balance=*/1'000, /*allowance=*/200, /*transfer_amount=*/100,
+      ContractAddress{}, ContractAddress{});
+  EXPECT_EQ(native_record, rv32_record)
+      << "native precompile and RV32 itc_erc20 diverged on transfer_from to "
+         "the zero address";
+  ASSERT_GE(native_record.size(), 3U);
+  EXPECT_EQ(native_record[2],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "transfer_from to the zero address must be accepted, not rejected";
+
+  // The tokens really landed on the zero address, and not on the recipient
+  // this harness otherwise defaults to. Comparing the two backends alone
+  // would still agree if the receiver override were dropped, so pin the
+  // committed native-token rows: the zero address gained one, the default
+  // recipient was never touched.
+  EXPECT_TRUE(lookup_storage_item_from_db(
+                  make_free_native_token_balance_addrkey(ContractAddress{}))
+                  .has_value())
+      << "the zero address must hold a committed native-token balance";
+  EXPECT_FALSE(
+      lookup_storage_item_from_db(
+          make_free_native_token_balance_addrkey(kNativeTfRecipientAddr))
+          .has_value())
+      << "the delegated transfer must not have gone to the default recipient";
+}
+
 // adjust_allowance(self, +amount): granting oneself an allowance is rejected by
 // both backends with ERC20Error::Internal at invoke, byte-identically.
 TEST_F(Erc20ParityTest, AdjustAllowanceToSelfParity)
@@ -2302,6 +2339,84 @@ TEST_F(Erc20ParityTest, MintThenBurnSameTxNetsSupplyParity)
       << "the committed supply must net back to the pre-mint value";
   EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[4]),
             std::optional<uint128_t>(0));
+}
+
+// The distinction issue #2135 turns on, pinned in a single transaction: a
+// zero-recipient transfer and a real burn both emit Transfer(x, zero, amount),
+// but only burn() moves supply. The transfer credits the zero address as an
+// ordinary account and leaves total_supply() alone; the burn debits the holder
+// and reduces total_supply(). Both backends agree, byte-for-byte.
+//
+// This is the working-as-intended reading of that issue: the zero address is
+// not a burn sink, and a zero-recipient Transfer event is a naming convention
+// (see the SDK's groundhog-erc20 events.rs) rather than a supply-reducing
+// state transition. Burning is the separate, owner-gated burn() call.
+//
+// The two paths are deliberately indistinguishable by event alone --- burn()
+// emits the same Transfer(owner, zero, amount) bytes, pinned by
+// NativeTokenAllowanceTest.GenesisRootBurnAuthorityIsNotHeightLimitedByPrecompile
+// against the bytes the zero-recipient transfer tests expect. Supply is the
+// signal that separates them, and that is what this test pins.
+TEST_F(Erc20ParityTest,
+       BurnReducesSupplyWhereZeroRecipientTransferDoesNotParity)
+{
+  auto nk = make_result_keys("native_step", 8);
+  auto rk = make_result_keys("rv32_step", 8);
+  auto steps = [](ContractAddress token, ContractAddress holder,
+                  std::vector<StorageKeyContractData> const &keys) {
+    ContractAddress const zero{};
+    return std::vector<CaptureStep>{
+        // Fund the caller and establish a supply to watch.
+        make_step<u8"mint">(token, keys[0], holder, make_amount(1'000)),
+        make_step<u8"total_supply">(token, keys[1]),
+        // Path 1: transfer to the zero address. An ordinary move.
+        make_step<u8"transfer">(token, keys[2], zero, make_amount(300)),
+        make_step<u8"total_supply">(token, keys[3]),
+        make_step<u8"get_balance_of">(token, keys[4], zero),
+        // Path 2: a real burn of the same token by the contract owner.
+        make_step<u8"burn">(token, keys[5], holder, make_amount(200)),
+        make_step<u8"total_supply">(token, keys[6]),
+        make_step<u8"get_balance_of">(token, keys[7], holder)};
+  };
+  auto [native_outcome, rv32_outcome] = run_mint_burn_parity(
+      steps(kNativeTokenAddr, kGenesisRootContractAddress, nk),
+      steps(kRv32TokenAddr, kGenesisRootContractAddress, rk));
+  EXPECT_EQ(native_outcome, rv32_outcome)
+      << "native precompile and RV32 itc_erc20 diverged on the supply "
+         "difference between a zero-recipient transfer and a burn";
+
+  auto const &[commit, records] = rv32_outcome;
+  EXPECT_EQ(commit, ExecResult::ExecResultOK);
+  ASSERT_EQ(records.size(), 8U);
+
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[1]),
+            std::optional<uint128_t>(1'000));
+
+  // The zero-recipient transfer is accepted and leaves supply untouched.
+  ASSERT_GE(records[2].size(), 2U);
+  EXPECT_EQ(records[2][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return))
+      << "a transfer to the zero address must be accepted, not rejected";
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[3]),
+            std::optional<uint128_t>(1'000))
+      << "a zero-recipient transfer must not reduce total supply";
+
+  // The tokens are not destroyed -- they sit in the zero address's balance.
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[4]),
+            std::optional<uint128_t>(300))
+      << "the zero address must hold the transferred tokens";
+
+  // The burn is the path that actually reduces supply.
+  ASSERT_GE(records[5].size(), 2U);
+  EXPECT_EQ(records[5][1],
+            static_cast<uint8_t>(InvocationFrameStatusCode::Return));
+  EXPECT_EQ(step_ok_amount<u8"total_supply">(records[6]),
+            std::optional<uint128_t>(800))
+      << "burn() must reduce total supply";
+
+  // The holder paid for both: 1000 - 300 transferred - 200 burned.
+  EXPECT_EQ(step_ok_amount<u8"get_balance_of">(records[7]),
+            std::optional<uint128_t>(500));
 }
 
 // A burn against hand-crafted state where the balance exists but the supply

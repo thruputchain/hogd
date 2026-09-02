@@ -1,6 +1,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <memory>
@@ -34,6 +35,17 @@
 namespace hogd {
 
 namespace {
+// TimePoint is Unix nanoseconds; system_clock's epoch is the Unix epoch on
+// every platform this builds for.
+TimePoint
+wall_clock_timepoint()
+{
+  return static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
 dbauth_client_t
 make_dbauth_client(x23::HostPort const &hostport)
 {
@@ -110,13 +122,25 @@ DBContext::block_execution_context() const
   }
   return BlockExecutionContext{
       .block_height = tip->value.proposal_header.block_height + 1,
-      .block_timepoint = 1'700'000'000,
+      .block_timepoint = block_timepoint_,
   };
 }
 
 void
-DBContext::advance_new_block(BlockExecutionMode mode)
+DBContext::advance_new_block(BlockExecutionMode mode,
+                             std::optional<TimePoint> block_timepoint)
 {
+  // Decided before anything is closed or committed: a refused advance must
+  // leave the DB usable, not half-torn-down.
+  const TimePoint next_timepoint =
+      block_timepoint.value_or(wall_clock_timepoint());
+  if (next_timepoint < block_timepoint_) {
+    throw BackwardsTimepointError(
+        std::format("advance_new_block: block timepoint {} is earlier than "
+                    "the block it follows ({})",
+                    next_timepoint, block_timepoint_));
+  }
+
   if (current_block_id_ > 0) {
     auto res = db_sched_client_.dbsched_close_snapshot(current_block_id_);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -124,9 +148,14 @@ DBContext::advance_new_block(BlockExecutionMode mode)
           "advance_new_block: dbsched_close_snapshot failed");
     }
 
+    // block_timepoint_ still holds the outgoing block's value here; the new
+    // block's is assigned below. Without this the committed header records 0
+    // while the contracts in that block executed against something else, so
+    // anything reading the block back disagrees with what ran in it.
     ConsensusValue value{};
     value.proposal_header.block_height = current_block_id_;
     value.proposal_header.network_hash = network_hash_;
+    value.proposal_header.block_timepoint = block_timepoint_;
     res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(
@@ -144,6 +173,7 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   }
 
   current_block_id_++;
+  block_timepoint_ = next_timepoint;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_,
                                              block_execution_context(),

@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -60,6 +61,17 @@ ok_status()
   return status;
 }
 
+// Whether a traced syscall succeeded. A body that failed did no work and
+// bills nothing, so only the crossing is charged -- which is why the entry
+// helpers below cannot price from their arguments alone.
+bool
+is_ok(HostFunctionStatusXdr const &status)
+{
+  return status.error() == HostFnErrorCode::NoneOrRecoverable &&
+         status.syscall_return_code() ==
+             SyscallErrorCode::kSyscallErrorCodeNone;
+}
+
 HostFunctionStatusXdr
 error_status(SyscallErrorCode code)
 {
@@ -78,6 +90,41 @@ make_entry(GasAmount gas_at_start, GasAmount gas_at_end, SyscallTraceBody body,
       .body = std::move(body),
       .status = std::move(status),
   };
+}
+
+// These traces run their syscalls back to back from the frame's gas limit, so
+// each entry starts where the previous one ended. Every entry used to begin and
+// end at the limit, which hid that relationship; now that a syscall costs
+// something, a cursor keeps it in one place rather than restating a running
+// total at every call site for a repricing to redo.
+class GasCursor {
+public:
+  explicit GasCursor(GasAmount start) : gas_(start) {}
+
+  // Advance past one syscall whose body bills `body_cost`, and hand back the
+  // entry's (start, end). The crossing is on top, and is paid even when the
+  // body bills nothing.
+  std::pair<GasAmount, GasAmount> step(GasAmount body_cost)
+  {
+    const GasAmount start = gas_;
+    gas_ -= body_cost + kSyscallBaseCost;
+    return {start, gas_};
+  }
+
+private:
+  GasAmount gas_;
+};
+
+// One traced syscall, advancing the cursor past it. `body_cost` is what the
+// body bills: zero for a syscall the schedule does not price, and zero again
+// on an error path, since a body that fails bills nothing and only the
+// crossing is charged.
+SyscallTrace
+step_entry(GasCursor &gas, GasAmount body_cost, SyscallTraceBody body,
+           HostFunctionStatusXdr status)
+{
+  const auto [start, end] = gas.step(body_cost);
+  return make_entry(start, end, std::move(body), std::move(status));
 }
 
 // Test-only stub accepting any rv32-tagged blob, so DeployContract can run
@@ -199,27 +246,29 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   handler.enable_tracing();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kGetBlockHeight);
     body.get_block_height().outputs =
         SyscallGetBlockHeightOutputs{.result = executing_height};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kGetTransactionStatistics);
     body.get_transaction_statistics().inputs.statistic =
         TransactionStatistic::GasRemaining;
+    // GasRemaining is read live, so it reflects the crossing that the
+    // GetBlockHeight above has already paid.
     body.get_transaction_statistics().outputs =
-        SyscallGetTransactionStatisticsOutputs{.result = 100'000};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+        SyscallGetTransactionStatisticsOutputs{.result = kGasLimit -
+                                                         kSyscallBaseCost};
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kGetMsgSender);
-    expected.push_back(make_entry(
-        100'000, 100'000, std::move(body),
+    expected.push_back(step_entry(
+        gas, 0, std::move(body),
         error_status(SyscallErrorCode::kSyscallErrorCodeIsRootTransaction)));
   }
 
@@ -277,6 +326,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
   handler.enable_tracing();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kNonnegativeIntSetAdd);
@@ -284,8 +334,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     body.nonnegative_int_set_add().inputs.set_value = to_xdr(int128_t{5});
     body.nonnegative_int_set_add().inputs.add_value = to_xdr(int128_t{7});
     body.nonnegative_int_set_add().inputs.flags = 0;
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kNonnegativeIntGet);
@@ -295,8 +344,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     outputs.current_set = to_xdr(int128_t{5});
     outputs.current_add = to_xdr(int128_t{7});
     body.nonnegative_int_get().outputs = std::move(outputs);
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     // The unset key's trace output must OMIT current_set entirely -- the
@@ -307,8 +355,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     SyscallNonnegativeIntGetOutputs outputs;
     outputs.current_add = to_xdr(int128_t{0});
     body.nonnegative_int_get().outputs = std::move(outputs);
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -354,22 +401,23 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   handler.enable_tracing();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part1);
     body.sha256_update().inputs.reset = true;
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, SHA256UpdateCost(part1.size()),
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.buffer.append_range(part2);
     body.sha256_update().inputs.reset = false;
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, SHA256UpdateCost(part2.size()),
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Finalize);
@@ -377,7 +425,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = expected_hash};
     expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+        step_entry(gas, kSHA256FinalizeCost, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -471,23 +519,28 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   handler.enable_transaction_stats();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
-  auto update_entry = [](uint32_t index, std::span<const uint8_t> buffer,
-                         bool reset, HostFunctionStatusXdr status) {
+  GasCursor gas{kGasLimit};
+  auto update_entry = [&gas](uint32_t index, std::span<const uint8_t> buffer,
+                             bool reset, HostFunctionStatusXdr status) {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = index;
     body.sha256_update().inputs.buffer.append_range(buffer);
     body.sha256_update().inputs.reset = reset;
-    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+    const GasAmount cost = is_ok(status) ? SHA256UpdateCost(buffer.size()) : 0;
+    return step_entry(gas, cost, std::move(body), std::move(status));
   };
-  auto finalize_entry = [](uint32_t index, std::optional<SHA256Hash> hash,
-                           HostFunctionStatusXdr status) {
+  auto finalize_entry = [&gas](uint32_t index, std::optional<SHA256Hash> hash,
+                               HostFunctionStatusXdr status) {
     SyscallTraceBody body(SyscallNo::kSHA256Finalize);
     body.sha256_finalize().inputs.index = index;
     if (hash.has_value()) {
       body.sha256_finalize().outputs =
           SyscallSHA256FinalizeOutputs{.hash = hash.value()};
     }
-    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+    // A finalize that produced a hash compressed the padding block; one that
+    // errored did not, and bills only the crossing.
+    return step_entry(gas, hash.has_value() ? kSHA256FinalizeCost : 0,
+                      std::move(body), std::move(status));
   };
   const auto invalid =
       error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
@@ -581,27 +634,31 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
   handler.enable_transaction_stats();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
-  auto update_entry = [](uint32_t index, std::span<const uint8_t> buffer,
-                         bool reset, HostFunctionStatusXdr status) {
+  GasCursor gas{kGasLimit};
+  auto update_entry = [&gas](uint32_t index, std::span<const uint8_t> buffer,
+                             bool reset, HostFunctionStatusXdr status) {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = index;
     body.sha256_update().inputs.buffer.append_range(buffer);
     body.sha256_update().inputs.reset = reset;
-    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+    const GasAmount cost = is_ok(status) ? SHA256UpdateCost(buffer.size()) : 0;
+    return step_entry(gas, cost, std::move(body), std::move(status));
   };
-  auto copy_entry = [](uint32_t src_index, uint32_t dst_index,
-                       HostFunctionStatusXdr status) {
+  auto copy_entry = [&gas](uint32_t src_index, uint32_t dst_index,
+                           HostFunctionStatusXdr status) {
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = src_index;
     body.sha256_copy().inputs.dst_index = dst_index;
-    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+    const GasAmount cost = is_ok(status) ? kSHA256CopyCost : 0;
+    return step_entry(gas, cost, std::move(body), std::move(status));
   };
-  auto finalize_entry = [](uint32_t index, SHA256Hash hash,
-                           HostFunctionStatusXdr status) {
+  auto finalize_entry = [&gas](uint32_t index, SHA256Hash hash,
+                               HostFunctionStatusXdr status) {
     SyscallTraceBody body(SyscallNo::kSHA256Finalize);
     body.sha256_finalize().inputs.index = index;
     body.sha256_finalize().outputs = SyscallSHA256FinalizeOutputs{.hash = hash};
-    return make_entry(100'000, 100'000, std::move(body), std::move(status));
+    const GasAmount cost = is_ok(status) ? kSHA256FinalizeCost : 0;
+    return step_entry(gas, cost, std::move(body), std::move(status));
   };
   const auto invalid =
       error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
@@ -624,6 +681,171 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
   EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 12U);
 
   ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// The one fixture in this suite that does not derive its costs from
+// gas_cost_table.h.
+//
+// Everything else here asks the schedule what a call costs, so a repricing
+// moves those fixtures and nothing objects -- right for a fixture, useless as
+// a guard. This one spells the prices out, and it guards something the
+// artifact digest cannot: gas_schedule_digest() hashes the schedule's names
+// and costs, not the cost *functions*, so SHA256UpdateCost could drop its
+// stream term, or kSHA256CopyCost could go back to zero, and every digest and
+// fingerprint in the tree would still match. Here it fails.
+//
+// Charges, crossing included, at kSyscallBaseCost = 50:
+//
+//   SHA256("")                22 + 50   one padding block, no per-call base
+//   SHA256Update(0, "", reset) 26 + 50  creates a stream, compresses nothing
+//   SHA256Copy(0 -> 1)        26 + 50   clones a stream, compresses nothing
+//   SHA256Finalize(1)         22 + 50   the padding block; erases, so no
+//                                       stream cost
+TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
+{
+  const SHA256Hash hash_empty = sha256(std::span<const uint8_t>{});
+
+  auto context = make_single_contract_context(
+      [hash_empty](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        auto expect = [](auto r, SyscallErrorCode code) {
+          return r.has_value() && r.value() == code;
+        };
+        constexpr auto kOk = SyscallErrorCode::kSyscallErrorCodeNone;
+
+        SHA256Hash one_shot{};
+        if (!expect(ctx.syscall<SyscallNo::kSHA256>(
+                        std::span<const std::byte>{}, one_shot),
+                    kOk) ||
+            one_shot != hash_empty) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+                        0U, std::span<const std::byte>{}, true),
+                    kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Copy>(0U, 1U), kOk)) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        SHA256Hash finalized{};
+        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, finalized),
+                    kOk) ||
+            finalized != hash_empty) {
+          return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        return {};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke().is_root_success());
+
+  GasAmount gas = kGasLimit;
+  auto charge = [&gas](GasAmount total) {
+    const GasAmount start = gas;
+    gas -= total;
+    return std::pair{start, gas};
+  };
+
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256);
+    body.sha256().outputs = SyscallSHA256Outputs{.hash = hash_empty};
+    const auto [start, end] = charge(72);
+    expected.push_back(make_entry(start, end, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Update);
+    body.sha256_update().inputs.index = 0;
+    body.sha256_update().inputs.reset = true;
+    const auto [start, end] = charge(76);
+    expected.push_back(make_entry(start, end, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Copy);
+    body.sha256_copy().inputs.src_index = 0;
+    body.sha256_copy().inputs.dst_index = 1;
+    const auto [start, end] = charge(76);
+    expected.push_back(make_entry(start, end, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kSHA256Finalize);
+    body.sha256_finalize().inputs.index = 1;
+    body.sha256_finalize().outputs =
+        SyscallSHA256FinalizeOutputs{.hash = hash_empty};
+    const auto [start, end] = charge(72);
+    expected.push_back(make_entry(start, end, std::move(body), ok_status()));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+}
+
+// What the artifact digest cannot check.
+//
+// gas_schedule_digest() hashes kSyscallGasCostSchedule's names and costs, not
+// the cost *functions* that read them. SHA256UpdateCost could drop its stream
+// term, or kSHA256CopyCost could be set to zero, and every digest and
+// fingerprint in the tree would still match -- verified by reverting each and
+// watching rv32_vm_test stay green. So the shapes are pinned here.
+//
+// Written against the constants rather than as literals on purpose: this test
+// says what the formulas mean and survives a repricing, while
+// CryptoSyscallPricesAreLockedIn above spells the numbers out and does not.
+// Between them a change has to be deliberate in both places.
+TEST(Sha256GasModelTest, CostFunctionShapesAreLockedIn)
+{
+  // No per-call base on the one-shot: every call compresses at least its
+  // padding, so there is no zero-block call for a base to describe.
+  EXPECT_EQ(SHA256HashCost(0), kSHA256HashBlockCost);
+  // The 9-byte pad decides where a block boundary falls, and 55 vs 56 is it.
+  EXPECT_EQ(SHA256HashCost(55), kSHA256HashBlockCost);
+  EXPECT_EQ(SHA256HashCost(56), 2 * kSHA256HashBlockCost);
+
+  // Creating a stream is not free, however few bytes it carries.
+  EXPECT_EQ(SHA256UpdateCost(0), kSHA256StreamCost);
+  // A partial block stays buffered and is billed by whichever call completes
+  // it, so a sub-block update pays the stream and nothing else.
+  EXPECT_EQ(SHA256UpdateCost(63), kSHA256StreamCost);
+  EXPECT_EQ(SHA256UpdateCost(64), kSHA256StreamCost + kSHA256HashBlockCost);
+
+  // Copy clones a stream and compresses nothing.
+  EXPECT_EQ(kSHA256CopyCost, kSHA256StreamCost);
+  // Finalize compresses the padding block. It erases a stream rather than
+  // creating one, so it pays no stream cost -- the create-side call already
+  // covered both halves of the slot's life.
+  EXPECT_EQ(kSHA256FinalizeCost, kSHA256HashBlockCost);
+}
+
+// The property the incremental family was repriced to restore, swept rather
+// than sampled.
+//
+// Before this schedule the streaming path reached the same compression
+// function as the one-shot for nothing: SHA256Update(4096) did the work of a
+// 410,100-gas SHA256(4096) free. Anything that makes streaming cheaper than
+// SHA256 for the same bytes is that bug returning, whatever the arithmetic
+// looks like where it is introduced.
+//
+// One update carrying every byte, then one finalize, is the cheapest route
+// through the family: splitting adds a crossing and a stream cost each time,
+// and past kSHA256BufferMaxSize a caller has to split. Bounding this bounds
+// the family.
+//
+// Note what holds this up, because it is not the stream cost: even with the
+// stream term removed the second crossing and the finalize block keep the
+// margin positive. This test guards those two; the shapes above guard the
+// stream term.
+TEST(Sha256GasModelTest, IncrementalHashingIsNeverCheaperThanOneShot)
+{
+  for (uint64_t bytes = 0; bytes <= 8192; ++bytes) {
+    const uint64_t one_shot = SHA256HashCost(bytes) + kSyscallBaseCost;
+    const uint64_t incremental = SHA256UpdateCost(bytes) + kSyscallBaseCost +
+                                 kSHA256FinalizeCost + kSyscallBaseCost;
+    ASSERT_GE(incremental, one_shot) << "bytes = " << bytes;
+  }
 }
 
 TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
@@ -692,13 +914,13 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
   handler.enable_tracing();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kGetAuthClaim);
     body.get_auth_claim().outputs =
         SyscallGetAuthClaimOutputs{.auth_claim = claim};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kMintAuthToken);
@@ -706,8 +928,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
     body.mint_auth_token().inputs.serialized_auth_token.append_range(
         serialized_node);
     body.mint_auth_token().outputs = SyscallMintAuthTokenOutputs{.token_id = 0};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kConsumeAuthToken);
@@ -719,8 +940,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
     outputs.unwrapped_token_id_start = 0;
     outputs.unwrapped_token_id_count = 0;
     body.consume_auth_token().outputs = std::move(outputs);
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -778,13 +998,13 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   QueueEntry full_entry;
   full_entry.append_range(entry_bytes);
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueInsert);
     body.retrocausal_queue_insert().inputs.key = key;
     body.retrocausal_queue_insert().inputs.queue_entry = full_entry;
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueuePeekLen);
@@ -792,8 +1012,7 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_peek_len().outputs =
         SyscallRetrocausalQueuePeekLenOutputs{
             .len = static_cast<uint32_t>(entry_bytes.size())};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
@@ -801,8 +1020,7 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_consume().inputs.peek = false;
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -877,6 +1095,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   handler.enable_tracing();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kGetDeployAddress);
@@ -886,8 +1105,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
     body.get_deploy_address().inputs = std::move(inputs);
     body.get_deploy_address().outputs =
         SyscallGetDeployAddressOutputs{.to_be_deployed = expected_addr};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kDeployContract);
@@ -895,8 +1113,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
     body.deploy_contract().inputs.contract_hash = blob_hash;
     body.deploy_contract().outputs =
         SyscallDeployContractOutputs{.deployed_address = expected_addr};
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
@@ -945,14 +1162,14 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   handler.enable_tracing();
   ASSERT_TRUE(handler.root_invoke().is_root_success());
 
+  GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags = 0;
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kBytestringGet);
@@ -960,8 +1177,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     SyscallBytestringGetOutputs outputs;
     outputs.bytestring.append_range(value);
     body.bytestring_get().outputs = std::move(outputs);
-    expected.push_back(
-        make_entry(100'000, 100'000, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);

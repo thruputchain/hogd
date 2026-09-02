@@ -23,6 +23,7 @@
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -250,7 +251,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r1_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g1 != 100) {
+        if (g1 != 100 + kSyscallBaseCost) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -273,7 +274,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r2_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g2 != 200) {
+        if (g2 != 200 + kSyscallBaseCost) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -296,7 +297,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r3_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g3 != 150) {
+        if (g3 != 150 + kSyscallBaseCost) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -324,7 +325,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!invoke_status.has_value()) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g != 100 + 200 + 150) {
+        if (g != 100 + 200 + 150 + (4 * kSyscallBaseCost)) {
           return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -369,7 +370,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
+  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150 + (4 * kSyscallBaseCost));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
@@ -467,7 +468,11 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 510);
+  // 255 for each child -- the one that fits and the one that is converted to
+  // OutOfGas and still charged its full limit -- plus the crossing each of the
+  // two invoke syscalls pays. The children's own limits are unaffected: the
+  // crossing is billed to the caller, outside the budget it hands down.
+  ASSERT_EQ(res.gas_consumed_, 255 + 255 + (2 * kSyscallBaseCost));
 }
 
 // NativeContract::invoke error-precedence lattice at exact gas exhaustion

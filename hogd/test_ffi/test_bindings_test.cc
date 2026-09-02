@@ -540,7 +540,7 @@ TEST(TestBindingsTest, GrantStorageTokensTest)
                                                 1000),
             kTestFFIErrorCodeNone);
 
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 namespace {
@@ -734,7 +734,7 @@ TEST(TestBindingsTest, VerifyAuthFromDB)
   ASSERT_TRUE(write_result.has_value()) << "Failed to write address auth data";
 
   // Advance block so auth data is available
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   // Serialize transaction
   auto serialized_stx = x23::serialize(stx);
@@ -796,7 +796,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   auto *db = make_db();
   ASSERT_NE(db, nullptr);
   x23::Defer d([db] { free_db(db); });
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   auto serialized_stx = x23::serialize(stx);
   VerifyAuthResultFromDBResult result =
@@ -3319,7 +3319,7 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
                                                 1'000'000'000),
             kTestFFIErrorCodeNone);
 
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   // Build signed transaction targeting root contract
   SignedTransaction stx{
@@ -3970,12 +3970,13 @@ TEST(TestBindingsTest, AdvanceBlockRejectedWhileHandlerOpen)
   ASSERT_NE(handler.syscall_handler, nullptr);
 
   // Advancing the block while the handler is open is rejected.
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeUnrecoverableError);
+  EXPECT_EQ(advance_new_block(db, nullptr),
+            kTestFFIErrorCodeUnrecoverableError);
 
   // After the handler is closed, advancing the block succeeds.
   EXPECT_EQ(close_syscall_handler(handler.syscall_handler),
             kTestFFIErrorCodeNone);
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
