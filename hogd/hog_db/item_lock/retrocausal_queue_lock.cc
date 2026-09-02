@@ -232,18 +232,14 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     // Rollback case: unreserve entries that are no longer needed.
     //
     // This shrink branch is only reachable via rollback_to_savepoint, which
-    // restores a previously-validated change. The consume validation block
-    // below re-reads block sizes from the live DAO, so it CAN still fail here:
-    // a committed sibling block may have pruned those blocks out from under us.
-    // But that same sibling commit invalidates this BlockTX first, so such a
-    // failure only ever happens on a block that is already doomed and will be
-    // discarded. When it does, ScopedUndo's fetch_add may transiently push
+    // restores a previously-validated change. The consume checks below run
+    // against the block-start metadata cached in this lock, not the live DAO,
+    // so replaying a change that already passed them passes again. Should a
+    // later check still fail, ScopedUndo's fetch_add may transiently push
     // reserved_entry_count_ back above kRetrocausalQueueBlockEntriesMaxLen and
-    // cause a spurious kConflict for a concurrent transaction sharing this lock
-    // — but that sibling transaction is in the same invalidated block and is
-    // itself about to observe kStaleBlock, so the inflation is harmless. The
-    // failure is surfaced to the caller by BlockTX::modify_lock (translating it
-    // to kStaleBlock) and handled in InvokeTX::rollback_to_savepoint.
+    // cause a spurious kConflict for a concurrent transaction sharing this
+    // lock; BlockTX::modify_lock surfaces the failure to the caller and
+    // InvokeTX::rollback_to_savepoint handles it.
     const size_t entries_to_unreserve =
         previous_entries_count - new_entries_count;
     reserved_entry_count_.fetch_sub(entries_to_unreserve,
@@ -255,16 +251,15 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   }
 
   if (delta.consume) {
-    // Now that we know this transaction will commit, we need to do one more
-    // thing before we compute storage costs. commit_change() should not
-    // consult the DAO, but the number of entries consumed by this delta
-    // depends on the size of stored blocks. Compute the number of entries
-    // consumed by this delta here and record it in case this transaction
-    // commits.
-    size_t consumed_entries = 0;
-
     auto const &snapshot_consume = meta.consume_state;
     auto const &new_consume = delta.consume->past_block_consume;
+    const uint64_t consumed_entries = delta.consume->past_block_consumed_count;
+
+    // The cursor is a position and the count is accounting. hog_exec reports
+    // both, and this lock never re-derives one from the other, so admission
+    // reads no block rows however much history the queue retains (#3594).
+    // The checks below are the ones the block-start metadata can answer on
+    // its own.
 
     // Reject consumes that reference blocks beyond the current max live block.
     // No valid hog_exec could ever generate such a consume; attempting to
@@ -290,6 +285,18 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
       return HogDbError{HogDbCode::kInvalidExecutorBehavior};
     }
 
+    // A block holds at most kRetrocausalQueueBlockEntriesMaxLen entries, so a
+    // partial cursor at or past that bound cannot point into any block.
+    if (new_consume.partial_consumed_number >=
+        kRetrocausalQueueBlockEntriesMaxLen) {
+      return HogDbError{HogDbCode::kInvalidExecutorBehavior};
+    }
+
+    // Past-block consumes cannot exceed the committed live count.
+    if (consumed_entries > meta.live_entries) {
+      return HogDbError{HogDbCode::kInvalidExecutorBehavior};
+    }
+
     if (new_consume.max_fully_consumed_block_number ==
         snapshot_consume.max_fully_consumed_block_number) {
       // Reject backward partial_consumed within the same block.
@@ -297,51 +304,24 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
           snapshot_consume.partial_consumed_number) {
         return HogDbError{HogDbCode::kInvalidExecutorBehavior};
       }
-
-      // Verify partial doesn't exceed actual block size.
-      if (new_consume.partial_consumed_number >
-          snapshot_consume.partial_consumed_number) {
-        auto block_num = snapshot_consume.max_fully_consumed_block_number + 1;
-        auto block = ctx.dao->read_retrocausal_queue_block(ctx.key, block_num);
-        if (!block.has_value()) {
-          return block.error();
-        }
-        if (new_consume.partial_consumed_number > block->entries.size()) {
-          return HogDbError{HogDbCode::kInvalidExecutorBehavior};
-        }
+      // Within one block the count is the cursor difference.
+      if (consumed_entries != new_consume.partial_consumed_number -
+                                  snapshot_consume.partial_consumed_number) {
+        return HogDbError{HogDbCode::kInvalidExecutorBehavior};
       }
-
-      consumed_entries += (new_consume.partial_consumed_number -
-                           snapshot_consume.partial_consumed_number);
     }
-    else {
-      // First block (the one we were partially in)
-      auto first_block_num =
-          snapshot_consume.max_fully_consumed_block_number + 1;
-      auto first_block =
-          ctx.dao->read_retrocausal_queue_block(ctx.key, first_block_num);
-      if (!first_block.has_value()) {
-        return first_block.error();
+    else if (new_consume.max_fully_consumed_block_number ==
+             meta.max_live_block_num) {
+      // Consume-to-tail: every live past-block entry is consumed, so the
+      // count is the committed live count. This is the path a delete then
+      // recreate of a nonempty queue takes (make_fully_consumed_item).
+      if (consumed_entries != meta.live_entries) {
+        return HogDbError{HogDbCode::kInvalidExecutorBehavior};
       }
-      consumed_entries += (first_block->entries.size() -
-                           snapshot_consume.partial_consumed_number);
-
-      // Intermediate blocks
-      for (uint64_t b = first_block_num + 1;
-           b <= new_consume.max_fully_consumed_block_number; ++b) {
-        auto block = ctx.dao->read_retrocausal_queue_block(ctx.key, b);
-        if (!block.has_value()) {
-          return block.error();
-        }
-        consumed_entries += block->entries.size();
-      }
-
-      // Last block (the one we end up partially in, which is now the new fully
-      // consumed point)
-      consumed_entries += new_consume.partial_consumed_number;
     }
-
-    after->consumed_past_entries_ = consumed_entries;
+    // Otherwise the consume crossed at least one block boundary and stopped
+    // short of the tail. hog_exec read each of those blocks as it consumed
+    // from them, and its count is trusted here the same way its cursor is.
   }
 
   // Conservative reservation: assume insertion into an empty RCQ.
@@ -428,6 +408,8 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   const bool has_consume = delta.consume != nullptr;
   const size_t current_consumed_count =
       has_consume ? delta.consume->current_block_consumed.size() : 0;
+  const uint64_t past_consumed_count =
+      has_consume ? delta.consume->past_block_consumed_count : 0;
 
   // Release excess reservation from self-consume high-water mark.
   size_t excess_reserved = change.max_insert_count() - elements_added;
@@ -463,11 +445,9 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     consume_delta_.emplace(std::move(*delta.consume));
   }
 
-  int64_t element_delta =
-      static_cast<int64_t>(elements_added) - change.consumed_past_entries_;
-  if (has_consume) {
-    element_delta -= current_consumed_count;
-  }
+  int64_t element_delta = static_cast<int64_t>(elements_added) -
+                          static_cast<int64_t>(past_consumed_count) -
+                          static_cast<int64_t>(current_consumed_count);
   committed_element_count_delta_ += element_delta;
 
   const int128_t cost_after = calculate_cost();

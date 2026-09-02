@@ -14,6 +14,7 @@
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/queue_util.h"
@@ -502,6 +503,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             1);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 1);
   EXPECT_TRUE(
       delta.retrocausal_queue().consume->current_block_consumed.empty());
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
@@ -518,6 +520,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             0);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 2);
 
   res = rcq_item.get_next_item(mode, true);
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
@@ -531,6 +534,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             1);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 3);
   EXPECT_TRUE(
       delta.retrocausal_queue().consume->current_block_consumed.empty());
 }
@@ -559,6 +563,7 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
   EXPECT_EQ(delta.retrocausal_queue()
                 .consume->past_block_consume.partial_consumed_number,
             0);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 0);
   EXPECT_EQ(read_entries(
                 delta.retrocausal_queue().consume->current_block_consumed),
             (std::vector<uint32_t>{7}));
@@ -633,10 +638,45 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
   auto delta = fully_consumed.get_delta();
 
   ASSERT_TRUE(delta.retrocausal_queue().consume);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 0);
   EXPECT_EQ(read_entries(
                 delta.retrocausal_queue().consume->current_block_consumed),
             (std::vector<uint32_t>{42, 99}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
+}
+
+// A delete-then-recreate of a nonempty persisted queue consumes to the tail.
+// The cursor jumps to the last live block and the count is the block-start
+// live count, both taken from the snapshot metadata without reading a block.
+TEST_F(ItemViewTest, MakeFullyConsumedItemReportsLiveEntriesAsConsumed)
+{
+  // Snapshot metadata for a queue whose four live entries sit in blocks 1
+  // and 2. Only the metadata matters here: the consume-to-tail delta must
+  // come from it without touching a block.
+  AddressAndKey addrkey{};
+  WireStorageItem wire(StorageItemType::kItemTypeRetrocausalQueue);
+  wire.metadata().live_entries = 4;
+  wire.metadata().max_live_block_num = 2;
+  auto entry = SnapshotStorageItem::make_variant(std::move(wire), addrkey.key);
+  ASSERT_TRUE(entry.has_value());
+  SnapshotStorageItem item(std::move(entry).value(), std::move(addrkey),
+                           BlockID{1}, *db_proxy_);
+  ASSERT_EQ(item.type(), ItemViewType::kRetrocausalQueue);
+
+  auto fully_consumed =
+      RetrocausalQueueItem::make_fully_consumed_item(item, {});
+  auto delta = fully_consumed.get_delta();
+
+  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  EXPECT_EQ(delta.retrocausal_queue()
+                .consume->past_block_consume.max_fully_consumed_block_number,
+            2);
+  EXPECT_EQ(delta.retrocausal_queue()
+                .consume->past_block_consume.partial_consumed_number,
+            0);
+  EXPECT_EQ(delta.retrocausal_queue().consume->past_block_consumed_count, 4);
+  EXPECT_TRUE(
+      delta.retrocausal_queue().consume->current_block_consumed.empty());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -42,9 +42,12 @@ public:
     return delta;
   }
 
+  // Every block in these tests holds one entry, so a consume of the next
+  // full block reports one past-block entry consumed.
   static StorageDelta
   make_rcq_consume_delta(uint64_t max_fully_consumed_block_number,
-                         uint64_t partial_consumed_number)
+                         uint64_t partial_consumed_number,
+                         uint64_t past_block_consumed_count)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
     delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
@@ -53,6 +56,7 @@ public:
                 .max_fully_consumed_block_number =
                     max_fully_consumed_block_number,
                 .partial_consumed_number = partial_consumed_number},
+        .past_block_consumed_count = past_block_consumed_count,
         .current_block_consumed = {}};
     return delta;
   }
@@ -60,16 +64,12 @@ public:
   static StorageDelta
   make_rcq_consume_insert_delta(uint64_t max_fully_consumed_block_number,
                                 uint64_t partial_consumed_number,
+                                uint64_t past_block_consumed_count,
                                 std::vector<QueueEntry> const &values)
   {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
-        .past_block_consume =
-            RetrocausalQueuePastBlockConsumeDelta{
-                .max_fully_consumed_block_number =
-                    max_fully_consumed_block_number,
-                .partial_consumed_number = partial_consumed_number},
-        .current_block_consumed = {}};
+    StorageDelta delta = make_rcq_consume_delta(max_fully_consumed_block_number,
+                                                partial_consumed_number,
+                                                past_block_consumed_count);
     delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{
         .added_entries = {values.begin(), values.end()}};
     return delta;
@@ -120,7 +120,7 @@ TEST_P(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
 
   // Consume block 1 fully.
-  submit_delta(key, make_rcq_consume_delta(1, 0));
+  submit_delta(key, make_rcq_consume_delta(1, 0, 1));
 
   auto block_from_zero =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
@@ -193,7 +193,7 @@ TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
 
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(1)})); // block 1
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
-  submit_delta(key, make_rcq_consume_delta(2, 0));               // block 3
+  submit_delta(key, make_rcq_consume_delta(2, 0, 2));            // block 3
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(9)})); // block 4
 
   auto block_from_two =
@@ -211,7 +211,7 @@ TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(1)})); // block 1
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(2)})); // block 2
   submit_delta(key,
-               make_rcq_consume_insert_delta(2, 0,
+               make_rcq_consume_insert_delta(2, 0, 2,
                                              {make_rcq_entry(9)})); // block 3
 
   auto block_from_two =
@@ -231,7 +231,7 @@ TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
 
   // Same block: one tx consumes all prior entries, one tx inserts.
   auto tx_consume = make_new_per_tx_db_proxy();
-  tx_consume.add_delta(key, make_rcq_consume_delta(2, 0),
+  tx_consume.add_delta(key, make_rcq_consume_delta(2, 0, 2),
                        std::to_underlying(StorageDeltaFlags::None));
   auto r = tx_consume.try_push_current_subtransaction();
   ASSERT_TRUE(r.has_value() && r.value());
@@ -266,10 +266,10 @@ TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
   submit_delta(key, make_rcq_insert_delta({make_rcq_entry(6)})); // block 6
 
   // Consume the first four blocks across several later blocks.
-  submit_delta(key, make_rcq_consume_delta(1, 0));
-  submit_delta(key, make_rcq_consume_delta(2, 0));
-  submit_delta(key, make_rcq_consume_delta(3, 0));
-  submit_delta(key, make_rcq_consume_delta(4, 0));
+  submit_delta(key, make_rcq_consume_delta(1, 0, 1));
+  submit_delta(key, make_rcq_consume_delta(2, 0, 1));
+  submit_delta(key, make_rcq_consume_delta(3, 0, 1));
+  submit_delta(key, make_rcq_consume_delta(4, 0, 1));
 
   auto block_from_zero =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,

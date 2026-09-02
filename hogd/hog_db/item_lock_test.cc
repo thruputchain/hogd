@@ -1154,6 +1154,7 @@ TEST(ItemLockTest, FailedRCQExclusiveUpgradeIsFailureAtomic)
       x23::Ptr<RetrocausalQueueConsumeDelta>(new RetrocausalQueueConsumeDelta{
           .past_block_consume = {.max_fully_consumed_block_number = 1,
                                  .partial_consumed_number = 0},
+          .past_block_consumed_count = 1,
           .current_block_consumed = {consumed_entry}});
 
   ItemChange recreated_rcq(RetrocausalQueueIt(std::move(delta)));

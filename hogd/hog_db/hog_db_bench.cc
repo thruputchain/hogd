@@ -616,6 +616,13 @@ RCQBenchmark::run_sequential()
 
         more.store(true, std::memory_order_relaxed);
 
+        // The bench stands in for the executor here, which reads the block it
+        // consumes from and reports how many entries that was.
+        auto block_r =
+            db_.read_retrocausal_queue_block(queue_keys_[q], next_block);
+        if (!block_r)
+          fail(block_r.error());
+
         CHECK(block_tx.try_acquire_reference());
 
         InvokeTX tx(block_tx);
@@ -627,6 +634,7 @@ RCQBenchmark::run_sequential()
                     .max_fully_consumed_block_number = next_block,
                     .partial_consumed_number = 0,
                 },
+            .past_block_consumed_count = block_r->entries.size(),
         });
         if (auto ret =
                 tx.request_retrocausal_queue(queue_keys_[q], std::move(delta),

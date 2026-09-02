@@ -85,17 +85,18 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
       }
     }
 
-    // try_atomic_change_lock validated everything and stashed
-    // consumed_past_entries_ on the delta.  get_meta returns the
-    // already-cached metadata (no extra DAO read).
+    // try_atomic_change_lock validated the consume counts against the
+    // metadata. get_meta returns the already-cached metadata (no extra DAO
+    // read).
     auto meta = lock.get_meta(nullptr);
     CHECK(meta.has_value());
 
     uint64_t live = (*meta)->live_entries;
     uint64_t added = inner.delta().insert.added_entries.size();
-    uint64_t consumed = inner.consumed_past_entries_;
+    uint64_t consumed = 0;
     if (inner.delta().consume) {
-      consumed += inner.delta().consume->current_block_consumed.size();
+      consumed = inner.delta().consume->past_block_consumed_count +
+                 inner.delta().consume->current_block_consumed.size();
     }
 
     if (consumed > live + added) {

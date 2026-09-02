@@ -115,12 +115,14 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
   }
 
   if (earlier.delta_.consume && delta_.consume) {
-    auto const &ec = earlier.delta_.consume->past_block_consume;
-    auto const &nc = delta_.consume->past_block_consume;
+    auto const &ec = *earlier.delta_.consume;
+    auto const &nc = *delta_.consume;
     bool monotonic =
-        (ec < nc) ||
-        (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
-                         delta_.consume->current_block_consumed.size());
+        ((ec.past_block_consume < nc.past_block_consume) ||
+         (ec.past_block_consume == nc.past_block_consume &&
+          ec.current_block_consumed.size() <=
+              nc.current_block_consumed.size())) &&
+        ec.past_block_consumed_count <= nc.past_block_consumed_count;
     if (!monotonic) {
       return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
     }
