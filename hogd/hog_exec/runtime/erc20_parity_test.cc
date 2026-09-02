@@ -1758,6 +1758,21 @@ TEST_F(Erc20ParityTest, TransferFromToZeroAddressParity)
   EXPECT_EQ(native_record[2],
             static_cast<uint8_t>(InvocationFrameStatusCode::Return))
       << "transfer_from to the zero address must be accepted, not rejected";
+
+  // The tokens really landed on the zero address, and not on the recipient
+  // this harness otherwise defaults to. Comparing the two backends alone
+  // would still agree if the receiver override were dropped, so pin the
+  // committed native-token rows: the zero address gained one, the default
+  // recipient was never touched.
+  EXPECT_TRUE(lookup_storage_item_from_db(
+                  make_free_native_token_balance_addrkey(ContractAddress{}))
+                  .has_value())
+      << "the zero address must hold a committed native-token balance";
+  EXPECT_FALSE(
+      lookup_storage_item_from_db(
+          make_free_native_token_balance_addrkey(kNativeTfRecipientAddr))
+          .has_value())
+      << "the delegated transfer must not have gone to the default recipient";
 }
 
 // adjust_allowance(self, +amount): granting oneself an allowance is rejected by
