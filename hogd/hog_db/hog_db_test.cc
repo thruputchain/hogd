@@ -365,14 +365,14 @@ TEST_F(HogDbTest, RecoveredUnsupportedContractDataTypeRejected)
   Address contract_addr = make_address(kAddress + 77);
   ItemKey key = make_item_key(contract_addr, 1);
   auto db_key = make_contract_data_key(key);
-  constexpr std::array<std::byte, 1> value{std::byte{0x42}};
+  constexpr std::array<std::byte, 1> kValue{std::byte{0x42}};
 
   // A supported contract-data type passes validation.
-  ASSERT_TRUE(db_.get_ramdb().put(db_key, kBytes, value));
+  ASSERT_TRUE(db_.get_ramdb().put(db_key, kBytes, kValue));
   EXPECT_TRUE(db_.validate_recovered_state_item_types());
 
   // An unsupported type is rejected as corruption.
-  ASSERT_TRUE(db_.get_ramdb().put(db_key, 0xff, value));
+  ASSERT_TRUE(db_.get_ramdb().put(db_key, 0xff, kValue));
   auto ret = db_.validate_recovered_state_item_types();
   ASSERT_FALSE(ret);
   EXPECT_EQ(ret.error().code(), HogDbCode::kCorruption);
