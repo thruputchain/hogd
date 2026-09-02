@@ -49,6 +49,14 @@ syscall_SHA256Update_inner(SystemCallHandler &handler, uint32_t input_index,
     return {r.error().code(), WrappedGasAmount{0}};
   }
 
+  // Whole blocks only, so this drops charges in two places: the carry from a
+  // previous call, which can push one more compression than floor() counts,
+  // and a tail of 56 bytes or more, whose padding spills a block that
+  // Finalize's flat one does not cover. Both are one block, and the call that
+  // caused them already paid the stream cost and the crossing -- more than the
+  // block is worth. Splitting cannot exploit it either: the block counts here
+  // and in SHA256HashCost differ by at most two, so streaming never undercuts
+  // the one-shot (Sha256GasModelTest pins that).
   return {SyscallErrorCode::kSyscallErrorCodeNone,
           WrappedGasAmount{SHA256UpdateCost(input_buffer.size())}};
 }
