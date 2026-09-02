@@ -45,7 +45,7 @@ namespace {
 
 // Mirrors LARGE_CALLDATA_LEN / LARGE_CALLDATA in the contract.
 constexpr size_t kLargeCalldataLen = 16 * 1024;
-constexpr uint8_t kLargeCalldataByte = 0x5a;
+constexpr std::uint8_t kLargeCalldataByte = 0x5a;
 
 // The root frame's one kInvoke record. Every entrypoint here issues exactly
 // one Invoke, so a second record (or none) is a failure, not a search miss.
@@ -73,8 +73,9 @@ bool
 is_large_calldata(auto const &bytes)
 {
   return bytes.size() == kLargeCalldataLen &&
-         std::ranges::all_of(bytes,
-                             [](uint8_t b) { return b == kLargeCalldataByte; });
+         std::ranges::all_of(bytes, [](std::uint8_t b) {
+           return b == kLargeCalldataByte;
+         });
 }
 
 // A malformed-span rejection at `address`: the documented no-op. No child
