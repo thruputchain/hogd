@@ -1393,16 +1393,15 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 // (#2190).
 TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 {
-  const uint32_t limit =
-      stock_network_config().max_new_contracts_per_tx;
+  const uint32_t limit = stock_network_config().max_new_contracts_per_tx;
 
   // One more distinct contract than the chain admits. Each is tiny and
   // individually valid, so the count is the only thing being rejected.
   decltype(Transaction{}.contracts_to_deploy) attached;
   for (uint32_t i = 0; i <= limit; ++i) {
     Contract contract(ContractType::kRv32);
-    contract.rv32_contract().data.append_range(
-        std::string("attached_") + std::to_string(i));
+    contract.rv32_contract().data.append_range(std::string("attached_") +
+                                               std::to_string(i));
     attached.push_back(std::move(contract));
   }
   ASSERT_EQ(attached.size(), static_cast<size_t>(limit) + 1);
@@ -1456,14 +1455,13 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 // the bound is inclusive, so a transaction at the limit still runs its body.
 TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 {
-  const uint32_t limit =
-      stock_network_config().max_new_contracts_per_tx;
+  const uint32_t limit = stock_network_config().max_new_contracts_per_tx;
 
   decltype(Transaction{}.contracts_to_deploy) attached;
   for (uint32_t i = 0; i < limit; ++i) {
     Contract contract(ContractType::kRv32);
-    contract.rv32_contract().data.append_range(
-        std::string("attached_") + std::to_string(i));
+    contract.rv32_contract().data.append_range(std::string("attached_") +
+                                               std::to_string(i));
     attached.push_back(std::move(contract));
   }
   ASSERT_EQ(attached.size(), static_cast<size_t>(limit));
