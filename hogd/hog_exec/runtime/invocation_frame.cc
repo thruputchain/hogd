@@ -84,8 +84,8 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   // transfer modified items from child frame to current frame
   modified_items_.reserve(modified_items_.size() +
                           frame.modified_items_.size());
-  for (auto &[addr, item] : frame.modified_items_) {
-    modified_items_.insert_or_assign(addr, std::move(item));
+  for (auto &[key, item] : frame.modified_items_) {
+    modified_items_.insert_or_assign(key, std::move(item));
   }
 
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
@@ -183,7 +183,8 @@ InvocationFrame::try_acquire_frame_locks(
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
 
-  for (auto const &[addrkey, item_view] : modified_items_) {
+  for (auto const &[key, item_view] : modified_items_) {
+    const AddressAndKey addrkey = key.to_address_and_key();
     bool has_observations = false;
     std::span<QueueEntry const> uncovered_obs;
     if (auto it = observations.find(addrkey); it != observations.end()) {
@@ -203,7 +204,8 @@ InvocationFrame::try_acquire_frame_locks(
   }
 
   for (auto const &[addrkey, entries] : observations) {
-    if (!entries.empty() && !modified_items_.contains(addrkey)) {
+    if (!entries.empty() &&
+        !modified_items_.contains(FrameItemKey::from(addrkey))) {
       StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
       delta.retrocausal_queue().observed_concurrent_entries = {entries.begin(),
                                                                entries.end()};
@@ -236,11 +238,11 @@ InvocationFrame::collect_storage_deltas(
 {
   out.reserve(out.size() + modified_items_.size() +
               new_contract_deployments_.size());
-  for (auto const &[addrkey, item_view] : modified_items_) {
+  for (auto const &[key, item_view] : modified_items_) {
     auto [delta, flags] = item_view.get_delta();
     if (delta) {
       out.push_back(FlaggedStorageDelta{
-          .addrkey = addrkey,
+          .addrkey = key.to_address_and_key(),
           .delta = *delta,
           .flags = flags,
       });
@@ -381,7 +383,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
             if (entries.empty()) {
               continue;
             }
-            auto *view = frame_stack_.back().get_item_view(addrkey);
+            auto *view =
+                frame_stack_.back().get_item_view(FrameItemKey::from(addrkey));
             if (view && !view->get<RetrocausalQueueItem>() &&
                 !view->get<UnmodifiedItem>()) {
               frame_stack_.pop_back();
@@ -500,15 +503,15 @@ InvocationFrameStack::lookup_locally_deployed_contract(
 }
 
 ItemView *
-InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
+InvocationFrame::add_item_view(FrameItemKey const &key, ItemView new_view)
 {
-  assert(!modified_items_.contains(addrkey));
-  auto [iter, _] = modified_items_.emplace(addrkey, std::move(new_view));
+  assert(!modified_items_.contains(key));
+  auto [iter, _] = modified_items_.emplace(key, std::move(new_view));
   return &iter->second;
 }
 
 ItemView *
-InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
+InvocationFrameStack::get_item_view(FrameItemKey const &key)
 {
   const int32_t stack_depth = frame_stack_.size();
   assert(stack_depth > 0);
@@ -516,7 +519,7 @@ InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
   auto &active_frame = frame_stack_.back();
 
   // do we already have a frame in the top active frame
-  if (auto *active_frame_view = active_frame.get_item_view(addrkey)) {
+  if (auto *active_frame_view = active_frame.get_item_view(key)) {
     return active_frame_view;
   }
 
@@ -525,19 +528,27 @@ InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
   for (int32_t i = stack_depth - 2; i >= 0; --i) {
     auto &frame = frame_stack_[i];
 
-    if (auto const *local_view = frame.get_item_view(addrkey)) {
+    if (auto const *local_view = frame.get_item_view(key)) {
       // refresh the parent frame view in the top frame
-      return active_frame.add_item_view(addrkey, *local_view);
+      return active_frame.add_item_view(key, *local_view);
     }
   }
 
-  return frame_stack_.back().add_item_view(addrkey, ItemView());
+  return frame_stack_.back().add_item_view(key, ItemView());
+}
+
+ItemView *
+InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
+{
+  return get_item_view(FrameItemKey::from(addrkey));
 }
 
 ItemView *
 InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
-  return get_item_view(get_addrkey(data_key));
+  assert(!frame_stack_.empty());
+  return get_item_view(
+      FrameItemKey::contract_data(frame_stack_.back().address(), data_key));
 }
 
 AuthToken const *
