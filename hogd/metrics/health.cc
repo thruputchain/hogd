@@ -30,7 +30,6 @@ Health::dump_to_string()
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("process_name", process_name_);
     w.field("pid", pid_);
-    w.field("executable_path", executable_path_);
     w.field("last_updated_timestamp", last_updated_timestamp_.format());
     w.field("status", std::format("{}", status_));
     w.field("current_block_height",

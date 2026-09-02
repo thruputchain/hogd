@@ -12,7 +12,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-#include "x23/progname.h"
 
 namespace hogd {
 
@@ -26,7 +25,10 @@ namespace hogd {
 // ...
 //
 // The health status is hosted via the http service in [hogd/http/], which calls
-// [dump_to_string()] in this class.
+// [dump_to_string()] in this class. That endpoint is reachable by anyone who
+// can reach the metrics port, so it reports only what a health check needs:
+// identity (process name, pid), liveness (timestamp), and progress (status,
+// block height). Do not add host layout -- paths, arguments, environment.
 class Health {
 public:
   enum class Status {
@@ -68,7 +70,6 @@ private:
   {
     process_name_ = read_process_name();
     pid_ = getpid();
-    executable_path_ = x23::getprogpath();
     last_updated_timestamp_.timestamp = std::chrono::system_clock::now();
   }
 
@@ -82,7 +83,6 @@ private:
 
   std::string process_name_;
   pid_t pid_;
-  std::string executable_path_;
   Status status_ = Status::kStarting;
   Timestamp last_updated_timestamp_;
   BlockHeight current_block_height_ = -1;

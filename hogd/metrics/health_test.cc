@@ -8,7 +8,6 @@
 #include "hogd/http/http_test.h"
 #include "hogd/metrics/health.h"
 #include "hogd/metrics/shared.h"
-#include "x23/progname.h"
 #include "gtest/gtest.h"
 
 #include <unistd.h>
@@ -73,7 +72,8 @@ TEST_F(HealthTest, DumpToStringReturnsJsonHealthState)
   EXPECT_FALSE(process_name->as_string()->empty());
 
   expect_json_integer_field(*parsed, "pid", getpid());
-  expect_json_string_field(*parsed, "executable_path", x23::getprogpath());
+  // The executable path is deliberately not reported; see health.h.
+  EXPECT_EQ(parsed->find("executable_path"), nullptr);
 
   const json::Value *timestamp = parsed->find("last_updated_timestamp");
   ASSERT_NE(timestamp, nullptr);
