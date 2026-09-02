@@ -88,6 +88,7 @@ add_library(runtime_test_objects OBJECT
   event_test.cc
   faucet_scenario_test.cc
   fibonacci_test.cc
+  get_returned_buffer_gas_3802_regression_test.cc
   sha256_incremental_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
