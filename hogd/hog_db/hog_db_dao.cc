@@ -83,6 +83,36 @@ HogDbDAO::for_each_state_item(GetEachCallback fn)
   });
 }
 
+HogDbStatus<void>
+HogDbDAO::validate_recovered_state_item_types()
+{
+  // A contract-data row must carry one of the encodings that
+  // get_charged_storage_cost_and_cache_data() knows how to price. An
+  // unsupported type would otherwise survive recovery and, on the first
+  // contract delete of that key, turn a snapshot-cost load failure into a
+  // fatal ItemLock panic. Reject it here instead so tampered on-disk state
+  // halts the node deterministically at startup, like a DbTip hash mismatch.
+  std::atomic<bool> valid = true;
+  for_each_state_item([&valid](std::span<const std::byte> key, uint8_t type,
+                               std::span<const std::byte> /*value*/) {
+    if (static_cast<Prefix>(key[0]) != Prefix::kContractDataKey)
+      return;
+    switch (type) {
+    case kNNInt128:
+    case kBytes:
+    case kRetrocausalQueue:
+      return;
+    default:
+      error("recovered contract-data item has unsupported type byte {}",
+            static_cast<int>(type));
+      valid.store(false, std::memory_order_relaxed);
+    }
+  });
+  if (!valid.load(std::memory_order_relaxed))
+    return HogDbError(HogDbCode::kCorruption);
+  return {};
+}
+
 HogDbStatus<DbTip>
 HogDbDAO::read_dbtip()
 {

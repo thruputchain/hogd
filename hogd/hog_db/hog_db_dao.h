@@ -512,6 +512,14 @@ public:
   // computes the db hash from scratch.
   StorageLongHash compute_full_db_hash();
 
+  // Validates the hogdb application `type` byte of every recovered state item.
+  // Recovery checks RAMDB storage framing but carries the type byte through
+  // unchecked (see disk_reader.cc), so a tampered data directory can admit a
+  // contract-data row with an unsupported type. Returns kCorruption if any such
+  // row is present. Intended to run at startup, before serving executor
+  // traffic.
+  HogDbStatus<void> validate_recovered_state_item_types();
+
   //
   // Global Operations
   //

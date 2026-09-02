@@ -103,6 +103,15 @@ hog_db_init(std::string_view path, size_t ram_bytes,
 
   // create the RPC context.
   HogDbDAO db_tmp(RAMDB(std::move(*ramdb)));
+
+  // Reject tampered on-disk state that framed a state item with an unsupported
+  // application type before it can reach a contract-triggered fatal path.
+  if (HogDbStatus<void> ret = db_tmp.validate_recovered_state_item_types();
+      !ret) {
+    critical("Recovered state failed item-type validation: {}", ret.error());
+    return EXIT_FAILURE;
+  }
+
   StorageLongHash db_hash = db_tmp.compute_full_db_hash();
 
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
