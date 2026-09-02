@@ -331,34 +331,6 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
   EXPECT_EQ(scheduler->size(), 0UL);
 }
 
-// Reproduces mempool audit Finding 2: committing a block that touches an
-// account which was excluded from the pending nomination aborts on
-// CHECK_EQ(ready_accounts_.erase(...), 1) in Scheduler::remove_from_scheduler
-// (scheduler.cc:1172).
-//
-// No attacker or special privilege is required. A funded account submits one
-// affordable transaction (txs[0]) and one whose gas_limit exceeds its balance
-// (txs[1]). The over-budget declaration is admitted normally --
-// schedgateway_submit_tx_batch forwards straight to submit_unvetted and
-// AuthServer::verify_transactions is signature/auth-claim only, so nothing on
-// the admission path compares gas_limit against a balance. During nomination
-// schedule() discards txs[1], which excludes the account for the rest of the
-// block and drops it from ready_accounts_. An ordinary follow-up submission
-// (txs[2]) then lands on the excluded account's runqueue while add_txs refuses
-// to re-insert the account into ready_accounts_ -- exactly the state the
-// assertion forbids (pinned by AddTxsDoesNotReenableAccountExcludedByPending-
-// Nomination above).
-//
-// Committing a block that touches that runqueue transaction -- the
-// validated-block commit path at rpc_from_coord.cc:2792/2809, which runs before
-// the exclusion is cleared at :2814/:2820 -- calls remove_from_scheduler, which
-// empties the account's runqueue, sees account_is_ready() == false, and gets 0
-// back from ready_accounts_.erase(). The CHECK then fires.
-//
-// This test drives that honest sequence and calls remove_from_scheduler
-// directly (as the RemoveFromRunqueue* tests do to model a block commit). In an
-// assert-enabled build it aborts at scheduler.cc:1172; it is expected to fail
-// until the scheduler uses the tolerant erase_ready_account() helper here.
 TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
@@ -372,14 +344,6 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   txs[2].tx.uniquifier.block_expiry_height = 12; // ordinary follow-up
 
   MempoolTestInfra server;
-  // Genesis initialization and the ceremony trigger auth_data_changed()
-  // callbacks that also call remove_from_scheduler(), which clears and reuses a
-  // function-static [accounts] map before taking [global_lock_]. Wait for the
-  // initial block commit so such a callback cannot overlap -- and clobber that
-  // shared map for -- the remove_from_scheduler() call below, exactly as the
-  // RemoveFromRunqueue* tests do. add_txs() reloads each account's hog age from
-  // the DB (read_average_hog_ages), so the set_hogs() balances below still take
-  // effect after the wait.
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
 
   server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
@@ -405,9 +369,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   EXPECT_EQ(scheduler->size(), 0UL);
 
   // An ordinary follow-up submission lands on the excluded account's runqueue,
-  // but [add_txs] refuses to re-insert the account into [ready_accounts_]
-  // (scheduler.cc:511-515). The account now owns a runqueue tx yet is absent
-  // from [ready_accounts_].
+  // but [add_txs] refuses to re-insert the account into [ready_accounts_].
   scheduler->add_txs({txs[2]})();
   EXPECT_EQ(scheduler->size(), 1UL);
   ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
@@ -418,14 +380,14 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   EXPECT_TRUE(scheduled.empty()); // still excluded
 
   // Commit a block that touches the excluded account's runqueue tx.
-  // remove_from_scheduler empties the runqueue, account_is_ready() -> false,
-  // and CHECK_EQ(ready_accounts_.erase(...), 1) fires at scheduler.cc:1172.
+  // In [remove_from_scheduler()], [account_is_ready()] is false and
+  // [ready_accounts_.erase(...)] returns 0. Before the fix,
+  // [ready_accounts_.erase(...)] would trigger a CHECK.
   x23::Vec<TransactionHash> hashes;
   hashes.push_back(sha256(txs[2].tx));
   scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
 
-  // Only reached once the scheduler tolerates an absent account on this path
-  // (e.g. via erase_ready_account()): the tx is removed cleanly.
+  // We only reach this point if the fix is working.
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
 }
