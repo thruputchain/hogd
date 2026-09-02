@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -421,6 +422,89 @@ TEST_F(Rv32SyscallEntryBridgeTest, DirectEntryOutOfGasWritesLiveOutputSpan)
   EXPECT_TRUE(
       std::ranges::equal(expected, std::span<const uint8_t>(memory).subspan(
                                        kOutputAddress, expected.size())));
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest,
+       InterpretersAgreeOnObservableExactBudgetOutOfGas)
+{
+  // At an exact gas boundary the SHA256 syscall body runs but is then charged
+  // into OutOfGas. The canonical per-instruction Machine runs the syscall
+  // against a scratch buffer (discarded on OutOfGas) while the threaded
+  // interpreter runs it against live guest memory (which retains the staged
+  // output) -- so the two interpreters' final guest memory legitimately
+  // differs. That memory is frame-local state a trap discards (see
+  // threaded_machine.h); what consensus observes is the (trap classification,
+  // gas_remaining) pair, and this test pins that both interpreters agree on it.
+  // The divergence in the discarded frame memory is therefore WAI, not a bug
+  // (issue #3780): after OutOfGas the whole frame is thrown away.
+  constexpr std::string_view input = "out of gas";
+  // Four argument-load instructions plus the ecall, each kBaseInstructionGas:
+  // the instruction stream consumes the whole budget, so the syscall body
+  // starts with zero gas remaining and is charged into OutOfGas.
+  constexpr uint64_t kExactBudget = 5 * rv32::kBaseInstructionGas;
+
+  std::vector<uint8_t> code;
+  uint8_t reg = 10; // a0
+  for (const int32_t imm :
+       {static_cast<int32_t>(SyscallNo::kSHA256),
+        static_cast<int32_t>(kInputAddress), static_cast<int32_t>(input.size()),
+        static_cast<int32_t>(kOutputAddress)}) {
+    append_u32(code, addi(reg, 0, imm));
+    ++reg;
+  }
+  append_u32(code, ecall());
+
+  std::vector<uint8_t> initial_memory(256, 0xCC);
+  std::ranges::copy(input, initial_memory.begin() + kInputAddress);
+
+  // Canonical per-instruction Machine driven through the scratch-buffer bridge.
+  auto canonical_program =
+      rv32::Program::create(std::span<const uint8_t>(code.data(), code.size()));
+  ASSERT_TRUE(canonical_program.has_value());
+  rv32::Machine canonical(std::make_shared<rv32::Program>(
+                              std::move(*canonical_program)),
+                          initial_memory.size(), kExactBudget);
+  ASSERT_TRUE(canonical.view().write_memory(0, initial_memory));
+  auto canonical_handler = make_handler();
+  rv32::SyscallBridgeHost canonical_bridge(&canonical_handler, &syscall_entry);
+  auto canonical_trace = start_frame(canonical_handler);
+  const rv32::StepResult canonical_result = canonical.run(canonical_bridge);
+  finish_frame(canonical_handler, std::move(canonical_trace),
+               std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
+
+  // Threaded interpreter driven against live guest memory, exactly as
+  // Rv32Runtime::invoke_internal does.
+  auto pre_instantiation = rv32::ThreadedMachinePreInstantiation::create(
+      std::span<const uint8_t>(code.data(), code.size()), initial_memory, 0,
+      initial_memory.size(), false);
+  ASSERT_TRUE(pre_instantiation.has_value());
+  rv32::ThreadedMachine threaded(*pre_instantiation, kExactBudget);
+  auto threaded_handler = make_handler();
+  auto threaded_trace = start_frame(threaded_handler);
+  ASSERT_EQ(threaded.start(), rv32::StepResult::kEcall);
+  ASSERT_TRUE(threaded.pending_ecall().has_value());
+  const rv32::EcallArgs ecall =
+      threaded.pending_ecall().value_or(rv32::EcallArgs{});
+  ExecutionContext threaded_context{
+      .memory = std::as_writable_bytes(threaded.memory()),
+      .gas_remaining = threaded.gas_remaining(),
+  };
+  const auto threaded_syscall =
+      syscall_entry(&threaded_handler, threaded_context, ecall.a0, ecall.a1,
+                    ecall.a2, ecall.a3, ecall.a4, ecall.a5, ecall.a6,
+                    ecall.a7)();
+  const rv32::StepResult threaded_result = threaded.resume_from_ecall(
+      rv32::HostResult::out_of_gas(threaded_syscall.second));
+  finish_frame(threaded_handler, std::move(threaded_trace),
+               std::unexpected(InvokeError{InvokeErrorCode::OutOfGas}));
+
+  // The consensus-visible result is identical on both interpreters.
+  EXPECT_EQ(canonical_result, rv32::StepResult::kTrap);
+  EXPECT_EQ(canonical.trap(), rv32::Trap::kOutOfGas);
+  EXPECT_EQ(canonical.gas_remaining(), 0U);
+  EXPECT_EQ(threaded_result, rv32::StepResult::kTrap);
+  EXPECT_EQ(threaded.trap(), rv32::Trap::kOutOfGas);
+  EXPECT_EQ(threaded.gas_remaining(), 0U);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, MachineRunCompletesRealReturnSyscall)
