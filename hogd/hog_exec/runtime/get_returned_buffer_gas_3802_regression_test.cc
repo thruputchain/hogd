@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "exec_result.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
