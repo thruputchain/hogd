@@ -133,6 +133,22 @@ public:
   // rejected at commit).
   BlockID block_height() const { return block_number_; }
 
+  // Height read off the tip the executor itself pins, never from a block id.
+  // Nothing cross-checks the timepoint.
+  BlockExecutionContext get_block_execution_context() const
+  {
+    // Completed here rather than awaited: bench setup runs on its own thread,
+    // never an x23 ThreadPool worker, which is what operator() asserts.
+    auto tip = db_proxy_->get_db_tip(block_number_)();
+    if (!tip.has_value()) {
+      panic("Failed to read db tip for block {}", block_number_);
+    }
+    return BlockExecutionContext{
+        .block_height = tip->value.proposal_header.block_height + 1,
+        .block_timepoint = 1'700'000'000,
+    };
+  }
+
   // Replay-cache-safe uniquifier assignment for benchmarks.
   //
   // HogDb enforces unique Uniquifier consumption per invoked address, with at
@@ -323,7 +339,9 @@ CommonBenchState::advance_block()
   block_number_++;
 
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 }
 
 // leaves the benchmark in a state where it's ready to execute transactions
@@ -373,7 +391,9 @@ CommonBenchState::run_genesis_configuration(
 
   block_number_++;
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
 
   open_event_block(block_number_);
 
@@ -422,7 +442,9 @@ CommonBenchState::run_genesis_configuration(
 
   block_number_++;
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(block_number_,
+                                             get_block_execution_context(),
+                                             *db_proxy_);
   open_event_block(block_number_);
 
   auto runtime_context = make_hog_exec_context();

@@ -231,7 +231,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+        // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
+        // over-capacity batch up to the free slots rather than dropping it.
+        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
           info("submit_unvetted rejected malformed transaction batch");
@@ -307,7 +309,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
-            mark_tx_failed_authentication(sha256((*txs)[i].tx));
             to_remove_indices.push_back(i);
           }
         }
@@ -415,7 +416,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
-        if (!(co_await parallel_batch_to_t(batch, *txs))) {
+        // Not [mempool_tx_size_limit_]: [enforce capacity] below admits an
+        // over-capacity batch up to the free slots rather than dropping it.
+        if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_vetted_rpc_count.increment();
           info("submit_vetted rejected malformed transaction batch");
@@ -450,7 +453,6 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
           if (code != AuthErrorCode::kAuthSuccess) {
-            mark_tx_failed_authentication(sha256((*txs)[i].tx));
             to_remove_indices.push_back(i);
           }
         }
@@ -783,11 +785,12 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
 }
 
 x23::Async<ExecResult>
-MempoolCoordinatorRpc::open_proposal_block(BlockID block_id,
-                                           size_t executor_idx)
+MempoolCoordinatorRpc::open_proposal_block(
+    BlockID block_id, BlockExecutionContext block_execution,
+    size_t executor_idx)
 {
   return exec_clients_[executor_idx].executorsched_open_proposal_block(
-      block_id);
+      block_id, block_execution);
 }
 
 MempoolCoordinatorRpc::InitializeBlockNodes
@@ -830,6 +833,7 @@ MempoolCoordinatorRpc::add_initialize_block_nodes(
         [&, i]() -> x23::Async<ExecResult> {
           const ExecResult result =
               co_await open_proposal_block(cache.block_id,
+                                           cache.block_execution,
                                            /*executor_idx=*/i);
           if (result == ExecResult::ExecResultOK) {
             executor_cleanups[i].arm();
@@ -1384,6 +1388,12 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   auto prepare_cache_node = nomination_dag.async<void>(
       "prepare nomination cache", [&]() -> x23::Async<void> {
         nominated_block_cache_.block_id = generate_block_id();
+        // Fixed before execution; every executor gets this same value.
+        nominated_block_cache_.block_execution = BlockExecutionContext{
+            .block_height =
+                last_committed_block_.value.proposal_header.block_height + 1,
+            .block_timepoint = context.block_timepoint,
+        };
         proposal_block_id.store(nominated_block_cache_.block_id);
         cache_cleanup.arm();
         // We place the block txs and tx hashes into these vectors. We mark
@@ -1535,8 +1545,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
   }
   x23::XdrVec<SignedTransaction> txs;
-  if (!(co_await parallel_batch_to_t(request.transactions, txs)) ||
-      txs.size() > kMaxBlockSize) {
+  if (!(co_await parallel_batch_to_t(request.transactions, txs,
+                                     kMaxBlockSize))) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
   }
   for (const SignedTransaction &tx : txs) {
@@ -1644,8 +1654,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
       co_return result(GenesisCeremonyOutcome::GenesisCeremonyExecutionFailed);
     }
     event_open = true;
+    // Same construction as an ordinary proposal.
+    const BlockExecutionContext genesis_block_execution{
+        .block_height =
+            last_committed_block_.value.proposal_header.block_height + 1,
+        .block_timepoint = request.context.block_timepoint,
+    };
     for (size_t i = 0; i < exec_clients_.size(); ++i) {
-      if (co_await open_proposal_block(block_id, i) !=
+      if (co_await open_proposal_block(block_id, genesis_block_execution, i) !=
           ExecResult::ExecResultOK) {
         co_await cleanup();
         co_return result(
@@ -1947,11 +1963,12 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
 }
 
 x23::Async<ExecResult>
-MempoolCoordinatorRpc::open_validation_block(BlockID block_id,
-                                             size_t executor_idx)
+MempoolCoordinatorRpc::open_validation_block(
+    BlockID block_id, BlockExecutionContext block_execution,
+    size_t executor_idx)
 {
   co_return co_await exec_clients_[executor_idx]
-      .executorsched_open_validation_block(block_id);
+      .executorsched_open_validation_block(block_id, block_execution);
 }
 
 x23::Async<SchedulerValidationResult>
@@ -2120,11 +2137,16 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         cache.result_tx_hashes.reserve(kMaxBlockSize);
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
+        // The coordinator RPC runs with [kBulkRpcMaxMessageSize], so a peer
+        // can claim far more transactions than a block holds.  Each claimed
+        // hash costs an allocation and a [find_tx] lookup before anything
+        // rejects it, and any that resolve go on to the executors.
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
-                                tx_nominations);
+                                tx_nominations, kMaxBlockSize);
         x23::Async<bool> tx_hash_handle =
-            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes);
+            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes,
+                                kMaxBlockSize);
 
         std::exception_ptr first_exception;
         bool decoded_tx_nominations = false;
@@ -2218,6 +2240,13 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         co_return;
       });
 
+  // From the proposal's header, never recomputed locally: these are what the
+  // proposer executed against, and deriving them here would split consensus.
+  const BlockExecutionContext validation_block_execution{
+      .block_height = proposal.header.block_height,
+      .block_timepoint = proposal.header.block_timepoint,
+  };
+
   x23::Vec<x23::DagNode<void>> open_validation_block_nodes;
   open_validation_block_nodes.reserve(exec_clients_.size());
   for (size_t i = 0; i < exec_clients_.size(); i++) {
@@ -2226,6 +2255,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         [&, i]() -> x23::Async<void> {
           ExecResult result =
               co_await open_validation_block(validation_block_id,
+                                             validation_block_execution,
                                              /*executor_idx=*/i);
           if (result != ExecResult::ExecResultOK) {
             co_await cancel_with_result(
@@ -2303,15 +2333,6 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   auto check_validation_node = validation_dag.async<void>(
       "check validation chunks", validation_dag.after(prepare_validate_node),
       [&]() -> x23::Async<void> {
-        for (const TransactionHash &tx_hash : missing_tx_hashes) {
-          if (tx_failed_authentication(tx_hash)) {
-            co_await cancel_with_result(
-                SchedulerValidationOutcome::SchedulerValidationInvalid,
-                "check validation chunks");
-            co_return;
-          }
-        }
-
         if (!missing_tx_hashes.empty()) {
           dag_outcome =
               SchedulerValidationOutcome::SchedulerValidationMissingTxs;
@@ -2740,7 +2761,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
-        clear_expired_failed_authentication_txs();
 
         // We need to do two things:
         // 1. If the nominated block is not the committed block, we need to

@@ -57,6 +57,8 @@ HogDbCategory::message(int code) const
     return "Invalid Executor Behavior";
   case kStaleBlock:
     return "Stale Block";
+  case kBusy:
+    return "Busy";
   default:
     return "Unknown Code (" + std::to_string(code) + ")";
   }

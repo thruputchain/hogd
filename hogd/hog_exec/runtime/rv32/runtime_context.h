@@ -33,7 +33,9 @@ public:
   explicit RuntimeContext(
       std::unordered_map<int32_t, RuntimeContractImage> contracts);
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override;
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  hogd::PreparedContract &out) const override;
+  using hogd::RuntimeContext::verify_contract;
 
   x23::Async<SystemStatus<std::unique_ptr<hogd::Runtime>>>
   make_new_runtime(DeployedContract const &deployed_contract,

@@ -360,7 +360,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
 
   auto snap1 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap1.has_value());
-  StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
+  StorageSnapshotCache cache1(snap1->viewing_block_id,
+                              get_block_execution_context(), get_db_proxy());
 
   auto warm = cache1.try_get_snapshot_item(addrkey)();
   ASSERT_TRUE(warm.has_value());
@@ -386,7 +387,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesUpdatedContractData)
   // A fresh viewing snapshot sees new-value.
   auto snap2 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap2.has_value());
-  StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
+  StorageSnapshotCache cache2(snap2->viewing_block_id,
+                              get_block_execution_context(), get_db_proxy());
 
   auto fresh = cache2.try_get_snapshot_item(addrkey)();
   ASSERT_TRUE(fresh.has_value());
@@ -410,10 +412,11 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
 
   auto snap1 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap1.has_value());
-  StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
+  StorageSnapshotCache cache1(snap1->viewing_block_id,
+                              get_block_execution_context(), get_db_proxy());
 
   // Warm negative contract lookup.
-  auto warm = cache1.try_get_contract_by_hash(missing_hash)();
+  auto warm = cache1.try_get_contract_entry(missing_hash)();
   ASSERT_TRUE(warm.has_value());
   EXPECT_EQ(warm.value(), nullptr);
 
@@ -430,7 +433,7 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   advance_block();
 
   // Stale cache still returns nulls.
-  auto stale_contract = cache1.try_get_contract_by_hash(missing_hash)();
+  auto stale_contract = cache1.try_get_contract_entry(missing_hash)();
   ASSERT_TRUE(stale_contract.has_value());
   EXPECT_EQ(stale_contract.value(), nullptr);
 
@@ -441,14 +444,15 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   // Fresh viewing snapshot sees the deployment.
   auto snap2 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap2.has_value());
-  StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
+  StorageSnapshotCache cache2(snap2->viewing_block_id,
+                              get_block_execution_context(), get_db_proxy());
 
   auto fresh_deploy = cache2.try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(fresh_deploy.has_value());
   EXPECT_NE(fresh_deploy.value(), nullptr);
 
   auto deployed_hash = sha256(*contract);
-  auto fresh_contract = cache2.try_get_contract_by_hash(deployed_hash)();
+  auto fresh_contract = cache2.try_get_contract_entry(deployed_hash)();
   ASSERT_TRUE(fresh_contract.has_value());
   EXPECT_NE(fresh_contract.value(), nullptr);
 
@@ -457,8 +461,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewlyDeployedContract)
   auto fresh_deploy_ptr = cache2.try_get_deployed_contract(contract_addr)();
   ASSERT_TRUE(fresh_deploy_ptr.has_value());
   ASSERT_NE(fresh_deploy_ptr.value(), nullptr);
-  EXPECT_EQ(&fresh_deploy_ptr.value()->entry->contract, fresh_contract.value());
-  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->translated.has_value());
+  EXPECT_EQ(fresh_deploy_ptr.value()->entry, fresh_contract.value());
+  EXPECT_FALSE(fresh_deploy_ptr.value()->entry->prepared.rv32.has_value());
 
   EXPECT_TRUE(get_db_proxy()
                   .close_viewing_snapshot(snap2->viewing_block_id)()
@@ -474,7 +478,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
 
   auto snap1 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap1.has_value());
-  StorageSnapshotCache cache1(snap1->viewing_block_id, get_db_proxy());
+  StorageSnapshotCache cache1(snap1->viewing_block_id,
+                              get_block_execution_context(), get_db_proxy());
 
   auto warm_tip = cache1.try_get_db_tip()();
   ASSERT_TRUE(warm_tip.has_value());
@@ -490,7 +495,8 @@ TEST_F(DirectStalenessTest, FreshViewingSnapshotSeesNewDbTip)
   // Fresh viewing snapshot sees incremented height.
   auto snap2 = get_db_proxy().open_viewing_snapshot()();
   ASSERT_TRUE(snap2.has_value());
-  StorageSnapshotCache cache2(snap2->viewing_block_id, get_db_proxy());
+  StorageSnapshotCache cache2(snap2->viewing_block_id,
+                              get_block_execution_context(), get_db_proxy());
 
   auto fresh_tip = cache2.try_get_db_tip()();
   ASSERT_TRUE(fresh_tip.has_value());
@@ -574,7 +580,8 @@ TEST_F(DirectStalenessTest,
       // is now rejected as expired during initial validation.
       .uniquifier = make_new_uniquifier()};
 
-  StorageSnapshotCache block_b_cache(block_b, get_db_proxy());
+  StorageSnapshotCache block_b_cache(block_b, get_block_execution_context(),
+                                     get_db_proxy());
   EventServerProxy event_proxy(
       x23::HostPort{"localhost", get_event_exec_port()});
   SystemCallHandler handler(

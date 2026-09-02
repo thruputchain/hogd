@@ -10,14 +10,13 @@
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -25,9 +24,11 @@
 
 namespace hogd {
 
-StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
-                                           DatabaseProxy &db_proxy)
-  : block_id_(block_id), db_proxy_(db_proxy)
+StorageSnapshotCache::StorageSnapshotCache(
+    BlockID block_id, BlockExecutionContext const &block_execution,
+    DatabaseProxy &db_proxy)
+  : block_id_(block_id), block_execution_context_(block_execution),
+    db_proxy_(db_proxy)
 {}
 
 StorageSnapshotCache::~StorageSnapshotCache()
@@ -36,7 +37,7 @@ StorageSnapshotCache::~StorageSnapshotCache()
 }
 
 x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
-StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
+StorageSnapshotCache::try_get_contract_entry(SHA256Hash const &hash)
 {
   {
     // Use shared lock for read-only cache lookup
@@ -72,12 +73,12 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
   std::optional<ContractCacheEntry> entry;
   if (db_res.value()) {
     Contract contract = std::move(db_res.value()).value();
-    std::optional<Rv32Contract> translated;
+    PreparedContract prepared;
     if (contract.contract_type() == ContractType::kRv32) {
-      translated = Rv32Contract::create(contract.rv32_contract());
+      prepared.rv32 = Rv32Contract::create(contract.rv32_contract());
     }
     entry.emplace(ContractCacheEntry{.contract = std::move(contract),
-                                     .translated = std::move(translated)});
+                                     .prepared = std::move(prepared)});
   }
 
   // TODO(geoff): If we decide to NOT reset the cache after every block,
@@ -91,29 +92,6 @@ StorageSnapshotCache::load_contract_entry(SHA256Hash hash)
   auto *obj2 = contract_cache_.find(hash, lock);
   CHECK_PTR(obj2);
   co_return obj2->has_value() ? &**obj2 : nullptr;
-}
-
-x23::MaybeAsync<SystemStatus<const Contract *>>
-StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
-{
-  {
-    auto [obj, sl] = contract_cache_.find_shared(hash);
-    if (obj) {
-      return SystemStatus<const Contract *>{obj->has_value() ? &(*obj)->contract
-                                                             : nullptr};
-    }
-  }
-  return load_contract_by_hash(hash);
-}
-
-x23::Async<SystemStatus<const Contract *>>
-StorageSnapshotCache::load_contract_by_hash(SHA256Hash hash)
-{
-  auto entry = co_await load_contract_entry(hash);
-  if (!entry) {
-    co_return entry.error();
-  }
-  co_return entry.value() ? &entry.value()->contract : nullptr;
 }
 
 x23::MaybeAsync<SystemStatus<const DeployedContract *>>
@@ -142,7 +120,7 @@ StorageSnapshotCache::load_deployed_contract(ContractAddress addr)
   if (db_res.value()) {
     DeployedContractHash meta = db_res.value().value();
     // Eagerly warm + translate the contract code; back-point at its entry.
-    auto entry = co_await get_contract_entry(meta.hash);
+    auto entry = co_await try_get_contract_entry(meta.hash);
     if (!entry) {
       co_return entry.error();
     }
@@ -253,26 +231,6 @@ StorageSnapshotCache::load_max_sha256_buffers()
     co_return tip.error();
   }
   co_return tip.value()->network_config.max_sha256_buffers;
-}
-
-x23::MaybeAsync<SystemStatus<uint32_t>>
-StorageSnapshotCache::try_get_max_cross_invoke_depth()
-{
-  auto *tip = db_tip_.load();
-  if (tip != nullptr) {
-    return SystemStatus<uint32_t>{tip->network_config.max_cross_invoke_depth};
-  }
-  return load_max_cross_invoke_depth();
-}
-
-x23::Async<SystemStatus<uint32_t>>
-StorageSnapshotCache::load_max_cross_invoke_depth()
-{
-  auto tip = co_await load_db_tip();
-  if (!tip.has_value()) {
-    co_return tip.error();
-  }
-  co_return tip.value()->network_config.max_cross_invoke_depth;
 }
 
 void

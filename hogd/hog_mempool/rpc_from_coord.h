@@ -9,8 +9,6 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
-#include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -44,6 +42,7 @@
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
+#include "hogd/xdr/protocol_token.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
@@ -77,8 +76,6 @@ public:
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
 
-  static constexpr size_t kFailedAuthenticationTxsBlockExpiryDelta = 5;
-
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
                         size_t num_exec_shards = 1)
@@ -92,7 +89,7 @@ public:
 
   ~MempoolCoordinatorRpc()
   {
-    disconnect_auth_callback();
+    disconnect_auth_callback()();
     // Wait for coroutines that outlive their initiating RPC handler and still
     // touch our members -- the detached vetted-notify send and the
     // [auth_data_changed] callback (whose [auth_data_height_] broadcast tail
@@ -107,10 +104,10 @@ public:
   // RPC is destroyed. This is normally called by our destructor; the devnode's
   // failed-construction path calls it earlier because it closes the auth server
   // before member destruction reaches the coordinator.
-  void disconnect_auth_callback()
+  x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
-      auth_rpc_->unregister_callback();
+      co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
   }
@@ -167,10 +164,9 @@ public:
   x23::Async<CoordinatorRegistrationOutcome>
   schedulercoord_intro_coord(CoordCard card)
   {
-    info("got {}, expected {}", card.protocol.c_str(),
-         version::kHogdProtocol());
-    if (std::string_view(card.protocol) !=
-        std::string_view(version::kHogdProtocol())) {
+    info("got {}, expected {}", protocol_text(card.protocol),
+         protocol_text(version::kHogdProtocol()));
+    if (card.protocol != version::kHogdProtocol()) {
       co_return CoordinatorRegistrationOutcome::
           CoordinatorRegistrationInvalidProtocol;
     }
@@ -429,6 +425,10 @@ private:
   struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
+    // Handed to every executor opening the block: from the coordinator's
+    // ProposalContext when proposing, from the proposal's header when
+    // validating.
+    BlockExecutionContext block_execution;
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<TransactionHash> tx_hashes;
 
@@ -522,22 +522,11 @@ private:
     auth_client_ = std::make_unique<auth_sched_client_t>(
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
-    const BlockHeight recovered_db_height =
-        last_committed_block_.value.proposal_header.block_height;
-    std::optional<BlockHeight> rejected_auth_height =
-        auth_rpc_->register_callback(
-            recovered_db_height,
-            [this](BlockHeight height, KeyChangeBatch key_changes) {
-              return auth_data_changed(height, std::move(key_changes));
-            },
-            [this] { initialized_.store(true, std::memory_order_release); });
-    if (rejected_auth_height) {
-      co_await db_rpc_->reset_scheduler();
-      throw std::runtime_error(std::format(
-          "auth startup watermark {} is ahead of recovered database height "
-          "{}; partial restart during an in-flight commit is unsupported",
-          *rejected_auth_height, recovered_db_height));
-    }
+    co_await auth_rpc_->register_callback(
+        [this](BlockHeight height, KeyChangeBatch key_changes) {
+          return auth_data_changed(height, std::move(key_changes));
+        },
+        [this] { initialized_.store(true, std::memory_order_release); });
     initialized_waiters_.store(true);
     initialized_waiters_.broadcast(&default_threadpool());
   }
@@ -577,8 +566,9 @@ private:
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
       x23::span<bool> ret);
 
-  x23::Async<ExecResult> open_proposal_block(BlockID block_id,
-                                             size_t executor_idx);
+  x23::Async<ExecResult>
+  open_proposal_block(BlockID block_id, BlockExecutionContext block_execution,
+                      size_t executor_idx);
 
   struct InitializeBlockNodes {
     x23::DagNode<DbSchedResult> create_snapshot;
@@ -647,8 +637,9 @@ private:
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs);
 
-  x23::Async<ExecResult> open_validation_block(BlockID block_id,
-                                               size_t executor_idx);
+  x23::Async<ExecResult>
+  open_validation_block(BlockID block_id, BlockExecutionContext block_execution,
+                        size_t executor_idx);
 
   static void record_submitted_vetted(size_t count);
   static void record_submitted_unvetted(size_t count);
@@ -728,54 +719,6 @@ private:
     num_validations_in_progress_.broadcast(&default_threadpool());
   }
 
-  void clear_expired_failed_authentication_txs()
-  {
-    // Entries are keyed by the last committed block height at which the failed
-    // authentication should still affect validation.
-    const BlockHeight cutoff =
-        last_committed_block_.value.proposal_header.block_height;
-    for (BlockHeight height = cutoff;
-         height > cutoff - static_cast<BlockHeight>(
-                               kFailedAuthenticationTxsBlockExpiryDelta);
-         height--) {
-      failed_authentication_txs_.remove(height);
-    }
-  }
-
-  void mark_tx_failed_authentication(const TransactionHash &tx_hash)
-  {
-    const BlockHeight expiry =
-        last_committed_block_.value.proposal_header.block_height +
-        kFailedAuthenticationTxsBlockExpiryDelta;
-    auto [tx_hashes, tx_hashes_lock] = failed_authentication_txs_[expiry];
-    // We do not check whether the insert succeeds. It is possible for the same
-    // tx to be added multiple times for the same block height (two validators
-    // could each call [schedulercoord_submit_unvetted()] with the same tx).
-    tx_hashes.insert(tx_hash, 0);
-  }
-
-  bool tx_failed_authentication(const TransactionHash &tx_hash)
-  {
-    const BlockHeight min_unexpired_height =
-        last_committed_block_.value.proposal_header.block_height + 1;
-    const BlockHeight max_unexpired_height =
-        last_committed_block_.value.proposal_header.block_height +
-        kFailedAuthenticationTxsBlockExpiryDelta;
-    for (BlockHeight height = min_unexpired_height;
-         height <= max_unexpired_height; height++) {
-      auto [tx_hashes, tx_hashes_lock] =
-          failed_authentication_txs_.find(height);
-      if (tx_hashes == nullptr) {
-        continue;
-      }
-      auto [entry, tx_hash_lock] = tx_hashes->find(tx_hash);
-      if (entry != nullptr) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   MempoolDbRpc *db_rpc_;
   MempoolAuthRpc *auth_rpc_;
   const NetworkHash network_hash_;
@@ -809,11 +752,6 @@ private:
   x23::CoroFutex<int64_t> num_validations_in_progress_{0};
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
-  using FailedAuthenticationTxSet =
-      SynchronizedMap<TransactionHash, char, SipHash24Hasher>;
-  SynchronizedMap<BlockHeight, FailedAuthenticationTxSet>
-      failed_authentication_txs_;
-
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
 

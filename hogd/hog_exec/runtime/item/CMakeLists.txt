@@ -10,6 +10,7 @@ target_include_directories(item_objects PRIVATE ${CMAKE_BINARY_DIR})
 
 # Standalone item tests — no syscall handlers, WASM runtimes, or precompiles
 add_library(item_test_objects OBJECT
+  frame_item_key_test.cc
   item_view_test.cc
   snapshot_storage_item_test.cc
 )

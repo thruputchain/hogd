@@ -37,6 +37,7 @@
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -96,8 +97,7 @@ IndexerOutboxOrigin
 pull_origin(const IndexerOutboxEpochOriginInfo &origin)
 {
   return {
-      .protocol =
-          ProtocolCommit(origin.protocol.data(), origin.protocol.size()),
+      .protocol = origin.protocol,
       .epoch_sequence = origin.epoch_sequence,
       .first_height = origin.first_height,
       .first_prev_hash = origin.first_prev_hash,
@@ -436,7 +436,7 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
   const BlockHeight tip_height = consensus_value.proposal_header.block_height;
   const ConsensusValueHash tip_hash =
       tip_height == -1 ? ConsensusValueHash{} : sha256(consensus_value);
-  const std::string current_protocol(version::kHogdProtocol());
+  const ProtocolCommit current_protocol = version::kHogdProtocol();
   const BlockHeight max_allowed_height =
       tip_height == INT64_MAX ? INT64_MAX : tip_height + 1;
 
@@ -711,7 +711,7 @@ x23::Async<EventIndexerPullResult>
 EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
 {
   using enum EventIndexerPullOutcome;
-  if (std::string_view(request.protocol) != version::kHogdProtocol()) {
+  if (request.protocol != version::kHogdProtocol()) {
     co_return pull_failure(EventIndexerPullMismatchedProtocol,
                            "event/indexer protocol mismatch");
   }
@@ -739,9 +739,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
         IndexerProgressState::IndexerProgressInitialized) {
       const auto it =
           std::ranges::find_if(indexer_origins_, [&](const auto &o) {
-            return o.protocol ==
-                   std::string_view(
-                       request.progress.initialized().origin.protocol);
+            return o.protocol == request.progress.initialized().origin.protocol;
           });
       if (it != indexer_origins_.end()) {
         retained_origin = *it;
@@ -764,8 +762,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
       co_return pull_failure(EventIndexerPullProgressConflict,
                              "indexer progress uses an unknown outbox origin");
     }
-    if (retained_origin->protocol !=
-        std::string_view(progress.origin.protocol)) {
+    if (retained_origin->protocol != progress.origin.protocol) {
       co_return pull_failure(EventIndexerPullProgressConflict,
                              "indexer progress protocol conflicts with origin");
     }
@@ -829,8 +826,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
             (progress.contiguous_height == origin_boundary &&
              progress.last_consensus_hash != progress.origin.first_prev_hash) ||
             (progress.contiguous_height > origin_boundary &&
-             (**progress_record).protocol !=
-                 std::string_view(progress.origin.protocol))) {
+             (**progress_record).protocol != progress.origin.protocol)) {
           co_return pull_failure(
               EventIndexerPullProgressConflict,
               "indexer progress identity conflicts with retained outbox");
@@ -911,7 +907,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
     co_return pull_failure(EventIndexerPullInternalFailure,
                            "pullable durable outbox record is unavailable");
   }
-  if ((**record).protocol != std::string_view(response_origin.protocol)) {
+  if ((**record).protocol != response_origin.protocol) {
     if (response_origin != current_origin) {
       x23::CoroGuard guard;
       co_await guard(outbox_commit_lock_);
@@ -929,7 +925,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request)
                            "pullable durable outbox record has wrong epoch");
   }
   auto loaded = co_await indexer_outbox_store_.load_committed_record(
-      next_height, std::string_view(response_origin.protocol));
+      next_height, response_origin.protocol);
   if (!loaded) {
     error("failed to load pullable committed outbox record {}: {}", next_height,
           loaded.error());

@@ -166,7 +166,7 @@ setup(ParentContext *parent_ctx, ForeignEntryPoint child_entry_point)
                                                 1'000'000'000),
             kTestFFIErrorCodeNone);
 
-  EXPECT_EQ(advance_new_block(h.db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(h.db, nullptr), kTestFFIErrorCodeNone);
 
   SignedTransaction stx{
       .tx = {.invocation =

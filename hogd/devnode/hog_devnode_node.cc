@@ -30,6 +30,7 @@
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/cleanup.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
@@ -61,6 +62,7 @@
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/ramdb/db.h"
@@ -706,7 +708,11 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
     // already captured coordinator state; this also clears the coordinator's
     // borrowed auth pointer before the server is destroyed. This is also safe
     // when construction failed before a callback was registered.
-    mempool_coord_server_.impl()->disconnect_auth_callback();
+    [](RpcServer<MempoolCoordinatorRpc> &mempool_coord_server)
+        -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      co_await mempool_coord_server.impl()->disconnect_auth_callback();
+    }(mempool_coord_server_)();
     mempool_auth_server_.reset();
     // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
     // the coordinator registered the scheduler (e.g. the post-genesis failure

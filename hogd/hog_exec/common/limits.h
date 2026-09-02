@@ -9,8 +9,8 @@
 namespace hogd {
 
 // Maximum size of a deployed contract's code blob (ContractBlob.data for
-// kWasmi / kRv32) -- the same quantity contract_deployment_cost_per_byte
-// charges for. Enforced deterministically in
+// kRv32) -- the same quantity contract_deployment_cost_per_byte charges
+// for. Enforced deterministically in
 // SystemCallHandler::perform_initial_validation() before any attached
 // contract is verified or executed (#2569).
 //

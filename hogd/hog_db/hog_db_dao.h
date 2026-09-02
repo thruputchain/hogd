@@ -109,6 +109,23 @@ public:
     return db_->sync().transform_error(to_hog_db_error);
   }
 
+  // commit_and_snapshot persists all pending changes and starts a full
+  // snapshot on ramdb's snapshot thread so disk cleanup can reclaim the WAL
+  // the snapshot covers. Returns the commit lsn without awaiting the
+  // snapshot; if the snapshot fails, snapshot_recommended() stays true and
+  // a later commit retries.
+  HogDbStatus<uint64_t> commit_and_snapshot()
+  {
+    return db_->sync_and_snapshot(0)
+        .transform([](auto &&ret) { return ret.first; })
+        .transform_error(to_hog_db_error);
+  }
+
+  // snapshot_recommended returns true when enough WAL has accumulated
+  // beyond snapshot coverage that commit_and_snapshot() would let disk
+  // cleanup reclaim it.
+  bool snapshot_recommended() const { return db_->snapshot_recommended(); }
+
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.
   size_t disk_bytes_written() const { return db_->disk_bytes_written(); }
@@ -447,6 +464,18 @@ public:
 
   // commit persists all pending changes in durable storage.
   HogDbStatus<uint64_t> commit() { return db_.commit(); }
+
+  // commit_and_snapshot persists all pending changes and starts a
+  // background full snapshot so disk cleanup can reclaim the WAL the
+  // snapshot covers. Returns the commit lsn without awaiting the snapshot.
+  HogDbStatus<uint64_t> commit_and_snapshot()
+  {
+    return db_.commit_and_snapshot();
+  }
+
+  // snapshot_recommended returns true when the WAL beyond snapshot
+  // coverage is worth reclaiming with commit_and_snapshot().
+  bool snapshot_recommended() const { return db_.snapshot_recommended(); }
 
   // disk_bytes_written returns the total bytes written to WAL log files since
   // the last database recovery.

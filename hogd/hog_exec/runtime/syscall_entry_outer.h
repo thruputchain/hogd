@@ -672,6 +672,15 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 
   auto [syscall_result, gas_consumed] = std::move(body_result);
 
+  // The crossing, charged here rather than in each body: a syscall added later
+  // cannot forget it, and a call that faulted or errored still used the entry
+  // path. Saturating, so a body that already billed the maximum cannot wrap to
+  // something cheap; the out-of-gas check below then sees the total.
+  gas_consumed =
+      WrappedGasAmount{gas_consumed.get() > UINT64_MAX - kSyscallBaseCost
+                           ? UINT64_MAX
+                           : gas_consumed.get() + kSyscallBaseCost};
+
   if (runtime_log_level(LogLevel::kTrace)) {
     // The inner syscall has already run and written its outputs; formatting
     // them for the trace log allocates. Keep it best-effort so an allocation

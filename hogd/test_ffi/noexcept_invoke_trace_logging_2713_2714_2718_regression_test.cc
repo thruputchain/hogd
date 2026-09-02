@@ -178,7 +178,7 @@ setup_root_invokes_child(ContractAddress *child_addr_storage, bool deploy_child)
               kTestFFIErrorCodeNone);
   }
 
-  EXPECT_EQ(advance_new_block(h.db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(h.db, nullptr), kTestFFIErrorCodeNone);
 
   SignedTransaction stx{
       .tx = {.invocation =

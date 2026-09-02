@@ -42,6 +42,11 @@ public:
 
   ExecutionMode mode() const { return mode_; }
 
+  BlockExecutionContext const &block_execution() const
+  {
+    return snapshot_cache_->block_execution_context();
+  }
+
   x23::Async<ExecProposeBatchResult>
   propose_transaction_batch(SignedTransactionBatch const &signed_txs,
                             TransactionID first_tx_id);

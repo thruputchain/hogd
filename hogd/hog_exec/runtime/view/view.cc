@@ -55,6 +55,13 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
         .calldata = Calldata{},
     };
 
+    // The view path admits its root parent frame through start_frame() rather
+    // than invoke(), so pin the tip here: the syscalls that frame goes on to
+    // run read the executing height, network hash and timepoint off it.
+    if (auto pinned = co_await syscall_handler.init_db_tip();
+        !pinned.has_value()) {
+      co_return ExpectedViewResult{TransactionViewStatus::InternalError};
+    }
     auto parent_max_buffers =
         co_await snapshot_cache.try_get_max_sha256_buffers();
     if (!parent_max_buffers.has_value()) {

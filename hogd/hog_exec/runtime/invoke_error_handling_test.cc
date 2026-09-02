@@ -17,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -861,9 +862,11 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         EXPECT_EQ(r.value(), SyscallErrorCode::kSyscallErrorCodeReentrance);
-        // The rejection stays the documented no-op, charging the caller
-        // nothing.
-        EXPECT_EQ(gas_after, gas_before);
+        // The rejection still does no work -- no child frame, no calldata
+        // copied -- but it is no longer free: the caller crossed into the host
+        // to ask, and pays kSyscallBaseCost for that. Otherwise a contract
+        // could spin on rejected reentrant invokes at no cost.
+        EXPECT_EQ(gas_after, gas_before + kSyscallBaseCost);
         co_return InvokeStatus<void>{};
       });
   auto self_contract = std::make_unique<NativeContract>(std::move(fns_self));

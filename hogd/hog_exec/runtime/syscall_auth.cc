@@ -137,7 +137,7 @@ syscall_GetAuthClaim_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_MintAuthToken_inner(
     SystemCallHandler &syscall_handler, const BlockHeight &input_expiry_height,
     std::span<const std::byte> input_serialized_auth_token,
@@ -147,13 +147,8 @@ syscall_MintAuthToken_inner(
                        .expiry_height = input_expiry_height};
 
   // Check expiry height is in the future
-  auto height = co_await syscall_handler.get_block_height();
-  if (!height) {
-    co_return SyscallInnerResult{height.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
-  }
-  if (input_expiry_height < *height) {
-    co_return SyscallInnerResult{
+  if (input_expiry_height < syscall_handler.get_block_height()) {
+    return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
   }
@@ -162,21 +157,21 @@ syscall_MintAuthToken_inner(
     x23::deserialize(&auth_token.root_node,
                      x23::BufView{input_serialized_auth_token});
   } catch (x23::XdrException &e) {
-    co_return SyscallInnerResult{
+    return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
   }
 
   if (!AuthTokenRegistry::node_within_depth(auth_token.root_node,
                                             kAuthTokenMaxDepth)) {
-    co_return SyscallInnerResult{
+    return SyscallInnerResult{
         SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
         WrappedGasAmount{0}};
   }
 
   auto status = syscall_handler.mint_auth_token(auth_token);
   if (!status) {
-    co_return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }
   output_token_id = *status;
 
@@ -186,11 +181,11 @@ syscall_MintAuthToken_inner(
         SyscallMintAuthTokenOutputs{.token_id = output_token_id});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ConsumeAuthToken_inner(
     SystemCallHandler &syscall_handler, uint32_t input_token_id,
     std::span<std::byte> output_auth_payload,
@@ -199,15 +194,11 @@ syscall_ConsumeAuthToken_inner(
     uint32_t &output_unwrapped_token_id_start,
     uint32_t &output_unwrapped_token_id_count)
 {
-  auto height = co_await syscall_handler.get_block_height();
-  if (!height) {
-    co_return SyscallInnerResult{height.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
-  }
-
-  auto status = syscall_handler.consume_auth_token(input_token_id, *height);
+  auto status =
+      syscall_handler.consume_auth_token(input_token_id,
+                                         syscall_handler.get_block_height());
   if (!status) {
-    co_return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().code(), WrappedGasAmount{0}};
   }
 
   auto const &result = *status;
@@ -233,8 +224,8 @@ syscall_ConsumeAuthToken_inner(
         .unwrapped_token_id_count = result.new_token_id_count});
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{0}};
 }
 
 } // namespace hogd

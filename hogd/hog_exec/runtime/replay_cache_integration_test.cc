@@ -232,8 +232,8 @@ TEST_F(ReplayCacheIntegrationTest,
   advance_block();
 
   auto tx = make_tx(3, /*nonce=*/12, /*expiry=*/0);
-  // Native contract id 99 is not registered in ctx_, so verify_contract() would
-  // fault it as Deterministic if it ran after the expiry check.
+  // A native attachment is refused during initial validation, so this would
+  // fault if it ran after the expiry check.
   tx.contracts_to_deploy.push_back(*make_native_contract(99));
 
   auto handler = make_new_system_call_handler(tx, *ctx_);

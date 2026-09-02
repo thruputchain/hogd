@@ -26,6 +26,7 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
@@ -131,16 +132,16 @@ public:
 
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
-  auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
+  auto *get_item_view(this auto &self, FrameItemKey const &key)
   {
-    auto it = self.modified_items_.find(addrkey);
+    auto it = self.modified_items_.find(key);
     if (it != self.modified_items_.end()) {
       return &(it->second);
     }
     return static_cast<decltype(&(it->second))>(nullptr);
   }
   // returns pointer to the newly created view
-  ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
+  ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
   x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
@@ -260,7 +261,9 @@ private:
   uint32_t total_try_invoke_depth_;
 
   // elements modified during the current call frame (and child frames)
-  std::unordered_map<AddressAndKey, ItemView> modified_items_;
+  // Keyed by the flat, pre-hashed form: a first touch probes every open frame
+  // with one key, and the hash is computed once for all of them.
+  std::unordered_map<FrameItemKey, ItemView, FrameItemKeyHash> modified_items_;
 
   // newly deployed contracts during the current call frame (and child frames)
   std::unordered_map<ContractAddress, DeployedContractHash, SipHash24Hasher>
@@ -421,6 +424,7 @@ public:
   // The returned pointer is never null
   ItemView *get_item_view(StorageKeyContractData const &data_key);
   ItemView *get_item_view(AddressAndKey const &addrkey);
+  ItemView *get_item_view(FrameItemKey const &key);
 
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {

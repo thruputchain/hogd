@@ -11,6 +11,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "x23/async.h"
 #include "x23/event.h"
@@ -84,7 +85,7 @@ TEST(RpcServerShutdown, SuspendedIndexerPullPinsServerDestruction)
   auto client = client_stream->client<EventIndexer1>();
 
   EventIndexerPullRequest request;
-  request.protocol = "test";
+  request.protocol = protocol_from_text("test");
   auto pending_call = client.event_indexer_pull_next(request);
 
   ASSERT_TRUE(state->invoked.try_acquire_for(std::chrono::seconds(5)));

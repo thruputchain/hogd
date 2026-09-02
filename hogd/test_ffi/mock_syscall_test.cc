@@ -14,6 +14,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "hogd/hog_exec/test_main.h"
@@ -255,7 +256,17 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  EmptyRuntime runtime(Invocation{.gas_limit = 7});
+  // What one call to the metering syscall costs: what its body asks for, plus
+  // the crossing every syscall pays. Written in terms of kSyscallBaseCost
+  // rather than as a literal so a repricing moves this test with it instead of
+  // failing it -- what is under test is that returned gas is consumed and that
+  // the second call runs out, not what the base happens to be.
+  constexpr GasAmount kBodyGas = 5;
+  constexpr GasAmount kCallGas = kBodyGas + hogd::kSyscallBaseCost;
+  // Enough for exactly one call, with a remainder too small for a second.
+  constexpr GasAmount kLimit = kCallGas + 2;
+
+  EmptyRuntime runtime(Invocation{.gas_limit = kLimit});
   context.push_mock_runtime(&runtime);
 
   auto res =
@@ -264,15 +275,15 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
-  EXPECT_EQ(runtime.gas_consumed(), 5);
-  EXPECT_EQ(runtime.gas_remaining(), 2);
+  EXPECT_EQ(runtime.gas_consumed(), kCallGas);
+  EXPECT_EQ(runtime.gas_remaining(), kLimit - kCallGas);
 
   auto out_of_gas =
       mock_syscall_parser<GasMeteringTestSyscallMeta>(SyscallNo::kExit, 0, 0, 0,
                                                       0, 0, 0, 0);
   EXPECT_EQ(out_of_gas.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
   EXPECT_EQ(out_of_gas.result_code, 0);
-  EXPECT_EQ(runtime.gas_consumed(), 7);
+  EXPECT_EQ(runtime.gas_consumed(), kLimit);
   EXPECT_EQ(runtime.gas_remaining(), 0);
 
   context.pop_mock_runtime();

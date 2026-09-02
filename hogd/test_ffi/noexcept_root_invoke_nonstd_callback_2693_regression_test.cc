@@ -70,7 +70,7 @@ TEST(TestBindingsTest, RootInvokeNonStdCallbackThrowReturnsUnrecoverable)
             kTestFFIErrorCodeNone);
   EXPECT_EQ(setup_grant_contract_storage_tokens(db, addr.data(), 1'000'000'000),
             kTestFFIErrorCodeNone);
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   SignedTransaction stx{
       .tx = {.invocation =

@@ -24,6 +24,7 @@
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
+#include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -103,11 +104,11 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
   EXPECT_EQ(deployed.value()->hash.contract_type, ContractType::kRv32);
-  EXPECT_TRUE(deployed.value()->entry->translated.has_value());
+  EXPECT_TRUE(deployed.value()->entry->prepared.rv32.has_value());
   // Back-pointer aliases the contract-cache entry the hash lookup returns.
-  auto by_hash = cache->try_get_contract_by_hash(deployed.value()->hash.hash)();
+  auto by_hash = cache->try_get_contract_entry(deployed.value()->hash.hash)();
   ASSERT_TRUE(by_hash.has_value());
-  EXPECT_EQ(&deployed.value()->entry->contract, by_hash.value());
+  EXPECT_EQ(deployed.value()->entry, by_hash.value());
 }
 
 // Verifies the actual returned value: fibonacci(10) == 55, decoded from the
@@ -641,20 +642,32 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
   ASSERT_TRUE(deployed.has_value());
   ASSERT_NE(deployed.value(), nullptr);
   ASSERT_NE(deployed.value()->entry, nullptr);
-  EXPECT_FALSE(deployed.value()->entry->translated.has_value());
+  EXPECT_FALSE(deployed.value()->entry->prepared.rv32.has_value());
 
   auto result = invoke_deployed(addr, 10'000);
   ASSERT_FALSE(result.is_root_success());
   EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Unrecoverable);
 }
 
-TEST(Rv32ContractTest, VerifyAcceptsRunExceedingLegacyGasBound)
+TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
 {
-  // A single straight-line run whose total gas exceeds the legacy uint16 run
-  // bound (65535) was formerly rejected; the lowering now splits it into
-  // <= kMaxRunGas chunks, so the contract loads and verifies.
+  // A single straight-line run whose total gas exceeds the chunk cap is split
+  // by the lowering into <= kMaxRunGas chunks, so the contract loads and
+  // verifies.
+  //
+  // This case used to be written against the legacy uint16 run bound (65535),
+  // which a run over that bound was formerly rejected for. That is no longer
+  // constructible: the priciest instruction costs kMaxInstructionGas and
+  // kMaxCodeBytes caps a program's length, so the most gas any straight-line
+  // run can hold now falls short of the legacy bound. The reachable case is
+  // kMaxRunGas, which is where the lowering actually splits.
+  static_assert((rv32::kMaxCodeBytes / rv32::kInstructionBytes) *
+                        rv32::kMaxInstructionGas <
+                    0xFFFFU,
+                "a straight-line run can reach the legacy uint16 bound again; "
+                "restore that case here rather than only testing kMaxRunGas");
   constexpr size_t kOverBoundDivCount =
-      (0xFFFFU / rv32::kDivInstructionGas) + 1; // 8193 divs -> 65544 gas
+      (rv32::kMaxRunGas / rv32::kDivInstructionGas) + 1;
   const std::vector<uint32_t> words(
       kOverBoundDivCount,
       rv32::test_program::op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
@@ -721,7 +734,7 @@ TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
 
 TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 {
-  Contract contract(ContractType::kWasmi);
+  Contract contract(ContractType::kNative);
   Rv32Context context;
   EXPECT_EQ(context.verify_contract(contract), InvokeErrorCode::Deterministic);
 }

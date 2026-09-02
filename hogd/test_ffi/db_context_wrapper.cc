@@ -1,6 +1,7 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <memory>
@@ -34,6 +35,17 @@
 namespace hogd {
 
 namespace {
+// TimePoint is Unix nanoseconds; system_clock's epoch is the Unix epoch on
+// every platform this builds for.
+TimePoint
+wall_clock_timepoint()
+{
+  return static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
 dbauth_client_t
 make_dbauth_client(x23::HostPort const &hostport)
 {
@@ -50,7 +62,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                      NetworkHash network_hash,
                      Contract const &genesis_root_contract,
                      NetworkConfig const &network_config)
-  : db_proxy_(nullptr), snapshot_cache_(nullptr)
+  : network_hash_(network_hash), db_proxy_(nullptr), snapshot_cache_(nullptr)
 {
   db_proxy_ = std::make_unique<DatabaseProxy>(
       LocalMockDB{.read_port_number_ = hog_db_wrapper_.exec_port()});
@@ -78,7 +90,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
     auth_server_->subscribe_to_auth_data_changes(auth_card)();
   }
 
-  GenesisConfiguration genesis_configuration{.network_hash = {},
+  GenesisConfiguration genesis_configuration{.network_hash = network_hash,
                                              .storage_cost_model = cost_model,
                                              .network_config = network_config,
                                              .root_contract =
@@ -87,6 +99,7 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
                                                  native_default_wallet_hash()};
   ConsensusValue genesis_value{};
   genesis_value.proposal_header.block_height = 0;
+  genesis_value.proposal_header.network_hash = network_hash;
   genesis_value.proposal_header.config_hash =
       compute_config_hash(genesis_configuration);
   auto res =
@@ -100,9 +113,36 @@ DBContext::DBContext(StorageCostModelXdr const &cost_model,
   advance_new_block();
 }
 
-void
-DBContext::advance_new_block(BlockExecutionMode mode)
+BlockExecutionContext
+DBContext::block_execution_context() const
 {
+  // Completed rather than awaited: the FFI entrypoints run on the caller's
+  // thread, never an x23 ThreadPool worker, which is what operator() asserts.
+  auto tip = db_proxy_->get_db_tip(current_block_id_)();
+  if (!tip.has_value()) {
+    throw std::runtime_error("block_execution_context: get_db_tip failed");
+  }
+  return BlockExecutionContext{
+      .block_height = tip->value.proposal_header.block_height + 1,
+      .block_timepoint = block_timepoint_,
+  };
+}
+
+void
+DBContext::advance_new_block(BlockExecutionMode mode,
+                             std::optional<TimePoint> block_timepoint)
+{
+  // Decided before anything is closed or committed: a refused advance must
+  // leave the DB usable, not half-torn-down.
+  const TimePoint next_timepoint =
+      block_timepoint.value_or(wall_clock_timepoint());
+  if (next_timepoint < block_timepoint_) {
+    throw BackwardsTimepointError(
+        std::format("advance_new_block: block timepoint {} is earlier than "
+                    "the block it follows ({})",
+                    next_timepoint, block_timepoint_));
+  }
+
   if (current_block_id_ > 0) {
     auto res = db_sched_client_.dbsched_close_snapshot(current_block_id_);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -110,8 +150,14 @@ DBContext::advance_new_block(BlockExecutionMode mode)
           "advance_new_block: dbsched_close_snapshot failed");
     }
 
+    // block_timepoint_ still holds the outgoing block's value here; the new
+    // block's is assigned below. Without this the committed header records 0
+    // while the contracts in that block executed against something else, so
+    // anything reading the block back disagrees with what ran in it.
     ConsensusValue value{};
     value.proposal_header.block_height = current_block_id_;
+    value.proposal_header.network_hash = network_hash_;
+    value.proposal_header.block_timepoint = block_timepoint_;
     res = db_sched_client_.dbsched_commit_snapshot(current_block_id_, value);
     if (res.result() != DbSchedResult::DbSchedResultOK) {
       throw std::runtime_error(
@@ -129,8 +175,11 @@ DBContext::advance_new_block(BlockExecutionMode mode)
   }
 
   current_block_id_++;
+  block_timepoint_ = next_timepoint;
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(current_block_id_,
+                                             block_execution_context(),
+                                             *db_proxy_);
   event_server_.open_block(current_block_id_)();
 }
 

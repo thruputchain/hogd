@@ -283,8 +283,13 @@ TEST(CoroSem, ManyWaiters)
         sem.release();
       }(sem, lastid, i, waiting);
 
-    while (waiting.load(std::memory_order_relaxed) < 64)
-      waiting.wait(waiting.load(std::memory_order_relaxed));
+    // Wait on the same value the loop condition observed.  Reloading
+    // inside wait() (waiting.wait(waiting.load())) races: if the last
+    // increments and their notify_all land between the condition's load
+    // and wait()'s, wait() sleeps on the final value 64, which nothing
+    // ever changes again, and the test hangs.
+    for (int seen; (seen = waiting.load(std::memory_order_relaxed)) < 64;)
+      waiting.wait(seen);
     lastid = 0x1'0000;
     sem.release();
     co_await pool.async(&ThreadPool::drain, &pool);

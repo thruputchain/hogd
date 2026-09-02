@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 #include <format>
 #include <memory>
 #include <set>
@@ -37,6 +39,19 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+
+namespace {
+// Must be the parent's committed height plus one, since the executor
+// cross-checks it against the tip. The timepoint is a stand-in.
+constexpr hogd::BlockExecutionContext
+test_block_execution(uint64_t block_height)
+{
+  return hogd::BlockExecutionContext{
+      .block_height = static_cast<hogd::BlockHeight>(block_height),
+      .block_timepoint = 1,
+  };
+}
+} // namespace
 
 namespace hogd {
 
@@ -104,9 +119,14 @@ protected:
   }
   EventCard make_event_card() { return event_wrapper_.make_event_card(); }
 
+  // Tracked explicitly: these tests jump to a distant block id for the block
+  // under test, while its height just continues the chain.
+  BlockHeight committed_height_ = 0;
+
   void open_block(BlockID block_id, BlockID parent_block_id)
   {
-    auto open_res = client_.executorsched_open_proposal_block(block_id);
+    auto open_res = client_.executorsched_open_proposal_block(
+        block_id, test_block_execution(committed_height_ + 1));
     ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
     auto db_res = db_client_.dbsched_create_snapshot(
@@ -123,18 +143,20 @@ protected:
     auto client_finish_res = client_.executorsched_finish_block(block_id);
     ASSERT_EQ(client_finish_res, ExecResult::ExecResultOK);
 
-    // We use [block_id] as the height as well.
+    const BlockHeight height = committed_height_ + 1;
     auto event_close_res =
-        event_client_.eventsched_close_block(block_id, block_id);
+        event_client_.eventsched_close_block(block_id, height);
     ASSERT_EQ(event_close_res.error(), RPCError::kRPCNone);
 
     auto db_close_res = db_client_.dbsched_close_snapshot(block_id);
     ASSERT_EQ(db_close_res.result(), DbSchedResult::DbSchedResultOK);
 
     ConsensusValue value{};
-    value.proposal_header.block_height = block_id;
+    value.proposal_header.block_height = height;
     auto db_commit_res = db_client_.dbsched_commit_snapshot(block_id, value);
     ASSERT_EQ(db_commit_res.result(), DbSchedResult::DbSchedResultOK);
+
+    committed_height_ = height;
   }
 };
 
@@ -205,7 +227,7 @@ TEST_F(RpcLoadgenEventTest, TestLoadgenPaymentsEmitEvents)
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
   SignedTransactionBatch txs;
-  parallel_batch_to_t(ext_result.success().work_txs, txs)();
+  parallel_batch_to_t(ext_result.success().work_txs, txs, kNoBatchSizeLimit)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Verify all transaction hashes are unique
@@ -311,7 +333,7 @@ TEST_F(RpcLoadgenEventTest, TestEventEmissionDelay)
   ASSERT_EQ(ext_result.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
 
   SignedTransactionBatch txs;
-  parallel_batch_to_t(ext_result.success().work_txs, txs)();
+  parallel_batch_to_t(ext_result.success().work_txs, txs, kNoBatchSizeLimit)();
   ASSERT_EQ(txs.size(), kNumTxs);
 
   // Verify all transaction hashes are unique

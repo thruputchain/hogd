@@ -167,8 +167,10 @@ RuntimeContext::RuntimeContext(
 {}
 
 InvokeErrorCode
-RuntimeContext::verify_contract(Contract const &contract) const
+RuntimeContext::verify_contract(Contract const &contract,
+                                hogd::PreparedContract & /*out*/) const
 {
+  // kMockTest images are prebuilt in contracts_; nothing to hand back.
   if (contract.contract_type() != ContractType::kMockTest) {
     return InvokeErrorCode::Deterministic;
   }

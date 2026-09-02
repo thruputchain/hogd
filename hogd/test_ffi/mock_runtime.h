@@ -41,10 +41,13 @@ public:
   make_new_runtime(DeployedContract const &deployed_contract,
                    SystemCallHandler *syscall_handler) const override;
 
-  InvokeErrorCode verify_contract(Contract const &contract) const override
+  InvokeErrorCode verify_contract(Contract const &contract,
+                                  PreparedContract &out) const override
   {
-    return base_context_->verify_contract(contract);
-  };
+    return base_context_->verify_contract(contract, out);
+  }
+  using RuntimeContext::verify_contract;
+  ;
 
   // Sets the function pointer and context that a mocked contract calls into.
   void set_trampoline(int32_t contract, ForeignEntryPoint entry_point,

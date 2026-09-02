@@ -82,8 +82,12 @@ public:
   executorsched_validate_batch(BlockID block_id,
                                ProposedTransactionBatch proposed_txs);
 
-  x23::Async<ExecResult> executorsched_open_proposal_block(BlockID id);
-  x23::Async<ExecResult> executorsched_open_validation_block(BlockID id);
+  x23::Async<ExecResult>
+  executorsched_open_proposal_block(BlockID id,
+                                    BlockExecutionContext block_execution);
+  x23::Async<ExecResult>
+  executorsched_open_validation_block(BlockID id,
+                                      BlockExecutionContext block_execution);
   // Indicates that state associated with this block can be garbage collected.
   // Does not block.  State will not be garbage collected until all
   // transactions on this block have been committed or aborted.

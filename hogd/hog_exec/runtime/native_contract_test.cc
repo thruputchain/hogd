@@ -23,6 +23,7 @@
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
@@ -48,6 +49,12 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
+// The mock serves a genesis tip at height 0, so the executing block is 1.
+constexpr BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1'700'000'000,
+};
+
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
 protected:
@@ -72,13 +79,18 @@ protected:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
 
-  SystemCallHandler make_handler(Transaction const &tx,
-                                 StorageSnapshotCache &snapshot,
+  SystemCallHandler make_handler(Transaction tx, StorageSnapshotCache &snapshot,
                                  BlockID block_id, TransactionID tx_id,
                                  RuntimeContext &runtime_context)
   {
     assert(db_proxy_ != nullptr);
     assert(event_server_proxy_ != nullptr);
+
+    // None of these tests is about replay expiry, and a default-constructed
+    // uniquifier expires at height 0. Leave an explicit choice alone.
+    if (tx.uniquifier.block_expiry_height == 0) {
+      tx.uniquifier.block_expiry_height = 1'000'000;
+    }
 
     return SystemCallHandler(
         tx, snapshot, PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
@@ -89,7 +101,7 @@ protected:
 
 TEST_F(NativeContractTest, BasicInstantiate)
 {
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -242,7 +254,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r1_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g1 != 100) {
+        if (g1 != 100 + kSyscallBaseCost) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -267,7 +279,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r2_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g2 != 200) {
+        if (g2 != 200 + kSyscallBaseCost) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -292,7 +304,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r3_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g3 != 150) {
+        if (g3 != 150 + kSyscallBaseCost) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -320,7 +332,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!invoke_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g != 100 + 200 + 150) {
+        if (g != 100 + 200 + 150 + (4 * kSyscallBaseCost)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -335,7 +347,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressMiddle,
                                               kAddressEntry};
@@ -365,7 +377,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
+  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150 + (4 * kSyscallBaseCost));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
@@ -430,7 +442,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -459,7 +471,11 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 510);
+  // 255 for each child -- the one that fits and the one that is converted to
+  // OutOfGas and still charged its full limit -- plus the crossing each of the
+  // two invoke syscalls pays. The children's own limits are unaffected: the
+  // crossing is billed to the caller, outside the budget it hands down.
+  ASSERT_EQ(res.gas_consumed_, 255 + 255 + (2 * kSyscallBaseCost));
 }
 
 // NativeContract::invoke error-precedence lattice at exact gas exhaustion
@@ -568,7 +584,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   ContractAddress const deployment_addrs[] = {kAddressConsumer, kAddressEntry};
   for (int32_t i = 0; i < 2; ++i) {
@@ -667,7 +683,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -805,7 +821,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
   auto context = make_context();
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
@@ -854,11 +870,15 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 }
 
 // Regression test for issue #1512. An attached native contract with an
-// unknown native_contract_id must be rejected by verify_contract rather
-// than reaching the panic in the deploy path.
-TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
+// unknown native_contract_id must be rejected during initial validation
+// rather than reaching the panic in the deploy path. Attachments are now
+// refused by contract type before verify_contract runs -- as Unrecoverable,
+// since the scheduler is meant to drop them first -- so this no longer
+// exercises that unknown-id branch, but it still pins what #1512 is about:
+// the panic stays unreachable.
+TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
 {
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract malicious_contract(ContractType::kNative);
   malicious_contract.native_contract_id() =
@@ -906,7 +926,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedByVerifyContract)
 
   auto res = handler.root_invoke()();
   ASSERT_FALSE(res.result_);
-  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Deterministic);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::Unrecoverable);
 }
 
 TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
@@ -983,7 +1003,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
 
   Contract parent_contract(ContractType::kNative);
   parent_contract.native_contract_id() =
@@ -1075,7 +1095,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
 
-  StorageSnapshotCache snapshot(0, *db_proxy_);
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
   ContractAddress address{};
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =

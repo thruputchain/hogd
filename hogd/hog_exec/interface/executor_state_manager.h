@@ -41,8 +41,10 @@ public:
   // return ExecResultOk if successful, or ExecResultSystemError if
   // the block_id already exists and is of a different mode.
   // These increase the reference count of the executor context
-  x23::Async<ExecResult> open_proposal(BlockID new_proposal_id);
-  x23::Async<ExecResult> open_validation(BlockID new_validation_id);
+  x23::Async<ExecResult> open_proposal(BlockID new_proposal_id,
+                                       BlockExecutionContext block_execution);
+  x23::Async<ExecResult> open_validation(BlockID new_validation_id,
+                                         BlockExecutionContext block_execution);
   // Decreases the reference count of the executor context.
   x23::Async<ExecResult> remove_block(BlockID block_id);
 
@@ -54,7 +56,10 @@ public:
   x23::Async<SystemStatus<void>> gc_executor_context(BlockID block_id);
 
 private:
-  x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode);
+  // Taken by value, not by reference: these are coroutines, and a reference
+  // parameter would dangle across the first suspension.
+  x23::Async<ExecResult> open_block(BlockID block_id, ExecutionMode mode,
+                                    BlockExecutionContext block_execution);
 
   x23::Async<PerThreadARC<ExecutorContext> *>
   get_executor_context_slow(BlockID block_id);
@@ -68,7 +73,9 @@ private:
   stash_snapshot_cache(std::unique_ptr<StorageSnapshotCache> snapshot_cache,
                        x23::CoroGuard const &g);
   std::unique_ptr<StorageSnapshotCache>
-  get_snapshot_cache(BlockID block_id, x23::CoroGuard const &g);
+  get_snapshot_cache(BlockID block_id,
+                     BlockExecutionContext const &block_execution,
+                     x23::CoroGuard const &g);
 
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,

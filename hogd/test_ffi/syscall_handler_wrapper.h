@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <unistd.h>
@@ -283,18 +284,29 @@ public:
 
 private:
   // RAII for the DBContext open-handler guard. Declared as a member *before*
-  // handler_ so it raises open_handler_count_ before handler_ borrows the DB's
-  // snapshot and proxies in the member-init list. Previously the guard was
+  // everything that reads or borrows DB state, so the borrow is admitted
+  // before the member-init list touches the DB. Previously the guard was
   // raised in the constructor body, i.e. after handler_ had already borrowed
   // DB state, leaving a window where a concurrent advance_new_block() saw a
   // zero count and replaced the snapshot the half-built handler referenced
   // (issue #2572). Released in the destructor (members destroyed in reverse
   // declaration order, so after handler_).
+  //
+  // Admission can be refused: a DB lifecycle transition (advance_new_block(),
+  // free_db()) already in flight is about to replace or destroy the state this
+  // handler would borrow, so there is nothing valid to bind to (issue #3049).
+  // Throwing from the guard aborts construction before any DB state is
+  // borrowed; the FFI entry points turn that into
+  // kTestFFIErrorCodeUnrecoverableError.
   class OpenHandlerGuard {
   public:
     explicit OpenHandlerGuard(DBContext &db) : db_(db)
     {
-      db_.register_open_handler();
+      if (!db_.try_register_open_handler()) {
+        throw std::runtime_error(
+            "cannot open a syscall handler while a DB lifecycle operation is "
+            "in flight");
+      }
     }
     ~OpenHandlerGuard() { db_.unregister_open_handler(); }
     OpenHandlerGuard(OpenHandlerGuard const &) = delete;
@@ -331,11 +343,15 @@ private:
   // only in release_test_ffi.yml.
   static thread_local std::vector<SyscallHandlerContext *> context_stack_;
 
-  DBContext::EphemeralTxIdentifier identifier_;
   DBContext &db_;
 
-  // Raised before handler_ borrows DB state; see OpenHandlerGuard (#2572).
+  // Raised before anything else reads or borrows DB state; see
+  // OpenHandlerGuard (#2572, #3049).
   OpenHandlerGuard open_handler_guard_;
+
+  // Allocated after the guard: the block id it captures is only stable once
+  // the borrow is admitted, since a lifecycle transition advances it.
+  DBContext::EphemeralTxIdentifier identifier_;
 
   // Keep the MockRuntimeContext alive for the handler's whole lifetime: the
   // embedded SystemCallHandler stores a RuntimeContext& into it, so closing the

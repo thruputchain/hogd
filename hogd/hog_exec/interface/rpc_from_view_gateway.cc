@@ -10,7 +10,6 @@
 #include <optional>
 #include <stop_token>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -89,8 +88,7 @@ ViewGatewayRpc::ViewGatewayRpc(std::string const &db_executor_address,
 ViewGatewayIntroOutcome
 ViewGatewayRpc::viewgateway_intro(ProtocolCommit const &protocol)
 {
-  if (std::string_view(protocol) !=
-      std::string_view(version::kHogdProtocol())) {
+  if (protocol != version::kHogdProtocol()) {
     return ViewGatewayIntroOutcome::ViewGatewayIntroMismatchedProtocol;
   }
   return ViewGatewayIntroOutcome::ViewGatewayIntroSuccess;
