@@ -92,6 +92,7 @@ add_library(runtime_test_objects OBJECT
   interleaving_tests.cc
   invocation_frame_test.cc
   invoke_error_handling_test.cc
+  invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_rv32_test.cc
