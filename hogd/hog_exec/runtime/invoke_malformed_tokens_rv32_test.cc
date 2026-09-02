@@ -221,9 +221,10 @@ TEST_F(InvokeMalformedTokensRv32Test, WellFormedTokensRunChild)
 
   ASSERT_NE(record->body.invoke().outputs, nullptr);
   auto const &child = record->body.invoke().outputs->child_trace;
-  EXPECT_EQ(child.invocation.invoked_address, kTargetAddress);
-  EXPECT_TRUE(is_large_calldata(child.invocation.calldata));
-  EXPECT_EQ(child.status.status_code(), InvocationFrameStatusCode::Abort);
+  ASSERT_NE(child, nullptr);
+  EXPECT_EQ(child->invocation.invoked_address, kTargetAddress);
+  EXPECT_TRUE(is_large_calldata(child->invocation.calldata));
+  EXPECT_EQ(child->status.status_code(), InvocationFrameStatusCode::Abort);
 }
 
 } // namespace hogd
