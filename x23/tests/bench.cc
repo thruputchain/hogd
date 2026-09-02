@@ -131,7 +131,40 @@ migrate_coro(benchmark::State &state)
     co_return;
   }()();
 }
-BENCHMARK(migrate_coro);
+BENCHMARK(migrate_coro)->UseRealTime()->MeasureProcessCPUTime();
+
+void
+migrate_coro_count(benchmark::State &state)
+{
+  uint64_t thread_handoffs = 0;
+
+  [&] -> x23::Async<void> {
+    auto previous = std::this_thread::get_id();
+
+    for (auto _ : state) {
+      co_await pool.bg();
+
+      auto current = std::this_thread::get_id();
+      thread_handoffs += current != previous;
+      previous = current;
+    }
+    co_return;
+  }()();
+
+  state.counters["handoffs/iter"] =
+      benchmark::Counter{double(thread_handoffs),
+                         benchmark::Counter::kAvgIterations};
+}
+[[maybe_unused]]
+static const auto _migrate_coro_registration = [] {
+  if (getenv("X23_BENCH_MIGRATE"))
+    BENCHMARK(migrate_coro_count)
+        ->UseRealTime()
+        ->MeasureProcessCPUTime()
+        ->Iterations(1'000'000)
+        ->Repetitions(10);
+  return false;
+}();
 
 void
 time_async_return(benchmark::State &state)
