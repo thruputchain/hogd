@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
