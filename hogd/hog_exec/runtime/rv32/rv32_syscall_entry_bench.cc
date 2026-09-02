@@ -8,7 +8,6 @@
 #include <cstring>
 #include <expected>
 #include <format>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <print>
@@ -168,9 +167,6 @@ constexpr uint32_t kNNIntOutAddAddress = kNNIntRegionAddress + 0xC0;
 static_assert(kNNIntOutAddAddress + sizeof(int128_t) <= kInputAddress,
               "NNInt arguments must not run into the hashing input");
 static_assert(sizeof(StorageKeyContractData) == 32);
-// The optional-input null sentinel the rv32 ABI uses: 0 is a valid guest
-// address, so an absent optional is all-ones (SyscallArgParams<const T *>).
-constexpr uint32_t kNullOptionalInput = std::numeric_limits<uint32_t>::max();
 
 // Values the NNInt rows read and write. Nonzero and distinct, so a path that
 // special-cased a zero or confused set with add would be measuring the wrong
