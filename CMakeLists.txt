@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.18)
-project(hogd VERSION 0.1.2 LANGUAGES C CXX)
+# VERSION is the last-resort version string embedded in binaries: release
+# builds take HOGD_DISTRIBUTION_VERSION from the pushed tag and tagged
+# checkouts take `git describe --exact-match`, so this only shows up in
+# untagged local builds (cmake/write_version_c.cmake:45-65). Keep it roughly
+# in step with the released line so those builds do not report a long-stale
+# version.
+project(hogd VERSION 0.1.26 LANGUAGES C CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
 

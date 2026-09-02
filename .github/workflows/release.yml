@@ -11,8 +11,11 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
-  # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.25-rc.4"
+  # HOGD_DISTRIBUTION_VERSION -- the version embedded in the binaries this
+  # workflow assembles -- is deliberately not a constant here: an entry in this
+  # block would shadow the value the jobs export through GITHUB_ENV. Each build
+  # job derives it from the pushed tag instead, with
+  # .github/actions/resolve-distribution-version.
 
 permissions:
   contents: write
@@ -69,6 +72,9 @@ jobs:
         uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
         with:
           submodules: false
+
+      - name: Resolve distribution version
+        uses: ./.github/actions/resolve-distribution-version
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
@@ -249,6 +255,9 @@ jobs:
         uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
         with:
           submodules: false
+
+      - name: Resolve distribution version
+        uses: ./.github/actions/resolve-distribution-version
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
@@ -509,11 +518,16 @@ jobs:
       contents: write
       actions: read
     steps:
-      - name: Verify tag matches distribution version
+      - name: Verify release ref is a version tag
         run: |
-          expected_tag="v${HOGD_DISTRIBUTION_VERSION}"
-          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
-            echo "release tag $GITHUB_REF_NAME does not match distribution version $HOGD_DISTRIBUTION_VERSION" >&2
+          set -euo pipefail
+          # The build jobs embed "${GITHUB_REF_NAME#v}" in every binary and
+          # assert the binaries report it, so the tag and the distribution
+          # version can no longer disagree. What still has to hold is that the
+          # ref being published is a version tag at all.
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if [[ "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ${semver} ]]; then
+            echo "release ref $GITHUB_REF_NAME is not a v<semver> tag" >&2
             exit 1
           fi
 

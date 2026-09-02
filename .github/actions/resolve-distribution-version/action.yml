@@ -1,0 +1,48 @@
+name: Resolve distribution version
+description: >
+  Computes the version embedded in the binaries this run assembles and exports
+  it as HOGD_DISTRIBUTION_VERSION for the rest of the job. A tag push takes the
+  version from the tag itself, so tagging never has to be kept in sync with a
+  constant checked into the workflow; every other trigger uses the fallback.
+
+inputs:
+  fallback-version:
+    description: >
+      Version used when the run was not triggered by a v* tag push. These
+      builds are never published, so the default is deliberately not a release
+      version.
+    required: false
+    default: "0.0.0-dev"
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve distribution version
+      shell: bash
+      env:
+        FALLBACK_VERSION: ${{ inputs.fallback-version }}
+      run: |
+        set -euo pipefail
+
+        if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          if [[ "${GITHUB_REF_NAME}" != v* ]]; then
+            echo "release tag ${GITHUB_REF_NAME} is not of the form v<semver>" >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+        else
+          version="${FALLBACK_VERSION}"
+        fi
+
+        # cmake/write_version_c.cmake embeds this string verbatim (minus a
+        # leading "v") and the publish job derives the expected tag from it, so
+        # reject anything that is not a bare semver before an hour of build
+        # time goes into it.
+        semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+        if [[ ! "${version}" =~ ${semver} ]]; then
+          echo "distribution version '${version}' is not a valid semver" >&2
+          exit 1
+        fi
+
+        echo "HOGD_DISTRIBUTION_VERSION=${version}" >> "${GITHUB_ENV}"
+        echo "resolved distribution version ${version}"
