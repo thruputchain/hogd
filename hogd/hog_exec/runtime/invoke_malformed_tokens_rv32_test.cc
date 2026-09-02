@@ -7,16 +7,18 @@
 // of 4-byte ids) is rejected by the span-length check, which runs ahead of
 // admission; admission runs ahead of the host's copy of the caller's calldata
 // (#2973, pinned natively in invoke_error_handling_test.cc). A rejected Invoke
-// reports gas 0, so that order is what keeps a contract from buying host copy
-// work for free with a one-byte token span and as much calldata as it likes.
+// bills nothing beyond the flat syscall crossing, so that order is what keeps
+// a contract from buying host copy work for free with a one-byte token span
+// and as much calldata as it likes.
 //
 // The guest asserts the error precedence (kInvalidSyscallInput beats
 // kReentrance) and that the rejection left its outputs untouched. The trace
 // assertions here add what the guest cannot see: no child frame was attached
-// to the rejected record, the rejection cost exactly nothing, and the losing
-// input -- the full calldata and the one-byte span -- was what the host saw.
-// The control shows the same calldata does reach a child frame once the span
-// is well-formed.
+// to the rejected record, the rejection cost exactly kSyscallBaseCost -- the
+// crossing every syscall pays, with nothing that grows with the 16 KiB of
+// calldata on top -- and the losing input, the full calldata and the one-byte
+// span, was what the host saw. The control shows the same calldata does reach
+// a child frame once the span is well-formed.
 
 #include <algorithm>
 #include <cstddef>
@@ -29,6 +31,7 @@
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
@@ -79,7 +82,7 @@ is_large_calldata(auto const &bytes)
 }
 
 // A malformed-span rejection at `address`: the documented no-op. No child
-// frame, no gas, and the losing input traced in full.
+// frame, only the crossing billed, and the losing input traced in full.
 void
 expect_rejected_before_child_frame(SyscallTrace const &record,
                                    ContractAddress const &address)
@@ -88,7 +91,10 @@ expect_rejected_before_child_frame(SyscallTrace const &record,
   EXPECT_EQ(record.status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
   EXPECT_EQ(record.body.invoke().outputs, nullptr);
-  EXPECT_EQ(record.gas_remaining_at_end, record.gas_remaining_at_start);
+  // The body reports gas 0; wrap_after_parse() adds the crossing. Anything
+  // more would be the calldata being priced, or copied.
+  EXPECT_EQ(record.gas_remaining_at_end,
+            record.gas_remaining_at_start - kSyscallBaseCost);
 
   auto const &inputs = record.body.invoke().inputs;
   EXPECT_EQ(inputs.address, address);
@@ -212,8 +218,10 @@ TEST_F(InvokeMalformedTokensRv32Test, WellFormedTokensRunChild)
   EXPECT_EQ(record->status.error(), HostFnErrorCode::NoneOrRecoverable);
   EXPECT_EQ(record->status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeNone);
-  // The child frame's total consumption is the kInvoke record's gas delta.
-  EXPECT_LT(record->gas_remaining_at_end, record->gas_remaining_at_start);
+  // The kInvoke record's gas delta is the crossing plus the child frame's
+  // total consumption.
+  EXPECT_LT(record->gas_remaining_at_end,
+            record->gas_remaining_at_start - kSyscallBaseCost);
 
   auto const &inputs = record->body.invoke().inputs;
   EXPECT_EQ(inputs.address, kTargetAddress);

@@ -4,14 +4,14 @@ use sdk::*;
 /// (a length that is not a whole number of 4-byte ids) that arrives together
 /// with contract-chosen calldata (#2327).
 ///
-/// A rejected Invoke reports gas 0, so any host work done ahead of the
-/// rejection is unpriced. The span-length check is the cheapest check Invoke
-/// runs and has to come first: ahead of admission (reentrance, token
-/// ownership, the depth bound), which in turn runs ahead of the host's copy of
-/// the calldata (#2973). A guest cannot watch that copy -- it has no side
-/// effect and costs no gas -- so the pin is on the error precedence the
-/// ordering implies, with a control showing that the same calldata does reach
-/// a child frame once the span is well-formed.
+/// A rejected Invoke bills nothing beyond the flat syscall crossing, so any
+/// host work done ahead of the rejection is unpriced. The span-length check
+/// is the cheapest check Invoke runs and has to come first: ahead of
+/// admission (reentrance, token ownership, the depth bound), which in turn
+/// runs ahead of the host's copy of the calldata (#2973). A guest cannot
+/// watch that copy -- it has no side effect and costs no gas -- so the pin is
+/// on the error precedence the ordering implies, with a control showing that
+/// the same calldata does reach a child frame once the span is well-formed.
 ///
 /// These need an rv32 caller: hogd's native syscall entry takes a typed span
 /// of uint32_t token ids, whose length is a count of ids, so it cannot express
