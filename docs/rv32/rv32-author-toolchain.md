@@ -1,6 +1,24 @@
 # RV32 Author Toolchain: Lowerer, Build, and Dispatch
 
-Status: landed decision record. Drafted 2026-05-29 off the `counter-rv32` spike
+> **Status: historical design record.** This note captured the lowerer /
+> build / dispatch decisions as they were made in mid-2026. The phases below
+> have since landed and several details are stale: the artifact is at gas
+> table version 4 (see `hogd/hog_exec/runtime/rv32/artifact.h` for the current
+> constants and digests), `groundhog build` has no `--target` flag (RV32 is its
+> only target), `built_contracts/build_wasm.sh` and
+> `scripts/rv32_make_smoke_artifact.sh` no longer exist, and the pinned
+> `rv32-lower` version is whatever `scripts/fetch.sh` installs.
+>
+> **Current author path.** Contract authors do not need anything in this
+> document. Scaffold a project with `groundhog new`, build the deployable
+> artifact with `groundhog build`, and run executor-backed tests with
+> `groundhog test`; see
+> [Getting Started](https://docs.groundhog.dev/start/getting-started/). The
+> rustflags a contract build needs live in the CLI's scaffold template
+> (`groundhog-rpc/crates/tools/cli/templates/config.toml.tmpl`), which
+> `built_contracts/.cargo/config.toml` in this repo mirrors.
+
+Status (at time of writing): landed decision record. Drafted 2026-05-29 off the `counter-rv32` spike
 and the landing of the register-native syscall ABI (groundhog-xdr 0.14.x, hogd
 PRs #2411 / #2417 and the `rv32: switch syscall bridge to register-native`
 work); updated after v4 guest-side dispatch landed.
