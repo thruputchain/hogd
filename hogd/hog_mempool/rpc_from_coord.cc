@@ -220,7 +220,12 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
 
   if (scheduler_->size() >= mempool_tx_size_limit_) {
     MempoolMetrics::instance().rejected_capacity_rpc_count.increment();
-    info(
+    // debug, not info: submit_unvetted is reachable through the public
+    // gateway, so at info this is one log line per rejected client request at
+    // the default release level -- anyone can fill an operator's log by
+    // sending junk. The metric incremented above is the durable signal; the
+    // same applies to the two rejections below.
+    debug(
         "submit_unvetted rejected txs as the mempool has too many pending txs");
     co_return;
   }
@@ -236,7 +241,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         if (!(co_await parallel_batch_to_t(batch, *txs, kNoBatchSizeLimit))) {
           MempoolMetrics::instance()
               .rejected_malformed_unvetted_rpc_count.increment();
-          info("submit_unvetted rejected malformed transaction batch");
+          debug("submit_unvetted rejected malformed transaction batch");
           submit_dag.fail(x23::DagFailureKind::Cancelled, "decode batch");
           co_return;
         }
@@ -261,8 +266,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
         ssize_t scheduler_size = scheduler_->size();
         if (scheduler_size >= mempool_tx_size_limit_) {
           MempoolMetrics::instance().rejected_capacity_rpc_count.increment();
-          info("submit_unvetted rejected txs as the mempool has too many "
-               "pending txs");
+          debug("submit_unvetted rejected txs as the mempool has too many "
+                "pending txs");
           // [commit_guard] is a smart pointer that has a [reset()] method just
           // like [x23::CoroGuard]. clang-tidy prefers that we dereference
           // [commit_guard] with [*] below rather than write
@@ -1319,14 +1324,20 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   co_await cg(nominated_block_cache_lock_);
 
   if (last_committed_block_.id != parent_id) {
-    info("schedulercoord_nominate ret");
+    // debug, not info: the "ret" lines in nominate, validate and commit_block
+    // print no outcome -- only the source line distinguishes which return path
+    // ran -- and there is one per block per RPC. The outcome is already in the
+    // nomination/validation/commit metrics recorded beside them, and hog-db
+    // logs the per-block progress line an operator actually reads
+    // ("committed block ...", hogd/hog_db/rpc_from_sched.cc).
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (last_committed_block_.value.proposal_header.block_height < 1) {
     // Heights 0 and 1 are reserved for genesis initialization and the genesis
     // ceremony. Ordinary nomination starts at height 2.
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
@@ -1334,7 +1345,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
@@ -1487,7 +1498,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
@@ -1522,7 +1533,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       .value = std::move(value),
       .default_wallet = last_committed_block_.default_wallet,
       .network_config = last_committed_block_.network_config};
-  info("schedulercoord_nominate ret");
+  debug("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
 
@@ -1993,7 +2004,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   if (proposal.header.block_height <= 1) {
     // Heights 0 and 1 are established outside ordinary validation.
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -2008,7 +2019,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       co_await decrement_num_validations_in_progress();
       validation_outcome =
           SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
-      info("schedulercoord_validate ret");
+      debug("schedulercoord_validate ret");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
     }
@@ -2046,14 +2057,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     co_await decrement_num_validations_in_progress();
     validation_outcome =
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
   if (proposal.header.network_hash != network_hash_) {
     co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -2492,7 +2503,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     graph_dot << validation_dag.dot();
   }
   if (log_validation_return) {
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
   }
   co_return result;
 }
@@ -2607,7 +2618,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                             /*remove_from_scheduler_size=*/0);
           // A block with ID [block_id] was neither nominated nor validated, so
           // it cannot be committed.
-          info("schedulercoord_commit_block ret");
+          debug("schedulercoord_commit_block ret");
           commit_dag.fail(x23::DagFailureKind::Cancelled, "check block exists");
         }
         co_return;
@@ -2668,7 +2679,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         }
         CHECK_PTR(commit_plan.committed_cache);
         if (commit_plan.committed_cache->db_tip.value != expected_value) {
-          info("schedulercoord_commit_block ret");
+          debug("schedulercoord_commit_block ret");
           invalid_consensus_value = true;
           commit_outcome =
               SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
@@ -2886,7 +2897,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                               .consensus_value = last_committed_block_.value});
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
-        info("schedulercoord_commit_block ret");
+        debug("schedulercoord_commit_block ret");
         last_commit_ = std::chrono::steady_clock::now();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
         co_return;
