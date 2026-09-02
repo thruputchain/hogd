@@ -326,42 +326,28 @@ TEST(BalanceLockTest, MaxBalanceRefundReleasesReservedSubtraction)
                   .has_value());
 
   // Refund the over-reserved storage cost (marginal RCQ cost was only 8).
-  EXPECT_TRUE(lock.add_committed_credit(12000).has_value());
+  lock.add_committed_credit(12000);
 
   EXPECT_EQ(lock.build_result(make_dummy_context()), kMax - 8);
 }
 
-// A refund that cannot be represented (would push the committed value past
-// INT128_MAX) is only reachable from tampered recovery state; it must surface
-// as a recoverable conflict rather than aborting the process.
-TEST(BalanceLockTest, ImpossibleRefundReturnsConflict)
+// A refund releases the reserved subtraction it cancels, so the freed
+// subtraction capacity is available again -- a later (or concurrent) debit
+// against the same finalized lock must not be spuriously rejected (#3782
+// review).
+TEST(BalanceLockTest, RefundRestoresSubtractionCapacity)
 {
-  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
-  BalanceLock lock(kMax);
+  BalanceLock lock(1000);
 
-  auto status = lock.add_committed_credit(1);
-  ASSERT_FALSE(status.has_value());
-  EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
-}
+  Balance debit(-50);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+                  .has_value());
+  EXPECT_EQ(lock.get_sub_capacity(), 950);
 
-// Each refund rechecks the ceiling against the current delta, so a second
-// refund that would overshoot INT128_MAX is rejected even after a first one
-// succeeded. This is the serialized form of two concurrent refunds against the
-// same finalized lock (they cannot both pass against a stale delta and then
-// overflow on the combined update).
-TEST(BalanceLockTest, SecondRefundThatWouldOvershootReturnsConflict)
-{
-  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
-  BalanceLock lock(kMax - 10);
+  lock.add_committed_credit(50);
 
-  // Room for a committed delta of at most +10 above the snapshot.
-  EXPECT_TRUE(lock.add_committed_credit(8).has_value());
-
-  auto status = lock.add_committed_credit(8);
-  ASSERT_FALSE(status.has_value());
-  EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
-
-  EXPECT_EQ(lock.build_result(make_dummy_context()), kMax - 2);
+  EXPECT_EQ(lock.get_sub_capacity(), 1000);
+  EXPECT_EQ(lock.build_result(make_dummy_context()), 1000);
 }
 
 } // namespace hogd

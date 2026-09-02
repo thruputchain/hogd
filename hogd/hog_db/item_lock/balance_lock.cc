@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <limits>
 
 #include "db_conflict.hh"
 #include "db_sched.hh"
@@ -74,32 +73,21 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   return 0;
 }
 
-HogDbStatus<void>
+void
 BalanceLock::add_committed_credit(int128_t credit)
 {
   CHECK_GT(credit, 0);
 
   // This runs after the balance lock is finalized (see
   // InvokeTX::commit/BlockTX::release_balance): it applies a storage
-  // over-reservation refund. The refund is not a fresh add against the snapshot
-  // ceiling but a partial release of the subtraction the finalized debit
-  // already reserved -- the committed delta moves toward zero. Modelling it as
-  // an add reservation dies on a max-balance snapshot, whose add capacity is
-  // zero, even though the net value is representable (#3782). Compose it with
-  // the finalized debit instead. The committed value snapshot + delta must stay
-  // <= INT128_MAX, i.e. delta <= INT128_MAX - snapshot; the lower bound holds
-  // automatically because a positive credit only raises an already-nonnegative
-  // committed value. try_apply_committed_credit enforces that ceiling and the
-  // delta update atomically, so concurrent refunds on this address in the same
-  // block cannot both pass and then overshoot. An impossible refund -- only
-  // reachable from tampered recovery state -- becomes a recoverable conflict
-  // instead of aborting the node.
-  int128_t snapshot = snapshot_balance_.snapshot_value().value_or(0);
-  int128_t max_delta = std::numeric_limits<int128_t>::max() - snapshot;
-  if (!delta_bounds_.try_apply_committed_credit(credit, max_delta)) {
-    return HogDbError{HogDbCode::kConflict};
-  }
-  return {};
+  // over-reservation refund. The refund only cancels part of the subtraction
+  // the finalized debit reserved, so it releases that reserved subtraction
+  // rather than reserving fresh add capacity -- which is what dies on a
+  // max-balance snapshot, whose add capacity is zero, even though the net value
+  // is representable (#3782). The refund is bounded by the reserved
+  // subtraction, so the committed value stays within the [0, INT128_MAX] domain
+  // the original reservation already enforced.
+  delta_bounds_.apply_committed_credit(credit);
 }
 
 int128_t

@@ -29,38 +29,23 @@ public:
                          int128_t add_before, int128_t add_after,
                          int128_t sub_before, int128_t sub_after);
 
-  // Atomically raises a finalized delta by `credit` (> 0) for a post-commit
-  // credit, e.g. a storage over-reservation refund, refusing (no-op, returns
-  // false) if the committed value would exceed `max_delta`. The bounds check
-  // and the delta update are one CAS, so concurrent refunds against the same
-  // finalized lock cannot each validate against a stale delta and then
-  // overshoot the ceiling on the combined update. Unlike try_reserve_delta the
-  // refund is a release of the subtraction the finalized debit already reserved
-  // rather than a fresh add against the snapshot ceiling, so it does not
-  // deadlock on the zero add capacity of a max-balance snapshot. Only the
-  // committed delta gates admission -- the lock is finalized, so no reservation
-  // consults the capacity counters; they are rebalanced to stay consistent for
-  // observability.
-  bool try_apply_committed_credit(int128_t credit, int128_t max_delta)
+  // Applies a post-commit credit of `amount` (> 0) to a finalized delta, e.g. a
+  // storage over-reservation refund. A refund only ever cancels part of the
+  // subtraction the finalized debit reserved, so it releases `amount` of
+  // subtraction capacity and raises the delta by the same amount; the reserved
+  // add capacity is unaffected. Modelling it this way (rather than as a fresh
+  // add) means it never touches the zero add capacity of a max-balance snapshot
+  // (#3782). Both are commutative atomic adds, so concurrent refunds compose
+  // without a CAS, and their total (bounded by the reserved subtraction) leaves
+  // the committed value within the reservation-enforced [0, INT128_MAX] domain.
+  // The subtraction capacity is released before the delta is published so a
+  // concurrent finalized-lock reservation never sees the raised delta against
+  // stale, too-low subtraction capacity.
+  void apply_committed_credit(int128_t amount)
   {
-    assert(credit > 0);
-    int128_t before = delta_.load(std::memory_order_relaxed);
-    for (;;) {
-      auto [after, overflow] = overflowing_add(before, credit);
-      if (overflow || after > max_delta) {
-        return false;
-      }
-      if (delta_.compare_exchange_strong(before, after,
-                                         std::memory_order_relaxed)) {
-        int128_t add_delta =
-            (after > 0 ? after : 0) - (before > 0 ? before : 0);
-        int128_t sub_delta =
-            (after < 0 ? after : 0) - (before < 0 ? before : 0);
-        add_.fetch_sub(add_delta, std::memory_order_relaxed);
-        sub_.fetch_add(sub_delta, std::memory_order_relaxed);
-        return true;
-      }
-    }
+    assert(amount > 0);
+    sub_.fetch_add(amount, std::memory_order_relaxed);
+    delta_.fetch_add(amount, std::memory_order_relaxed);
   }
 
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }

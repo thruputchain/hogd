@@ -256,13 +256,7 @@ InvokeTX::commit()
         CHECK_GE(released_cost, 0);
 
         if (released_cost > 0) {
-          if (auto r = block_.get().release_balance(key.get_address(),
-                                                    released_cost);
-              !r.has_value()) {
-            commit_error = r.error();
-            failed = true;
-            break;
-          }
+          block_.get().release_balance(key.get_address(), released_cost);
         }
       }
     }
