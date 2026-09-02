@@ -1331,8 +1331,31 @@ TEST(HogDevnode, VersionPrintsBeforeInitialization)
   std::string stdout_output = process.read_remaining_stdout();
   std::string stderr_output = process.read_remaining_stderr();
   EXPECT_EQ(stdout_output,
-            std::format("hog-devnode {}\n", version::kHogdVersion));
+            std::format("hog-devnode {}\ncommit: {}\nprotocol: {}\n",
+                        version::kHogdVersion, version::kHogdGitHash,
+                        protocol_text(version::kHogdProtocol())));
   EXPECT_TRUE(stderr_output.empty()) << stderr_output;
+}
+
+TEST(HogDevnode, VersionIsAcceptedAfterOtherArguments)
+{
+  // --version anywhere on the command line wins, so it can be appended to a
+  // command already in the operator's shell history.
+  HogDevnodeProcess process = HogDevnodeProcess::start({"--version"});
+
+  std::optional<int> status = process.wait_for_exit_for_test(exit_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = status.value();
+  ASSERT_TRUE(WIFEXITED(exit_status));
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_SUCCESS);
+
+  std::string stdout_output = process.read_remaining_stdout();
+  EXPECT_TRUE(stdout_output.starts_with(
+      std::format("hog-devnode {}\n", version::kHogdVersion)))
+      << stdout_output;
 }
 
 TEST(HogDevnode, InvalidNumericArgumentPrintsFriendlyUsageBeforeInitialization)

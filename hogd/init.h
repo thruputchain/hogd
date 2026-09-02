@@ -24,9 +24,10 @@ extern int hogd_init(int argc, char *argv[], bool do_print_version = true,
                      LogLevel log_level = is_debug_build() ? LogLevel::kDebug
                                                            : LogLevel::kInfo);
 
-// Prints "<program> <hogd-version>" and returns true when argv is exactly
-// `--version`. Call before hogd_init() so version probes stay quiet and do not
-// initialize subsystems.
+// Prints the build's identity -- "<program> <hogd-version>", then its git
+// commit and protocol token, one per line -- and returns true when `--version`
+// appears anywhere in argv. Call before hogd_init() so version probes stay
+// quiet and do not initialize subsystems.
 extern bool print_version_and_exit_if_requested(int argc, char *argv[]);
 
 } // namespace hogd

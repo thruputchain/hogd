@@ -106,8 +106,20 @@ print_version(const char *process, bool do_print_binary_hash)
 bool
 print_version_and_exit_if_requested(int argc, char *argv[])
 {
-  if (argc != 2 || argv == nullptr || argv[1] == nullptr ||
-      std::string_view(argv[1]) != "--version") {
+  if (argv == nullptr) {
+    return false;
+  }
+  // Accepted anywhere on the command line, like help_requested() in
+  // hogd/base/cli.h: someone appending --version to a command they already
+  // have in their shell history should not have to strip the other flags.
+  bool requested = false;
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] != nullptr && std::string_view(argv[i]) == "--version") {
+      requested = true;
+      break;
+    }
+  }
+  if (!requested) {
     return false;
   }
 
@@ -119,7 +131,14 @@ print_version_and_exit_if_requested(int argc, char *argv[])
       program.remove_prefix(slash + 1);
     }
   }
+  // Keep "<program> <version>" as the first line: the release workflow greps
+  // this output for the distribution version it built
+  // (.github/workflows/release.yml, "Verify distribution version").
   std::println("{} {}", program, version::kHogdVersion);
+  std::println("commit: {}", version::kHogdGitHash);
+  // The protocol token is what peers compare at the mempool intro RPC, so it
+  // is the field to ask for when two nodes refuse each other.
+  std::println("protocol: {}", protocol_text(version::kHogdProtocol()));
   return true;
 }
 
