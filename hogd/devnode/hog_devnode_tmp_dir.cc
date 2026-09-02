@@ -1,9 +1,11 @@
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -13,21 +15,47 @@
 
 namespace hogd {
 
-HogDevnodeTmpDir::HogDevnodeTmpDir()
+namespace {
+
+// Where Directory::open_temporary() will place the directory, mirroring
+// get_tmp_dir() in hogd/base/io.cc. For the error message only.
+std::string
+temp_dir_location()
+{
+  const char *tmpdir = std::getenv("TMPDIR"); // NOLINT(concurrency-mt-unsafe)
+  return tmpdir != nullptr ? std::string(tmpdir) : std::string("/tmp/");
+}
+
+// Creates the process's scratch directory, or throws.
+//
+// This fails for ordinary reasons -- an unwritable or missing $TMPDIR, a full
+// filesystem -- so it must not be a CHECK: aborting turns an operator's
+// environment problem into a crash with no explanation. Both callers run
+// inside the try scope of hog-devnode's main() (hog_devnode.cc), which prints
+// what() and exits.
+std::string
+open_temporary_dir()
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
-  CHECK(dir.has_value());
-  path_ = std::filesystem::absolute((*dir).get_path()).string();
+  if (!dir) {
+    throw std::runtime_error(
+        std::format("could not create a hog-devnode temp dir under '{}': {}",
+                    temp_dir_location(), dir.error()));
+  }
+  return std::filesystem::absolute((*dir).get_path()).string();
 }
+
+} // namespace
+
+HogDevnodeTmpDir::HogDevnodeTmpDir() : path_(open_temporary_dir())
+{}
 
 HogDevnodeTmpDir::HogDevnodeTmpDir(
     std::optional<std::filesystem::path> const &data_dir,
     std::string_view subdir)
 {
   if (!data_dir.has_value()) {
-    ErrnoStatus<Directory> dir = Directory::open_temporary();
-    CHECK(dir.has_value());
-    path_ = std::filesystem::absolute((*dir).get_path()).string();
+    path_ = open_temporary_dir();
     return;
   }
 
