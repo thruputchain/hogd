@@ -79,7 +79,7 @@ public:
   HogDbStatus<int128_t> commit_change(ItemChange change,
                                       const LockContext &ctx) noexcept;
 
-  void add_committed_balance_credit(int128_t delta);
+  HogDbStatus<void> add_committed_balance_credit(int128_t delta);
 
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;

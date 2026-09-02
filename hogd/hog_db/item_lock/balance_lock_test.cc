@@ -311,4 +311,37 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
   }
 }
 
+// Regression test for #3782: a storage over-reservation refund credited to a
+// finalized balance lock whose snapshot is INT128_MAX must apply the net change
+// (releasing the reserved subtraction) instead of aborting on the zero add
+// capacity of a max-balance snapshot.
+TEST(BalanceLockTest, MaxBalanceRefundReleasesReservedSubtraction)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  BalanceLock lock(kMax);
+
+  // Reserve the RCQ one-entry storage debit against the recovered max balance.
+  Balance debit(-12008);
+  ASSERT_TRUE(lock.try_atomic_change_lock(nullptr, &debit, make_dummy_context())
+                  .has_value());
+
+  // Refund the over-reserved storage cost (marginal RCQ cost was only 8).
+  EXPECT_TRUE(lock.add_committed_credit(12000).has_value());
+
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kMax - 8);
+}
+
+// A refund that cannot be represented (would push the committed value past
+// INT128_MAX) is only reachable from tampered recovery state; it must surface
+// as a recoverable conflict rather than aborting the process.
+TEST(BalanceLockTest, ImpossibleRefundReturnsConflict)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  BalanceLock lock(kMax);
+
+  auto status = lock.add_committed_credit(1);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
+}
+
 } // namespace hogd

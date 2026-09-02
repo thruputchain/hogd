@@ -29,6 +29,23 @@ public:
                          int128_t add_before, int128_t add_after,
                          int128_t sub_before, int128_t sub_after);
 
+  // Raises a finalized delta from `before` to `after` (after >= before) for a
+  // post-commit credit, e.g. a storage over-reservation refund. Unlike
+  // try_reserve_delta this never fails: the lock is finalized, so no concurrent
+  // reservation observes the capacity counters, and the credit only releases
+  // the reserved subtraction the finalized debit already holds (plus consumes
+  // matching add capacity when the delta crosses zero). The caller guarantees
+  // the resulting committed value stays in the item's domain.
+  void apply_committed_credit(int128_t before, int128_t after)
+  {
+    assert(after >= before);
+    int128_t add_delta = (after > 0 ? after : 0) - (before > 0 ? before : 0);
+    int128_t sub_delta = (after < 0 ? after : 0) - (before < 0 ? before : 0);
+    add_.fetch_sub(add_delta, std::memory_order_relaxed);
+    sub_.fetch_add(sub_delta, std::memory_order_relaxed);
+    delta_.fetch_add(after - before, std::memory_order_relaxed);
+  }
+
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }
 
   // For testing only

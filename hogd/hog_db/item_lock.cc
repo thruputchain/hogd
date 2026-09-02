@@ -193,13 +193,13 @@ try {
   return HogDbError{HogDbCode::kInternal};
 }
 
-void
+HogDbStatus<void>
 ItemLock::add_committed_balance_credit(int128_t delta)
 {
   CHECK_EQ(lock_state_.load(std::memory_order_acquire), kFinalized);
   auto *inner = std::get_if<BalanceLock>(&lock_contents_);
   CHECK(inner != nullptr);
-  inner->add_committed_credit(delta);
+  return inner->add_committed_credit(delta);
 }
 
 HogDbStatus<int128_t>

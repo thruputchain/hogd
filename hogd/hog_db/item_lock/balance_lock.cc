@@ -73,12 +73,30 @@ BalanceLock::try_atomic_change_lock(const Balance *before, const Balance *after,
   return 0;
 }
 
-void
-BalanceLock::add_committed_credit(int128_t delta)
+HogDbStatus<void>
+BalanceLock::add_committed_credit(int128_t credit)
 {
-  CHECK_GT(delta, 0);
-  auto ok = delta_bounds_.try_reserve_delta(0, delta, 0, delta, 0, 0);
-  CHECK(ok);
+  CHECK_GT(credit, 0);
+
+  // This runs after the balance lock is finalized (see
+  // InvokeTX::commit/BlockTX::release_balance): it applies a storage
+  // over-reservation refund. The refund is not a fresh add against the snapshot
+  // ceiling but a partial release of the subtraction the finalized debit
+  // already reserved -- the committed delta moves toward zero. Modelling it as
+  // an add reservation dies on a max-balance snapshot, whose add capacity is
+  // zero, even though the net value is representable (#3782). Compose it with
+  // the finalized debit instead, guarding the balance domain and surfacing an
+  // impossible refund as a recoverable conflict rather than aborting the node.
+  int128_t snapshot = snapshot_balance_.snapshot_value().value_or(0);
+  int128_t before = delta_bounds_.get_delta();
+  auto [after, delta_overflow] = overflowing_add(before, credit);
+  bool committed_overflow = overflowing_add(snapshot, after).second;
+  if (delta_overflow || committed_overflow) {
+    return HogDbError{HogDbCode::kConflict};
+  }
+
+  delta_bounds_.apply_committed_credit(before, after);
+  return {};
 }
 
 int128_t

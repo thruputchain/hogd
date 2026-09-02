@@ -68,7 +68,10 @@ public:
     return 0;
   }
 
-  void add_committed_credit(int128_t delta);
+  // Applies a storage over-reservation refund to a finalized balance lock.
+  // Returns a conflict (instead of aborting) if the refund cannot be
+  // represented, which is only reachable from tampered recovery state.
+  HogDbStatus<void> add_committed_credit(int128_t credit);
 
   HogDbStatus<void> stage_committed_changes(const LockContext &ctx,
                                             ChangeSet &changes) const;
