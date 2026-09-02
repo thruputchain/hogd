@@ -36,6 +36,19 @@ make_bind_host_port(std::string_view bind_ip, uint16_t port)
   return bind_addr;
 }
 
+// Returns true when make_bind_host_port() will accept bind_ip, i.e. when it is
+// a numeric address rather than a name needing DNS. Startup paths that take the
+// bind address from a command line should ask this first and report a normal
+// argument error: the panic above is not an exception, so a typo like
+// "localhost" would otherwise escape main()'s catch as a stack trace.
+inline bool
+is_numeric_bind_host(std::string_view bind_ip)
+{
+  return x23::HostPort(std::string(bind_ip), uint16_t{0})
+      .to_addr(/*dns=*/false)
+      .has_value();
+}
+
 inline std::string
 format_advertised_address(std::string_view bind_ip, uint16_t port)
 {

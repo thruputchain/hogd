@@ -216,7 +216,11 @@ parse_generate_args(int argc, char *argv[])
       options.contract_artifact_directories.push_back(std::move(dir));
       continue;
     }
-    usage(argv);
+    // Reached both for a flag this binary does not know and for a known flag
+    // whose value is missing, since every branch above also requires
+    // "i + 1 < argc". Say so instead of printing the usage text alone.
+    hogd::arg_error(std::format("unknown or incomplete option '{}'", arg), argv,
+                    usage);
   }
 
   if (options.genesis_out.empty()) {

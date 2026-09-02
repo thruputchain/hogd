@@ -1488,6 +1488,27 @@ TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
   }
 }
 
+TEST(HogDevnode, RejectsNonNumericListenHostBeforeInitialization)
+{
+  // A hostname is not resolved on the bind path: it used to reach
+  // make_bind_host_port(), whose panic is not an exception and so printed a
+  // stack trace instead of an argument error.
+  expect_startup_failure({"--listen-host", "localhost"},
+                         "is not a numeric IP address");
+}
+
+TEST(HogDevnode, UnknownOptionNamesTheOffendingArgument)
+{
+  expect_startup_failure({"--not-a-flag"},
+                         "unknown or incomplete option '--not-a-flag'");
+}
+
+TEST(HogDevnode, OptionMissingItsValueNamesTheOffendingArgument)
+{
+  expect_startup_failure({"--scheduler-port"},
+                         "unknown or incomplete option '--scheduler-port'");
+}
+
 TEST(HogDevnode, InvalidLogLevelPrintsFriendlyUsageBeforeInitialization)
 {
   HogDevnodeProcess process =

@@ -28,6 +28,7 @@
 #include "hogd/base/cli.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/dev_wallet_profile.h"
@@ -429,6 +430,16 @@ parse_args(int argc, char *argv[])
             "Invalid listen host: wildcard addresses cannot be advertised",
             argv, usage);
       }
+      // The internal services bind through make_bind_host_port(), which panics
+      // on anything getaddrinfo() will not resolve numerically. Catch it here,
+      // where it is still an ordinary argument error with a usage message.
+      if (!hogd::is_numeric_bind_host(options.listen_host)) {
+        hogd::arg_error(
+            std::format("Invalid listen host: '{}' is not a numeric IP address "
+                        "(hostnames are not resolved; use 127.0.0.1)",
+                        options.listen_host),
+            argv, usage);
+      }
       continue;
     }
     if (arg == "--scheduler-port" && i + 1 < argc) {
@@ -512,7 +523,11 @@ parse_args(int argc, char *argv[])
       }
       continue;
     }
-    usage(argv);
+    // Reached both for a flag this binary does not know and for a known flag
+    // whose value is missing, since every branch above also requires
+    // "i + 1 < argc". Say so instead of printing the usage text alone.
+    hogd::arg_error(std::format("unknown or incomplete option '{}'", arg), argv,
+                    usage);
   }
   reject_manifest_shorthand_conflicts(sources, argv);
   if (dev_accounts_value.has_value()) {
