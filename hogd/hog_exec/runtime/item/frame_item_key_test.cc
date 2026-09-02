@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <unordered_map>
 
+#include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "types.hh"
 
@@ -24,7 +24,7 @@ data_key_of(uint8_t seed)
 {
   StorageKeyContractData key{};
   for (size_t i = 0; i < key.size(); ++i) {
-    key[i] = static_cast<uint8_t>(seed * 3 + i);
+    key[i] = static_cast<uint8_t>((seed * 3) + i);
   }
   return key;
 }

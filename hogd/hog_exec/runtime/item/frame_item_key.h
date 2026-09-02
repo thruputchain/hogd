@@ -1,11 +1,10 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <span>
 
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 

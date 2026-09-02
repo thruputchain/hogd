@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
