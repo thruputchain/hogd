@@ -1093,11 +1093,11 @@ twice on the stack at once, but a contract invoked twice in sequence by the
 same caller has its first frame's views merged into the caller's frame at
 commit, and its second frame has to find them there. Native-token balances and
 the auth registry also read keys under addresses other than the active frame's.
-What can go is the cost: every probe re-hashes the 68-byte key and a miss
-visits every ancestor. Hashing once and probing with the precomputed hash, or
-one transaction-wide index from key to the deepest frame holding a view, would
-take it from ~50 ns per frame to near nothing. That is an engineering change
-rather than a pricing one; until it lands, the price has to include the walk.
+What can go is the cost: every probe re-hashed the 68-byte key and a miss
+visits every ancestor. Hashing once and probing with the precomputed hash is
+what `FrameItemKey` does (see "What caching the hash bought" below); one
+transaction-wide index from key to the deepest frame holding a view would
+remove the remaining probes as well, and is the larger change.
 
 **Writes are cheap to stage and paid for twice later.** A first-touch write
 costs what a no-load first touch costs; the syscall stages an item and stops.
@@ -1112,6 +1112,46 @@ orders of magnitude over a warm read, most of it the coroutine round trip
 through the proxy rather than any lookup. Its ±7 µs is also the widest of any
 row. It is on the record so the size of what the schedule declines to price is
 known, not as a candidate for the table.
+
+**What caching the hash bought.** The frame maps were keyed by the XDR
+`AddressAndKey`, so every probe serialized it into a buffer and SipHashed 68
+bytes, and a first touch at depth D did that D+1 times. `FrameItemKey`
+(`hogd/hog_exec/runtime/item/frame_item_key.h`) lays the address, key type
+and payload out flat, hashes them once when the key enters the frame stack --
+straight from the syscall's address and 32-byte key, without building the XDR
+union -- and every frame probes with the cached hash; the XDR form is rebuilt
+only where a delta is emitted. Same container, same run configuration, before
+and after:
+
+| regime | before ns | after ns | change |
+|---|---:|---:|---:|
+| `entry/NNIntGet`, warm | 211 | 198 | -6% |
+| `entry/NNIntSetAdd`, warm | 220 | 209 | -5% |
+| first touch, depth 1, 1 key | 632 | 443 | -30% |
+| first touch, depth 1, 4096 keys | 1007 | 669 | -34% |
+| first touch, no load, depth 1, 4096 keys | 723 | 413 | -43% |
+| first-touch write, depth 1, 4096 keys | 735 | 447 | -39% |
+| each parent frame, per first touch | 51 | 1.0 | -98% |
+| first touch at depth 8, 4096 keys | 1442 | 623 | -57% |
+| first touch at depth 16, 4096 keys | 2018 | 654 | -68% |
+| first touch at depth 254, 4096 keys | 13958 | 927 | -93% |
+| committing one staged item, 4096 items | 362 | 271 | -25% |
+| committing one staged item, 256 items | 222 | 95 | -57% |
+
+The depth term is gone: what remains per parent frame is one integer compare
+and a bucket probe on a map that does not hold the key, about a nanosecond.
+The first touch itself lost the second and third hashes it used to perform
+(the walk's, then the emplace's), and the child commit lost the re-hash of
+every key it moved into the parent. The warm rows barely moved, as they
+should: a warm read was one hash before and is one hash after.
+
+What did not change is the shape in K. A first touch still costs 1.5x more
+with 4096 keys in the frame than with one, which is the `unordered_map`
+growing, rehashing and leaving cache, and is the next thing to take out of the
+structure rather than price around. At depth 254 the report now prints
+`<noise` for the single-key cell: isolating one 450 ns touch by subtracting a
+25 µs frames-only baseline is below what three repetitions resolve, which is
+itself the right reading of that cell.
 
 A note on pinning: `taskset -c <one core>` crashes this binary with SIGFPE in
 `x23::PerCpuSet::lookup` before the first row, because the per-CPU set sizes

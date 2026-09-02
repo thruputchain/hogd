@@ -411,7 +411,12 @@ def print_storage(summary, unit_ns=None):
                 print(f"{'':<28}{depth:>6}  (no frame/Push/{depth} baseline "
                       "to subtract)")
                 continue
-            cells = " ".join(f"{cost:>8.1f}" for _, cost in entry["per_key"])
+            # A per-key cost at or below zero is a point where the frames-only
+            # baseline is large and noisy next to the few calls being isolated
+            # (one touch against 254 frames); it is not a cost, so it is not
+            # printed as one and does not enter the worst or the spread.
+            cells = " ".join(f"{cost:>8.1f}" if cost > 0 else f"{'<noise':>8}"
+                             for _, cost in entry["per_key"])
             flag = "" if entry.get("flat", True) else "  <- NOT FLAT"
             print(f"{'':<28}{depth:>6}{'':>15}{cells}"
                   f"{entry['worst_ns']:>10.1f}{gas(entry['worst_ns'])}"
