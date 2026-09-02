@@ -1104,8 +1104,8 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
 
   x23::CoroGuard cg;
   co_await cg(global_lock_);
-  // [accounts] is static and therefore reused my multiple threads, so we wait
-  // to call [clear()] on it until after we have acquired the lock.
+  // [accounts] is static and therefore used by multiple threads, so we wait to
+  // call [clear()] on it until after we have acquired the lock.
   accounts.clear();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
