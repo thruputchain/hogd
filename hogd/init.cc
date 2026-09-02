@@ -62,7 +62,7 @@ read_self_binary()
   const std::string &path = x23::getprogpath();
   if (path.empty())
     panic("unable to determine path of binary");
-  info("reading self binary from {}", path);
+  debug("reading self binary from {}", path);
   auto rres = x23::readfile<x23::Buf>(path);
   if (!rres)
     panic("{}: {}", path, rres.error());
@@ -94,9 +94,13 @@ print_version(const char *process, bool do_print_binary_hash)
 {
   info("hogd version: {}, git commit hash: {}", version::kHogdVersion,
        version::kHogdGitHash);
-  info("hogd config: {}", version::kHogdCmake);
+  // The cmake repro command and the full argv are long lines that answer a
+  // build or deployment question, not an operational one, so they stay out of
+  // the default release output. Version, protocol token and binary hash --
+  // what an operator quotes in a bug report -- remain at info.
+  debug("hogd config: {}", version::kHogdCmake);
   info("hogd protocol: {}", protocol_text(version::kHogdProtocol()));
-  info("hogd command: {}", cmdline);
+  debug("hogd command: {}", cmdline);
   if (do_print_binary_hash)
     info("hogd process: {}, binary hash: {}", process, get_self_binary_hash());
 }

@@ -33,7 +33,11 @@ x23::Async<hogd::ErrnoStatus<rpc_client_t<RpcService>>>
 make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
-  info("make_rpc_client: connecting to {}", x23::HostPort(ss));
+  // debug, not info: a single node opens one of these per internal service
+  // (hog-devnode makes about eight before it is ready), and a successful
+  // internal connection is not news. Failures below still log at error, and
+  // the retry path still warns.
+  debug("make_rpc_client: connecting to {}", x23::HostPort(ss));
   while (true) {
     std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
     if (!res) {
