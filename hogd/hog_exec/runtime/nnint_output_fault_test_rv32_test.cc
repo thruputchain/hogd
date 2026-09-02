@@ -62,7 +62,7 @@ TEST_F(NnintOutputFaultTestRv32Test, FaultValidFirst)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // Invalid first output pointer, valid second output pointer.
@@ -77,7 +77,7 @@ TEST_F(NnintOutputFaultTestRv32Test, FaultInvalidFirst)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 TEST_F(NnintOutputFaultTestRv32Test, ValidationFailure)
@@ -90,7 +90,7 @@ TEST_F(NnintOutputFaultTestRv32Test, ValidationFailure)
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 } // namespace hogd

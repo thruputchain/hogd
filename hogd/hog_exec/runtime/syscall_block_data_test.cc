@@ -21,6 +21,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -53,22 +54,23 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         BlockHeight expected_height) -> InvokeStatus<void> {
+         BlockHeight expected_height) -> x23::Async<InvokeStatus<void>> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 100;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Verify the returned height matches expected
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -99,11 +101,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
       *context);
 
   // Invoke the contract method which calls the syscall and verifies the height
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -129,22 +131,23 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         BlockHeight expected_height) -> InvokeStatus<void> {
+         BlockHeight expected_height) -> x23::Async<InvokeStatus<void>> {
         // Call GetBlockHeight syscall
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Verify the returned height matches expected
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -175,11 +178,11 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
       *context);
 
   // Invoke the contract method which calls the syscall and verifies the height
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
   // Commit the transaction
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -205,20 +208,21 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         BlockHeight expected_height) -> InvokeStatus<void> {
+         BlockHeight expected_height) -> x23::Async<InvokeStatus<void>> {
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         if (block_height != expected_height) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -247,10 +251,10 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -269,19 +273,19 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx,
-         TimePoint expected_timepoint) -> InvokeStatus<void> {
+         TimePoint expected_timepoint) -> x23::Async<InvokeStatus<void>> {
         TimePoint block_timepoint = 0;
-        auto status =
-            ctx.syscall<SyscallNo::kGetBlockTimepoint>(block_timepoint);
+        auto status = co_await ctx.syscall<SyscallNo::kGetBlockTimepoint>(
+            block_timepoint);
 
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (block_timepoint != expected_timepoint) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -309,9 +313,9 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto root_res = handler.root_invoke();
+  auto root_res = handler.root_invoke()();
   ASSERT_TRUE(root_res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // A supplied height disagreeing with the tip means this node is executing a
@@ -329,15 +333,16 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
 
   NativeContractBuilder builder;
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Never reached: admission refuses the transaction first. A tripwire.
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
         if (status.has_value() &&
             status.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -361,7 +366,7 @@ TEST_F(SyscallBlockDataTest, MismatchedContextHeightRejectsTransaction)
       *context);
 
   // Surfaces as an unrecoverable system error out of initial validation.
-  ASSERT_FALSE(handler.root_invoke().is_root_success());
+  ASSERT_FALSE(handler.root_invoke()().is_root_success());
 }
 
 // Both syscalls take no inputs, so their whole contribution to a trace is the
@@ -376,14 +381,15 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightIsTraced)
 
   NativeContractBuilder builder;
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight block_height = 0;
-        auto status = ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
+        auto status =
+            co_await ctx.syscall<SyscallNo::kGetBlockHeight>(block_height);
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -406,8 +412,8 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightIsTraced)
       *context);
   handler.enable_tracing();
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
@@ -437,15 +443,15 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointIsTraced)
 
   NativeContractBuilder builder;
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      0, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         TimePoint block_timepoint = 0;
-        auto status =
-            ctx.syscall<SyscallNo::kGetBlockTimepoint>(block_timepoint);
+        auto status = co_await ctx.syscall<SyscallNo::kGetBlockTimepoint>(
+            block_timepoint);
         if (!status.has_value() ||
             status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -468,8 +474,8 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointIsTraced)
       *context);
   handler.enable_tracing();
 
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);

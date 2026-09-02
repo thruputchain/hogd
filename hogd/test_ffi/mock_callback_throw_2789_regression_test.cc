@@ -9,7 +9,7 @@
 //   * the root mock frame unwound into hogd::root_invoke()'s catch, which
 //     translated the throw into kTestFFIErrorCodeUnrecoverableError (#2693),
 //     but
-//   * a child Invoke reached the callback from syscall_Invoke_inner(...)
+//   * a child Invoke reached the callback from syscall_Invoke_inner(...)()
 //     noexcept -- below the Wasmtime host import, the RV32 ecall trampoline,
 //     and mock_syscall_entrypoint()'s own catch alike -- so the throw hit that
 //     noexcept boundary and called std::terminate().
@@ -18,7 +18,7 @@
 // the callback is called, so every path gets the same structured Unrecoverable
 // result regardless of what sits above it. The tests below drive the child
 // Invoke through mock_syscall_entrypoint(kInvoke, ...), the same
-// syscall_Invoke_inner() body a Wasmtime or RV32 parent reaches through its
+// syscall_Invoke_inner()() body a Wasmtime or RV32 parent reaches through its
 // trampoline, and cover the variants reported on the issue: a std::exception
 // throw, a non-std::exception throw, and a throw under InvokeFlag::TryInvoke
 // (where the process died before the parent could read frame_status).
@@ -62,7 +62,7 @@ struct ParentContext {
 };
 
 // Parent mock contract: issues one child Invoke syscall through the public
-// mock syscall entrypoint (the same syscall_Invoke_inner() body a Wasmtime or
+// mock syscall entrypoint (the same syscall_Invoke_inner()() body a Wasmtime or
 // RV32 parent reaches) and records the result rather than interpreting it, so
 // the test can assert on the raw host-function status.
 ForeignInvokeResult
@@ -279,7 +279,7 @@ TEST(TestBindingsTest, NestedInvokeNonStdCallbackThrowIsUnrecoverable)
   expect_child_throw_is_unrecoverable(child_throws_non_std, InvokeFlagSet{});
 }
 
-// TryInvoke variant: the process died before syscall_Invoke_inner() could
+// TryInvoke variant: the process died before syscall_Invoke_inner()() could
 // write CopyableInvokeOutputs.frame_status, so the containment the flag
 // promises never happened. The parent now returns from the syscall with a
 // structured host error instead.

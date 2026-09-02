@@ -3,7 +3,7 @@
 // A manually-opened mock invocation frame must be metered exactly the way
 // production kInvoke meters a child frame. Production does this in two places:
 //
-//   * syscall_Invoke_inner() calls SystemCallHandler::invoke() with
+//   * syscall_Invoke_inner()() calls SystemCallHandler::invoke() with
 //     min(requested gas_limit, remaining_gas), so a child frame is never
 //     admitted with a bigger budget than its parent still has; and
 //   * wrap_after_parse()'s gas epilogue rewrites a handleable syscall result to

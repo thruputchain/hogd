@@ -28,6 +28,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -65,21 +66,21 @@ TEST_P(RevertTest, RootFrameReverts)
   fns.emplace(
       0,
       [str_hello,
-       key](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+       key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Write the bytestring to storage
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), key, std::as_bytes(std::span(str_hello)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE()
               << "RootFrameReverts: Failed to set bytestring in method 0";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Now revert the transaction
         ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
@@ -107,11 +108,11 @@ TEST_P(RevertTest, RootFrameReverts)
       *runtime_context);
 
   // Execute the transaction - it should succeed
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Commit the transaction - it should succeed
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultTxRootFrameReverted);
 
   advance_block();
@@ -156,69 +157,68 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   fns_0.emplace(
       0,
       [addr_1, addr_2,
-       addr_3](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+       addr_3](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // try_invoke addr_1:0
         CopyableInvokeOutputs r1_outputs{};
-        auto r1 = [&]() {
+        auto r1 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_1,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r1_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_1, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, r1_outputs);
         }();
         if (!r1.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // addr_1 manually reverted, so the invoke succeeds
         // (kSyscallErrorCodeNone) and the child frame status is Abort.
         if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             r1_outputs.frame_status != InvocationFrameStatusCode::Abort) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Invoke addr_2:1 (check method) to verify "test1" is absent
-        auto r2_check = [&]() {
+        auto r2_check =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_2,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_2, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         if (!r2_check.has_value() ||
             r2_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE()
               << "NestedFrameWithTryInvokeReverts: addr_2 check failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // Invoke addr_3:1 (check method) to verify "test2" is absent
-        auto r3_check = [&]() {
+        auto r3_check =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_3,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_3, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         if (!r3_check.has_value() ||
             r3_check.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
           ADD_FAILURE()
               << "NestedFrameWithTryInvokeReverts: addr_3 check failed";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
@@ -226,27 +226,27 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   // revert. This undoes all state changes from addr_2 and addr_3.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
   fns_1.emplace(
-      0, [addr_2](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r2 = [&]() {
+      0, [addr_2](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r2 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_2,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_2, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         if (!r2.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        // Manually revert -- undoes locks acquired by addr_2 and addr_3
+        // Manually revert -- undoes locks acquired by addr_2 and
+        // addr_3
         ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
 
@@ -255,9 +255,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   //   method 1: check that "test1" is absent (verification after revert)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_2;
   fns_2.emplace(0,
-                [str_hello, key1, addr_3](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                [str_hello, key1, addr_3](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key1, std::as_bytes(std::span(str_hello)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
@@ -265,40 +265,41 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                     ADD_FAILURE()
                         << "NestedFrameWithTryInvokeReverts: Failed to "
                            "set bytestring in contract 2";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  auto r3 = [&]() {
+                  auto r3 = co_await
+                      [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
                     CopyableInvokeInputs inputs{
                         .entrypoint_id = 0,
                         .gas_limit = UINT64_MAX,
                         .flags = std::to_underlying(InvokeFlag::TryInvoke),
                     };
-                    return ctx.syscall<SyscallNo::kInvoke>(
+                    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                         addr_3, std::span<const std::byte>{},
                         std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
                   }();
                   if (!r3.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
                   if (r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
 
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   fns_2.emplace(
-      1, [key1](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = ctx.handler().get_bytestring(key1);
+      1, [key1](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await ctx.handler().get_bytestring(key1);
         if (!res.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (res.value().has_value()) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test1 should be "
                            "absent after revert";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_2 = std::make_unique<NativeContract>(std::move(fns_2));
 
@@ -307,9 +308,9 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   //   method 1: check that "test2" is absent (verification after revert)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_3;
   fns_3.emplace(0,
-                [str_world, key2](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto [res, _gas] = syscall_BytestringSet_inner(
+                [str_world, key2](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
+                  auto [res, _gas] = co_await syscall_BytestringSet_inner(
                       ctx.handler(), key2, std::as_bytes(std::span(str_world)),
                       std::to_underlying(StorageDeltaFlags::None));
                   if (!res.has_value() ||
@@ -317,22 +318,22 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                     ADD_FAILURE()
                         << "NestedFrameWithTryInvokeReverts: Failed to "
                            "set bytestring in contract 3";
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
   fns_3.emplace(
-      1, [key2](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = ctx.handler().get_bytestring(key2);
+      1, [key2](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await ctx.handler().get_bytestring(key2);
         if (!res.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (res.value().has_value()) {
           ADD_FAILURE() << "NestedFrameWithTryInvokeReverts: test2 should be "
                            "absent after revert";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_3 = std::make_unique<NativeContract>(std::move(fns_3));
 
@@ -365,10 +366,10 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -398,30 +399,31 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
   ContractAddress addr_caller = make_contract_address(3);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_fault;
-  fns_fault.emplace(
-      0, [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return InvokeError{InvokeErrorCode::Deterministic};
-      });
+  fns_fault.emplace(0,
+                    [](NativeSyscallContext & /*unused*/)
+                        -> x23::Async<InvokeStatus<void>> {
+                      co_return InvokeError{InvokeErrorCode::Deterministic};
+                    });
   auto contract_fault = std::make_unique<NativeContract>(std::move(fns_fault));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
       0,
-      [addr_fault](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [addr_fault](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = [&]() {
+        auto r0 = co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_fault,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 r0_outputs);
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_fault, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, r0_outputs);
         }();
         if (!r0.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child frame faulted, so the invoke now succeeds
         // (kSyscallErrorCodeNone) with frame status Fault.
@@ -429,7 +431,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
             r0_outputs.frame_status != InvocationFrameStatusCode::Fault) {
           ADD_FAILURE() << "GetReturnBufferOnFault: Expected nested invoke "
                            "to report frame status Fault";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         ReturnBuffer buffer;
@@ -443,18 +445,18 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
             restored_auth_token_ids_written_len);
         if (!res.has_value()) {
           ADD_FAILURE()
-              << "GetReturnBufferOnFault: Failed to get return buffer";
-          return InvokeError{InvokeErrorCode::Deterministic};
+              << "GetReturnBufferOnFault: Failed to get co_return buffer";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (res.value() !=
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable) {
           ADD_FAILURE() << "GetReturnBufferOnFault: Expected "
                            "kSyscallErrorCodeNoReturnBufferAvailable, got: "
                         << static_cast<int32_t>(res.value());
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_caller =
       std::make_unique<NativeContract>(std::move(fns_caller));
@@ -487,11 +489,11 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
       *runtime_context);
 
   // Execute the transaction - it should succeed
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Commit the transaction - it should succeed
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   advance_block();
@@ -514,20 +516,19 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [abort_payload,
-       kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [abort_payload, kAddrChild](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, outputs);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child manually reverted, so the invoke succeeds
         // (kSyscallErrorCodeNone) and reports frame status Abort.
@@ -535,28 +536,28 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
             outputs.frame_status != InvocationFrameStatusCode::Abort) {
           ADD_FAILURE() << "Expected frame status Abort, got "
                         << static_cast<int32_t>(outputs.frame_status);
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (outputs.return_buffer_len != abort_payload.size()) {
           ADD_FAILURE() << "Abort payload length mismatch: expected "
                         << abort_payload.size() << ", got "
                         << outputs.return_buffer_len;
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         auto status = ctx.handler().get_return_buffer();
         if (!status.has_value()) {
-          return status.error().to_invoke_error();
+          co_return status.error().to_invoke_error();
         }
         if (!status.value().has_value()) {
           ADD_FAILURE() << "Abort payload should be available";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (*status.value().value() != abort_payload) {
           ADD_FAILURE() << "Abort payload content mismatch";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_parent =
       std::make_unique<NativeContract>(std::move(fns_parent));
@@ -565,19 +566,19 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
       0,
-      [abort_payload,
-       kConflictKey](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [abort_payload, kConflictKey](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto child_data = make_bytestring("child_state");
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kConflictKey, std::as_bytes(std::span(child_data)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         ReturnBuffer buffer(abort_payload.begin(), abort_payload.end());
         ctx.handler().set_return_buffer(std::move(buffer), true);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_child = std::make_unique<NativeContract>(std::move(fns_child));
 
@@ -602,7 +603,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
   auto locker_tx = make_new_per_tx_db_proxy(UINT64_MAX);
   locker_tx.add_delta(conflict_addrkey, make_bytestring_delta("locker"),
                       std::to_underlying(StorageDeltaFlags::None));
-  auto lock_res = locker_tx.try_push_current_subtransaction();
+  auto lock_res = locker_tx.try_push_current_subtransaction()();
   ASSERT_TRUE(lock_res.has_value());
   ASSERT_TRUE(lock_res.value());
 
@@ -617,12 +618,12 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Clean up the locker transaction.
-  ASSERT_TRUE(locker_tx.abort_transaction().has_value());
+  ASSERT_TRUE(locker_tx.abort_transaction()().has_value());
 
   advance_block();
 
@@ -644,29 +645,30 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [kAddrChild](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [kAddrChild](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = ctx.gas_remaining(),
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrChild,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kAddrChild, std::span<const std::byte>{}, std::span<uint32_t>{},
+            inputs, outputs);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The child manually reverted, so the invoke succeeds
-        // (kSyscallErrorCodeNone) and reports frame status Abort.
+        // (kSyscallErrorCodeNone) and reports frame status
+        // Abort.
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs.frame_status != InvocationFrameStatusCode::Abort) {
           ADD_FAILURE() << "Expected frame status Abort, got "
                         << static_cast<int32_t>(outputs.frame_status);
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_parent =
       std::make_unique<NativeContract>(std::move(fns_parent));
@@ -674,17 +676,18 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   // Child: write to storage, then manually revert.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0, [kWriteKey](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0,
+      [kWriteKey](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto data = make_bytestring("written");
-        auto [res, _gas] = syscall_BytestringSet_inner(
+        auto [res, _gas] = co_await syscall_BytestringSet_inner(
             ctx.handler(), kWriteKey, std::as_bytes(std::span(data)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_child = std::make_unique<NativeContract>(std::move(fns_child));
 
@@ -712,10 +715,10 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
 
   // Proposal mode: run and extract proposal data.
   auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);
-  auto proposal_res = proposal_handler.root_invoke();
+  auto proposal_res = proposal_handler.root_invoke()();
   ASSERT_TRUE(proposal_res.is_root_success());
   auto proposal_data = proposal_handler.get_proposal_data();
-  ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+  ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
 
   // No nondeterministic bit should have been logged.
   EXPECT_EQ(proposal_data.nondeterministic_bit_count, 0U);
@@ -726,9 +729,9 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *runtime_context,
                                               proposal_data);
-  auto validation_res = validation_handler.root_invoke();
+  auto validation_res = validation_handler.root_invoke()();
   ASSERT_TRUE(validation_res.is_root_success());
-  ASSERT_EQ(validation_handler.try_commit_transaction(),
+  ASSERT_EQ(validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
 }
 

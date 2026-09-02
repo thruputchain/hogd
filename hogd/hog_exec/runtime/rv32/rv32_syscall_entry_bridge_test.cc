@@ -154,7 +154,8 @@ protected:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
+        /*max_sha256_buffers=*/8);
     return std::move(stashed).value();
   }
 
@@ -164,7 +165,7 @@ protected:
                InvokeStatus<void> result = {})
   {
     auto status = handler.finish_frame(std::move(result),
-                                       std::move(stashed_parent_trace));
+                                       std::move(stashed_parent_trace))();
     ASSERT_TRUE(status.has_value());
   }
 

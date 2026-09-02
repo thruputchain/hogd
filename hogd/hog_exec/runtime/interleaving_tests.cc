@@ -26,6 +26,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -54,25 +55,25 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         0,
         [](NativeSyscallContext &ctx, int64_t set_amount,
-           int64_t add_amount) -> InvokeStatus<void> {
-          auto r = ctx.handler().set_nnint(kKey, set_amount, add_amount,
-                                           std::to_underlying(
-                                               StorageDeltaFlags::None));
+           int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
+          auto r =
+              co_await ctx.handler().set_nnint(kKey, set_amount, add_amount,
+                                               std::to_underlying(
+                                                   StorageDeltaFlags::None));
           if (!r.has_value() || !r.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     // reset contract state
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          auto r = ctx.handler().set_nnint(kKey, 35, 0,
-                                           std::to_underlying(
-                                               StorageDeltaFlags::None));
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r = co_await ctx.handler().set_nnint(
+              kKey, 35, 0, std::to_underlying(StorageDeltaFlags::None));
           if (!r.has_value() || !r.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     auto native_contract = builder.build();
@@ -111,12 +112,12 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}}}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       ADD_FAILURE() << "root invoke for reset transaction failed";
       return false;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res != ExecResult::ExecResultOK) {
       ADD_FAILURE() << "try_commit_transaction error for reset transaction";
       return false;
@@ -157,11 +158,11 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = *calldata}}},
                 *context);
-            auto res = handler.root_invoke();
+            auto res = handler.root_invoke()();
             if (!res.is_root_success()) {
               panic("root invoke failed");
             }
-            auto commit_res = handler.try_commit_transaction();
+            auto commit_res = handler.try_commit_transaction()();
             if (commit_res != ExecResult::ExecResultOK &&
                 commit_res != ExecResult::ExecResultTxNonDeterministicError) {
               panic("try_commit_transaction error");

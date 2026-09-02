@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
+#include "x23/async.h"
 #include "x23/format.h"
 
 namespace hogd {
@@ -19,7 +20,7 @@ RuntimeContext::verify_contract(Contract const &contract) const
   return verify_contract(contract, discarded);
 }
 
-InvokeResult
+x23::Async<InvokeResult>
 Runtime::invoke(MethodID method_id, uint64_t gas_limit)
 {
 
@@ -32,26 +33,30 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
     trace("Invoking method {} with gas limit {}", method_id, gas_limit);
   } catch (std::exception const &e) {
     report_dropped_log(e.what());
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = 0};
   } catch (...) {
     report_dropped_log("unknown exception");
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = 0};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = 0};
   }
-  auto [res, gas_consumed] = invoke_internal(method_id, gas_limit);
+  auto [res, gas_consumed] = co_await invoke_internal(method_id, gas_limit);
   try {
     trace("Invoke result: {}, gas consumed: {}",
           res.has_value() ? "success" : x23::show(res.error().code()),
           gas_consumed);
   } catch (std::exception const &e) {
     report_dropped_log(e.what());
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = gas_consumed};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = gas_consumed};
   } catch (...) {
     report_dropped_log("unknown exception");
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::Unrecoverable},
-                        .gas_consumed_ = gas_consumed};
+    co_return InvokeResult{.result_ =
+                               InvokeError{InvokeErrorCode::Unrecoverable},
+                           .gas_consumed_ = gas_consumed};
   }
 
   // Interpreters that perform metering on a basic block level, instead of
@@ -69,7 +74,7 @@ Runtime::invoke(MethodID method_id, uint64_t gas_limit)
 
   CHECK(gas_consumed <= gas_limit);
 
-  return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
+  co_return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
 }
 
 Runtime::Runtime(SystemCallHandler *syscall_handler)

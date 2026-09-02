@@ -20,6 +20,7 @@
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -63,19 +64,31 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
+  // Each lookup answers from cache without allocating a coroutine frame --
+  // MaybeAsync's value arm -- and falls back to an Async that suspends on the
+  // database read only on a miss.  The lock guarding each cache is always
+  // released before that read, so no cache lock is ever held across a
+  // suspension.
+  //
   // The cached contract for `hash`: its code and the image this cache built
   // when it loaded it, so callers reuse that image rather than preparing the
   // same bytes again. Borrowed -- node-stable and valid for the block, so it
   // outlives any transaction's runtimes. Returns nullptr (wrapped) for a
   // negative lookup.
-  SystemStatus<const ContractCacheEntry *>
+  x23::MaybeAsync<SystemStatus<const ContractCacheEntry *>>
   try_get_contract_entry(SHA256Hash const &hash);
-  SystemStatus<const DeployedContract *>
+  x23::MaybeAsync<SystemStatus<const DeployedContract *>>
   try_get_deployed_contract(ContractAddress const &addr);
-  SystemStatus<const SnapshotStorageItem *>
+  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
-  SystemStatus<const DbTip *> try_get_db_tip();
+  x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
+
+  // The frame hash-buffer limit, threaded to start_frame() by the callers that
+  // admit a frame so admission itself has no tip read left to fail on. Served
+  // off the same lock-free tip cache as everything else: the block's first
+  // read fetches the tip, every later one is an atomic load.
+  x23::MaybeAsync<SystemStatus<uint32_t>> try_get_max_sha256_buffers();
 
   // The executing block's own facts. Unlike everything above these do not
   // come from the db tip, which for an open block is the *parent*: the height
@@ -117,6 +130,18 @@ public:
 
 private:
   void release_db_tip();
+
+  // Miss paths for the lookups above.  Each takes its key BY VALUE so the key
+  // is copied into the coroutine frame and stays valid across the database
+  // read.
+  x23::Async<SystemStatus<const ContractCacheEntry *>>
+  load_contract_entry(SHA256Hash hash);
+  x23::Async<SystemStatus<const DeployedContract *>>
+  load_deployed_contract(ContractAddress addr);
+  x23::Async<SystemStatus<const SnapshotStorageItem *>>
+  load_snapshot_item(AddressAndKey addrkey);
+  x23::Async<SystemStatus<const DbTip *>> load_db_tip();
+  x23::Async<SystemStatus<uint32_t>> load_max_sha256_buffers();
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.

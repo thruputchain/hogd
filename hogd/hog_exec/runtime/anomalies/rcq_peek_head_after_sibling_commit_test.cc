@@ -66,6 +66,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -126,22 +127,23 @@ public:
   std::unique_ptr<NativeContext> make_context()
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> map;
-    map.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  for (uint8_t val : cd) {
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        kQueueKey, std::as_bytes(std::span(&val, 1)));
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                  }
-                  return {};
-                });
     map.emplace(
-        1, [this](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto peek = ctx.handler().retrocausal_queue_consume(kQueueKey,
-                                                              /*peek=*/true);
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          for (uint8_t val : cd) {
+            auto res = co_await ctx.handler().retrocausal_queue_insert(
+                kQueueKey, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value()) {
+              co_return res.error().to_invoke_error();
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
+    map.emplace(
+        1, [this](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto peek =
+              co_await ctx.handler().retrocausal_queue_consume(kQueueKey,
+                                                               /*peek=*/true);
           if (peek.has_value()) {
             if (peek.value().has_value()) {
               peek_entry_ = to_bytes(peek.value().value());
@@ -158,30 +160,30 @@ public:
           sibling_committed_.wait(false);
 
           if (!peek.has_value()) {
-            return peek.error().to_invoke_error();
+            co_return peek.error().to_invoke_error();
           }
 
           auto consume =
-              ctx.handler().retrocausal_queue_consume(kQueueKey,
-                                                      /*peek=*/false);
+              co_await ctx.handler().retrocausal_queue_consume(kQueueKey,
+                                                               /*peek=*/false);
           if (!consume.has_value()) {
-            return consume.error().to_invoke_error();
+            co_return consume.error().to_invoke_error();
           }
           if (!consume.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           QueueEntry const &entry = consume.value().value();
           consumed_entry_ = to_bytes(entry);
 
-          auto [ws, _wg] = syscall_BytestringSet_inner(
+          auto [ws, _wg] = co_await syscall_BytestringSet_inner(
               ctx.handler(), make_storage_key("result"),
               std::as_bytes(std::span(entry.data(), entry.size())),
               std::to_underlying(StorageDeltaFlags::None));
           if (!ws.has_value() ||
               ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -218,13 +220,13 @@ public:
     ProposalRun run;
     std::thread worker([&] {
       auto handler = make_new_system_call_handler(tx, ctx);
-      run.root_ok = handler.root_invoke().is_root_success();
+      run.root_ok = handler.root_invoke()().is_root_success();
       run.proposal_data = handler.get_proposal_data();
       if (run.root_ok) {
-        run.commit = handler.try_commit_transaction();
+        run.commit = handler.try_commit_transaction()();
       }
       else {
-        EXPECT_TRUE(handler.abort_transaction().has_value());
+        EXPECT_TRUE(handler.abort_transaction()().has_value());
       }
     });
 
@@ -263,9 +265,9 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   NondeterministicProposalData insert_p;
   auto run = run_peek_consume_interleaved(tx_peek_consume, *ctx, [&] {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    EXPECT_TRUE(ha.root_invoke().is_root_success());
+    EXPECT_TRUE(ha.root_invoke()().is_root_success());
     insert_p = ha.get_proposal_data();
-    EXPECT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   });
 
   ASSERT_TRUE(run.root_ok);
@@ -298,13 +300,13 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_peek_consume, *ctx, peek_p);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   EXPECT_FALSE(peek_entry_.has_value());
   EXPECT_EQ(peek_error_,
@@ -344,17 +346,17 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   NondeterministicProposalData insert_10_p;
   {
     auto ha = make_new_system_call_handler(tx_insert_10, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
     insert_10_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   NondeterministicProposalData insert_20_p;
   auto run = run_peek_consume_interleaved(tx_peek_consume, *ctx, [&] {
     auto ha = make_new_system_call_handler(tx_insert_20, *ctx);
-    EXPECT_TRUE(ha.root_invoke().is_root_success());
+    EXPECT_TRUE(ha.root_invoke()().is_root_success());
     insert_20_p = ha.get_proposal_data();
-    EXPECT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   });
 
   ASSERT_TRUE(run.root_ok);
@@ -382,18 +384,18 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   {
     auto h10 = make_new_system_call_handler_validation(tx_insert_10, *ctx,
                                                        insert_10_p);
-    ASSERT_TRUE(h10.root_invoke().is_root_success());
-    ASSERT_EQ(h10.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h10.root_invoke()().is_root_success());
+    ASSERT_EQ(h10.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h20 = make_new_system_call_handler_validation(tx_insert_20, *ctx,
                                                        insert_20_p);
-    ASSERT_TRUE(h20.root_invoke().is_root_success());
-    ASSERT_EQ(h20.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h20.root_invoke()().is_root_success());
+    ASSERT_EQ(h20.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_peek_consume, *ctx, peek_p);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   EXPECT_EQ(peek_entry_, (std::vector<uint8_t>{10}));
   EXPECT_EQ(consumed_entry_, (std::vector<uint8_t>{10}));

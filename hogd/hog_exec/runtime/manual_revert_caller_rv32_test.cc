@@ -79,11 +79,11 @@ TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto init_res = init_handler.root_invoke();
+  auto init_res = init_handler.root_invoke()();
   ASSERT_TRUE(init_res.is_root_success())
       << "Failed to initialize manual_revert_caller contract";
 
-  auto init_commit_res = init_handler.try_commit_transaction();
+  auto init_commit_res = init_handler.try_commit_transaction()();
   ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit initialization";
 
@@ -97,11 +97,11 @@ TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto call_res = call_handler.root_invoke();
+  auto call_res = call_handler.root_invoke()();
   ASSERT_TRUE(call_res.is_root_success())
       << "Failed to call call_basic_manual_revert";
 
-  auto call_commit_res = call_handler.try_commit_transaction();
+  auto call_commit_res = call_handler.try_commit_transaction()();
   ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
 
@@ -146,11 +146,11 @@ TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto init_res = init_handler.root_invoke();
+  auto init_res = init_handler.root_invoke()();
   ASSERT_TRUE(init_res.is_root_success())
       << "Failed to initialize manual_revert_caller contract";
 
-  auto init_commit_res = init_handler.try_commit_transaction();
+  auto init_commit_res = init_handler.try_commit_transaction()();
   ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit initialization";
 
@@ -165,11 +165,11 @@ TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
                           .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto call_res = call_handler.root_invoke();
+  auto call_res = call_handler.root_invoke()();
   ASSERT_TRUE(call_res.is_root_success())
       << "Failed to call call_nested_manual_revert";
 
-  auto call_commit_res = call_handler.try_commit_transaction();
+  auto call_commit_res = call_handler.try_commit_transaction()();
   ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
 
@@ -215,11 +215,11 @@ TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto init_res = init_handler.root_invoke();
+  auto init_res = init_handler.root_invoke()();
   ASSERT_TRUE(init_res.is_root_success())
       << "Failed to initialize manual_revert_caller contract";
 
-  auto init_commit_res = init_handler.try_commit_transaction();
+  auto init_commit_res = init_handler.try_commit_transaction()();
   ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit initialization";
 
@@ -234,11 +234,11 @@ TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto call_res = call_handler.root_invoke();
+  auto call_res = call_handler.root_invoke()();
   ASSERT_TRUE(call_res.is_root_success())
       << "Failed to call call_error_type_revert";
 
-  auto call_commit_res = call_handler.try_commit_transaction();
+  auto call_commit_res = call_handler.try_commit_transaction()();
   ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
 
@@ -284,11 +284,11 @@ TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto init_res = init_handler.root_invoke();
+  auto init_res = init_handler.root_invoke()();
   ASSERT_TRUE(init_res.is_root_success())
       << "Failed to initialize manual_revert_caller contract";
 
-  auto init_commit_res = init_handler.try_commit_transaction();
+  auto init_commit_res = init_handler.try_commit_transaction()();
   ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit initialization";
 
@@ -303,11 +303,11 @@ TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
                           .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto call_res = call_handler.root_invoke();
+  auto call_res = call_handler.root_invoke()();
   ASSERT_TRUE(call_res.is_root_success())
       << "Failed to call call_storage_manual_revert";
 
-  auto call_commit_res = call_handler.try_commit_transaction();
+  auto call_commit_res = call_handler.try_commit_transaction()();
   ASSERT_EQ(call_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit call transaction";
 
@@ -353,11 +353,11 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto init_res = init_handler.root_invoke();
+  auto init_res = init_handler.root_invoke()();
   ASSERT_TRUE(init_res.is_root_success())
       << "Failed to initialize manual_revert_caller contract";
 
-  auto init_commit_res = init_handler.try_commit_transaction();
+  auto init_commit_res = init_handler.try_commit_transaction()();
   ASSERT_EQ(init_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit initialization";
 
@@ -375,10 +375,10 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto write_res = write_handler.root_invoke();
+  auto write_res = write_handler.root_invoke()();
   ASSERT_TRUE(write_res.is_root_success()) << "Failed to write own state";
 
-  auto write_commit_res = write_handler.try_commit_transaction();
+  auto write_commit_res = write_handler.try_commit_transaction()();
   ASSERT_EQ(write_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit write transaction";
 
@@ -392,11 +392,11 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto check_res = check_handler.root_invoke();
+  auto check_res = check_handler.root_invoke()();
   ASSERT_TRUE(check_res.is_root_success())
       << "Failed to check own state exists";
 
-  auto check_commit_res = check_handler.try_commit_transaction();
+  auto check_commit_res = check_handler.try_commit_transaction()();
   ASSERT_EQ(check_commit_res, ExecResult::ExecResultOK)
       << "Failed to commit check transaction";
 
