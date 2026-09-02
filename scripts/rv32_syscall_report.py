@@ -430,10 +430,10 @@ def print_storage(summary, unit_ns=None):
         print(f"parent walk: a first touch costs {per_frame:.1f} ns more per "
               f"frame of depth (depth {shallow} to {deep}, at K={keys}).")
         print("Every miss in the active frame looks in every parent before "
-              "creating a view; at the")
-        print("configured maximum depth that is the dominant term, and it is "
-              "paid whether or not any")
-        print("parent holds the key.")
+              "creating a view, so this is")
+        print("paid on every first touch whether or not any parent holds the "
+              "key, and it grows with")
+        print("whatever max_cross_invoke_depth the chain sets.")
 
     for family, rows_ in sorted(summary["commits"].items()):
         print()

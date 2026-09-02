@@ -1415,11 +1415,18 @@ register_benchmarks()
   benchmark::RegisterBenchmark("vm/NNIntSetAdd", bm_syscall_vm,
                                nnint_set_add_call());
 
-  // The sweeps. Depth is frames on top of the fixture's two; the deepest is
-  // the deepest stack the stock network config admits, since the parent walk
-  // on a first touch is linear in it and the schedule has to hold at the top.
-  const uint32_t max_depth = stock_network_config().max_cross_invoke_depth - 2;
-  const std::array<uint32_t, 3> depths = {1, 16, max_depth};
+  // The sweeps. Depth is frames on top of the fixture's two. 8 and 16 are
+  // where a chain is expected to set max_cross_invoke_depth; the repo's stock
+  // config admits far more, and its maximum is swept too, as the far point
+  // that shows the parent walk is linear in depth rather than as a depth any
+  // chain runs at. The parent walk on a first touch is linear in the stack,
+  // and the schedule has to hold at whatever depth the chain allows.
+  const uint32_t stock_max_depth =
+      stock_network_config().max_cross_invoke_depth - 2;
+  std::vector<uint32_t> depths = {1, 8, 16};
+  if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
+    depths.push_back(stock_max_depth);
+  }
   const std::array<uint64_t, 4> key_counts = {1, 16, 256, kFirstTouchKeys};
   for (const uint32_t depth : depths) {
     benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth).c_str(),
