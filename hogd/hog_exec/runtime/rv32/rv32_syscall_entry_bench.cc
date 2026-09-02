@@ -1429,37 +1429,40 @@ register_benchmarks()
   }
   const std::array<uint64_t, 4> key_counts = {1, 16, 256, kFirstTouchKeys};
   for (const uint32_t depth : depths) {
-    benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth).c_str(),
+    benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth),
                                  bm_frame_push, depth);
   }
   for (const uint32_t depth : depths) {
     for (const uint64_t keys : key_counts) {
-      benchmark::RegisterBenchmark(
-          std::format("frame/NNIntGetFirstTouch/{}/{}", depth, keys).c_str(),
-          bm_frame_sweep, depth, keys, nnint_get_call(true),
-          KeySpace::kFirstTouch, /*commit_innermost=*/false);
+      benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
+                                               depth, keys),
+                                   bm_frame_sweep, depth, keys,
+                                   nnint_get_call(true), KeySpace::kFirstTouch,
+                                   /*commit_innermost=*/false);
     }
   }
   for (const uint64_t keys : key_counts) {
     benchmark::RegisterBenchmark(
-        std::format("frame/NNIntGetFirstTouchNoLoad/1/{}", keys).c_str(),
+        std::format("frame/NNIntGetFirstTouchNoLoad/1/{}", keys),
         bm_frame_sweep, 1U, keys, nnint_get_call(false), KeySpace::kFirstTouch,
         /*commit_innermost=*/false);
-    benchmark::RegisterBenchmark(
-        std::format("frame/NNIntSetAddFirstTouch/1/{}", keys).c_str(),
-        bm_frame_sweep, 1U, keys, nnint_set_add_call(), KeySpace::kSetAdd,
-        /*commit_innermost=*/false);
+    benchmark::RegisterBenchmark(std::format("frame/NNIntSetAddFirstTouch/1/{}",
+                                             keys),
+                                 bm_frame_sweep, 1U, keys, nnint_set_add_call(),
+                                 KeySpace::kSetAdd,
+                                 /*commit_innermost=*/false);
     // Two frames: a fresh parent for the child to commit into, so the merge
     // takes the insert path every iteration rather than the assignment path a
     // parent that already held the keys would offer.
-    benchmark::RegisterBenchmark(
-        std::format("frame/NNIntSetAddMerge/{}", keys).c_str(), bm_frame_sweep,
-        2U, keys, nnint_set_add_call(), KeySpace::kMerge,
-        /*commit_innermost=*/true);
-    benchmark::RegisterBenchmark(
-        std::format("frame/NNIntSetAddDiscard/{}", keys).c_str(),
-        bm_frame_sweep, 2U, keys, nnint_set_add_call(), KeySpace::kMerge,
-        /*commit_innermost=*/false);
+    benchmark::RegisterBenchmark(std::format("frame/NNIntSetAddMerge/{}", keys),
+                                 bm_frame_sweep, 2U, keys, nnint_set_add_call(),
+                                 KeySpace::kMerge,
+                                 /*commit_innermost=*/true);
+    benchmark::RegisterBenchmark(std::format("frame/NNIntSetAddDiscard/{}",
+                                             keys),
+                                 bm_frame_sweep, 2U, keys, nnint_set_add_call(),
+                                 KeySpace::kMerge,
+                                 /*commit_innermost=*/false);
   }
 
   // Last, because it leaves the shared snapshot cache a quarter-million
