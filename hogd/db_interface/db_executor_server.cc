@@ -248,16 +248,14 @@ DbExecutorRpc::get_db_tip(BlockID block_id)
     return ExpectedDBTip(RPCError::kRPCBadBlockID);
   }
 
-  // The mock does not track block height, so report the pre-genesis sentinel
-  // height (-1). At executing height 0 this makes the executor's replay-expiry
-  // gate a no-op, consistent with the mock not implementing the replay cache.
   // The tip id is the committed parent -- distinct from block_id, which
   // get_block_data() just confirmed is an open child (DatabaseProxy rejects a
   // tip whose id equals the requested block).
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);
   ConsensusValue value{};
-  value.proposal_header.block_height = -1;
+  value.proposal_header.block_height = block_manager_->committed_tip_height();
+  value.proposal_header.network_hash = block_manager_->get_network_hash();
   out.db_tip() = DbTip{.id = block_manager_->committed_tip_id(),
                        .storage_long_hash = {},
                        .value = value,

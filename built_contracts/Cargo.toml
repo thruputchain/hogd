@@ -42,6 +42,7 @@ members = [
     "local_test_contracts/auth_weight_test",
     "local_test_contracts/drip_faucet",
     "local_test_contracts/faucet_caller",
+    "local_test_contracts/invoke_malformed_tokens_test",
     "local_test_contracts/tx_context_test",
 ]
 

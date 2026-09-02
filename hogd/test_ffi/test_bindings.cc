@@ -13,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 
 #include "address_auth.hh"
@@ -390,6 +391,15 @@ get_snapshot_storage_item(void *db, FFISerializedAddressAndKey addrkey) noexcept
               .ffi_error_code = kTestFFIErrorCodeDeserializeError};
     }
 
+    // get_snapshot_item() reads current_block_id_ and queries the snapshot that
+    // id names; advance_new_block() changes both. Borrow across the read so the
+    // two cannot interleave (issue #2704).
+    DBContext::Borrow borrow(*db_context);
+    if (!borrow.held()) {
+      return {.data = kNullBuffer,
+              .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+    }
+
     auto item = db_context->get_snapshot_item(deserialized_addrkey);
     if (!item.has_value()) {
       return {.data = kNullBuffer, .ffi_error_code = kTestFFIErrorCodeNone};
@@ -449,7 +459,7 @@ free_db(DBContext *ptr) noexcept
 }
 
 TestFFIErrorCode
-advance_new_block(void *db) noexcept
+advance_new_block(void *db, const uint64_t *block_timepoint) noexcept
 {
   auto *ptr = reinterpret_cast<DBContext *>(db);
   if (!ptr)
@@ -488,8 +498,16 @@ advance_new_block(void *db) noexcept
   }
 
   try {
-    ptr->advance_new_block();
+    ptr->advance_new_block(BlockExecutionMode::kBlockExecutionModeProposal,
+                           block_timepoint
+                               ? std::optional<TimePoint>(*block_timepoint)
+                               : std::nullopt);
     return kTestFFIErrorCodeNone;
+  } catch (BackwardsTimepointError const &e) {
+    // The caller's argument, not an internal failure: nothing was advanced, so
+    // the DB is still usable and the caller can retry with a sane timepoint.
+    log_error("error advancing new block: {}", e);
+    return kTestFFIErrorCodeInvalidArgument;
   } catch (std::exception const &e) {
     log_error("error advancing new block: {}", e);
     return kTestFFIErrorCodeUnrecoverableError;
@@ -1493,10 +1511,13 @@ free_db(void *ptr)
 }
 
 TestFFIErrorCode
-advance_new_block(void *db)
+advance_new_block(void *db, const uint64_t *block_timepoint)
 {
-  hogd::do_ffi_trace("FFI (start): advance_new_block(db={})", db);
-  auto result = hogd::advance_new_block(db);
+  hogd::do_ffi_trace(
+      "FFI (start): advance_new_block(db={}, block_timepoint={})", db,
+      block_timepoint ? std::to_string(*block_timepoint)
+                      : std::string("wall clock"));
+  auto result = hogd::advance_new_block(db, block_timepoint);
   hogd::do_ffi_trace("FFI (end): advance_new_block(db={}) -> {}", db, result);
   return result;
 }

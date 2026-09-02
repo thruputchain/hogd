@@ -3,6 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -53,6 +54,19 @@
 #include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
+
+namespace {
+// Must be the height the block will actually commit, since the executor
+// cross-checks it against the tip. The timepoint is a stand-in.
+constexpr hogd::BlockExecutionContext
+test_block_execution(uint64_t block_height)
+{
+  return hogd::BlockExecutionContext{
+      .block_height = static_cast<hogd::BlockHeight>(block_height),
+      .block_timepoint = 1,
+  };
+}
+} // namespace
 
 namespace hogd {
 
@@ -211,7 +225,8 @@ void
 open_block(db_sched_client_t &db_sched_client,
            event_sched_client_t &event_sched_client,
            std::vector<exec_client_t> &exec_clients,
-           uint64_t parent_block_number, uint64_t block_number)
+           uint64_t parent_block_number, uint64_t block_number,
+           BlockHeight block_height)
 {
   info("opening block {}", block_number);
   auto start_time = x23::fastclock::get_ns();
@@ -220,13 +235,14 @@ open_block(db_sched_client_t &db_sched_client,
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
 
   for (auto &exec_client : exec_clients) {
-    [](auto &exec_client, uint64_t block_number,
+    [](auto &exec_client, uint64_t block_number, BlockHeight block_height,
        std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
-      co_await exec_client.executorsched_open_proposal_block(block_number);
+      co_await exec_client.executorsched_open_proposal_block(
+          block_number, test_block_execution(block_height));
       if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
         cb();
       }
-    }(exec_client, block_number, n_remaining_execs, cb);
+    }(exec_client, block_number, block_height, n_remaining_execs, cb);
   }
 
   auto event_async = event_sched_client.eventsched_open_block(block_number);
@@ -270,9 +286,9 @@ close_block(db_sched_client_t &db_sched_client,
       }
     }(exec_client, block_number, n_remaining_execs, cb);
   }
-  // We use [block_number] as the height as well.
+  const BlockHeight block_height = prev_value.proposal_header.block_height + 1;
   auto event_async =
-      event_sched_client.eventsched_close_block(block_number, block_number);
+      event_sched_client.eventsched_close_block(block_number, block_height);
   auto issue_time = x23::fastclock::get_ns();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -280,7 +296,7 @@ close_block(db_sched_client_t &db_sched_client,
   }
   auto close_time = x23::fastclock::get_ns();
   ConsensusValue value{};
-  value.proposal_header.block_height = block_number;
+  value.proposal_header.block_height = block_height;
   auto commit_res =
       db_sched_client.dbsched_commit_snapshot(block_number, value);
   if (commit_res.result() != DbSchedResult::DbSchedResultOK) {
@@ -302,8 +318,7 @@ close_block(db_sched_client_t &db_sched_client,
   // origin against the mock scheduler's genesis tip at registration.
   ConsensusValue event_value{};
   event_value.prev_hash = sha256(prev_value);
-  event_value.proposal_header.block_height =
-      static_cast<BlockHeight>(block_number);
+  event_value.proposal_header.block_height = block_height;
   event_value.proposal_header.events_hash = event_result.root_hash();
   auto event_commit_res =
       event_sched_client.eventsched_commit_block(block_number, event_value)();
@@ -371,8 +386,10 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto start_time = x23::fastclock::get_ns();
 
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
+  // Height comes off the previous committed value, never off a block number.
   open_block(db_sched_client, event_sched_client, exec_clients,
-             parent_block_number, current_block_number);
+             parent_block_number, current_block_number,
+             prev_value.proposal_header.block_height + 1);
 
   BlockValidationQueue block_validation_queue(txs, batch_size);
   x23::XdrVec<NondeterministicProposalData> nominations(txs->size());

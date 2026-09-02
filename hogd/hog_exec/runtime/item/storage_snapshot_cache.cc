@@ -15,6 +15,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -22,9 +23,11 @@
 
 namespace hogd {
 
-StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
-                                           DatabaseProxy &db_proxy)
-  : block_id_(block_id), db_proxy_(db_proxy)
+StorageSnapshotCache::StorageSnapshotCache(
+    BlockID block_id, BlockExecutionContext const &block_execution,
+    DatabaseProxy &db_proxy)
+  : block_id_(block_id), block_execution_context_(block_execution),
+    db_proxy_(db_proxy)
 {}
 
 StorageSnapshotCache::~StorageSnapshotCache()
@@ -33,7 +36,7 @@ StorageSnapshotCache::~StorageSnapshotCache()
 }
 
 SystemStatus<const ContractCacheEntry *>
-StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
+StorageSnapshotCache::try_get_contract_entry(SHA256Hash const &hash)
 {
   {
     // Use shared lock for read-only cache lookup
@@ -63,12 +66,12 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
   std::optional<ContractCacheEntry> entry;
   if (db_res.value()) {
     Contract contract = std::move(db_res.value()).value();
-    std::optional<Rv32Contract> translated;
+    PreparedContract prepared;
     if (contract.contract_type() == ContractType::kRv32) {
-      translated = Rv32Contract::create(contract.rv32_contract());
+      prepared.rv32 = Rv32Contract::create(contract.rv32_contract());
     }
     entry.emplace(ContractCacheEntry{.contract = std::move(contract),
-                                     .translated = std::move(translated)});
+                                     .prepared = std::move(prepared)});
   }
 
   // TODO(geoff): If we decide to NOT reset the cache after every block,
@@ -82,16 +85,6 @@ StorageSnapshotCache::get_contract_entry(SHA256Hash const &hash)
   auto *obj2 = contract_cache_.find(hash, lock);
   CHECK_PTR(obj2);
   return obj2->has_value() ? &**obj2 : nullptr;
-}
-
-SystemStatus<const Contract *>
-StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
-{
-  auto entry = get_contract_entry(hash);
-  if (!entry) {
-    return entry.error();
-  }
-  return entry.value() ? &entry.value()->contract : nullptr;
 }
 
 SystemStatus<const DeployedContract *>
@@ -114,7 +107,7 @@ StorageSnapshotCache::try_get_deployed_contract(ContractAddress const &addr)
   if (db_res.value()) {
     DeployedContractHash meta = db_res.value().value();
     // Eagerly warm + translate the contract code; back-point at its entry.
-    auto entry = get_contract_entry(meta.hash);
+    auto entry = try_get_contract_entry(meta.hash);
     if (!entry) {
       return entry.error();
     }

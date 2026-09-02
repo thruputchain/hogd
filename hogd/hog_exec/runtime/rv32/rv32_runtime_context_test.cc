@@ -772,7 +772,7 @@ return_trace_entry(GasAmount gas, std::span<const uint8_t> buffer,
   SyscallTraceBody body(SyscallNo::kReturn);
   body.return_trace().inputs.buffer.append_range(buffer);
   body.return_trace().inputs.revert_frame = revert_frame;
-  return make_trace_entry(gas, gas, std::move(body),
+  return make_trace_entry(gas, gas - kSyscallBaseCost, std::move(body),
                           HostFunctionStatusXdr(HostFnErrorCode::Return));
 }
 
@@ -784,7 +784,8 @@ sha256_trace_entry(GasAmount gas_at_start, std::span<const uint8_t> input,
   body.sha256().inputs.input.append_range(input);
   body.sha256().outputs = SyscallSHA256Outputs{.hash = hash};
   return make_trace_entry(gas_at_start,
-                          gas_at_start - SHA256HashCost(input.size()),
+                          gas_at_start - SHA256HashCost(input.size()) -
+                              kSyscallBaseCost,
                           std::move(body), ok_status());
 }
 
@@ -813,11 +814,14 @@ TEST_F(Rv32RuntimeContextTest, InvalidSyscallThenReturnTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(make_trace_entry(
       kEnoughGas - (2 * rv32::kBaseInstructionGas),
-      kEnoughGas - (2 * rv32::kBaseInstructionGas) - kNoSyscallCost,
+      kEnoughGas - (2 * rv32::kBaseInstructionGas) - kNoSyscallCost -
+          kSyscallBaseCost,
       SyscallTraceBody(static_cast<SyscallNo>(kSyscallCount)),
       error_status(SyscallErrorCode::kSyscallErrorCodeNoSyscall)));
-  expected.push_back(return_trace_entry(
-      kEnoughGas - (9 * rv32::kBaseInstructionGas) - kNoSyscallCost, {}));
+  expected.push_back(return_trace_entry(kEnoughGas -
+                                            (9 * rv32::kBaseInstructionGas) -
+                                            kNoSyscallCost - kSyscallBaseCost,
+                                        {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   EXPECT_EQ(handler.get_trace()->status.status_code(),
@@ -878,17 +882,21 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
     body.bytestring_set().inputs.bytestring.append_range(value);
     body.bytestring_set().inputs.flags =
         static_cast<uint32_t>(StorageDeltaFlags::None);
-    expected.push_back(make_trace_entry(kParityGas - 6, kParityGas - 6,
+    expected.push_back(make_trace_entry(kParityGas - 6,
+                                        kParityGas - 6 - kSyscallBaseCost,
                                         std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
-    expected.push_back(make_trace_entry(kParityGas - 13, kParityGas - 13,
-                                        std::move(body), ok_status()));
+    expected.push_back(
+        make_trace_entry(kParityGas - 13 - kSyscallBaseCost,
+                         kParityGas - 13 - (2 * kSyscallBaseCost),
+                         std::move(body), ok_status()));
   }
-  expected.push_back(return_trace_entry(kParityGas - 20, {}));
+  expected.push_back(
+      return_trace_entry(kParityGas - 20 - (2 * kSyscallBaseCost), {}));
 
   EXPECT_EQ(trace.status.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(trace.status.return_buffer().empty());
@@ -939,8 +947,9 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
 
   // SHA256 is 4 addi + ecall; the hash-returning Return is 6 addi + ecall.
   const GasAmount sha_gas = kParityGas - (5 * rv32::kBaseInstructionGas);
-  const GasAmount return_gas =
-      sha_gas - SHA256HashCost(input.size()) - (7 * rv32::kBaseInstructionGas);
+  const GasAmount return_gas = sha_gas - SHA256HashCost(input.size()) -
+                               kSyscallBaseCost -
+                               (7 * rv32::kBaseInstructionGas);
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -949,7 +958,9 @@ TEST_F(Rv32RuntimeContextTest, Sha256ThenReturnTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -985,7 +996,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
   const GasAmount sha_gas = 9'977;
-  const GasAmount return_gas = 8'770;
+  const GasAmount return_gas = 9'898;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -994,7 +1005,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -1031,7 +1044,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
   const GasAmount sha_gas = 9'974;
-  const GasAmount return_gas = 8'767;
+  const GasAmount return_gas = 9'895;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, {}));
@@ -1040,7 +1053,9 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   EXPECT_TRUE(handler.get_trace()->storage_writes.empty());
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
-  EXPECT_EQ(result.gas_consumed_, kParityGas - return_gas);
+  // return_gas is where the Return syscall starts; the frame ends one
+  // crossing below that, which is what the Return itself costs.
+  EXPECT_EQ(result.gas_consumed_, kParityGas - (return_gas - kSyscallBaseCost));
 
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 0);
@@ -1178,7 +1193,8 @@ TEST_F(Rv32RuntimeContextTest, RootInvokeReturnsBufferThroughSystemCallHandler)
 
   ASSERT_TRUE(result.is_root_success());
   // Three argument loads (a0..a2) plus the ecall instruction.
-  EXPECT_EQ(result.gas_consumed_, 4U * rv32::kBaseInstructionGas);
+  EXPECT_EQ(result.gas_consumed_,
+            (4U * rv32::kBaseInstructionGas) + kSyscallBaseCost);
   auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   ASSERT_EQ(output.return_buffer().size(), payload.size());

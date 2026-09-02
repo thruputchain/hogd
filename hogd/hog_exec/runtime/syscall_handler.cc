@@ -43,8 +43,8 @@
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/metrics.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -147,6 +147,18 @@ SystemCallHandler::init_db_tip() const
   if (!tip.has_value()) {
     return std::unexpected(tip.error());
   }
+  // The height the block was opened with must agree with the tip we are about
+  // to pin, or this node is executing a different block than it is building.
+  // Checked here, the transaction's one fallible tip read, so every later
+  // height read stays a plain load.
+  auto const &block_execution = snapshot_cache_.block_execution_context();
+  const BlockHeight derived = (*tip)->value.proposal_header.block_height + 1;
+  if (block_execution.block_height != derived) [[unlikely]] {
+    error("Block height mismatch: opened with {}, db tip implies {}",
+          block_execution.block_height, derived);
+    return std::unexpected(SystemError{SystemErrorCode::Unrecoverable});
+  }
+
   // Owned by the snapshot cache and stable until the cache is recycled for a
   // new block, which cannot happen while this transaction is executing.
   db_tip_ = *tip;
@@ -280,7 +292,7 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  for (auto const &[_, contract] : newly_created_contracts_) {
+  for (auto const &[hash, contract] : newly_created_contracts_) {
     // Enforce the contract size limit before verification: the limit is
     // runtime-agnostic, and rejecting here -- before any body execution --
     // guarantees commit_transaction never stages an oversized code row
@@ -292,13 +304,45 @@ SystemCallHandler::perform_initial_validation()
           InvokeError{InvokeErrorCode::Deterministic};
       return {};
     }
-    auto res = runtime_context_.verify_contract(*contract);
+    // Native contracts are registered at genesis, never deployed by a
+    // transaction: is_banned_redeploy_native_contract() rejects every id, so
+    // an attached one could never reach deploy_contract successfully.
+    //
+    // TODO(geoff): filter these out in the scheduler, which is what should
+    // stop one being proposed in the first place. Until then the
+    // classification depends on where the transaction came from: in proposal
+    // mode it is ours and the scheduler should already have dropped it, so
+    // reaching here is an internal inconsistency; in validation mode it came
+    // from another proposer and is attacker-controlled, so it is a
+    // proposer-attributable rejection and must never be reportable as an
+    // internal error a peer can induce.
+    //
+    // Genesis is unaffected: it installs the native token and wallet through
+    // the deployment prerequisites, not through contracts_to_deploy.
+    if (contract->contract_type() == ContractType::kNative) {
+      error("Attached contract is native; native contracts are not deployable");
+      cumulative_invoke_result_.result_ = InvokeError{
+          std::holds_alternative<ValidationModeData>(execution_mode_data_)
+              ? InvokeErrorCode::ValidationFailure
+              : InvokeErrorCode::Unrecoverable};
+      return {};
+    }
+    PreparedContract prepared;
+    auto res = runtime_context_.verify_contract(*contract, prepared);
     // TODO(geoff): gas costs for verifying contracts
     if (res != InvokeErrorCode::None) {
       error("Contract verification failed");
       cumulative_invoke_result_.result_ = InvokeError{res};
       return {};
     }
+    // rv32 is the only type that reaches here -- native is rejected above and
+    // an unregistered type fails verification -- and for rv32 verifying an
+    // attachment *is* translating it, so a successful verification always
+    // yields an image. Keep it: this is what stops the first same-transaction
+    // invocation from lowering the identical bytes again, both passes outside
+    // transaction gas (#3536).
+    CHECK(prepared.rv32.has_value());
+    local_preparations_.emplace(hash, std::move(prepared));
   }
   return {};
 }
@@ -1330,24 +1374,23 @@ SystemCallHandler::~SystemCallHandler()
   }
 }
 
-const Rv32Contract *
-SystemCallHandler::get_or_create_local_rv32_translation(
-    SHA256Hash const &hash, Contract const &contract)
+SystemStatus<const PreparedContract *>
+SystemCallHandler::resolve_prepared_contract(SHA256Hash const &hash)
 {
-  auto it = local_rv32_translations_.find(hash);
-  if (it != local_rv32_translations_.end()) {
-    // Cached result -- the pointer is null for a known non-translatable
-    // artifact, so we never retranslate.
-    return it->second.get();
+  // Attachments are prepared once, by perform_initial_validation.
+  auto it = local_preparations_.find(hash);
+  if (it != local_preparations_.end()) {
+    return &it->second;
   }
 
-  std::optional<Rv32Contract> translated =
-      Rv32Contract::create(contract.rv32_contract());
-  auto [inserted, _] = local_rv32_translations_.emplace(
-      hash, translated.has_value()
-                ? std::make_unique<Rv32Contract>(std::move(*translated))
-                : nullptr);
-  return inserted->second.get();
+  // Anything else is already committed, and the snapshot cache prepared it
+  // eagerly when it loaded it. Borrow that image rather than building a second
+  // one from the same bytes (#3536).
+  auto entry = snapshot_cache_.try_get_contract_entry(hash);
+  if (!entry.has_value()) {
+    return entry.error();
+  }
+  return entry.value() != nullptr ? &entry.value()->prepared : nullptr;
 }
 
 SystemStatus<const Contract *>
@@ -1361,15 +1404,11 @@ SystemCallHandler::resolve_contract(SHA256Hash const &hash) const
     return it->second.get();
   }
 
-  auto snapshot_res = snapshot_cache_.try_get_contract_by_hash(hash);
-  if (!snapshot_res.has_value()) {
-    return snapshot_res.error();
+  auto entry = snapshot_cache_.try_get_contract_entry(hash);
+  if (!entry.has_value()) {
+    return entry.error();
   }
-  auto &snapshot_contract = *snapshot_res;
-  if (snapshot_contract != nullptr) {
-    return snapshot_contract;
-  }
-  return nullptr;
+  return entry.value() != nullptr ? &entry.value()->contract : nullptr;
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
@@ -1888,20 +1927,25 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
     return entry.error();
   }
 
-  // A read that would exceed the per-tx concurrent-observation cap surfaces as
-  // a deterministic syscall error, so a contract can't drive the bounded
-  // observation vector past kMaxConcurrentRcqReadsPerTx (#2894). This is a
-  // dedicated resource-limit code contracts can handle as a stop condition,
-  // not a malformed-input error.
+  // Return whatever get_next_item resolved. Only a concurrent read consumes an
+  // observation slot; a self or past-block consume records no observation and
+  // so is never subject to the per-tx observation cap. get_next_item already
+  // returns nullptr for a concurrent read the cap blocked, so a non-null entry
+  // here is always a legitimate read -- return it even once the cap is exceeded
+  // rather than dropping it behind a read-limit error (#3611). The pointer
+  // aliases into owned storage and is copied here into the syscall result.
+  if (const QueueEntry *value = entry.value()) {
+    return *value;
+  }
+
+  // No entry resolved. If that is because a concurrent read hit the per-tx
+  // observation cap, surface the deterministic read-limit error so a contract
+  // can't drive the bounded observation vector past kMaxConcurrentRcqReadsPerTx
+  // (#2894). This is a dedicated resource-limit code contracts can handle as a
+  // stop condition, not a malformed-input error.
   if (observation_cap_exceeded(execution_mode_data)) {
     return SyscallError{
         SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
-  }
-
-  // The pointer aliases into owned storage and is copied here into the syscall
-  // result (the one copy the contract's return value requires).
-  if (const QueueEntry *value = entry.value()) {
-    return *value;
   }
 
   return SyscallError{
@@ -2267,6 +2311,22 @@ SystemCallHandler::get_block_height() const
   // timelocks) must observe the executing height, matching the replay-cache
   // expiry check.
   return db_tip()->value.proposal_header.block_height + 1;
+}
+
+NetworkHash const &
+SystemCallHandler::get_network_hash() const
+{
+  // Identical in every header, so the parent tip's copy is already this
+  // block's value, no adjustment needed.
+  return db_tip()->value.proposal_header.network_hash;
+}
+
+TimePoint
+SystemCallHandler::get_block_timepoint() const
+{
+  // Not derivable from the tip: for an open block that is the parent, whose
+  // timepoint is the previous block's.
+  return snapshot_cache_.block_execution_context().block_timepoint;
 }
 
 // == Auth token syscalls ==

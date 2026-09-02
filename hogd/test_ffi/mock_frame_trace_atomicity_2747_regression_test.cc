@@ -21,6 +21,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
 #include "invoke_flag.hh"
@@ -137,7 +138,10 @@ TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
   EXPECT_EQ(reentrance.status.error(), HostFnErrorCode::NoneOrRecoverable);
   EXPECT_EQ(reentrance.status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeReentrance);
-  EXPECT_EQ(reentrance.gas_remaining_at_end, kParentGas);
+  // Neither refusal ran a child frame, but both reached the handler, so each
+  // pays the crossing and the second starts where the first left off.
+  EXPECT_EQ(reentrance.gas_remaining_at_start, kParentGas);
+  EXPECT_EQ(reentrance.gas_remaining_at_end, kParentGas - kSyscallBaseCost);
   EXPECT_EQ(reentrance.body.invoke().outputs, nullptr);
 
   auto const &bad_flags = trace.system_calls[1];
@@ -145,7 +149,9 @@ TEST(TestBindingsTest, RefusedMockFrameOpenLeavesNoUnfinishedInvokeTrace)
   EXPECT_EQ(bad_flags.status.error(), HostFnErrorCode::NoneOrRecoverable);
   EXPECT_EQ(bad_flags.status.syscall_return_code(),
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
-  EXPECT_EQ(bad_flags.gas_remaining_at_end, kParentGas);
+  EXPECT_EQ(bad_flags.gas_remaining_at_start, kParentGas - kSyscallBaseCost);
+  EXPECT_EQ(bad_flags.gas_remaining_at_end,
+            kParentGas - (2 * kSyscallBaseCost));
   EXPECT_EQ(bad_flags.body.invoke().outputs, nullptr);
 }
 

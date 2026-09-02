@@ -35,6 +35,15 @@
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
+namespace {
+// Any consistent context will do, but it must be the same for every open of
+// a given block: open_block rejects a reopen whose context disagrees.
+constexpr hogd::BlockExecutionContext kTestBlockExecution{
+    .block_height = 1,
+    .block_timepoint = 1,
+};
+} // namespace
+
 namespace hogd {
 
 class RpcLoadgenPaymentTest : public ::testing::Test {
@@ -131,7 +140,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Open the proposal block
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
+  auto open_res =
+      client_.executorsched_open_proposal_block(test_block_id,
+                                                kTestBlockExecution);
   ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
   // Open corresponding db block
@@ -196,7 +207,9 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
   rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
 
   // Open the proposal block
-  auto open_res = client_.executorsched_open_proposal_block(test_block_id);
+  auto open_res =
+      client_.executorsched_open_proposal_block(test_block_id,
+                                                kTestBlockExecution);
   ASSERT_EQ(open_res, ExecResult::ExecResultOK);
 
   // Open corresponding db block

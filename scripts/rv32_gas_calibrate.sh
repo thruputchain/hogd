@@ -24,6 +24,7 @@
 #   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp --out /tmp/gas.json
 #   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp -- --quick
 #   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp -- --op=DIV
+#   scripts/rv32_gas_calibrate.sh build-release-ccache-tmp -- --syscalls-only
 
 set -euo pipefail
 

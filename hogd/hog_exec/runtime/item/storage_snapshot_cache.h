@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -16,19 +17,19 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
-#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
 
-// A cached contract: the bytecode plus, for translatable engines (rv32), its
-// eagerly-built ready-to-instantiate image. `translated` is nullopt for
-// non-rv32 contracts (and if translation failed -- treated as Unrecoverable by
-// the engine, matching prior behavior).
+// A cached contract: the bytecode plus, for engines that prepare one, its
+// eagerly-built ready-to-instantiate image. `prepared` is empty for engines
+// with nothing to prepare (and if preparation failed -- treated as
+// Unrecoverable by the engine, matching prior behavior).
 struct ContractCacheEntry {
   Contract contract;
-  std::optional<Rv32Contract> translated;
+  PreparedContract prepared;
 };
 
 class DatabaseProxy;
@@ -53,21 +54,42 @@ class DatabaseProxy;
 // (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
-  StorageSnapshotCache(BlockID block_id, DatabaseProxy &db_proxy);
+  StorageSnapshotCache(BlockID block_id,
+                       BlockExecutionContext const &block_execution,
+                       DatabaseProxy &db_proxy);
   // delete move and copy
   StorageSnapshotCache(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache(StorageSnapshotCache &&) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  SystemStatus<const Contract *>
-  try_get_contract_by_hash(SHA256Hash const &hash);
+  // The cached contract for `hash`: its code and the image this cache built
+  // when it loaded it, so callers reuse that image rather than preparing the
+  // same bytes again. Borrowed -- node-stable and valid for the block, so it
+  // outlives any transaction's runtimes. Returns nullptr (wrapped) for a
+  // negative lookup.
+  SystemStatus<const ContractCacheEntry *>
+  try_get_contract_entry(SHA256Hash const &hash);
   SystemStatus<const DeployedContract *>
   try_get_deployed_contract(ContractAddress const &addr);
   SystemStatus<const SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
   SystemStatus<const DbTip *> try_get_db_tip();
+
+  // The executing block's own facts. Unlike everything above these do not
+  // come from the db tip, which for an open block is the *parent*: the height
+  // is the tip's plus one, and the timepoint is not derivable from it at all.
+  BlockExecutionContext const &block_execution_context() const
+  {
+    return block_execution_context_;
+  }
+
+  // Re-arms a recycled cache for its next block.
+  void set_block_execution_context(BlockExecutionContext const &block_execution)
+  {
+    block_execution_context_ = block_execution;
+  }
 
   ~StorageSnapshotCache();
 
@@ -77,6 +99,13 @@ public:
     deployment_cache_.unsafe_clear();
     snapshot_item_cache_.unsafe_clear();
     block_id_ = UINT64_MAX;
+    // Poison rather than leave the last block's context behind:
+    // get_snapshot_cache() re-arms it, and anything that reads it before then
+    // gets an obviously-wrong height rather than a plausible stale one.
+    block_execution_context_ = BlockExecutionContext{
+        .block_height = std::numeric_limits<BlockHeight>::min(),
+        .block_timepoint = 0,
+    };
     release_db_tip();
   }
 
@@ -88,10 +117,6 @@ public:
 
 private:
   void release_db_tip();
-  // Lookup/insert/eager-translate the contract entry for `hash`. Returns
-  // nullptr (wrapped) for a negative lookup.
-  SystemStatus<const ContractCacheEntry *>
-  get_contract_entry(SHA256Hash const &hash);
 
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
@@ -117,6 +142,10 @@ private:
       snapshot_item_cache_;
 
   BlockID block_id_;
+
+  // Read-only for the life of the block, so unlike the tip it needs no
+  // synchronization.
+  BlockExecutionContext block_execution_context_;
   DatabaseProxy &db_proxy_;
 
   std::atomic<DbTip *> db_tip_ = nullptr;

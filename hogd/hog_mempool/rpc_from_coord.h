@@ -425,6 +425,10 @@ private:
   struct PendingBlock {
     DbTip db_tip;
     BlockID block_id;
+    // Handed to every executor opening the block: from the coordinator's
+    // ProposalContext when proposing, from the proposal's header when
+    // validating.
+    BlockExecutionContext block_execution;
     x23::XdrVec<SignedTransaction> txs;
     x23::XdrVec<TransactionHash> tx_hashes;
 
@@ -562,8 +566,9 @@ private:
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
       x23::span<bool> ret);
 
-  x23::Async<ExecResult> open_proposal_block(BlockID block_id,
-                                             size_t executor_idx);
+  x23::Async<ExecResult>
+  open_proposal_block(BlockID block_id, BlockExecutionContext block_execution,
+                      size_t executor_idx);
 
   struct InitializeBlockNodes {
     x23::DagNode<DbSchedResult> create_snapshot;
@@ -632,8 +637,9 @@ private:
   x23::Async<bool> validate_batch(BlockID block_id,
                                   const x23::Vec<ProposedTransaction> &txs);
 
-  x23::Async<ExecResult> open_validation_block(BlockID block_id,
-                                               size_t executor_idx);
+  x23::Async<ExecResult>
+  open_validation_block(BlockID block_id, BlockExecutionContext block_execution,
+                        size_t executor_idx);
 
   static void record_submitted_vetted(size_t count);
   static void record_submitted_unvetted(size_t count);

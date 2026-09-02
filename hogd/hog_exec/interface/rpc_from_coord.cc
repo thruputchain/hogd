@@ -150,21 +150,23 @@ ExecutorMempoolRpc::executorsched_validate_batch(
 }
 
 x23::Async<ExecResult>
-ExecutorMempoolRpc::executorsched_open_proposal_block(BlockID id)
+ExecutorMempoolRpc::executorsched_open_proposal_block(
+    BlockID id, BlockExecutionContext block_execution)
 {
   if (!initialize_check()) [[unlikely]] {
     co_return ExecResult::ExecResultSystemError;
   }
-  co_return co_await executor_states_->open_proposal(id);
+  co_return co_await executor_states_->open_proposal(id, block_execution);
 }
 
 x23::Async<ExecResult>
-ExecutorMempoolRpc::executorsched_open_validation_block(BlockID id)
+ExecutorMempoolRpc::executorsched_open_validation_block(
+    BlockID id, BlockExecutionContext block_execution)
 {
   if (!initialize_check()) [[unlikely]] {
     co_return ExecResult::ExecResultSystemError;
   }
-  co_return co_await executor_states_->open_validation(id);
+  co_return co_await executor_states_->open_validation(id, block_execution);
 }
 
 x23::Async<ExecResult>

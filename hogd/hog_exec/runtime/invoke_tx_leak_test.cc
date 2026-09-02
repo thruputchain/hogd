@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <span>
 
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +20,11 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
+#include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "rpc_types.hh"
@@ -44,8 +49,19 @@ namespace {
 
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*contract*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*unused*/,
+                                  PreparedContract &out) const override
   {
+    // Hand back a placeholder image, as a real rv32 verification would: an
+    // accepted attachment must look prepared. Its contents are irrelevant --
+    // these tests never invoke the deployed contracts -- and it cannot be
+    // built from the attachment itself, which is opaque placeholder bytes and,
+    // in the size-limit test, larger than any valid artifact can be.
+    ContractBlob placeholder;
+    placeholder.data.append_range(
+        rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
+                                            std::span<const uint8_t>{}));
+    out.rv32 = Rv32Contract::create(placeholder);
     return InvokeErrorCode::None;
   }
 

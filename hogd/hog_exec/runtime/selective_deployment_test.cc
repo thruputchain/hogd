@@ -26,8 +26,11 @@
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
+#include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
+#include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
@@ -58,13 +61,25 @@ namespace {
 // bookkeeping (which contracts end up in the DB), not artifact validation, and
 // use opaque placeholder bytes in contracts_to_deploy rather than real
 // artifacts. A real Rv32Context would reject those bytes in verify_contract
-// and the test would fail for unrelated reasons. The deployed contracts are
-// never invoked, so make_new_runtime does not need to produce a working
-// Runtime.
+// and the test would fail for unrelated reasons -- and DeploysContractAtExact-
+// SizeLimit needs a blob larger than any valid artifact can be. The deployed
+// contracts are never invoked, so make_new_runtime does not need to produce a
+// working Runtime.
 class NoopRv32Context : public RuntimeContext {
 public:
-  InvokeErrorCode verify_contract(Contract const & /*unused*/) const override
+  InvokeErrorCode verify_contract(Contract const & /*unused*/,
+                                  PreparedContract &out) const override
   {
+    // Hand back a placeholder image, as a real rv32 verification would: an
+    // accepted attachment must look prepared. Its contents are irrelevant --
+    // these tests never invoke the deployed contracts -- and it cannot be
+    // built from the attachment itself, which is opaque placeholder bytes and,
+    // in the size-limit test, larger than any valid artifact can be.
+    ContractBlob placeholder;
+    placeholder.data.append_range(
+        rv32::test_artifact::build_artifact({rv32::test_program::addi(0, 0, 0)},
+                                            std::span<const uint8_t>{}));
+    out.rv32 = Rv32Contract::create(placeholder);
     return InvokeErrorCode::None;
   }
 
@@ -439,8 +454,9 @@ TEST_P(SelectiveDeploymentTest,
 }
 
 // A contract deployed via the deploy syscall is invokable in the same
-// transaction: the tx-local rv32 translation path translates on first use and
-// memoizes for the second invoke.
+// transaction. The attachment is translated once, when initial validation
+// verifies it, and both invokes borrow that image from the tx-local cache --
+// no invocation retranslates the artifact (#3536).
 TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
 {
   Contract fib_contract(ContractType::kRv32);
@@ -1357,6 +1373,72 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
             ExecResult::ExecResultTxDeterministicError);
   advance_block();
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
+}
+
+// A native contract attached to a transaction is rejected during initial
+// validation, even when the body never deploys or invokes it: every native id
+// is refused by deploy_contract's banned-redeploy check, so an attachment
+// could never be deployed. The scheduler is meant to drop such a transaction
+// before it reaches the executor, so the classification is Unrecoverable
+// rather than a contract fault. The contract here is registered in the
+// NativeContext, so it is rejected for being native, not for being unknown.
+TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
+{
+  // A distinct id from the deployer's, so the attachment is registered in the
+  // context but does not hash to a contract already in the db.
+  auto attached_native = make_native_contract(1);
+  auto attached_hash = sha256(*attached_native);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "transaction body must not execute when a native "
+                         "contract is attached";
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_1;
+  fns_1.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
+        ADD_FAILURE() << "the attached native contract must never be invoked";
+        return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto native_contract_1 = std::make_unique<NativeContract>(std::move(fns_1));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  contract_map.emplace(1, std::move(native_contract_1));
+  NativeContext native_context(std::move(contract_map));
+  NoopRv32Context noop_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kRv32, {&noop_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {*attached_native},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
+
+  auto res = handler.root_invoke();
+  EXPECT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Unrecoverable});
+  EXPECT_EQ(handler.try_commit_transaction(),
+            ExecResult::ExecResultUnrecoverable);
+  advance_block();
+  EXPECT_FALSE(lookup_contract_from_db(attached_hash).has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
