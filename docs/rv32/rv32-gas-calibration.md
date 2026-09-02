@@ -1124,6 +1124,45 @@ These are charges *on top of* the syscall table, which prices `NNIntGet` at
 adopted here: the schedule is unchanged, and these are the input to that
 decision.
 
+**How far does the key count scale.** Nothing caps the keys a transaction may
+touch except its gas budget, so a price read at 4096 is only sound if the cost
+has stopped moving by then. It has not. Depth 1 on the development container,
+ns per first touch -- shape only, see the caveat below:
+
+| K | no-load (the frame map alone) | loaded (+ the snapshot cache) |
+|---:|---:|---:|
+| 1 | 293 | 504 |
+| 256 | 342 | 486 |
+| 4096 | 378 | 667 |
+| 16384 | 449 | 1281 |
+| 65536 | 723 | 2226 |
+| 262144 | 1266 | 2783 |
+
+Flat to about 4096 (1.3x over a single key), then climbing steadily -- roughly
+1.6-1.75x per 4x keys in the tail, which is what a map outgrowing each cache
+level looks like. At 262144 keys the frame's map alone is ~50 MB.
+
+So pricing at the top of the sweep is not attractive: it would charge an
+ordinary transaction touching a handful of keys 3-4x what it costs. Pricing at
+the knee instead leaves a transaction touching hundreds of thousands of keys
+underpaying, and what bounds that is the gas budget it has to burn getting
+there -- at the ~220 gas a first touch would cost (the syscall's 100 plus the
+120 surcharge), 262144 of them is about 58M gas before the contract does
+anything else. Which point to price at is a policy call about that budget
+rather than something the measurement settles.
+
+**Two caveats on the table above.** The knee's location is a property of the
+host's cache, and the container's L3 is 33 MB against hog10's 256 MB, so the
+bench pool should be expected to stay flat considerably further -- these
+numbers say the curve bends, not where. And the loaded column is an upper
+bound: its keys have to exist in the benchmark's mock, and at the top of the
+sweep that map is ~90 MB resident competing for the same cache. That is
+scaffolding rather than a cost a contract causes, which is why the no-load
+column -- which seeds nothing and consults neither the mock nor the cache --
+is the one to read for how the frame's own map scales. Seeding rows now run
+last for that reason; before they did, an unrelated K=16 no-load row measured
+2.4x dearer.
+
 **The parent walk is measured and deliberately not priced.** At 0.57 ns per
 open frame it rounds to 1 gas, which is below what this benchmark resolves --
 and a constant in this table is not free, since every one is folded into
