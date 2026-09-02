@@ -33,13 +33,14 @@ public:
   // credit, e.g. a storage over-reservation refund, refusing (no-op, returns
   // false) if the committed value would exceed `max_delta`. The bounds check
   // and the delta update are one CAS, so concurrent refunds against the same
-  // finalized lock cannot each validate against a stale delta and then overshoot
-  // the ceiling on the combined update. Unlike try_reserve_delta the refund is a
-  // release of the subtraction the finalized debit already reserved rather than
-  // a fresh add against the snapshot ceiling, so it does not deadlock on the
-  // zero add capacity of a max-balance snapshot. Only the committed delta gates
-  // admission -- the lock is finalized, so no reservation consults the capacity
-  // counters; they are rebalanced to stay consistent for observability.
+  // finalized lock cannot each validate against a stale delta and then
+  // overshoot the ceiling on the combined update. Unlike try_reserve_delta the
+  // refund is a release of the subtraction the finalized debit already reserved
+  // rather than a fresh add against the snapshot ceiling, so it does not
+  // deadlock on the zero add capacity of a max-balance snapshot. Only the
+  // committed delta gates admission -- the lock is finalized, so no reservation
+  // consults the capacity counters; they are rebalanced to stay consistent for
+  // observability.
   bool try_apply_committed_credit(int128_t credit, int128_t max_delta)
   {
     assert(credit > 0);
@@ -51,8 +52,10 @@ public:
       }
       if (delta_.compare_exchange_strong(before, after,
                                          std::memory_order_relaxed)) {
-        int128_t add_delta = (after > 0 ? after : 0) - (before > 0 ? before : 0);
-        int128_t sub_delta = (after < 0 ? after : 0) - (before < 0 ? before : 0);
+        int128_t add_delta =
+            (after > 0 ? after : 0) - (before > 0 ? before : 0);
+        int128_t sub_delta =
+            (after < 0 ? after : 0) - (before < 0 ? before : 0);
         add_.fetch_sub(add_delta, std::memory_order_relaxed);
         sub_.fetch_add(sub_delta, std::memory_order_relaxed);
         return true;
