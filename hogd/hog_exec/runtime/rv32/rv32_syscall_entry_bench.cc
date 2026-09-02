@@ -5,8 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <expected>
 #include <format>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -17,6 +21,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
@@ -37,9 +42,12 @@
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -70,10 +78,14 @@
 // syscall rather than a modelled host -- which is the number the calibration
 // harness reports, arrived at independently.
 //
-// Only stateless syscalls are benchmarked. A syscall that reads storage costs
-// what the snapshot cache costs, which is a different measurement with a
-// different worst case (a cache miss), and pricing it needs state set up
-// deliberately rather than whatever a fresh handler happens to have.
+// Stateless syscalls first, and now the first stateful family: the NNInt
+// storage calls, in the `frame/` and `cold/` rows. A storage syscall's cost is
+// not a function of its arguments alone -- it depends on whether this
+// transaction has touched the key before, how deep the invocation stack is,
+// and whether the block's snapshot cache holds the key -- so those rows set
+// that state up deliberately, one regime per row, rather than measuring
+// whatever a warm handler happens to be in. See "Storage: the NNInt rows"
+// below for what each regime is and how it is isolated.
 namespace hogd {
 namespace {
 
@@ -133,6 +145,95 @@ constexpr uint32_t kHashSlotCopy = 1;
 // The limit start_frame() fixes on the frame it admits: passed in rather than
 // read off the db tip, so this fixture needs no pinned tip.
 constexpr uint32_t kMaxSha256Buffers = 8;
+
+// NNInt argument block, above VerifySignature's material and below the hashing
+// input. Every argument gets its own cache-line-sized slot so the alias guard
+// never sees two of them overlap, whatever order the ABI registers them in.
+constexpr uint32_t kNNIntRegionAddress = 0x0E00;
+static_assert(kNNIntRegionAddress >= kMessageAddress + kMaxMessageBytes,
+              "NNInt arguments must not overlap VerifySignature's message");
+// StorageKeyContractData, 32 bytes. Two slots, one per syscall, so the warm
+// Get and the warm SetAdd rows work different keys and neither leaves the
+// other's key in a state it did not expect -- a Get after a SetAdd on the same
+// key takes the cheaper written-item branch rather than the loaded one.
+constexpr uint32_t kNNIntGetKeyAddress = kNNIntRegionAddress;
+constexpr uint32_t kNNIntSetAddKeyAddress = kNNIntRegionAddress + 0x20;
+// int128 inputs to SetAdd.
+constexpr uint32_t kNNIntSetValueAddress = kNNIntRegionAddress + 0x40;
+constexpr uint32_t kNNIntAddValueAddress = kNNIntRegionAddress + 0x60;
+// Get's three outputs: int128, bool, int128.
+constexpr uint32_t kNNIntOutSetAddress = kNNIntRegionAddress + 0x80;
+constexpr uint32_t kNNIntOutSetOptAddress = kNNIntRegionAddress + 0xA0;
+constexpr uint32_t kNNIntOutAddAddress = kNNIntRegionAddress + 0xC0;
+static_assert(kNNIntOutAddAddress + sizeof(int128_t) <= kInputAddress,
+              "NNInt arguments must not run into the hashing input");
+static_assert(sizeof(StorageKeyContractData) == 32);
+// The optional-input null sentinel the rv32 ABI uses: 0 is a valid guest
+// address, so an absent optional is all-ones (SyscallArgParams<const T *>).
+constexpr uint32_t kNullOptionalInput = std::numeric_limits<uint32_t>::max();
+
+// Values the NNInt rows read and write. Nonzero and distinct, so a path that
+// special-cased a zero or confused set with add would be measuring the wrong
+// thing rather than silently agreeing.
+constexpr int128_t kNNIntSnapshotValue = 7;
+constexpr int128_t kNNIntSetValue = 1000;
+constexpr int128_t kNNIntAddValue = 1;
+
+// Each storage regime below reads and writes its own set of keys, so one row's
+// warm-up cannot leave another row's key in a frame or in the snapshot cache.
+// The tag is the key's first byte; the row's index goes in bytes 8..15.
+enum class KeySpace : uint8_t {
+  // The one key the warm entry/vm rows repeat on, resident in the fixture's
+  // inner frame after the first call.
+  kWarm = 1,
+  // Keys the first-touch sweeps read, seeded in the mock db and, after each
+  // row's warm pass, resident in the block's snapshot cache -- but never in a
+  // frame when the timed call arrives.
+  kFirstTouch = 2,
+  // Keys the SetAdd sweeps write. Never seeded: a write consults neither the
+  // snapshot cache nor the db.
+  kSetAdd = 3,
+  // Keys written in a child frame and merged into its parent on commit.
+  kMerge = 4,
+  // Keys used exactly once each, so every read misses the snapshot cache.
+  kCold = 5,
+};
+
+StorageKeyContractData
+make_nnint_key(KeySpace space, uint64_t index)
+{
+  StorageKeyContractData key{};
+  key[0] = std::to_underlying(space);
+  for (size_t i = 0; i < sizeof(index); ++i) {
+    key[8 + i] = static_cast<uint8_t>(index >> (8 * i));
+  }
+  return key;
+}
+
+// Point the NNInt syscalls at `key` by writing it where their argument word
+// says it is. A 32-byte store: in a timed loop it is ~1 ns beside a call of
+// ~100, and it is what a guest does too -- its key lives in memory and it
+// writes the one it wants before calling.
+void
+write_nnint_key(std::span<uint8_t> memory, uint32_t key_address, KeySpace space,
+                uint64_t index)
+{
+  const StorageKeyContractData key = make_nnint_key(space, index);
+  std::memcpy(memory.data() + key_address, key.data(), key.size());
+}
+
+// The first-touch sweeps read this many distinct keys at most; the fixture
+// seeds exactly this many so a sweep point beyond it fails loudly (the read
+// returns kStorageKeyNotExist) rather than measuring an error path.
+constexpr uint64_t kFirstTouchKeys = 4096;
+// Keys the cold row may consume before it runs out. A cold read needs a key
+// the snapshot cache has never seen, and the cache is never reset within a
+// process, so each one is used exactly once. Sized for the fixed iteration
+// count the row registers with, times the runner's repetitions, with room for
+// the warm-up calls and a few extra repetitions. Exhausting it fails the row
+// with a message rather than recycling keys and quietly measuring hits.
+constexpr uint64_t kColdPoolKeys = uint64_t{1} << 18;
+constexpr int64_t kColdIterations = 20000;
 
 // A RuntimeContext that can build nothing.
 //
@@ -196,8 +297,15 @@ public:
     // being priced. A contract called by another contract is also the ordinary
     // case, so the inner frame is both the measurable arrangement and the
     // representative one.
-    outer_trace_ = push_frame(make_address(1));
-    inner_trace_ = push_frame(make_address(2));
+    outer_trace_ = push_frame(inner_address_parent());
+    inner_trace_ = push_frame(inner_address());
+
+    // Snapshot state the storage rows read. The mock serves whatever it was
+    // handed at setup; a key it does not hold reads as kStorageKeyNotExist,
+    // which fails the row rather than timing it.
+    // Two warm keys: index 0 is the Get rows', index 1 the SetAdd rows'.
+    seed_nnint(inner_address(), KeySpace::kWarm, 2);
+    seed_nnint(leaf_address(), KeySpace::kFirstTouch, kFirstTouchKeys);
   }
 
   ~SyscallBenchFixture()
@@ -217,7 +325,6 @@ public:
 
   [[nodiscard]] SystemCallHandler &handler() { return *handler_; }
 
-private:
   // Distinct, deterministic addresses so caller and callee differ.
   static ContractAddress make_address(uint8_t seed)
   {
@@ -226,6 +333,30 @@ private:
     return address;
   }
 
+  // The frame the entry rows run in, and its parent.
+  static ContractAddress inner_address_parent() { return make_address(1); }
+  static ContractAddress inner_address() { return make_address(2); }
+  // The innermost frame of every frame/ sweep, whatever its depth. A storage
+  // key is namespaced by the address of the frame touching it
+  // (InvocationFrameStack::get_addrkey), so the first-touch keys are seeded
+  // under this one address and every sweep depth reads the same seeded set.
+  static ContractAddress leaf_address() { return make_address(0x40); }
+  // Intermediate frames of a depth sweep, and the merge rows' parent. Distinct
+  // from the leaf, from each other, and from the fixture's own two frames,
+  // because production forbids reentrance and the addresses here should not
+  // describe a stack that could not exist.
+  static ContractAddress spacer_address(uint32_t index)
+  {
+    ContractAddress address{};
+    address[0] = 0x80;
+    address[1] = static_cast<uint8_t>(index);
+    address[2] = static_cast<uint8_t>(index >> 8);
+    return address;
+  }
+  static ContractAddress cold_address() { return make_address(0x50); }
+
+  // Push a frame at `address` on top of whatever is there. The trace handle
+  // is what pop_frame needs back.
   std::unique_ptr<InvocationFrameTrace> push_frame(ContractAddress address)
   {
     auto stashed = handler_->start_frame(
@@ -243,6 +374,67 @@ private:
     return std::move(stashed).value();
   }
 
+  // Finish the top frame. A successful child merges its modified items into
+  // its parent (commit_successful_child_frame); a failed one is discarded
+  // (commit_failed_child_frame), which is how a sweep row returns the stack to
+  // exactly the state it found, however many keys it touched.
+  void pop_frame(std::unique_ptr<InvocationFrameTrace> trace, bool success)
+  {
+    InvokeStatus<void> result =
+        success ? InvokeStatus<void>{}
+                : InvokeStatus<void>{std::unexpected(
+                      InvokeError{InvokeErrorCode::Deterministic})};
+    auto finished = handler_->finish_frame(result, std::move(trace));
+    if (!finished.has_value()) {
+      std::abort();
+    }
+  }
+
+  // Put `count` NNInt items under `address` in the mock snapshot, at the keys
+  // make_nnint_key(space, 0..count).
+  void seed_nnint(ContractAddress const &address, KeySpace space,
+                  uint64_t count)
+  {
+    for (uint64_t index = 0; index < count; ++index) {
+      StorageKey key(StorageKeyType::ContractData);
+      key.contract_data_key() = make_nnint_key(space, index);
+      snapshot_server_.impl()->setup_create_item(
+          AddressAndKey{.address = address, .key = key},
+          StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+    }
+  }
+
+  // The cold row's keys, seeded on first use rather than in the constructor:
+  // every vm row builds its own fixture, and a quarter-million inserts per
+  // fixture is a cost nothing but the cold row needs.
+  void seed_cold_pool()
+  {
+    if (cold_pool_seeded_) {
+      return;
+    }
+    seed_nnint(cold_address(), KeySpace::kCold, kColdPoolKeys);
+    cold_pool_seeded_ = true;
+  }
+
+  // The next never-read cold key, or nullopt when the pool is spent. One
+  // counter for the process: the snapshot cache is never reset, so a key read
+  // by any earlier repetition is warm for every later one.
+  std::optional<uint64_t> take_cold_key()
+  {
+    if (next_cold_key_ >= kColdPoolKeys) {
+      return std::nullopt;
+    }
+    return next_cold_key_++;
+  }
+
+private:
+  static StorageCostModel const &cost_model()
+  {
+    static const StorageCostModel model =
+        StorageCostModel::default_cost_model();
+    return model;
+  }
+
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(/*block_id=*/0);
   TestEventAggregator event_server_;
   TestEventAggregatorExecServer event_server_exec_server_ =
@@ -254,6 +446,8 @@ private:
   std::unique_ptr<SystemCallHandler> handler_;
   std::unique_ptr<InvocationFrameTrace> outer_trace_;
   std::unique_ptr<InvocationFrameTrace> inner_trace_;
+  bool cold_pool_seeded_ = false;
+  uint64_t next_cold_key_ = 0;
 };
 
 // One syscall's register-native arguments: a0 is the number, a1..a7 the words.
@@ -262,6 +456,9 @@ struct SyscallCall {
   std::array<uint32_t, 8> words = {};
   // Bytes of guest input the call reads, for the size-swept hashing rows.
   uint32_t input_bytes = 0;
+  // Where the call reads its storage key from, for the rows that change it
+  // between calls. Zero for calls that take none.
+  uint32_t key_address = 0;
 };
 
 SyscallCall
@@ -405,6 +602,43 @@ verify_signature_call(size_t index)
   return call;
 }
 
+// NonnegativeIntGet(key, force_load_from_snapshot) -> (set, set_opt, add).
+//
+// force_load_from_snapshot decides whether the handler consults the snapshot
+// at all. With it set, a key this frame has not written is loaded from the
+// snapshot cache (SystemCallHandler::get_nnint, the UnmodifiedItem branch);
+// without it the same call answers (nullopt, 0) from the frame alone. The two
+// are different code paths with different costs, and both are real: the SDK
+// exposes them as get_values_force and get_values.
+SyscallCall
+nnint_get_call(bool force_load_from_snapshot)
+{
+  SyscallCall call =
+      make_call(force_load_from_snapshot ? "NNIntGet" : "NNIntGetNoLoad",
+                SyscallNo::kNonnegativeIntGet,
+                {kNNIntGetKeyAddress, force_load_from_snapshot ? 1U : 0U,
+                 kNNIntOutSetAddress, kNNIntOutSetOptAddress,
+                 kNNIntOutAddAddress});
+  call.key_address = kNNIntGetKeyAddress;
+  return call;
+}
+
+// NonnegativeIntSetAdd(key, set_value, add_value, flags), with a set value
+// present: the shape an ERC20 balance update takes after a forced read. Never
+// touches the snapshot or the db -- the write is staged in the frame's item
+// view and only reaches storage at commit, which is why its first-touch rows
+// need no seeding and why the commit-side cost is measured separately.
+SyscallCall
+nnint_set_add_call()
+{
+  SyscallCall call = make_call("NNIntSetAdd", SyscallNo::kNonnegativeIntSetAdd,
+                               {kNNIntSetAddKeyAddress, kNNIntSetValueAddress,
+                                kNNIntAddValueAddress,
+                                std::to_underlying(StorageDeltaFlags::None)});
+  call.key_address = kNNIntSetAddKeyAddress;
+  return call;
+}
+
 // Guest memory with the hashing input seeded, and a real ed25519 signature
 // laid out where VerifySignature's arguments point.
 //
@@ -448,6 +682,15 @@ make_guest_memory()
   }
   std::ranges::copy(public_key, memory.begin() + kPublicKeyAddress);
   std::ranges::copy(message, memory.begin() + kMessageAddress);
+
+  // The NNInt block: the warm keys, and SetAdd's two operands. The sweep rows
+  // overwrite the key per call; the operands stay.
+  write_nnint_key(memory, kNNIntGetKeyAddress, KeySpace::kWarm, 0);
+  write_nnint_key(memory, kNNIntSetAddKeyAddress, KeySpace::kWarm, 1);
+  std::memcpy(memory.data() + kNNIntSetValueAddress, &kNNIntSetValue,
+              sizeof(kNNIntSetValue));
+  std::memcpy(memory.data() + kNNIntAddValueAddress, &kNNIntAddValue,
+              sizeof(kNNIntAddValue));
   return memory;
 }
 
@@ -821,6 +1064,270 @@ bm_hash_buffers_update_fill(benchmark::State &state, uint32_t occupancy)
   state.SetItemsProcessed(creations);
 }
 
+// ---------------------------------------------------------------------------
+// Storage: the NNInt rows
+//
+// The stateless rows above price a call from its arguments. A storage syscall
+// cannot be priced that way, because what it does depends on state the
+// arguments do not name:
+//
+//   - whether this transaction has already touched the key (the item view is
+//     in the active frame, or in a parent frame, or nowhere yet);
+//   - how deep the invocation stack is, because a key not in the active frame
+//     is looked for in every parent frame before a fresh view is created
+//     (InvocationFrameStack::get_item_view walks the stack on every miss);
+//   - whether the block's snapshot cache holds the key, and if not, a db read.
+//
+// So each of those is its own regime, and each regime gets rows that put the
+// handler in exactly that state before every timed call:
+//
+//   entry/NNIntGet            warm: the key's view is in the active frame,
+//                             loaded from the snapshot. One map lookup and a
+//                             variant read. entry/NNIntSetAdd is the write
+//                             analogue, overwriting a view already there.
+//   frame/Push/D              the baseline under every sweep: D frames
+//                             pushed and popped, no syscalls. What one frame
+//                             costs to open and discard.
+//   frame/NNIntGetFirstTouch/D/K
+//                             first touch, snapshot-cached: K distinct keys
+//                             read once each in a fresh frame at depth D, so
+//                             every read misses the active frame, walks D+1
+//                             parents, creates a view, and loads it from the
+//                             snapshot cache -- which holds every key after
+//                             the row's warm pass. The frame is discarded, so
+//                             the next iteration starts from the same state.
+//   frame/NNIntGetFirstTouchNoLoad/1/K
+//                             the same without force_load: the view is
+//                             created and nothing is loaded.
+//   frame/NNIntSetAddFirstTouch/1/K
+//                             first-touch writes: create the view, stage the
+//                             item. No snapshot, no db.
+//   frame/NNIntSetAddMerge/K, frame/NNIntSetAddDiscard/K
+//                             the same K writes in a child frame that then
+//                             commits into a fresh parent (Merge) or is
+//                             thrown away (Discard). The difference is what
+//                             a successful child costs its parent per item,
+//                             which is where a write's in-executor cost
+//                             actually lands.
+//   cold/NNIntGet             snapshot-cache miss: every call reads a key the
+//                             cache has never seen, so it goes through the
+//                             DatabaseProxy to the mock snapshot server. See
+//                             the row for what that number is and is not.
+//
+// The sweeps are read the way the opcode sweeps are: a line in K, whose slope
+// is the per-key cost and whose intercept must agree with frame/Push/D. A
+// slope that changes with D is the parent walk; a slope that changes with K
+// would be the frame's map not being O(1), which is the thing to look for
+// rather than assume.
+//
+// What is deliberately absent: any regime that depends on the *block's*
+// state rather than the transaction's. Whether a key is in the snapshot cache
+// depends on which transactions ran before this one in the block, which
+// validators schedule differently, so it cannot be a term in a deterministic
+// price; the cold row measures it anyway, so the size of what is being
+// declined is on the record.
+// ---------------------------------------------------------------------------
+
+using FrameTraces = std::vector<std::unique_ptr<InvocationFrameTrace>>;
+
+// Push `depth` frames: spacers, then the leaf every sweep's syscalls run in.
+// `traces` is reused across iterations so its allocation is not in the loop.
+void
+push_frames(SyscallBenchFixture &fixture, uint32_t depth, FrameTraces &traces)
+{
+  for (uint32_t i = 0; i + 1 < depth; ++i) {
+    traces.push_back(
+        fixture.push_frame(SyscallBenchFixture::spacer_address(i)));
+  }
+  if (depth > 0) {
+    traces.push_back(fixture.push_frame(SyscallBenchFixture::leaf_address()));
+  }
+}
+
+// Pop everything push_frames pushed, innermost first. Every frame is failed --
+// discarded, along with whatever it touched -- except the innermost when
+// `commit_innermost` is set, which commits into the frame below it. That
+// frame is then failed in turn, so nothing reaches the fixture's own frames.
+void
+pop_frames(SyscallBenchFixture &fixture, FrameTraces &traces,
+           bool commit_innermost = false)
+{
+  bool success = commit_innermost;
+  while (!traces.empty()) {
+    fixture.pop_frame(std::move(traces.back()), success);
+    traces.pop_back();
+    success = false;
+  }
+}
+
+void
+bm_frame_push(benchmark::State &state, uint32_t depth)
+{
+  SyscallBenchFixture &fixture = shared_fixture();
+  FrameTraces traces;
+  traces.reserve(depth);
+
+  int64_t frames = 0;
+  for (auto _ : state) {
+    push_frames(fixture, depth, traces);
+    pop_frames(fixture, traces);
+    benchmark::ClobberMemory();
+    frames += depth;
+  }
+  state.SetItemsProcessed(frames);
+  state.counters["depth"] = benchmark::Counter(static_cast<double>(depth));
+}
+
+// One iteration: open `depth` frames, issue `call` once per key on `keys`
+// distinct keys in the innermost, close them all. Reported per iteration, so
+// the report can fit the line; items_processed counts the keys.
+//
+// Every call is checked, not just the warm pass. A stateful row can start
+// failing partway -- a key the mock was not seeded with, a frame that would
+// not open -- and a row that timed the error path from then on would look
+// like a fast syscall.
+void
+bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
+               SyscallCall call, KeySpace space, bool commit_innermost)
+{
+  SyscallBenchFixture &fixture = shared_fixture();
+  std::vector<uint8_t> memory = make_guest_memory();
+  const std::span<uint8_t> memory_span(memory);
+  FrameTraces traces;
+  traces.reserve(depth);
+
+  // Issues the row's calls in the frames already pushed. Returns the first
+  // failure, if any, with the frames still open so the caller can close them.
+  const auto run_keys = [&](uint64_t *gas_out)
+      -> std::optional<std::pair<SyscallCall, SyscallOutcome>> {
+    for (uint64_t index = 0; index < keys; ++index) {
+      write_nnint_key(memory_span, call.key_address, space, index);
+      const SyscallOutcome outcome =
+          invoke_syscall_entry(fixture.handler(), memory_span, call);
+      benchmark::DoNotOptimize(outcome.gas);
+      if (!outcome.ok) {
+        return std::make_pair(call, outcome);
+      }
+      if (gas_out != nullptr) {
+        *gas_out = outcome.gas;
+      }
+    }
+    return std::nullopt;
+  };
+
+  // Warm pass: faults every key into the snapshot cache (for the rows that
+  // load), and fails the row here if a call cannot run. Closed with the same
+  // discard the timed iterations use, so the frame state it leaves is the
+  // state they start from.
+  uint64_t gas = 0;
+  push_frames(fixture, depth, traces);
+  auto failure = run_keys(&gas);
+  pop_frames(fixture, traces, commit_innermost);
+  if (failure) {
+    fail_row(state, failure->first, failure->second);
+    return;
+  }
+
+  int64_t touches = 0;
+  for (auto _ : state) {
+    push_frames(fixture, depth, traces);
+    failure = run_keys(nullptr);
+    pop_frames(fixture, traces, commit_innermost);
+    if (failure) {
+      fail_row(state, failure->first, failure->second);
+      return;
+    }
+    benchmark::ClobberMemory();
+    touches += static_cast<int64_t>(keys);
+  }
+
+  state.SetItemsProcessed(touches);
+  state.counters["depth"] = benchmark::Counter(static_cast<double>(depth));
+  state.counters["keys"] = benchmark::Counter(static_cast<double>(keys));
+  state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
+}
+
+// A read that misses the snapshot cache, once per call.
+//
+// What this measures: get_item_view's miss, the UnmodifiedItem load,
+// StorageSnapshotCache::try_get_snapshot_item missing under its shared lock,
+// DatabaseProxy::get_snapshot_item -- an x23 RPC, serialized, over a local
+// socket, to BlockSnapshotRpc -- the SnapshotStorageItem built from the reply,
+// and the cache insert. Everything on the executor's side of a cold read.
+//
+// What it does not measure: hog_db. The server answering is the in-process
+// mock, whose lookup is an unordered_map find, so this is the fixed cost of
+// going to the db and not the cost of the db. Read it as a floor under a
+// cold read and as the size of the thing the schedule declines to price,
+// and not as a number to put in gas_cost_table.h. The report keeps it out of
+// --schedule for that reason.
+//
+// Keys come from a pool used strictly once: the cache is never reset within
+// the process, so a key read by any earlier call -- an earlier repetition,
+// the warm-up, the benchmark's own iteration-count probing -- is warm for
+// every later one. Hence the fixed iteration count at registration, sized
+// against kColdPoolKeys, and the loud failure when the pool runs out rather
+// than a quiet slide into measuring hits.
+//
+// Runs in its own frame, pushed for the row and discarded after it, so the
+// quarter-million item views it creates do not stay behind in the fixture's
+// inner frame for every later row's lookups to walk past. Register it last:
+// the snapshot cache it fills is shared, and a lookup into a cache of 250k
+// entries is not the same lookup as one into a cache of 4k.
+void
+bm_nnint_cold(benchmark::State &state)
+{
+  SyscallBenchFixture &fixture = shared_fixture();
+  fixture.seed_cold_pool();
+  std::vector<uint8_t> memory = make_guest_memory();
+  const std::span<uint8_t> memory_span(memory);
+  const SyscallCall call = nnint_get_call(/*force_load_from_snapshot=*/true);
+  auto trace = fixture.push_frame(SyscallBenchFixture::cold_address());
+
+  const auto next_call = [&]() -> std::optional<SyscallOutcome> {
+    const std::optional<uint64_t> index = fixture.take_cold_key();
+    if (!index.has_value()) {
+      state.SkipWithError(std::format(
+          "cold/NNIntGet: the pool of {} never-read keys is spent; fewer "
+          "repetitions, or raise kColdPoolKeys",
+          kColdPoolKeys));
+      return std::nullopt;
+    }
+    write_nnint_key(memory_span, call.key_address, KeySpace::kCold, *index);
+    return invoke_syscall_entry(fixture.handler(), memory_span, call);
+  };
+
+  const std::optional<SyscallOutcome> warm = next_call();
+  if (!warm.has_value()) {
+    fixture.pop_frame(std::move(trace), false);
+    return;
+  }
+  if (!warm->ok) {
+    fail_row(state, call, *warm);
+    fixture.pop_frame(std::move(trace), false);
+    return;
+  }
+
+  int64_t calls = 0;
+  for (auto _ : state) {
+    const std::optional<SyscallOutcome> outcome = next_call();
+    if (!outcome.has_value()) {
+      break;
+    }
+    benchmark::DoNotOptimize(outcome->gas);
+    if (!outcome->ok) {
+      fail_row(state, call, *outcome);
+      break;
+    }
+    benchmark::ClobberMemory();
+    ++calls;
+  }
+  fixture.pop_frame(std::move(trace), false);
+
+  state.SetItemsProcessed(calls);
+  state.counters["gas"] = benchmark::Counter(static_cast<double>(warm->gas));
+}
+
 void
 register_benchmarks()
 {
@@ -894,6 +1401,64 @@ register_benchmarks()
                                    .c_str(),
                                bm_syscall_vm,
                                verify_signature_call(kVerifyVmRow));
+
+  // NNInt, warm: the key's view is already in the active frame. The Get rows
+  // read a view loaded from the snapshot; SetAdd overwrites a staged write.
+  benchmark::RegisterBenchmark("entry/NNIntGet", bm_syscall_entry,
+                               nnint_get_call(true));
+  benchmark::RegisterBenchmark("vm/NNIntGet", bm_syscall_vm,
+                               nnint_get_call(true));
+  benchmark::RegisterBenchmark("entry/NNIntGetNoLoad", bm_syscall_entry,
+                               nnint_get_call(false));
+  benchmark::RegisterBenchmark("entry/NNIntSetAdd", bm_syscall_entry,
+                               nnint_set_add_call());
+  benchmark::RegisterBenchmark("vm/NNIntSetAdd", bm_syscall_vm,
+                               nnint_set_add_call());
+
+  // The sweeps. Depth is frames on top of the fixture's two; the deepest is
+  // the deepest stack the stock network config admits, since the parent walk
+  // on a first touch is linear in it and the schedule has to hold at the top.
+  const uint32_t max_depth = stock_network_config().max_cross_invoke_depth - 2;
+  const std::array<uint32_t, 3> depths = {1, 16, max_depth};
+  const std::array<uint64_t, 4> key_counts = {1, 16, 256, kFirstTouchKeys};
+  for (const uint32_t depth : depths) {
+    benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth).c_str(),
+                                 bm_frame_push, depth);
+  }
+  for (const uint32_t depth : depths) {
+    for (const uint64_t keys : key_counts) {
+      benchmark::RegisterBenchmark(
+          std::format("frame/NNIntGetFirstTouch/{}/{}", depth, keys).c_str(),
+          bm_frame_sweep, depth, keys, nnint_get_call(true),
+          KeySpace::kFirstTouch, /*commit_innermost=*/false);
+    }
+  }
+  for (const uint64_t keys : key_counts) {
+    benchmark::RegisterBenchmark(
+        std::format("frame/NNIntGetFirstTouchNoLoad/1/{}", keys).c_str(),
+        bm_frame_sweep, 1U, keys, nnint_get_call(false), KeySpace::kFirstTouch,
+        /*commit_innermost=*/false);
+    benchmark::RegisterBenchmark(
+        std::format("frame/NNIntSetAddFirstTouch/1/{}", keys).c_str(),
+        bm_frame_sweep, 1U, keys, nnint_set_add_call(), KeySpace::kSetAdd,
+        /*commit_innermost=*/false);
+    // Two frames: a fresh parent for the child to commit into, so the merge
+    // takes the insert path every iteration rather than the assignment path a
+    // parent that already held the keys would offer.
+    benchmark::RegisterBenchmark(
+        std::format("frame/NNIntSetAddMerge/{}", keys).c_str(), bm_frame_sweep,
+        2U, keys, nnint_set_add_call(), KeySpace::kMerge,
+        /*commit_innermost=*/true);
+    benchmark::RegisterBenchmark(
+        std::format("frame/NNIntSetAddDiscard/{}", keys).c_str(),
+        bm_frame_sweep, 2U, keys, nnint_set_add_call(), KeySpace::kMerge,
+        /*commit_innermost=*/false);
+  }
+
+  // Last, because it leaves the shared snapshot cache a quarter-million
+  // entries larger than every row before it found it.
+  benchmark::RegisterBenchmark("cold/NNIntGet", bm_nnint_cold)
+      ->Iterations(kColdIterations);
 }
 
 // Everything needed to know whether this run is comparable with another one,

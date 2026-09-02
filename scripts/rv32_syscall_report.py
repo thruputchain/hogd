@@ -33,6 +33,7 @@ import math
 import re
 import statistics
 import sys
+import textwrap
 
 # One gas is 1/RESOLUTION of a baseline instruction. Matches
 # rv32_gas_report.py's default; a syscall schedule built at a different
@@ -93,6 +94,30 @@ RATE_DENOMINATORS = (1, 2, 4, 8, 16, 32, 64)
 RATE_OVERCHARGE_TARGET = 1.10
 
 SHA256_ROW = re.compile(r"^(entry|vm)/SHA256/(\d+)$")
+
+# The storage rows. frame/ rows time one iteration of "open D frames, issue
+# the call on K distinct keys in the innermost, close them all", so they are
+# read as a line in K per depth; frame/Push/D is the K=0 point measured
+# directly. cold/ rows are one call each, against the mock db, and are kept
+# out of every schedule number on purpose -- see STORAGE_COLD_NOTE.
+FRAME_PUSH_ROW = re.compile(r"^frame/Push/(\d+)$")
+FRAME_SWEEP_ROW = re.compile(r"^frame/([A-Za-z0-9]+)/(\d+)/(\d+)$")
+FRAME_COMMIT_ROW = re.compile(r"^frame/([A-Za-z0-9]+)(Merge|Discard)/(\d+)$")
+COLD_ROW = re.compile(r"^cold/(.+)$")
+
+# A sweep's per-key cost is read at every K, not fitted to one slope: the
+# first run showed it rising 1.7x from 1 key to 4096 in a frame, and a line
+# through that has a negative intercept and describes nothing. Worst-over-best
+# across the sweep beyond this is reported as NOT FLAT, and the schedule is
+# built from the dearest point rather than an average.
+STORAGE_FLATNESS_TOLERANCE = 1.25
+
+STORAGE_COLD_NOTE = (
+    "cold/ rows miss the snapshot cache on every call and go to the db proxy. "
+    "The server answering is the benchmark's in-process mock, whose lookup is "
+    "a hash-map find, so this is the executor-side cost of going to the db -- "
+    "the proxy, the RPC, the cache insert -- and not the cost of hog_db. It is "
+    "a floor under a cold read and is excluded from --schedule.")
 
 
 def load(path):
@@ -216,6 +241,224 @@ def fit_sha256(points):
     total = sum((y - mean_y) ** 2 for y in ys)
     r_squared = 1.0 if total == 0.0 else 1.0 - residual / total
     return intercept, slope, r_squared
+
+
+def storage_push_baselines(measured):
+    """frame/Push/D rows: {depth: ns per iteration}."""
+    baselines = {}
+    for name, row in measured.items():
+        match = FRAME_PUSH_ROW.match(name)
+        if match:
+            baselines[int(match.group(1))] = row["real_time"]
+    return baselines
+
+
+def storage_sweeps(measured):
+    """frame/FAMILY/D/K rows: {family: {depth: [(keys, ns per iteration)]}}.
+
+    Commit rows (frame/FAMILYMerge/K) are not sweeps in this sense and are
+    handled by storage_commit_pairs.
+    """
+    sweeps = {}
+    for name, row in measured.items():
+        match = FRAME_SWEEP_ROW.match(name)
+        if not match:
+            continue
+        family, depth, keys = match.group(1), int(match.group(2)), \
+            int(match.group(3))
+        sweeps.setdefault(family, {}).setdefault(depth, []).append(
+            (keys, row["real_time"]))
+    for family in sweeps.values():
+        for depth in family:
+            family[depth].sort()
+    return sweeps
+
+
+def storage_commit_pairs(measured):
+    """frame/FAMILYMerge/K against frame/FAMILYDiscard/K:
+    {family: [(keys, merge_ns, discard_ns)]}.
+
+    The two rows do identical work up to the child's close, so their
+    difference over K is what committing one staged item into a parent costs.
+    """
+    merges, discards = {}, {}
+    for name, row in measured.items():
+        match = FRAME_COMMIT_ROW.match(name)
+        if not match:
+            continue
+        family, kind, keys = match.group(1), match.group(2), int(match.group(3))
+        (merges if kind == "Merge" else discards).setdefault(family, {})[keys] \
+            = row["real_time"]
+    pairs = {}
+    for family, by_keys in merges.items():
+        for keys, merge_ns in sorted(by_keys.items()):
+            discard_ns = discards.get(family, {}).get(keys)
+            if discard_ns is not None:
+                pairs.setdefault(family, []).append((keys, merge_ns, discard_ns))
+    return pairs
+
+
+def cold_rows(measured, sd):
+    """cold/NAME rows: {name: (ns per call, stddev)}.
+
+    The cold row registers with a fixed iteration count, which Google
+    Benchmark appends to the name as `/iterations:N`; that is a run parameter
+    and not part of the syscall's name, so it is dropped.
+    """
+    out = {}
+    for name, row in measured.items():
+        match = COLD_ROW.match(name)
+        if match:
+            syscall = match.group(1).split("/iterations:", 1)[0]
+            out[syscall] = (row["real_time"],
+                            sd.get(name, {}).get("real_time", 0.0))
+    return out
+
+
+def storage_summary(measured, sd):
+    """Everything the storage tables and the schedule need, or None when the
+    run has no storage rows.
+
+    Per sweep family and depth: the per-key cost at every K against the push
+    baseline, the dearest of them, and whether the sweep is flat. Per commit
+    family: the per-item merge cost at each K. The cold rows verbatim.
+    """
+    baselines = storage_push_baselines(measured)
+    sweeps = storage_sweeps(measured)
+    pairs = storage_commit_pairs(measured)
+    cold = cold_rows(measured, sd)
+    if not (baselines or sweeps or pairs or cold):
+        return None
+    summary = {"baselines": baselines, "sweeps": {}, "commits": {},
+               "cold": cold}
+    for family, by_depth in sweeps.items():
+        for depth, points in by_depth.items():
+            baseline = baselines.get(depth)
+            entry = {"points": points, "baseline_ns": baseline}
+            if baseline is None:
+                summary["sweeps"].setdefault(family, {})[depth] = entry
+                continue
+            # Per-key cost at each K: the iteration minus the measured
+            # frames-only baseline, over the keys. A point per K rather than
+            # one slope, because the cost is not constant in K -- the frame's
+            # map grows, rehashes, and stops fitting in cache -- and a schedule
+            # has to hold at the dearest point, which is what "worst" is.
+            per_key = [(keys, (ns - baseline) / keys)
+                       for keys, ns in points if keys > 0]
+            entry["per_key"] = per_key
+            costs = [cost for _, cost in per_key if cost > 0]
+            if costs:
+                entry["worst_ns"] = max(costs)
+                entry["worst_at"] = max(per_key, key=lambda p: p[1])[0]
+                entry["spread"] = max(costs) / min(costs)
+                entry["flat"] = entry["spread"] <= STORAGE_FLATNESS_TOLERANCE
+            summary["sweeps"].setdefault(family, {})[depth] = entry
+    for family, rows_ in pairs.items():
+        summary["commits"][family] = [
+            (keys, merge_ns, discard_ns, (merge_ns - discard_ns) / keys)
+            for keys, merge_ns, discard_ns in rows_ if keys > 0]
+    return summary
+
+
+def parent_walk_ns(summary, family="NNIntGetFirstTouch"):
+    """What each additional parent frame adds to a first touch: the per-key
+    cost at the deepest measured depth minus the shallowest, per frame of
+    difference, at the largest K both were measured at. None when the family
+    was not swept over depth.
+
+    Returns (ns per frame, shallow depth, deep depth, K).
+    """
+    by_depth = summary["sweeps"].get(family, {})
+    depths = sorted(d for d, e in by_depth.items() if e.get("per_key"))
+    if len(depths) < 2:
+        return None
+    shallow, deep = depths[0], depths[-1]
+    shallow_costs = dict(by_depth[shallow]["per_key"])
+    deep_costs = dict(by_depth[deep]["per_key"])
+    common = sorted(set(shallow_costs) & set(deep_costs))
+    if not common:
+        return None
+    keys = common[-1]
+    return ((deep_costs[keys] - shallow_costs[keys]) / (deep - shallow),
+            shallow, deep, keys)
+
+
+def print_storage(summary, unit_ns=None):
+    """The storage tables. With a unit, costs are also shown in gas."""
+    def gas(ns):
+        return f"{ns / unit_ns:>8.1f}" if unit_ns else f"{'-':>8}"
+
+    if summary["baselines"]:
+        print()
+        header = (f"{'frames opened+discarded':<28}{'ns/iteration':>14}"
+                  f"{'ns/frame':>10}{'gas/frame':>10}")
+        print(header)
+        print("-" * len(header))
+        for depth, ns in sorted(summary["baselines"].items()):
+            print(f"{depth:<28}{ns:>14.1f}{ns / depth:>10.1f}"
+                  f"{gas(ns / depth):>10}")
+
+    for family, by_depth in sorted(summary["sweeps"].items()):
+        print()
+        header = (f"{family:<28}{'depth':>6}  ns/key at K = "
+                  + " ".join(f"{k:>8}" for k, _ in
+                             next(iter(by_depth.values())).get("per_key", []))
+                  + f"{'worst':>10}{'gas':>8}{'spread':>8}")
+        print(header)
+        print("-" * len(header))
+        for depth, entry in sorted(by_depth.items()):
+            if not entry.get("per_key"):
+                print(f"{'':<28}{depth:>6}  (no frame/Push/{depth} baseline "
+                      "to subtract)")
+                continue
+            cells = " ".join(f"{cost:>8.1f}" for _, cost in entry["per_key"])
+            flag = "" if entry.get("flat", True) else "  <- NOT FLAT"
+            print(f"{'':<28}{depth:>6}{'':>15}{cells}"
+                  f"{entry['worst_ns']:>10.1f}{gas(entry['worst_ns'])}"
+                  f"{entry['spread']:>7.2f}x{flag}")
+    if summary["sweeps"]:
+        print()
+        print("ns/key is (iteration - frame/Push/depth) / K: what each of K "
+              "first touches in one")
+        print("frame costs, at that K. NOT FLAT marks a spread past "
+              f"{STORAGE_FLATNESS_TOLERANCE:g}x; the dearest point")
+        print("is the one a schedule has to cover.")
+    walk = parent_walk_ns(summary)
+    if walk:
+        per_frame, shallow, deep, keys = walk
+        print()
+        print(f"parent walk: a first touch costs {per_frame:.1f} ns more per "
+              f"frame of depth (depth {shallow} to {deep}, at K={keys}).")
+        print("Every miss in the active frame looks in every parent before "
+              "creating a view; at the")
+        print("configured maximum depth that is the dominant term, and it is "
+              "paid whether or not any")
+        print("parent holds the key.")
+
+    for family, rows_ in sorted(summary["commits"].items()):
+        print()
+        header = (f"{family + ' commit':<28}{'K':>6}{'merge ns':>11}"
+                  f"{'discard ns':>12}{'ns/item':>9}{'gas/item':>9}")
+        print(header)
+        print("-" * len(header))
+        for keys, merge_ns, discard_ns, per_item in rows_:
+            print(f"{'':<28}{keys:>6}{merge_ns:>11.1f}{discard_ns:>12.1f}"
+                  f"{per_item:>9.1f}{gas(per_item):>9}")
+        print("Merge and Discard are the same writes in a child frame; Merge "
+              "commits them into a fresh")
+        print("parent and Discard drops them. The difference is what a "
+              "successful child costs its parent")
+        print("per staged item, which is where a write's in-executor cost "
+              "lands rather than in the syscall.")
+
+    if summary["cold"]:
+        print()
+        header = f"{'cold (mock db)':<28}{'ns/call':>10}{'±':>9}"
+        print(header)
+        print("-" * len(header))
+        for name, (ns, err) in sorted(summary["cold"].items()):
+            print(f"{name:<28}{ns:>10.1f}{err:>9.2f}")
+        print(textwrap.fill(STORAGE_COLD_NOTE, width=78))
 
 
 def choose_rate(gas_per_unit):
@@ -537,6 +780,10 @@ def print_table(data):
                       f"{max(rates):.4f} ({max(rates) / min(rates):.0f}x "
                       "spread within one syscall)")
 
+    storage = storage_summary(measured, sd)
+    if storage:
+        print_storage(storage)
+
     skipped = failed_rows(data)
     if skipped:
         print()
@@ -736,6 +983,28 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
                                    if block_excess_ns > 0 else 0),
             })
         proposal["sweep"] = sha256_points(measured)
+
+    storage = storage_summary(measured, stddevs(bench))
+    if storage:
+        proposal["storage"] = storage
+        # The shape the measurement suggests, in gas. Each is the slope of a
+        # sweep, so the crossing is not in it: a first touch is priced as the
+        # warm call (which is in the syscall table above) plus this.
+        first = storage["sweeps"].get("NNIntGetFirstTouch", {})
+        shallow = min(first) if first else None
+        if shallow is not None and "worst_ns" in first[shallow]:
+            # The dearest point of the sweep at the shallowest depth: the
+            # per-frame walk is priced separately, and the cost in K is not
+            # flat, so worst-case pricing takes the worst K.
+            proposal["storage_first_touch_gas"] = to_gas(
+                first[shallow]["worst_ns"])
+        walk = parent_walk_ns(storage)
+        if walk:
+            proposal["storage_parent_frame_gas"] = to_gas(walk[0])
+        commits = storage["commits"].get("NNIntSetAdd", [])
+        if commits:
+            proposal["storage_commit_item_gas"] = to_gas(
+                max(per_item for _, _, _, per_item in commits))
     return proposal
 
 
@@ -870,6 +1139,12 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  billed depending on an argument the caller picks. Lower is "
               "flatter.")
 
+    storage = proposal.get("storage")
+    if storage:
+        print()
+        print("Storage (NNInt), in this run's gas unit:")
+        print_storage(storage, unit_ns=proposal["unit_ns"])
+
     print()
     print("=" * 68)
     print("Proposed hogd/hog_exec/runtime/gas_cost_table.h constants")
@@ -904,6 +1179,31 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  kSyscallGasCostSchedule's names and costs, not the formula,")
         print("  so any constant the formula reads has to be an")
         print("  entry in kSyscallGasCostSchedule to be hashed.")
+    if storage:
+        print()
+        print("  Storage, measured and not yet priced. These are the dearest")
+        print("  points of the sweeps above, in gas; the shape they suggest,")
+        print("  with the constants it would need, is:")
+        if "storage_first_touch_gas" in proposal:
+            print(f"    kStorageFirstTouchCost = "
+                  f"{proposal['storage_first_touch_gas']};   // new: per key "
+                  "this tx has not touched, snapshot-cached")
+        if "storage_parent_frame_gas" in proposal:
+            print(f"    kStorageParentFrameCost = "
+                  f"{proposal['storage_parent_frame_gas']};  // new: per "
+                  "open parent frame, per first touch")
+        if "storage_commit_item_gas" in proposal:
+            print(f"    kStorageCommitItemCost = "
+                  f"{proposal['storage_commit_item_gas']};   // new: per "
+                  "staged item a successful child hands its parent")
+        print("  A first touch is a fact about the transaction's own history")
+        print("  -- deterministic, since it depends only on this tx's earlier")
+        print("  syscalls -- and not about the block's cache, which is not.")
+        print("  Whether that state-dependence belongs in the schedule is the")
+        print("  decision the numbers are input to. The cold row is not")
+        print(textwrap.fill("proposed: " + STORAGE_COLD_NOTE.split(". ", 1)[1],
+                            width=78, initial_indent="  ",
+                            subsequent_indent="  "))
     print()
     print("Changing any of these is a coordinated gas-schedule update: each")
     print("is an entry in kSyscallGasCostSchedule, which is folded into")

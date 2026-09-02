@@ -937,6 +937,176 @@ How much margin a protocol constant deserves is a policy call, not a
 measurement. The report's job is to make the size of it visible rather than let
 it be discovered later; picking it is yours.
 
+### Storage: the NNInt rows
+
+The first stateful family, measured in the same binary. NNInt is the smallest
+storage syscall -- a 16-byte value, no length axis -- so what it isolates is
+the machinery every storage syscall shares: the item view, the frame stack, the
+snapshot cache. Bytestrings add a byte term on top of this and are the next
+row set.
+
+**Why a storage syscall cannot be priced from its arguments.** The stateless
+rows above cost what they cost whatever came before them. A storage read does
+not. `SystemCallHandler::get_nnint` asks `InvocationFrameStack::get_item_view`
+for the key, and what that costs depends on three things the arguments do not
+name:
+
+- whether this transaction has touched the key already -- the view is in the
+  active frame, and the call is one map lookup;
+- if not, how deep the invocation stack is -- a miss in the active frame looks
+  in *every* parent frame before creating a fresh view, so a first touch at
+  depth 200 does 200 lookups where the same call at depth 1 does one, and it
+  does them whether or not any parent holds the key;
+- and, for a forced load, whether the block's snapshot cache holds the key --
+  a hit is a shared-lock find, a miss is a database round trip.
+
+Writes have the mirror shape: `set_nnint` stages an item in the frame's view
+and consults nothing, and the work lands later, when a successful child frame
+moves its staged items into its parent (`commit_successful_child_frame`) and
+again when the root commits its delta batch to the database.
+
+So each of those is a regime, and each regime is a row that puts the handler in
+exactly that state before every timed call:
+
+| row | what every timed call does |
+|---|---|
+| `entry/NNIntGet`, `vm/NNIntGet` | warm read: the view is in the active frame, loaded from the snapshot |
+| `entry/NNIntGetNoLoad` | warm read without `force_load_from_snapshot` |
+| `entry/NNIntSetAdd`, `vm/NNIntSetAdd` | warm write: overwrites a staged item already in the frame |
+| `frame/Push/D` | open D frames and discard them; no syscalls. The baseline under every sweep |
+| `frame/NNIntGetFirstTouch/D/K` | in a fresh frame at depth D, read K distinct keys once each: miss the frame, walk D+1 parents, create a view, load it from the snapshot cache |
+| `frame/NNIntGetFirstTouchNoLoad/1/K` | the same with no load: create the view and answer from it |
+| `frame/NNIntSetAddFirstTouch/1/K` | first-touch writes: create the view, stage the item |
+| `frame/NNIntSetAddMerge/K`, `frame/NNIntSetAddDiscard/K` | K writes in a child frame that then commits into a fresh parent, or is discarded. The difference is the per-item commit cost |
+| `cold/NNIntGet` | a read that misses the snapshot cache, once per call |
+
+**How each regime is kept to itself.** The sweep rows open their frames inside
+the timed iteration and close them as *failed*, so whatever they touched is
+discarded and the next iteration starts from the state the last one found. Each
+regime reads and writes its own key space (the key's first byte is the regime
+tag), so one row's warm pass cannot leave a key in a frame, or in the snapshot
+cache, that another row then finds warm. The first-touch keys are seeded in the
+mock snapshot and faulted into the cache by the row's warm pass, so the timed
+reads are cache hits by construction; the cold row's keys are used strictly
+once, from a pool sized against a fixed iteration count, and the row fails with
+a message rather than recycling one. Every call in every iteration is checked,
+not only the warm pass: a stateful row can start failing partway, and one that
+timed the error path from then on would report a fast syscall.
+
+The cold row is registered last, because it leaves the shared snapshot cache a
+quarter-million entries larger than every row before it found it, and a lookup
+into that cache is not the same lookup.
+
+**How to read the sweeps.** Each `frame/` family is a line in K per depth, fit
+through the measured K=0 point (`frame/Push/D`, the same frames with no calls).
+The slope is the per-key cost and the report prints it. Two checks go with it,
+because R2 on a sweep this wide says nothing (the 4096 point carries almost all
+the variance): the fitted intercept has to agree with the push baseline it
+extrapolates to, and the per-point residuals have to stay flat in K. A residual
+that grows with K is a per-key cost that is not constant -- the frame's map not
+being O(1), or something else in the iteration scaling with the keys -- and the
+report flags an intercept more than 25% off.
+
+The depth axis is the parent walk. The per-key slope at depth 254 -- the
+deepest stack the stock network config admits -- minus the slope at depth 1,
+over the difference, is what one open parent frame adds to every first touch.
+
+**What the cold row is, and is not.** It measures everything on the executor's
+side of a snapshot-cache miss: the miss under the shared lock, the
+`DatabaseProxy` RPC -- serialized, over a local socket -- the
+`SnapshotStorageItem` built from the reply, the cache insert. The server
+answering is the benchmark's in-process mock, whose lookup is a hash-map find.
+So it is the fixed cost of *going* to the database and not the cost of the
+database, a floor under a cold read rather than the read. The report prints it
+in its own table and keeps it out of `--schedule`.
+
+There is a more basic reason it is not proposed. Whether a key is in the
+snapshot cache depends on which transactions ran before this one in the block,
+and validators schedule a block's transactions differently. A price that
+depended on it would not be deterministic. Whether this transaction has touched
+the key before depends only on this transaction's own earlier syscalls, which
+every validator replays identically -- so a per-transaction first-touch charge
+is a legitimate term and a per-block cache-miss charge is not. That is the
+distinction the rows are built around, and it is the same one the EVM arrived at
+with warm and cold access lists.
+
+**First results.** The same 4-core Xeon development container as the first
+stateless numbers, unpinned (see the note on `taskset` below), three
+repetitions, medians. Treat the ratios as the finding and the nanoseconds as
+host-specific; the bench-pool run supersedes these.
+
+| regime | ns | x a warm `GetBlockHeight` (86 ns) |
+|---|---:|---:|
+| `entry/NNIntGet`, warm | 187 | 2.2 |
+| `entry/NNIntGetNoLoad`, warm | 178 | 2.1 |
+| `entry/NNIntSetAdd`, warm | 204 | 2.4 |
+| one frame opened and discarded | 80 | 0.9 |
+| first touch, depth 1, 1 key in the frame | 513 | 6.0 |
+| first touch, depth 1, 4096 keys in the frame | 869 | 10.1 |
+| first touch, no load, depth 1, 4096 keys | 605 | 7.0 |
+| first-touch write, depth 1, 4096 keys | 627 | 7.3 |
+| each parent frame, per first touch | 46.5 | 0.5 |
+| first touch at depth 254, 1 key | 12154 | 141 |
+| committing one staged item into a parent, 4096 items | 298 | 3.5 |
+| snapshot-cache miss, against the mock | 174975 | 2034 |
+
+Four things follow.
+
+**A warm read is two crossings' worth, and it is the key hash.** `NNIntGet`
+and `NNIntGetNoLoad` land within 10 ns of each other at ~180 ns, against 86 ns
+for a stateless read. Whether the view is consulted for a snapshot value or not
+barely registers; what the other ~100 ns buys is `get_item_view`'s lookup,
+which hashes a 68-byte `AddressAndKey` (`std::hash<AddressAndKey>` in
+`xdr_util.h` serializes address, key type and key into a buffer and hashes
+that) and probes the frame's map. A warm write costs the same plus a variant
+emplace.
+
+**A first touch is not one cost; it depends on how many keys the frame already
+holds.** At depth 1 the first of 4096 first touches costs 513 ns and the
+4096th about 870 -- a 1.7x spread that the report marks `NOT FLAT`. The frame's
+`modified_items_` is an `unordered_map`: as it fills it rehashes (every
+rehash re-hashes every key it holds, at the 68-byte hash above), allocates a
+node per key, and stops fitting in L2 somewhere past a few hundred entries. The
+no-load and write sweeps show the same shape at ~600 ns, so ~260 ns of the
+loaded first touch is the snapshot-cache lookup (a second hash of the same key,
+a shared lock, a find) and the rest is creating the view. A fitted line does not
+describe this -- the first draft of the report fitted one and got a negative
+intercept -- which is why the report prints the per-key cost at every K and
+takes the dearest.
+
+**The parent walk is linear in depth and dominates at the top.** Each open
+parent frame adds 46.5 ns to every first touch, which is one more
+`AddressAndKey` hash and one more probe of a map that does not hold the key. At
+depth 16 that is already more than the touch itself; at the configured maximum
+of 256 frames a single first touch costs **12 µs -- 141 crossings -- charged as
+one crossing.** It is paid whether or not any parent holds the key, and in
+production no parent can: a contract cannot be re-entered, and contract-data
+keys are namespaced by the touching frame's address, so the walk finds a view
+only for keys of other kinds (balances, for instance). For NNInt it is a pure
+loss, and the obvious fix -- hash once and probe each frame with the
+precomputed hash, or track per-key which frames hold a view -- is an
+engineering change rather than a pricing one. Until it lands, the price has to
+include it.
+
+**Writes are cheap to stage and paid for twice later.** A first-touch write
+costs what a no-load first touch costs; the syscall stages an item and stops.
+Committing that item from a successful child into a fresh parent costs another
+150-300 ns per item, rising with the count for the same map-growth reason, and
+the root commit's delta batch to hog_db is not measured here at all. Any
+per-write price has to prepay both halves, because neither is a syscall the
+schedule sees.
+
+The cold row is what it says: 175 µs against the in-process mock, three
+orders of magnitude over a warm read, most of it the coroutine round trip
+through the proxy rather than any lookup. Its ±8 µs is also the widest of any
+row. It is on the record so the size of what the schedule declines to price is
+known, not as a candidate for the table.
+
+A note on pinning: `taskset -c <one core>` crashes this binary with SIGFPE in
+`x23::PerCpuSet::lookup` before the first row, because the per-CPU set sizes
+itself from the affinity mask and a single-core mask leaves it dividing by
+zero. A mask of several cores does not trip it. These numbers are unpinned.
+
 ### What follows
 
 - **The zero-gas reads are the urgent item.** On hog10 a loop of
@@ -964,9 +1134,18 @@ it be discovered later; picking it is yours.
   `kSyscallGasCostSchedule` is already in `kGasScheduleDigest` so the input
   exists, and `HOGD_RV32_ENGINE_SOURCES` wants a syscall-path equivalent, or a
   rewrite of `syscall_entry_outer.h` moves these numbers with nothing saying so.
-- Stateful syscalls remain unmeasured and are the harder half: their worst case
-  is a snapshot-cache miss, which is a DB cost rather than a syscall cost and is
-  not reproducible the way these are. Even the stateless set has a cold path --
-  the first `GetBlockHeight` in a block fetches the db tip through the proxy and
-  every later one reads an atomic. The numbers above are the steady state, which
-  is what a contract making more than one syscall sees.
+- NNInt is measured (above) and not yet priced. The rest of the storage family
+  is not: bytestrings add a length axis to the same machinery and are the next
+  rows; `DeleteObject` and the retrocausal queue calls follow the same
+  frame-and-snapshot pattern with their own item types; the auth registry calls
+  reach a different table. What none of the rows reach is the root commit --
+  `try_commit_transaction`'s delta batch and hog_db's item locks -- which is
+  where a write's cost lands last, and needs a real database rather than the
+  mock to measure.
+- The snapshot-cache miss is measured against the mock and deliberately not
+  proposed. Its worst case is a hog_db read, which is a database cost rather
+  than a syscall cost and is not reproducible the way these are. Even the
+  stateless set has a cold path -- the first `GetBlockHeight` in a block
+  fetches the db tip through the proxy and every later one reads an atomic. The
+  numbers above are the steady state, which is what a contract making more than
+  one syscall sees.

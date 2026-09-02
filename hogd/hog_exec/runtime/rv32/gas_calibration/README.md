@@ -251,8 +251,11 @@ syscall has no equivalent knob: the guest controls the argument sizes and
 nothing else, and argument size is already an explicit term in the cost
 function. So the sweep is two-dimensional -- calls, and bytes per call -- with
 no worst-case-context search behind it. That is why stateless syscalls are the
-tractable half of syscall pricing, and why the stateful ones (whose worst case
-is a snapshot load) will need something this harness does not do.
+tractable half of syscall pricing. The stateful ones have exactly such an axis
+-- whether the transaction has touched the key, how deep the stack is, whether
+the snapshot cache holds it -- and `rv32_syscall_entry_bench`'s `frame/` and
+`cold/` rows sweep it regime by regime; see "Storage: the NNInt rows" in
+`docs/rv32/rv32-gas-calibration.md`.
 
 ## Comparing runs
 
