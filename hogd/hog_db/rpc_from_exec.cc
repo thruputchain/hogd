@@ -465,19 +465,19 @@ HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
-  HogDbStatus<OwningSpan<const std::byte>> wasm =
-      ctx_.get_db().read_wasm_code(hash);
+  HogDbStatus<OwningSpan<const std::byte>> code =
+      ctx_.get_db().read_contract_code(hash);
 
   if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
     return ExpectedContract(RPCError::kRPCBadBlockID);
 
-  if (!wasm)
-    return ExpectedContract(to_rpc_error(wasm.error()));
+  if (!code)
+    return ExpectedContract(to_rpc_error(code.error()));
 
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
 
-  x23::deserialize(&out.contract(), x23::BufView{*wasm});
+  x23::deserialize(&out.contract(), x23::BufView{*code});
 
   return out;
 }
