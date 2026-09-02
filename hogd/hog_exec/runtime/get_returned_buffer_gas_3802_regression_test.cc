@@ -77,11 +77,13 @@ protected:
           auto ret = ctx.syscall<SyscallNo::kReturn>(
               std::span<const std::byte>{expected}, false,
               std::span<const std::byte>{});
-          EXPECT_FALSE(ret.has_value()); // Return yields a non-recoverable status
+          EXPECT_FALSE(
+              ret.has_value()); // Return yields a non-recoverable status
           return {};
         });
 
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+        fns_caller;
     fns_caller.emplace(
         0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
           const CopyableInvokeInputs inputs{
@@ -90,9 +92,11 @@ protected:
               .flags = 0,
           };
           CopyableInvokeOutputs outputs{};
-          auto invoke_res = ctx.syscall<SyscallNo::kInvoke>(
-              child, std::span<const std::byte>{},
-              std::span<uint32_t const>{}, inputs, outputs);
+          auto invoke_res =
+              ctx.syscall<SyscallNo::kInvoke>(child,
+                                              std::span<const std::byte>{},
+                                              std::span<uint32_t const>{},
+                                              inputs, outputs);
           EXPECT_TRUE(invoke_res.has_value());
           EXPECT_EQ(invoke_res.value(),
                     SyscallErrorCode::kSyscallErrorCodeNone);
@@ -106,8 +110,7 @@ protected:
                 std::span<std::byte>{out}, written, std::span<std::byte>{},
                 ids_written);
             EXPECT_TRUE(get_res.has_value());
-            EXPECT_EQ(get_res.value(),
-                      SyscallErrorCode::kSyscallErrorCodeNone);
+            EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
             // Every retrieval copies the full retained buffer: this is the
             // length-proportional work the report showed going unpriced.
             EXPECT_EQ(written, kBufferLen);
