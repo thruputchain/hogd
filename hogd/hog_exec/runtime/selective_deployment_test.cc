@@ -1451,6 +1451,60 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
   EXPECT_FALSE(lookup_contract_from_db(first_hash).has_value());
 }
 
+// The same contract attached twice is rejected during initial validation
+// rather than silently deduplicated: newly_created_contracts_ is keyed by
+// hash, so a repeat would otherwise vanish and two different transaction
+// encodings would have identical effect.
+TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
+{
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(std::string("duplicated"));
+  auto contract_hash = sha256(contract);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        ADD_FAILURE() << "transaction body must not execute when a contract "
+                         "is attached twice";
+        co_return InvokeError{InvokeErrorCode::Deterministic};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  NativeContext native_context(std::move(contract_map));
+  NoopRv32Context noop_context;
+  MultiplexedContext context(
+      std::unordered_map<ContractType, std::pair<RuntimeContext const *, bool>>{
+          {ContractType::kNative, {&native_context, false}},
+          {ContractType::kRv32, {&noop_context, false}}});
+
+  auto deployer_contract = make_native_contract(0);
+  write_contract(deployer_contract);
+  auto deployer_addr = make_contract_address(1);
+  write_deployment(deployer_addr, deployer_contract);
+
+  setup_grant_storage_token(deployer_addr, 1'000'000'000);
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = deployer_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+          .contracts_to_deploy = {contract, contract},
+      }};
+  auto handler = make_new_system_call_handler(handler_tx, context);
+
+  auto res = handler.root_invoke()();
+  EXPECT_FALSE(res.is_root_success());
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::Deterministic});
+  EXPECT_EQ(handler.try_commit_transaction()(),
+            ExecResult::ExecResultTxDeterministicError);
+  advance_block();
+  EXPECT_FALSE(lookup_contract_from_db(contract_hash).has_value());
+}
+
 // Exactly max_new_contracts_per_tx attached contracts passes the count gate:
 // the bound is inclusive, so a transaction at the limit still runs its body.
 TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)

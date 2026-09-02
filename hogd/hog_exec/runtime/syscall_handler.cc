@@ -188,6 +188,7 @@ SystemCallHandler::SystemCallHandler(
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
+    attached_contract_count_(tx.contracts_to_deploy.size()),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                          SipHash24Hasher>
@@ -298,19 +299,29 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  // A chain bounds how many distinct contracts one transaction may attach.
-  // The bodies of the ones a contract goes on to deploy are committed as a
-  // single message at the end of the transaction, so without this an attached
-  // set large enough to overflow that message would only fail at commit --
-  // after the body ran and the root lock was taken -- where an oversized
-  // request is indistinguishable from a transport failure and is reported as
+  // Attaching the same contract twice is rejected rather than deduplicated.
+  // newly_created_contracts_ is keyed by hash, so a repeat would otherwise
+  // vanish silently and two different transaction encodings would have
+  // identical effect -- the duplicate bytes are carried, hashed into a
+  // different transaction, and then ignored. Nothing legitimate needs it.
+  if (newly_created_contracts_.size() != attached_contract_count_) {
+    error("Transaction attaches {} contracts but only {} are distinct",
+          attached_contract_count_, newly_created_contracts_.size());
+    cumulative_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::Deterministic};
+    co_return SystemStatus<void>{};
+  }
+
+  // A chain bounds how many contracts one transaction may attach. The bodies
+  // of the ones a contract goes on to deploy are committed as a single message
+  // at the end of the transaction, so without this an attached set large
+  // enough to overflow that message would only fail at commit -- after the
+  // body ran and the root lock was taken -- where an oversized request is
+  // indistinguishable from a transport failure and is reported as
   // unrecoverable (#2190).
   //
-  // Counted over the deduplicated map rather than tx.contracts_to_deploy: a
-  // repeated contract is one entry in the commit batch, so charging it twice
-  // would reject a transaction whose batch does fit. Deterministic in both
-  // proposal and validation mode -- it is a function of the transaction bytes
-  // alone, so every node reaches the same verdict.
+  // Deterministic in both proposal and validation mode: it is a function of
+  // the transaction bytes alone, so every node reaches the same verdict.
   if (newly_created_contracts_.size() >
       db_tip()->network_config.max_new_contracts_per_tx) {
     error("Transaction attaches {} contracts; chain permits {}",

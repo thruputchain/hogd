@@ -478,6 +478,13 @@ private:
   const std::optional<Uniquifier> tx_uniquifier_;
   const std::optional<ContractAddress> root_invoked_address_;
 
+  // Contracts the transaction attached, before deduplication by hash. Kept so
+  // perform_initial_validation can tell an attachment list that collapsed from
+  // one that did not: newly_created_contracts_ is keyed by hash, so a repeated
+  // contract silently vanishes into it. Zero for the test-harness constructor,
+  // which attaches nothing.
+  const size_t attached_contract_count_ = 0;
+
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
   const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
