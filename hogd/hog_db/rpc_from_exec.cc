@@ -477,7 +477,18 @@ HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
 
-  x23::deserialize(&out.contract(), x23::BufView{*wasm});
+  try {
+    x23::deserialize(&out.contract(), x23::BufView{*wasm});
+  } catch (x23::XdrException &e) {
+    // A persistent contract-code row whose inline payload does not decode as a
+    // Contract is corrupt on-disk state. Report it as a structured corruption
+    // error -- the same way the retrocausal-queue metadata path above does --
+    // rather than letting the decode exception unwind across the executor RPC
+    // boundary, where the syscall wrapper would translate it into an opaque
+    // unrecoverable host error.
+    error("failed to deserialize persistent contract row: {}", e.what());
+    return ExpectedContract(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+  }
 
   return out;
 }
