@@ -29,21 +29,35 @@ public:
                          int128_t add_before, int128_t add_after,
                          int128_t sub_before, int128_t sub_after);
 
-  // Raises a finalized delta from `before` to `after` (after >= before) for a
-  // post-commit credit, e.g. a storage over-reservation refund. Unlike
-  // try_reserve_delta this never fails: the lock is finalized, so no concurrent
-  // reservation observes the capacity counters, and the credit only releases
-  // the reserved subtraction the finalized debit already holds (plus consumes
-  // matching add capacity when the delta crosses zero). The caller guarantees
-  // the resulting committed value stays in the item's domain.
-  void apply_committed_credit(int128_t before, int128_t after)
+  // Atomically raises a finalized delta by `credit` (> 0) for a post-commit
+  // credit, e.g. a storage over-reservation refund, refusing (no-op, returns
+  // false) if the committed value would exceed `max_delta`. The bounds check
+  // and the delta update are one CAS, so concurrent refunds against the same
+  // finalized lock cannot each validate against a stale delta and then overshoot
+  // the ceiling on the combined update. Unlike try_reserve_delta the refund is a
+  // release of the subtraction the finalized debit already reserved rather than
+  // a fresh add against the snapshot ceiling, so it does not deadlock on the
+  // zero add capacity of a max-balance snapshot. Only the committed delta gates
+  // admission -- the lock is finalized, so no reservation consults the capacity
+  // counters; they are rebalanced to stay consistent for observability.
+  bool try_apply_committed_credit(int128_t credit, int128_t max_delta)
   {
-    assert(after >= before);
-    int128_t add_delta = (after > 0 ? after : 0) - (before > 0 ? before : 0);
-    int128_t sub_delta = (after < 0 ? after : 0) - (before < 0 ? before : 0);
-    add_.fetch_sub(add_delta, std::memory_order_relaxed);
-    sub_.fetch_add(sub_delta, std::memory_order_relaxed);
-    delta_.fetch_add(after - before, std::memory_order_relaxed);
+    assert(credit > 0);
+    int128_t before = delta_.load(std::memory_order_relaxed);
+    for (;;) {
+      auto [after, overflow] = overflowing_add(before, credit);
+      if (overflow || after > max_delta) {
+        return false;
+      }
+      if (delta_.compare_exchange_strong(before, after,
+                                         std::memory_order_relaxed)) {
+        int128_t add_delta = (after > 0 ? after : 0) - (before > 0 ? before : 0);
+        int128_t sub_delta = (after < 0 ? after : 0) - (before < 0 ? before : 0);
+        add_.fetch_sub(add_delta, std::memory_order_relaxed);
+        sub_.fetch_add(sub_delta, std::memory_order_relaxed);
+        return true;
+      }
+    }
   }
 
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }

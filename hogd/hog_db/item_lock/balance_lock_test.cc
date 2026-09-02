@@ -344,4 +344,24 @@ TEST(BalanceLockTest, ImpossibleRefundReturnsConflict)
   EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
 }
 
+// Each refund rechecks the ceiling against the current delta, so a second
+// refund that would overshoot INT128_MAX is rejected even after a first one
+// succeeded. This is the serialized form of two concurrent refunds against the
+// same finalized lock (they cannot both pass against a stale delta and then
+// overflow on the combined update).
+TEST(BalanceLockTest, SecondRefundThatWouldOvershootReturnsConflict)
+{
+  constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
+  BalanceLock lock(kMax - 10);
+
+  // Room for a committed delta of at most +10 above the snapshot.
+  EXPECT_TRUE(lock.add_committed_credit(8).has_value());
+
+  auto status = lock.add_committed_credit(8);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error().code(), HogDbCode::kConflict);
+
+  EXPECT_EQ(lock.build_result(make_dummy_context()), kMax - 2);
+}
+
 } // namespace hogd

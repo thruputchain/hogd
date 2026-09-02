@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <limits>
 
 #include "db_conflict.hh"
 #include "db_sched.hh"
@@ -85,17 +86,19 @@ BalanceLock::add_committed_credit(int128_t credit)
   // already reserved -- the committed delta moves toward zero. Modelling it as
   // an add reservation dies on a max-balance snapshot, whose add capacity is
   // zero, even though the net value is representable (#3782). Compose it with
-  // the finalized debit instead, guarding the balance domain and surfacing an
-  // impossible refund as a recoverable conflict rather than aborting the node.
+  // the finalized debit instead. The committed value snapshot + delta must stay
+  // <= INT128_MAX, i.e. delta <= INT128_MAX - snapshot; the lower bound holds
+  // automatically because a positive credit only raises an already-nonnegative
+  // committed value. try_apply_committed_credit enforces that ceiling and the
+  // delta update atomically, so concurrent refunds on this address in the same
+  // block cannot both pass and then overshoot. An impossible refund -- only
+  // reachable from tampered recovery state -- becomes a recoverable conflict
+  // instead of aborting the node.
   int128_t snapshot = snapshot_balance_.snapshot_value().value_or(0);
-  int128_t before = delta_bounds_.get_delta();
-  auto [after, delta_overflow] = overflowing_add(before, credit);
-  bool committed_overflow = overflowing_add(snapshot, after).second;
-  if (delta_overflow || committed_overflow) {
+  int128_t max_delta = std::numeric_limits<int128_t>::max() - snapshot;
+  if (!delta_bounds_.try_apply_committed_credit(credit, max_delta)) {
     return HogDbError{HogDbCode::kConflict};
   }
-
-  delta_bounds_.apply_committed_credit(before, after);
   return {};
 }
 
