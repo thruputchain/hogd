@@ -640,7 +640,12 @@ HogDbDAO::get_charged_storage_cost_and_cache_data(
     switch (item.value().type) {
     case kNNInt128:
     {
-      CHECK(item.value().value.size() == sizeof(int128_xdr));
+      // A kNNInt128 row whose value is not exactly int128_xdr-sized can only
+      // come from tampered/corrupt on-disk state (recovery validates record
+      // shape, not this application-level invariant). Report it as corruption
+      // instead of reaching a fatal size invariant.
+      if (item.value().value.size() != sizeof(int128_xdr))
+        return HogDbError(HogDbCode::kCorruption);
       auto encoded = std::span<const std::byte, sizeof(int128_xdr)>(
           item.value().value.data(), sizeof(int128_xdr));
       int128_t out = int128_from_xdr_bytes(encoded);

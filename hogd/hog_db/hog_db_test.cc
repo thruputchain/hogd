@@ -502,6 +502,25 @@ TEST_F(HogDbTest, ItemLockCacheData)
   EXPECT_EQ(0xABCD'EF01'2345'6789, rsize->second.get_cached_nnint128_base());
 }
 
+// A recovered/tampered kNNInt128 contract-data row whose value is not exactly
+// int128_xdr-sized must be reported as corruption by the snapshot-pricing read
+// path, not abort on a fatal size invariant. RAMDB recovery validates record
+// shape but not this application-level type/size invariant, so such a row can
+// survive recovery and reach get_charged_storage_cost_and_cache_data() on the
+// first add-only touch.
+TEST_F(HogDbTest, ShortNNInt128SnapshotReadIsCorruption)
+{
+  ItemKey ikey = make_key(kAddress, kAddress);
+  auto db_key = make_contract_data_key(ikey);
+
+  std::array<std::byte, 1> malformed_value{};
+  ASSERT_TRUE(db_.get_ramdb().put(db_key, kNNInt128, malformed_value));
+
+  auto rsize = db_.get_charged_storage_cost_and_cache_data(ikey, &cost_model_);
+  ASSERT_FALSE(rsize);
+  EXPECT_EQ(rsize.error().code(), HogDbCode::kCorruption);
+}
+
 TEST_F(HogDbTest, ItemLockCacheDataBalance)
 {
   ItemKey ikey = make_address_balance_item_key(make_address(kAddress));
