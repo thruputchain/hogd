@@ -203,6 +203,33 @@ class StorageFitTest(unittest.TestCase):
                                          resolution=1)
         self.assertNotIn("storage_first_touch_gas", proposal)
 
+    def test_ragged_sweeps_align_under_their_own_columns(self):
+        # Depth 1 sweeps further than the others; the table's columns are the
+        # union and a missing point is blank rather than shifting the row.
+        run = synthetic_run()
+        for k in (16384, 65536):
+            run["benchmarks"].append(
+                row(f"frame/NNIntGetFirstTouch/1/{k}", 300.0 + k * 120.0))
+        summary = report.storage_summary(report.rows(run), report.stddevs(run))
+        self.assertEqual([k for k, _ in
+                          summary["sweeps"]["NNIntGetFirstTouch"][1]["per_key"]],
+                         [1, 16, 256, 4096, 16384, 65536])
+        self.assertEqual([k for k, _ in
+                          summary["sweeps"]["NNIntGetFirstTouch"][16]["per_key"]],
+                         [1, 16, 256, 4096])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_table(run)
+        text = out.getvalue()
+        header = [ln for ln in text.split("\n")
+                  if ln.startswith("NNIntGetFirstTouch ")][0]
+        self.assertIn("65536", header)
+        # The depth-16 row still ends at its own worst, not under a K it
+        # never measured.
+        depth16 = [ln for ln in text.split("\n")
+                   if ln.strip().startswith("16 ") and "345.0" in ln]
+        self.assertTrue(depth16, "depth 16 row missing from the table")
+
     def test_cold_rows_drop_the_iteration_suffix_and_keep_stddev(self):
         self.assertEqual(list(self.summary["cold"]), ["NNIntGet"])
         self.assertEqual(self.summary["cold"]["NNIntGet"], (25000.0, 12.5))
@@ -222,8 +249,31 @@ class StorageScheduleTest(unittest.TestCase):
         # ceil((120 - 110) / 1.6) = 7, not ceil(120 / 1.6) = 75.
         self.assertEqual(proposal["storage_first_touch_gas"], 7)
         self.assertEqual(proposal["storage_first_touch_from"], "NNIntGet")
-        self.assertEqual(proposal["storage_parent_frame_gas"], 10)
+        # ceil(40 / 1.6) = 25.
         self.assertEqual(proposal["storage_commit_item_gas"], 25)
+
+    def test_parent_walk_is_measured_but_not_proposed(self):
+        proposal = report.build_schedule(synthetic_run(),
+                                         synthetic_calibration(1.6),
+                                         resolution=1)
+        # Reported as nanoseconds, with what it leaves unpriced at the deepest
+        # depth, and never as a constant: a gas-schedule entry is hashed into
+        # the digest, so one is not added for a term this small.
+        self.assertNotIn("storage_parent_frame_gas", proposal)
+        self.assertAlmostEqual(proposal["storage_parent_frame_ns"], 15.0,
+                               places=6)
+        # 15 ns/frame over 254 frames at a 1.6 ns unit.
+        self.assertAlmostEqual(proposal["storage_parent_frame_unpriced_gas"],
+                               15.0 * 254 / 1.6, places=4)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_schedule(synthetic_run(), synthetic_calibration(1.6),
+                                  resolution=1)
+        text = out.getvalue()
+        self.assertNotIn("kStorageParentFrameCost", text)
+        self.assertIn("parent walk is not proposed", text)
+        # Still measured and shown in the tables.
+        self.assertIn("parent walk: a first touch costs", text)
 
     def test_cold_row_never_reaches_the_syscall_table(self):
         proposal = report.build_schedule(synthetic_run(),

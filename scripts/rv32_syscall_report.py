@@ -422,9 +422,14 @@ def print_storage(summary, unit_ns=None):
 
     for family, by_depth in sorted(summary["sweeps"].items()):
         print()
+        # Depths need not share a key sweep -- the deep one runs only where
+        # the question is the frame map rather than the parent walk -- so the
+        # columns are the union and a depth that skipped a point leaves it
+        # blank rather than shifting its row under the wrong heading.
+        all_keys = sorted({k for entry in by_depth.values()
+                           for k, _ in entry.get("per_key", [])})
         header = (f"{family:<28}{'depth':>6}  ns/key at K = "
-                  + " ".join(f"{k:>8}" for k, _ in
-                             next(iter(by_depth.values())).get("per_key", []))
+                  + " ".join(f"{k:>8}" for k in all_keys)
                   + f"{'worst':>10}{'gas':>8}{'spread':>8}")
         print(header)
         print("-" * len(header))
@@ -437,8 +442,11 @@ def print_storage(summary, unit_ns=None):
             # baseline is large and noisy next to the few calls being isolated
             # (one touch against 254 frames); it is not a cost, so it is not
             # printed as one and does not enter the worst or the spread.
-            cells = " ".join(f"{cost:>8.1f}" if cost > 0 else f"{'<noise':>8}"
-                             for _, cost in entry["per_key"])
+            by_k = dict(entry["per_key"])
+            cells = " ".join(
+                (f"{by_k[k]:>8.1f}" if by_k[k] > 0 else f"{'<noise':>8}")
+                if k in by_k else f"{'':>8}"
+                for k in all_keys)
             flag = "" if entry.get("flat", True) else "  <- NOT FLAT"
             print(f"{'':<28}{depth:>6}{'':>15}{cells}"
                   f"{entry['worst_ns']:>10.1f}{gas(entry['worst_ns'])}"
@@ -1043,9 +1051,21 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
             proposal["storage_first_touch_warm_ns"] = first[shallow]["warm_ns"]
             proposal["storage_first_touch_from"] = warm_syscall_for(
                 "NNIntGetFirstTouch")
+        # The parent walk is measured and reported, never proposed. Since
+        # #3771 it is a fraction of a nanosecond per frame, which rounds to
+        # 1 gas -- below what this benchmark resolves, and a constant in this
+        # table is not free: every one is hashed into
+        # rv32::kGasScheduleDigest, so adding one buys a coordinated
+        # gas-schedule update for a term that is noise. What is left unpriced
+        # is bounded by what it costs to get deep in the first place: reaching
+        # depth D means D nested invokes, each dearer than the walk it adds.
+        # The number is printed so a regression -- or a chain setting
+        # max_cross_invoke_depth far higher -- is visible in the sweep.
         walk = parent_walk_ns(storage)
         if walk:
-            proposal["storage_parent_frame_gas"] = to_gas(walk[0])
+            proposal["storage_parent_frame_ns"] = walk[0]
+            proposal["storage_parent_frame_unpriced_gas"] = (
+                walk[0] * walk[2] / unit)
         commits = storage["commits"].get("NNIntSetAdd", [])
         if commits:
             proposal["storage_commit_item_gas"] = to_gas(
@@ -1236,14 +1256,25 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
                   f"{proposal['storage_first_touch_from']} "
                   f"({proposal['storage_first_touch_warm_ns']:.1f} ns), which "
                   "the table already prices.")
-        if "storage_parent_frame_gas" in proposal:
-            print(f"    kStorageParentFrameCost = "
-                  f"{proposal['storage_parent_frame_gas']};  // new: per "
-                  "open parent frame, per first touch")
+
         if "storage_commit_item_gas" in proposal:
             print(f"    kStorageCommitItemCost = "
                   f"{proposal['storage_commit_item_gas']};   // new: per "
                   "staged item a successful child hands its parent")
+        if "storage_parent_frame_ns" in proposal:
+            print(f"  The parent walk is not proposed: "
+                  f"{proposal['storage_parent_frame_ns']:.2f} ns per open "
+                  "frame rounds to 1 gas,")
+            print("  which is under what this benchmark resolves, and every "
+                  "constant here is")
+            print("  hashed into the gas-schedule digest. At the deepest "
+                  "depth swept that")
+            print(f"  leaves ~"
+                  f"{proposal['storage_parent_frame_unpriced_gas']:.0f} gas "
+                  "unpriced per first touch, bounded by the nested")
+            print("  invokes needed to get there, each dearer than the walk "
+                  "it adds. The")
+            print("  sweep still measures it, so a regression shows up.")
         print("  A first touch is a fact about the transaction's own history")
         print("  -- deterministic, since it depends only on this tx's earlier")
         print("  syscalls -- and not about the block's cache, which is not.")

@@ -1115,15 +1115,26 @@ report (the run itself printed a first-touch cost that double-counted the warm
 call; see #3796):
 
 ```
-kStorageFirstTouchCost  = 120;  // surcharge over a warm NNIntGet (146.5 ns)
-kStorageParentFrameCost = 1;    // per open parent frame, per first touch
-kStorageCommitItemCost  = 35;   // per staged item a child hands its parent
+kStorageFirstTouchCost = 120;  // surcharge over a warm NNIntGet (146.5 ns)
+kStorageCommitItemCost = 35;   // per staged item a child hands its parent
 ```
 
 These are charges *on top of* the syscall table, which prices `NNIntGet` at
 100 gas (the 50-gas shared crossing base plus 50 of its own). Nothing is
 adopted here: the schedule is unchanged, and these are the input to that
 decision.
+
+**The parent walk is measured and deliberately not priced.** At 0.57 ns per
+open frame it rounds to 1 gas, which is below what this benchmark resolves --
+and a constant in this table is not free, since every one is folded into
+`rv32::kGasScheduleDigest`, so adding one means a coordinated gas-schedule
+update for a term that is noise. What that leaves unpriced is bounded by what
+it costs to get deep in the first place: at the stock maximum of 254 frames it
+is about 90 gas per first touch, and reaching depth 254 means 254 nested
+invokes, each of them dearer than the walk it adds. At the 8 or 16 a chain is
+expected to configure it is a few gas. The sweep keeps measuring it, so a
+regression -- or a chain setting `max_cross_invoke_depth` far higher -- shows
+up as a rising per-frame number rather than as silence.
 
 **What #3771 bought.** The frame maps were keyed by the XDR `AddressAndKey`,
 so every probe serialized it into a buffer and SipHashed 68 bytes, and a first

@@ -218,10 +218,16 @@ write_nnint_key(std::span<uint8_t> memory, uint32_t key_address, KeySpace space,
   std::memcpy(memory.data() + key_address, key.data(), key.size());
 }
 
-// The first-touch sweeps read this many distinct keys at most; the fixture
-// seeds exactly this many so a sweep point beyond it fails loudly (the read
-// returns kStorageKeyNotExist) rather than measuring an error path.
-constexpr uint64_t kFirstTouchKeys = 4096;
+// The most distinct keys a first-touch sweep reads. Seeded on demand rather
+// than up front: every vm/ row builds its own fixture, and seeding a quarter
+// of a million items per fixture is a cost only the sweeps need.
+//
+// The top of the sweep is not a protocol limit -- nothing caps the keys a
+// transaction may touch except its gas budget -- so it is set where the
+// per-key cost stops moving, which is what makes pricing at the plateau
+// sound. See "How far does the key count scale" in
+// docs/rv32/rv32-gas-calibration.md.
+constexpr uint64_t kFirstTouchKeys = 262144;
 // Keys the cold row may consume before it runs out. A cold read needs a key
 // the snapshot cache has never seen, and the cache is never reset within a
 // process, so each one is used exactly once. Sized for the fixed iteration
@@ -300,8 +306,7 @@ public:
     // handed at setup; a key it does not hold reads as kStorageKeyNotExist,
     // which fails the row rather than timing it.
     // Two warm keys: index 0 is the Get rows', index 1 the SetAdd rows'.
-    seed_nnint(inner_address(), KeySpace::kWarm, 2);
-    seed_nnint(leaf_address(), KeySpace::kFirstTouch, kFirstTouchKeys);
+    seed_nnint(inner_address(), KeySpace::kWarm, 0, 2);
   }
 
   ~SyscallBenchFixture()
@@ -386,18 +391,31 @@ public:
     }
   }
 
-  // Put `count` NNInt items under `address` in the mock snapshot, at the keys
-  // make_nnint_key(space, 0..count).
+  // Put NNInt items under `address` in the mock snapshot, at the keys
+  // make_nnint_key(space, first..last).
   void seed_nnint(ContractAddress const &address, KeySpace space,
-                  uint64_t count)
+                  uint64_t first, uint64_t last)
   {
-    for (uint64_t index = 0; index < count; ++index) {
+    for (uint64_t index = first; index < last; ++index) {
       StorageKey key(StorageKeyType::ContractData);
       key.contract_data_key() = make_nnint_key(space, index);
       snapshot_server_.impl()->setup_create_item(
           AddressAndKey{.address = address, .key = key},
           StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
     }
+  }
+
+  // Seed first-touch keys up to `count`, from wherever the last call stopped.
+  // The sweeps read indices 0..K-1, so a row asking for fewer than a previous
+  // row needs no work.
+  void ensure_first_touch_keys(uint64_t count)
+  {
+    if (count <= seeded_first_touch_keys_) {
+      return;
+    }
+    seed_nnint(leaf_address(), KeySpace::kFirstTouch, seeded_first_touch_keys_,
+               count);
+    seeded_first_touch_keys_ = count;
   }
 
   // The cold row's keys, seeded on first use rather than in the constructor:
@@ -408,7 +426,7 @@ public:
     if (cold_pool_seeded_) {
       return;
     }
-    seed_nnint(cold_address(), KeySpace::kCold, kColdPoolKeys);
+    seed_nnint(cold_address(), KeySpace::kCold, 0, kColdPoolKeys);
     cold_pool_seeded_ = true;
   }
 
@@ -444,6 +462,7 @@ private:
   std::unique_ptr<InvocationFrameTrace> inner_trace_;
   bool cold_pool_seeded_ = false;
   uint64_t next_cold_key_ = 0;
+  uint64_t seeded_first_touch_keys_ = 0;
 };
 
 // One syscall's register-native arguments: a0 is the number, a1..a7 the words.
@@ -1184,9 +1203,20 @@ bm_frame_push(benchmark::State &state, uint32_t depth)
 // like a fast syscall.
 void
 bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
-               SyscallCall call, KeySpace space, bool commit_innermost)
+               SyscallCall call, KeySpace space, bool commit_innermost,
+               bool needs_seeded_keys)
 {
   SyscallBenchFixture &fixture = shared_fixture();
+  // Only the rows that actually read the snapshot seed it. Seeding is not
+  // free to the measurement: every seeded key is a StorageItemWrapper in the
+  // mock's map, and at the top of the sweep that is ~90 MB resident competing
+  // for cache with the frame map being measured. A row that never consults
+  // the snapshot -- the no-load reads, the writes -- would be paying for
+  // scaffolding it does not use. Measured: seeding first made an unrelated
+  // K=16 no-load row 2.4x dearer.
+  if (needs_seeded_keys) {
+    fixture.ensure_first_touch_keys(keys);
+  }
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
   FrameTraces traces;
@@ -1423,42 +1453,63 @@ register_benchmarks()
   if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
     depths.push_back(stock_max_depth);
   }
-  const std::array<uint64_t, 4> key_counts = {1, 16, 256, kFirstTouchKeys};
+  // Two key sweeps. The short one runs at every depth, where the question is
+  // the parent walk. The long one runs at depth 1 only, where the question is
+  // how the frame's own map scales: nothing bounds the keys a transaction may
+  // touch except its gas budget, so a price taken at 4096 is only sound if the
+  // cost has stopped moving by then. Registered in increasing K so the shared
+  // snapshot cache grows monotonically rather than a small row inheriting a
+  // large one.
+  const std::array<uint64_t, 4> key_counts = {1, 16, 256, 4096};
+  const std::array<uint64_t, 7> deep_key_counts = {
+      1, 16, 256, 4096, 16384, 65536, kFirstTouchKeys};
   for (const uint32_t depth : depths) {
     benchmark::RegisterBenchmark(std::format("frame/Push/{}", depth),
                                  bm_frame_push, depth);
   }
-  for (const uint32_t depth : depths) {
-    for (const uint64_t keys : key_counts) {
-      benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
-                                               depth, keys),
-                                   bm_frame_sweep, depth, keys,
-                                   nnint_get_call(true), KeySpace::kFirstTouch,
-                                   /*commit_innermost=*/false);
-    }
-  }
-  for (const uint64_t keys : key_counts) {
+  // The rows that need no seeded snapshot go first, so they measure the frame
+  // map in a process the sweep has not yet grown. Registration order is run
+  // order, and the seeded rows below leave ~90 MB of mock items resident.
+  for (const uint64_t keys : deep_key_counts) {
     benchmark::RegisterBenchmark(
         std::format("frame/NNIntGetFirstTouchNoLoad/1/{}", keys),
         bm_frame_sweep, 1U, keys, nnint_get_call(false), KeySpace::kFirstTouch,
-        /*commit_innermost=*/false);
+        /*commit_innermost=*/false, /*needs_seeded_keys=*/false);
     benchmark::RegisterBenchmark(std::format("frame/NNIntSetAddFirstTouch/1/{}",
                                              keys),
                                  bm_frame_sweep, 1U, keys, nnint_set_add_call(),
                                  KeySpace::kSetAdd,
-                                 /*commit_innermost=*/false);
+                                 /*commit_innermost=*/false,
+                                 /*needs_seeded_keys=*/false);
+  }
+  for (const uint32_t depth : depths) {
+    const std::span<const uint64_t> sweep =
+        depth == 1 ? std::span<const uint64_t>(deep_key_counts)
+                   : std::span<const uint64_t>(key_counts);
+    for (const uint64_t keys : sweep) {
+      benchmark::RegisterBenchmark(std::format("frame/NNIntGetFirstTouch/{}/{}",
+                                               depth, keys),
+                                   bm_frame_sweep, depth, keys,
+                                   nnint_get_call(true), KeySpace::kFirstTouch,
+                                   /*commit_innermost=*/false,
+                                   /*needs_seeded_keys=*/true);
+    }
+  }
+  for (const uint64_t keys : key_counts) {
     // Two frames: a fresh parent for the child to commit into, so the merge
     // takes the insert path every iteration rather than the assignment path a
     // parent that already held the keys would offer.
     benchmark::RegisterBenchmark(std::format("frame/NNIntSetAddMerge/{}", keys),
                                  bm_frame_sweep, 2U, keys, nnint_set_add_call(),
                                  KeySpace::kMerge,
-                                 /*commit_innermost=*/true);
+                                 /*commit_innermost=*/true,
+                                 /*needs_seeded_keys=*/false);
     benchmark::RegisterBenchmark(std::format("frame/NNIntSetAddDiscard/{}",
                                              keys),
                                  bm_frame_sweep, 2U, keys, nnint_set_add_call(),
                                  KeySpace::kMerge,
-                                 /*commit_innermost=*/false);
+                                 /*commit_innermost=*/false,
+                                 /*needs_seeded_keys=*/false);
   }
 
   // Last, because it leaves the shared snapshot cache a quarter-million
