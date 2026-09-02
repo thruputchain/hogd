@@ -72,25 +72,24 @@ BlockTX::release_balance(const Address &addr, int128_t delta)
   if (lock->is_finalized()) {
     return lock->add_committed_balance_credit(delta);
   }
-  else {
-    // No prior balance lock exists in this block. This happens when
-    // lock_storage was never called for the address (marginal cost was 0)
-    // but commit_change returned a negative cost (e.g., consuming or
-    // deleting snapshot entries). Such an address must have a snapshot
-    // balance — you can't have snapshot storage items without one — so
-    // the fresh-balance guard in try_atomic_change_lock passes.
-    ItemChange change = ItemChange(Balance(delta));
-    LockContext ctx(&db_, block_height_, key, &cost_model_);
-    auto r = do_lock(*lock, change, ctx);
-    // A credit that overflows a (tampered) near-max snapshot balance surfaces
-    // here as a conflict rather than aborting the node; see #3782.
-    if (!r.has_value()) {
-      return r.error();
-    }
-    auto cr = lock->commit_change(std::move(change), ctx);
-    if (!cr.has_value()) {
-      return cr.error();
-    }
+
+  // No prior balance lock exists in this block. This happens when
+  // lock_storage was never called for the address (marginal cost was 0)
+  // but commit_change returned a negative cost (e.g., consuming or
+  // deleting snapshot entries). Such an address must have a snapshot
+  // balance — you can't have snapshot storage items without one — so
+  // the fresh-balance guard in try_atomic_change_lock passes.
+  ItemChange change = ItemChange(Balance(delta));
+  LockContext ctx(&db_, block_height_, key, &cost_model_);
+  auto r = do_lock(*lock, change, ctx);
+  // A credit that overflows a (tampered) near-max snapshot balance surfaces
+  // here as a conflict rather than aborting the node; see #3782.
+  if (!r.has_value()) {
+    return r.error();
+  }
+  auto cr = lock->commit_change(std::move(change), ctx);
+  if (!cr.has_value()) {
+    return cr.error();
   }
   return {};
 }
