@@ -1195,35 +1195,18 @@ TEST(Mempool, NominateTxWithError)
             kNumBlocks + 1);
 }
 
-// RPC-level companion to
-// Scheduler.CommitTouchingExcludedAccountRemovesFromScheduler (in
-// scheduler_test.cc). This drives mempool audit Finding 2 entirely through the
-// coordinator's public RPC surface -- no direct scheduler access -- so it shows
-// the abort is reachable by an honest node using normal APIs. It aborts on
-// CHECK_EQ(ready_accounts_.erase(...), 1) at scheduler.cc:1172.
-//
-// The path is the "nominated block + honest client retry" variant that
-// remove_from_scheduler's own comment (scheduler.cc:1119) anticipates:
+// This test does the following to exercise a failed CHECK that was later fixed:
 //   1. Submit an affordable tx (txs[0]) and one whose gas_limit exceeds the
-//      account's balance (txs[1]). Nothing on the submit path compares
-//      gas_limit against a balance, so both are admitted.
+//      account's balance (txs[1]).
 //   2. Nominate: txs[0] is included in the block; txs[1] is over budget, so the
-//      account is discarded and excluded from the block, leaving
-//      ready_accounts_ while the nomination is pending.
-//   3. The client resubmits txs[0] -- an ordinary retry of a still-unconfirmed
-//      tx. It lands back on the excluded account's runqueue; the account stays
-//      out of ready_accounts_.
-//   4. Commit the nominated block. remove_from_scheduler(nominated tx hashes,
-//      including txs[0]) empties the account's runqueue, account_is_ready()
-//      returns false, and ready_accounts_.erase() returns 0 -- firing the
-//      CHECK.
-//
-// Default test accounts are funded with 5'000'000'000 * 10 hogs
-// (grant_initial_tokens_for_account), so txs[1]'s gas_limit of 5'000'000'000 *
-// 20 is over budget. In an assert-enabled build the commit below aborts; the
-// test is expected to fail until the scheduler tolerates an absent account on
-// this path (erase_ready_account). If the account were not excluded, the commit
-// would return SchedulerCommitOK and this test would pass.
+//      account is removed from [ready_accounts_] while the nomination is
+//      pending.
+//   3. The client resubmits txs[0]. It is added back to the scheduler runqueue;
+//      the account is *not* added back to [ready_accounts_].
+//   4. Commit the nominated block. [remove_from_scheduler()] removes the
+//      account's txs from the runqueue. In that function, [account_is_ready()]
+//      returns false and [ready_accounts_.erase()] returns 0. Before the fix,
+//      [ready_accounts_.erase()] would trigger a CHECK.
 TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1251,13 +1234,13 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
 
-  // 3. Honest client retry of the still-unconfirmed affordable tx. It lands
-  // back on the excluded account's runqueue.
+  // 3. Submit txs[0] (the affordable tx) again.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
 
-  // 4. Commit the nominated block. remove_from_scheduler touches txs[0] on the
-  // excluded account's runqueue and aborts at scheduler.cc:1172.
+  // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
+  // from the runqueue and attempts to remove the account from
+  // [ready_accounts_].
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
