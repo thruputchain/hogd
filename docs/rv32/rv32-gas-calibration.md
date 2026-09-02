@@ -1129,18 +1129,26 @@ touch except its gas budget, so a price read at 4096 is only sound if the cost
 has stopped moving by then. It has not. Depth 1 on the development container,
 ns per first touch -- shape only, see the caveat below:
 
-| K | no-load (the frame map alone) | loaded (+ the snapshot cache) |
-|---:|---:|---:|
-| 1 | 293 | 504 |
-| 256 | 342 | 486 |
-| 4096 | 378 | 667 |
-| 16384 | 449 | 1281 |
-| 65536 | 723 | 2226 |
-| 262144 | 1266 | 2783 |
+| K | container, no-load | container, loaded | hog10, no-load | hog10, loaded |
+|---:|---:|---:|---:|---:|
+| 1 | 293 | 504 | 174 | 256 |
+| 256 | 342 | 486 | 172 | 262 |
+| 4096 | 378 | 667 | 187 | 330 |
+| 16384 | 449 | 1281 | 213 | 395 |
+| 65536 | 723 | 2226 | 243 | 629 |
+| 262144 | 1266 | 2783 | 341 | 1108 |
 
-Flat to about 4096 (1.3x over a single key), then climbing steadily -- roughly
-1.6-1.75x per 4x keys in the tail, which is what a map outgrowing each cache
-level looks like. At 262144 keys the frame's map alone is ~50 MB.
+The container bends early and hard: flat to about 4096, then roughly 1.6-1.75x
+per 4x keys. hog10 stays flat much further -- 174 ns at one key and 187 at
+4096, still only 243 at 65536 -- which is its 256 MB of L3 absorbing what the
+container's 33 MB could not. That is the shape a map outgrowing each cache
+level has, and it says the knee is a property of the host rather than of the
+code. At 262144 keys the frame's map alone is ~50 MB.
+
+Read the *surcharge* rather than the total when judging how much this matters
+for a price, because the warm call is a fixed component that flattens the
+ratio. On hog10 the loaded first touch costs 183 ns over its warm call at
+4096 and 961 ns at 262144 -- 5.2x, where the totals differ by 3.4x.
 
 So pricing at the top of the sweep is not attractive: it would charge an
 ordinary transaction touching a handful of keys 3-4x what it costs. Pricing at
@@ -1152,16 +1160,18 @@ anything else. Which point to price at is a policy call about that budget
 rather than something the measurement settles.
 
 **Two caveats on the table above.** The knee's location is a property of the
-host's cache, and the container's L3 is 33 MB against hog10's 256 MB, so the
-bench pool should be expected to stay flat considerably further -- these
-numbers say the curve bends, not where. And the loaded column is an upper
+host's cache, which is why both hosts are shown rather than the pool alone:
+the container is what a small-cache validator would see. And the loaded
+columns are an upper
 bound: its keys have to exist in the benchmark's mock, and at the top of the
 sweep that map is ~90 MB resident competing for the same cache. That is
 scaffolding rather than a cost a contract causes, which is why the no-load
 column -- which seeds nothing and consults neither the mock nor the cache --
-is the one to read for how the frame's own map scales. Seeding rows now run
-last for that reason; before they did, an unrelated K=16 no-load row measured
-2.4x dearer.
+is the one to read for how the frame's own map scales. The rows that need no
+seeded snapshot run first for that reason, and the commit rows run before the
+seeded sweep too: they are a difference of two whole-iteration timings, and
+measured after it they read 37-255 ns per item against 35-56 for the same
+rows before the sweep existed.
 
 **The parent walk is measured and deliberately not priced.** At 0.57 ns per
 open frame it rounds to 1 gas, which is below what this benchmark resolves --
