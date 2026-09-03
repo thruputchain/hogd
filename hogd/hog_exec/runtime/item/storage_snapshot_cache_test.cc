@@ -123,13 +123,16 @@ TEST_F(StorageSnapshotCacheTest, NegativeLookupIsCachedUnderTheFrameKey)
 }
 
 // Two payload-less key types under one address are different entries: the
-// key type is part of the flat key, so the cache cannot conflate them.
+// key type is part of the flat key, so the cache cannot conflate them. (Both
+// types here are ones the cache serves; Metadata is answered by the
+// deployment cache instead and make_variant rejects it.)
 TEST_F(StorageSnapshotCacheTest, PayloadlessKeyTypesAreDistinctEntries)
 {
   const AddressAndKey auth{.address = address_of(5),
                            .key = StorageKey(StorageKeyType::AuthData)};
   const AddressAndKey meta{.address = address_of(5),
-                           .key = StorageKey(StorageKeyType::Metadata)};
+                           .key = StorageKey(
+                               StorageKeyType::FreeNativeTokenBalance)};
 
   auto auth_item = cache_->try_get_snapshot_item(auth)();
   auto meta_item = cache_->try_get_snapshot_item(meta)();
