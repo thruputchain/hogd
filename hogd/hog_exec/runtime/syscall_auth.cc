@@ -153,6 +153,18 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
+  // Bound the per-transaction auth-token registry. Deserializing the untrusted
+  // tree and retaining the decoded token is unpriced beyond the flat syscall
+  // cost, so count this attempt before touching the input and refuse once the
+  // cap is hit. Counting before the parse (not just on success) keeps a
+  // contract from forcing repeated decode/traversal work with trees that fail
+  // the depth check or deserialize only after substantial parsing.
+  if (!syscall_handler.try_begin_auth_token_mint()) {
+    return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
+  }
+
   try {
     x23::deserialize(&auth_token.root_node,
                      x23::BufView{input_serialized_auth_token});

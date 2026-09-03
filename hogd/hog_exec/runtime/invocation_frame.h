@@ -446,6 +446,14 @@ public:
   AuthToken const *lookup_auth_token(uint32_t token_id) const;
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
 
+  // Counts a mint attempt and reports whether it is allowed; false once the
+  // per-transaction cap is hit. Called before deserializing the input so the
+  // cap bounds decode work regardless of whether the token parses.
+  bool try_begin_auth_token_mint()
+  {
+    return auth_token_registry_.try_begin_mint_attempt();
+  }
+
   struct ConsumeAuthTokenResult {
     AuthTokenPayload const *payload;
     ContractAddress const *mint_address;

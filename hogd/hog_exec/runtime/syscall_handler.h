@@ -424,6 +424,12 @@ public:
 
   // Auth token syscalls
   SyscallStatus<uint32_t> mint_auth_token(AuthToken const &auth_token);
+  // Counts a mint attempt against the per-transaction cap and reports whether
+  // it is allowed, so a mint can be refused before its input is deserialized.
+  bool try_begin_auth_token_mint()
+  {
+    return invocation_frame_stack_.try_begin_auth_token_mint();
+  }
   SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 

@@ -6,6 +6,7 @@
 #include "auth_token.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/components/auth_token_registry.h"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -199,6 +200,55 @@ TEST(AuthTokenRegistryTest, UnwrapAndRegisterShareOneMonotonicIdSpace)
   auto next_id = registry.register_auth_token(token_with_children({}));
   ASSERT_TRUE(next_id.has_value());
   ASSERT_EQ(next_id.value(), 4U);
+}
+
+// A transaction may make at most kMaxAuthTokensPerTransaction mint attempts;
+// the attempt after that is refused. The count is taken before the untrusted
+// tree is parsed, so it bounds decode/traversal work whether or not a given
+// tree would parse -- not only the successful mints (issue #3826). The registry
+// was previously limited only by the UINT32_MAX id space.
+TEST(AuthTokenRegistryTest, MintAttemptsAreCappedPerTransaction)
+{
+  AuthTokenRegistry registry;
+
+  for (uint32_t i = 0; i < kMaxAuthTokensPerTransaction; ++i) {
+    ASSERT_TRUE(registry.try_begin_mint_attempt());
+  }
+
+  // The cap is reached, so further attempts are refused -- including ones whose
+  // tree would have failed to parse, which is the point of counting before the
+  // decode.
+  ASSERT_FALSE(registry.try_begin_mint_attempt());
+  ASSERT_FALSE(registry.try_begin_mint_attempt());
+}
+
+// Registering and unwrapping are internal registry operations, not mint
+// attempts, so they do not consume the per-transaction mint-attempt budget:
+// only the syscall's pre-parse gate (try_begin_mint_attempt) does.
+TEST(AuthTokenRegistryTest, RegisterAndUnwrapDoNotConsumeMintAttempts)
+{
+  AuthTokenRegistry registry;
+
+  auto parent =
+      AuthToken{.mint_address = make_test_address(1),
+                .expiry_height = 100,
+                .root_node =
+                    AuthTokenNode{.consumer_address = make_test_address(2),
+                                  .payload = make_test_payload(0ULL),
+                                  .child_nodes = {AuthTokenNode{
+                                      .consumer_address = make_test_address(3),
+                                      .payload = make_test_payload(1ULL),
+                                      .child_nodes = {}}}}};
+  auto parent_id = registry.register_auth_token(parent);
+  ASSERT_TRUE(parent_id.has_value());
+  ASSERT_TRUE(registry.unwrap_auth_token(parent_id.value()).has_value());
+
+  // Neither the register nor the unwrap above touched the attempt budget, so a
+  // full cap of attempts is still available.
+  for (uint32_t i = 0; i < kMaxAuthTokensPerTransaction; ++i) {
+    ASSERT_TRUE(registry.try_begin_mint_attempt());
+  }
+  ASSERT_FALSE(registry.try_begin_mint_attempt());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
