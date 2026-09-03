@@ -71,6 +71,30 @@ constexpr static uint64_t kSHA256StreamCost = 26;
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 
+// What an NNInt storage syscall costs on top of the crossing: reaching the
+// frame's item map, hashing the key, and reading or staging the value. Charged
+// by NonnegativeIntGet and NonnegativeIntSetAdd alike.
+//
+// One constant for all three call shapes -- get, get without a snapshot load,
+// and set-add -- because the measurement does not separate them usefully. On
+// the bench pool their own costs above the base came out 60/45/66 gas in one
+// run and 59/43/62 in another, so the spread between the shapes is comparable
+// to the spread between runs of the same shape. Three constants would put
+// false precision into the digest and give a contract a reason to prefer one
+// call over another for pricing rather than for what it needs.
+//
+// 75 covers the dearest of those (66) with room, and lands the total at a
+// round 125 with the base. It replaces a schedule that charged these calls
+// nothing of their own, which underbilled them about twofold.
+//
+// This does not price a key's FIRST touch, which costs another ~90 gas at
+// four thousand keys in a frame and far more beyond that, nor the per-item
+// cost a successful child frame pays merging its writes into its parent.
+// Both are measured -- see docs/rv32/rv32-gas-calibration.md -- and neither is
+// chargeable where it happens yet: the syscall cannot see whether a key was a
+// first touch, and frame completion has no gas meter at all.
+constexpr static uint64_t kStorageAccessCost = 75;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -157,12 +181,13 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
     {.name = u8"VerifySignatureBase", .cost = kVerifySignatureBaseCost},
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
+    {.name = u8"StorageAccess", .cost = kStorageAccessCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
 }};

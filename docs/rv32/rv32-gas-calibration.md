@@ -520,6 +520,53 @@ reference with no seam guards checks no seam guards rather than failing. They
 appear the next time the bench pool regenerates it, which is the same
 `mode=reference` run that would be needed to make the ratios portable anyway.
 
+### Gating the syscall costs themselves
+
+The section above gates the *seam* the calibration harness measures. The
+production syscall path is gated separately, by
+`scripts/rv32_syscall_report.py --check` against
+`hogd/hog_exec/runtime/rv32/gas_calibration/syscall_reference.txt`, and the
+nightly fails on it.
+
+**What it catches that nothing else did.** The gas schedule's digest stops a
+constant being *edited* without the change being deliberate. It says nothing
+about the engine drifting away from the constants. A syscall that doubles in
+cost while every constant sits still leaves contracts underpaying by half, and
+before this gate existed no check in the repository looked at it -- the nightly
+measured the syscalls, filed the numbers, and stayed green whatever they said.
+
+**How it is built**, deliberately mirroring the opcode reference so there is one
+idea to understand rather than two:
+
+- Costs are **ratios to a crossing baseline measured in the same run**, so the
+  file survives the bench host changing speed. The baseline is the median of the
+  syscalls that only cross the boundary -- membership decided by measurement,
+  everything within 1.5x of the cheapest few -- rather than one chosen syscall,
+  because one row carrying every ratio is one row whose noise becomes the gate.
+  The anchor is a median of the three cheapest rather than the single cheapest,
+  so one anomalously fast row cannot drag the anchor below the cluster it is
+  supposed to be.
+- The tolerance is the **same 2x**. An alarm, not a budget: a gate that fires on
+  ordinary drift gets muted and then catches nothing.
+- **A guard that was not measured is a failure**, not a pass. A benchmark that
+  died halfway cannot report green by producing no rows to check.
+- The **engine fingerprint** is checked first, by equality. If it moved, every
+  ratio below describes a different interpreter.
+
+**What is deliberately not guarded.** `cold/` rows, because they are bounded by
+the benchmark's in-process mock rather than by hogd -- gating them would gate
+the harness. Rows whose own repetitions disagree by more than 5%, which cannot
+tell a regression from their own noise. And sweep cells where the frames-only
+baseline dominates the subtraction: the depth-254 K=1 cell isolates one ~260 ns
+touch by subtracting a 30 microsecond baseline, so the keys are 4% of what was
+timed and its ratio is mostly the error in that subtraction. A cell must carry
+at least 10% of its own measurement to be guarded, which excludes exactly that
+one.
+
+Regenerate on the bench host with the calibration workflow's `mode=reference`,
+which prints the block. Regenerating it to make a failure go away hides exactly
+what it is for.
+
 ### The other half, measured
 
 `rv32_syscall_entry_bench` (Google Benchmark,
@@ -1144,7 +1191,26 @@ The cold row is what it says: 42.2 µs against the in-process mock, 266x a warm
 lookup. It is on the record so the size of what the schedule declines to price
 is known, not as a candidate for the table.
 
-**What the run proposes, and what to take.** The report prints
+**What was adopted.** `kStorageAccessCost = 75`, charged by
+`NonnegativeIntGet` and `NonnegativeIntSetAdd` alike, which with the shared
+base puts an NNInt syscall at **125 gas**. It replaces a schedule that charged
+these calls nothing of their own beyond the crossing -- 50 gas against a
+measured 178 ns, underbilling them about twofold.
+
+One constant for all three call shapes rather than three. Their own costs above
+the base measured 60/45/66 gas in one bench-pool run and 59/43/62 in another,
+so the spread between the shapes is comparable to the spread between runs of
+the same shape. Three constants would put false precision into the digest and
+give a contract a reason to prefer one call over another for pricing rather
+than for what it needs. 75 covers the dearest of those with room and lands on a
+round total.
+
+What that leaves unpriced is the first touch and the commit, below. Neither is
+chargeable where it happens yet, and both need mechanism rather than a number:
+the syscall cannot see whether a key was a first touch (only `get_item_view`
+knows, and it does not report it), and frame completion has no gas meter at all.
+
+**What the run proposes for the rest, and what to take.** The report prints
 
 ```
 kStorageFirstTouchCost = 532;  // surcharge over a warm NNIntGet (158.4 ns)
@@ -1181,7 +1247,15 @@ into the tail. The bound has to be on keys *touched*.
 
 Adopting 100 is a gas-schedule change and not a benchmark change: the constant
 is folded into `rv32::kGasScheduleDigest` and pinned in committed artifacts, so
-it lands as a coordinated update rather than with this measurement.
+it lands as a coordinated update rather than with this measurement. It also
+needs the mechanism noted above -- a first-touch signal the syscall can see --
+which `kStorageAccessCost` did not, since a syscall already knows its own cost.
+
+When the schedule does move, `kAcceptedGasSchedules` in `artifact.h` is what
+keeps already-deployed contracts working: the old digest stays in that list as
+a transitional entry until the lowerer that stamps the new one has rolled out.
+`kStorageAccessCost` did exactly that -- it added an entry for v4 as it stood
+before storage access was priced.
 
 These are charges *on top of* the syscall table, which prices `NNIntGet` at
 100 gas (the 50-gas shared crossing base plus 50 of its own). Nothing is

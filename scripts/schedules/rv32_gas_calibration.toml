@@ -63,6 +63,7 @@ cmake --build build/release --parallel "$(nproc)" \
 mkdir -p ${HOG_DUMP_DIR}
 
 CHECK_RESULT=0
+SYSCALL_CHECK_RESULT=0
 
 # `reference` produces the numbers and prints a reference file without gating;
 # that is how a new host is bootstrapped, since the committed reference holds
@@ -165,6 +166,16 @@ if [ "{{ .mode }}" = "reference" ]; then
   ./scripts/rv32_gas_report.py ${HOG_DUMP_DIR}/rv32-gas-calibration.json \
     --emit-reference | tee ${HOG_DUMP_DIR}/rv32-gas-reference.txt
 
+  # The syscall half of the same bootstrap. Emitted here rather than gated,
+  # because the ratios in the committed file were measured on some other host
+  # and this mode exists to replace them with this one's.
+  echo '===== proposed syscall_reference.txt for this host ====='
+  echo 'To adopt: copy ${HOG_DUMP_DIR}/rv32-syscall-reference.txt from this'
+  echo 'host over'
+  echo 'hogd/hog_exec/runtime/rv32/gas_calibration/syscall_reference.txt'
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --emit-reference | tee ${HOG_DUMP_DIR}/rv32-syscall-reference.txt || true
+
 else
 
   echo 'running calibration and checking it against the committed reference'
@@ -192,11 +203,11 @@ else
       --predict || true
   fi
 
-  # Syscall costs are measured on every run, gating or not, and never fail the
-  # job. They are not gated yet: there is no committed reference for them, and
-  # inventing one from a single run of a new benchmark would be a gate that
-  # describes nothing. The JSON is filed either way, so the history exists by
-  # the time there is something to compare against.
+  # Syscall costs are measured on every run and, since there is now a committed
+  # reference, gated too -- see the syscall check below. The benchmark itself
+  # still never fails the job: a row that cannot run is news to read in the log
+  # rather than a reason to lose the opcode calibration beside it, and the gate
+  # reports that row as unchecked, which fails for the right reason and says so.
   echo '===== syscall costs on the production entry path ====='
   ./scripts/rv32_syscall_bench.sh build/release \
     --out ${HOG_DUMP_DIR}/rv32-syscall-bench.json > syscall_bench.log 2>&1 \
@@ -210,6 +221,21 @@ else
     --crosscheck ${HOG_DUMP_DIR}/rv32-openssl-speed.json || true
   ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
     --gas ${HOG_DUMP_DIR}/rv32-gas-calibration.json --schedule || true
+
+  # The syscall gate. Unlike everything else in this block it can fail the job.
+  #
+  # What it adds over the opcode check above: that one guards the interpreter,
+  # and the gas schedule's digest guards the syscall CONSTANTS against being
+  # edited silently. Neither notices the engine drifting away from those
+  # constants -- a syscall that doubles in cost while every constant sits still
+  # is what leaves contracts underpaying, and before this nothing looked at it.
+  #
+  # Absent output is not a pass: the check fails when a guarded row was not
+  # measured, so a benchmark that died halfway cannot report green.
+  echo '===== syscall costs against the committed reference ====='
+  ./scripts/rv32_syscall_report.py ${HOG_DUMP_DIR}/rv32-syscall-bench.json \
+    --check hogd/hog_exec/runtime/rv32/gas_calibration/syscall_reference.txt \
+    || SYSCALL_CHECK_RESULT=$?
 
 fi
 
@@ -285,6 +311,13 @@ file_measurement || METRICS_RESULT=$?
 # nothing, which is the one failure nobody would notice.
 if [ $CHECK_RESULT -ne 0 ]; then
   exit $CHECK_RESULT
+fi
+
+# After the opcode gate and the filing, for the same reason those are ordered
+# that way: a drifted syscall cost is news worth failing on, and the run that
+# found it is the one whose numbers history most wants.
+if [ $SYSCALL_CHECK_RESULT -ne 0 ]; then
+  exit $SYSCALL_CHECK_RESULT
 fi
 
 exit $METRICS_RESULT

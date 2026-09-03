@@ -112,6 +112,40 @@ COLD_ROW = re.compile(r"^cold/(.+)$")
 # built from the dearest point rather than an average.
 STORAGE_FLATNESS_TOLERANCE = 1.25
 
+# Gating. Mirrors the opcode calibration's reference in scripts/
+# rv32_gas_report.py: costs as ratios to a baseline measured in the same run,
+# a loose tolerance, and "a guard that was not measured was not checked".
+#
+# The tolerance is deliberately the same 2x. This is an alarm for a syscall
+# getting wildly more expensive, not a performance budget; a gate that fires on
+# ordinary run-to-run drift gets muted and then catches nothing.
+GUARD_TOLERANCE = 1.0
+
+# Only rows that reproduce are guarded. A row whose own repetitions disagree by
+# more than this cannot distinguish a regression from its own noise, so gating
+# on it would fire at random. Recorded per run rather than assumed: the bench
+# pool sits near 1% and the development container near 12%.
+GUARD_MAX_CV = 0.05
+
+# The baseline every ratio is relative to: the median of the syscalls that do
+# nothing but cross the boundary. A median over several rather than one chosen
+# syscall, for the reason the opcode reference gives -- one row carrying every
+# ratio is one row whose misbehaviour looks like the whole surface moving.
+#
+# Membership is measured, not listed: a row within this factor of the cheapest
+# is doing crossing work and nothing else. The report's own schedule section
+# reaches the same grouping from the same data.
+GUARD_BASE_SPREAD = 1.5
+
+# A sweep cell is a subtraction: the keys' cost is the iteration minus the
+# frames-only baseline. When the frames dominate, that difference is the small
+# gap between two large numbers and its relative error is whatever the two
+# timings' errors are, magnified. The depth-254 K=1 cell is the example the
+# calibration doc calls out -- one ~260 ns touch isolated by subtracting a
+# 30 microsecond baseline, which is 4% of what was actually timed. Guarding it
+# would gate on the noise in that subtraction rather than on the touch.
+GUARD_MIN_SIGNAL_SHARE = 0.10
+
 STORAGE_COLD_NOTE = (
     "cold/ rows miss the snapshot cache on every call and go to the db proxy. "
     "The server answering is the benchmark's in-process mock, whose lookup is "
@@ -171,7 +205,12 @@ def failed_rows(data):
 
 
 def stddevs(data):
-    return {entry.get("run_name"): entry
+    # Keyed the same way rows() keys medians, run_name first and name as the
+    # fallback. Google Benchmark emits both, but a hand-built file may carry
+    # only one, and a stddev map keyed differently from the medians silently
+    # matches nothing -- which reads as "no row reproduces well enough to
+    # guard" rather than as the mismatch it is.
+    return {(entry.get("run_name") or entry.get("name")): entry
             for entry in data.get("benchmarks", [])
             if entry.get("aggregate_name") == "stddev"}
 
@@ -1292,6 +1331,207 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     return 0
 
 
+def guard_baseline(measured, sd):
+    """The crossing cost this run's ratios are relative to, or None.
+
+    The median of the entry rows within GUARD_BASE_SPREAD of the cheapest --
+    the syscalls that only cross the boundary. Returns None when fewer than
+    three qualify, since a median over two is one of the two.
+    """
+    costs = []
+    for name in syscall_names(measured):
+        row = measured.get("entry/" + name)
+        if row and row.get("real_time", 0) > 0:
+            costs.append(row["real_time"])
+    if len(costs) < 3:
+        return None
+    # Anchored on the median of the three cheapest rather than on the single
+    # cheapest. One anomalously fast row -- a syscall that returns early, a
+    # measurement that went wrong -- would otherwise drag the anchor below the
+    # crossing cluster and exclude the very rows the baseline is meant to be.
+    anchor = statistics.median(sorted(costs)[:3])
+    base = [c for c in costs if c <= anchor * GUARD_BASE_SPREAD]
+    if len(base) < 3:
+        return None
+    return statistics.median(base)
+
+
+def guard_cv(name, measured, sd):
+    """Coefficient of variation for a row, or None when it cannot be read."""
+    row = measured.get(name)
+    dev = sd.get(name)
+    if not row or not dev or not row.get("real_time"):
+        return None
+    return dev.get("real_time", 0.0) / row["real_time"]
+
+
+def guardable(measured, sd):
+    """Every quantity worth gating, as {key: ratio-to-baseline}.
+
+    Two families. `syscall/<name>` is an entry row: the production path for one
+    call, which is what a contract pays. `storage/<family>/<depth>/<keys>` is a
+    per-key cost from a sweep, which is what it pays per key it has not touched
+    -- the term the syscall rows cannot see.
+
+    cold/ rows are deliberately absent. They are bounded by the benchmark's own
+    mock rather than by hogd, so gating them would gate the harness.
+    """
+    baseline = guard_baseline(measured, sd)
+    if not baseline:
+        return None, {}
+    guards = {}
+    for name in syscall_names(measured):
+        row_name = "entry/" + name
+        row = measured.get(row_name)
+        cv = guard_cv(row_name, measured, sd)
+        if not row or cv is None or cv > GUARD_MAX_CV:
+            continue
+        guards[f"syscall/{name}"] = row["real_time"] / baseline
+    summary = storage_summary(measured, sd)
+    for family, by_depth in sorted((summary or {}).get("sweeps", {}).items()):
+        for depth, entry in sorted(by_depth.items()):
+            for keys, per_key in entry.get("per_key", []):
+                if per_key <= 0:
+                    continue
+                row_name = f"frame/{family}/{depth}/{keys}"
+                cv = guard_cv(row_name, measured, sd)
+                if cv is None or cv > GUARD_MAX_CV:
+                    continue
+                iteration = measured[row_name]["real_time"]
+                if (per_key * keys) / iteration < GUARD_MIN_SIGNAL_SHARE:
+                    continue
+                guards[f"storage/{family}/{depth}/{keys}"] = per_key / baseline
+    return baseline, guards
+
+
+def emit_reference(data):
+    """Write the syscall reference a later run is checked against."""
+    measured = rows(data)
+    sd = stddevs(data)
+    ctx = context(data)
+    baseline, guards = guardable(measured, sd)
+    if not guards:
+        print("no guardable rows in this run", file=sys.stderr)
+        return 1
+    print("# RV32 syscall cost reference.")
+    print("#")
+    print("# Regenerate with:")
+    print("#   scripts/rv32_syscall_bench.sh BUILD_DIR --out /tmp/sys.json")
+    print("#   scripts/rv32_syscall_report.py /tmp/sys.json --emit-reference \\")
+    print("#     > hogd/hog_exec/runtime/rv32/gas_calibration/"
+          "syscall_reference.txt")
+    print("#")
+    print("# Or run the RV32 Gas Calibration workflow with mode=reference,")
+    print("# which prints this block from the bench host.")
+    print("#")
+    print("# Checked by scripts/rv32_syscall_report.py --check. Costs are")
+    print("# multiples of this run's own crossing cost, not nanoseconds, so")
+    print("# the file survives the bench host changing speed. It does not")
+    print("# survive changing microarchitecture: a syscall that waits on")
+    print("# memory and one that only crosses the boundary do not scale")
+    print("# together, which is the same reason the opcode reference carries.")
+    print("#")
+    print("# What this catches that the gas schedule cannot: the schedule's")
+    print("# digest stops a CONSTANT being changed silently, and says nothing")
+    print("# about the engine drifting away from the constants. A syscall that")
+    print("# doubles in cost without any constant moving is exactly the")
+    print("# failure that leaves contracts underpaying, and it is invisible")
+    print("# to every other check in this repository.")
+    print("#")
+    print("# Regenerating this file to make a failure go away hides exactly")
+    print("# what it is for.")
+    print()
+    print(f"engine_fingerprint {ctx.get('engine_fingerprint', 'unknown')}")
+    print(f"engine_source_digest "
+          f"{ctx.get('engine_source_digest') or 'unknown'}")
+    print(f"# generated from a {ctx.get('hogd_build_type', 'unknown')} build "
+          f"on {ctx.get('hogd_host', 'unknown')} "
+          f"({ctx.get('hogd_cpu_model', 'unknown')})")
+    print(f"# crossing baseline {baseline:.1f} ns")
+    print(f"tolerance {GUARD_TOLERANCE}")
+    print()
+    print("# guard <key> <cost relative to the crossing baseline>")
+    for key, ratio in sorted(guards.items()):
+        print(f"guard {key} {ratio:.3f}")
+    return 0
+
+
+def load_reference(path):
+    reference = {"guards": {}, "tolerance": GUARD_TOLERANCE,
+                 "engine_fingerprint": None}
+    with open(path) as handle:
+        for line in handle:
+            fields = line.split("#", 1)[0].split()
+            if not fields:
+                continue
+            if fields[0] == "guard" and len(fields) == 3:
+                reference["guards"][fields[1]] = float(fields[2])
+            elif fields[0] == "tolerance" and len(fields) == 2:
+                reference["tolerance"] = float(fields[1])
+            elif fields[0] == "engine_fingerprint" and len(fields) == 2:
+                reference["engine_fingerprint"] = fields[1]
+    return reference
+
+
+def check_against_reference(data, reference_path):
+    """Gate this run against a committed reference. Non-zero on failure."""
+    reference = load_reference(reference_path)
+    measured = rows(data)
+    sd = stddevs(data)
+    ctx = context(data)
+    failures = []
+
+    # The fingerprint first, and not as a ratio: it is exact equality over the
+    # engine's own definition, so it cannot flake, and a mismatch means every
+    # ratio below describes a different interpreter.
+    expected = reference.get("engine_fingerprint")
+    actual = ctx.get("engine_fingerprint")
+    if expected and expected != "unknown" and actual != expected:
+        failures.append(
+            f"engine fingerprint {actual}, reference has {expected}.\n"
+            "  The engine moved. Regenerating the reference is correct only "
+            "once the new\n"
+            "  costs have been read and the schedule changed to follow them "
+            "if it needs to.")
+
+    baseline, current = guardable(measured, sd)
+    if not baseline:
+        failures.append(
+            "no crossing baseline in this run, so nothing could be checked.\n"
+            "  The cheap stateless syscalls are what every ratio is relative "
+            "to; without\n"
+            "  three of them the gate cannot vouch for anything.")
+    else:
+        tolerance = reference["tolerance"]
+        for key, guard_ratio in sorted(reference["guards"].items()):
+            ratio = current.get(key)
+            if ratio is None:
+                # Not a warning. A guard that was not measured was not checked,
+                # and a gate that passes without checking reports coverage it
+                # did not provide.
+                failures.append(
+                    f"{key}: not measured in this run, so this guard was not "
+                    "checked.\n"
+                    "  Either the row failed or it reproduced too poorly to "
+                    "guard; either way\n"
+                    "  the gate cannot vouch for it.")
+                continue
+            limit = guard_ratio * (1.0 + tolerance)
+            if ratio > limit:
+                failures.append(
+                    f"{key}: {ratio:.2f}x the crossing, was "
+                    f"{guard_ratio:.2f}x (limit {limit:.2f}x).")
+
+    print(f"checked {data.get('_path', '<run>')} against {reference_path}")
+    if not failures:
+        print(f"{len(reference['guards'])} guard(s) hold.")
+        return 0
+    print()
+    for failure in failures:
+        print(f"FAIL: {failure}")
+    return 1
+
+
 def print_comparison(before, after):
     before_rows = rows(before)
     after_rows = rows(after)
@@ -1339,6 +1579,14 @@ def main():
                              "headroom is the rounding, which at resolution 1 "
                              "is a few percent -- narrower than this "
                              "benchmark reproduces to on a shared host.")
+    parser.add_argument("--emit-reference", action="store_true",
+                        help="print the gating reference for this run, to be "
+                             "committed and checked by --check")
+    parser.add_argument("--check", metavar="REFERENCE",
+                        help="gate this run against a committed reference; "
+                             "non-zero exit when a guarded cost has doubled "
+                             "relative to the crossing, or when a guard could "
+                             "not be measured")
     parser.add_argument("--crosscheck", metavar="OPENSSL_JSON",
                         help="openssl speed JSON from scripts/"
                              "rv32_openssl_speed.sh, run on the same host; "
@@ -1347,6 +1595,16 @@ def main():
     args = parser.parse_args()
 
     runs = [load(path) for path in args.json]
+    if args.emit_reference or args.check:
+        if len(runs) != 1:
+            parser.error("--emit-reference and --check take exactly one "
+                         "benchmark JSON")
+        if args.emit_reference and args.check:
+            parser.error("--emit-reference writes a reference and --check "
+                         "reads one; pick one")
+        if args.emit_reference:
+            return emit_reference(runs[0])
+        return check_against_reference(runs[0], args.check)
     if args.schedule:
         if len(runs) != 1:
             parser.error("--schedule takes exactly one benchmark JSON")
