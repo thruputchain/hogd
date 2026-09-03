@@ -12,10 +12,8 @@
 
 namespace hogd {
 
-// Whether `network_config` may be hashed at all. A v1 list is hashed as
-// written, so a non-canonical one would give a single configuration more than
-// one hash. Every path taking a configuration from an untrusted peer must
-// check this before hashing: the hash functions CHECK it.
+// Whether `network_config` may be hashed at all. Every path taking one from an
+// untrusted peer must check this first; the hash functions CHECK it.
 inline bool
 config_hashable(const NetworkConfig &network_config)
 {

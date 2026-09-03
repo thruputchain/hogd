@@ -132,11 +132,7 @@ TEST(ConfigHashTest, RejectsNonCanonicalParamList)
   EXPECT_EQ(fresh.v1().params.size(), 3U);
 }
 
-// The canonical form puts a parameter at the index its id names, so reading
-// one is a lookup rather than a search. This pins that the lookup lands on the
-// right entry, using values that are not the defaults so a misindexed read
-// would show. A list that is not canonical fails a CHECK rather than
-// resolving; RejectsNonCanonicalParamList covers refusing it up front.
+// Values chosen off the defaults so a misindexed read shows.
 TEST(ConfigHashTest, ReadsEachParamFromItsOwnIndex)
 {
   NetworkConfig prefix;

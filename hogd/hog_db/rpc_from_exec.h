@@ -78,11 +78,8 @@ class HogDbExecutorServer : public RpcServer<HogDbExecutorRpc> {
 public:
   explicit HogDbExecutorServer(RPCContext &ctx) : RpcServer(ctx)
   {
-    // The executor commits a transaction's new contract bodies in one message,
-    // so this link carries whatever aggregate a transaction is admitted with
-    // rather than a fixed per-message budget. Set here rather than at each
-    // call site so every server -- production, devnode, bench, tests -- agrees
-    // with the client in database_proxy.cc.
+    // New contract bodies commit in one message, so this link is sized by the
+    // aggregate a transaction is admitted with, not a per-message budget.
     max_message_size_ = kBulkRpcMaxMessageSize;
   }
 };

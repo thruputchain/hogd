@@ -485,9 +485,8 @@ private:
                            SipHash24Hasher>
       newly_created_contracts_;
 
-  // Noted at construction, where the attachment list is still in hand:
-  // newly_created_contracts_ is keyed by hash, so a repeat leaves no trace
-  // there. perform_initial_validation rejects it.
+  // Noted at construction: the map above is keyed by hash, so a repeat leaves
+  // no trace there.
   const bool has_duplicate_attachment_ = false;
 
   // Images for this transaction's attachments, keyed by contract hash.

@@ -121,9 +121,7 @@ load_stock_genesis_root_contract()
   return contract;
 }
 
-// max_new_contracts_per_tx for this repository's dev and test chains. Nothing
-// legitimate attaches many contracts at once, and a ceremony transaction
-// attaches one per distinct wallet artifact it funds.
+// max_new_contracts_per_tx for this repository's dev and test chains.
 constexpr uint32_t kStockMaxNewContractsPerTx = 4;
 
 NetworkConfig
@@ -245,10 +243,8 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
       }
     }
 
-    // The chain refuses a transaction attaching more contracts than it admits,
-    // so a ceremony that built one would produce a genesis its own rules
-    // reject. Fail here, where the artifact is being built, rather than at the
-    // height-1 block that cannot execute.
+    // Fail where the artifact is built, not at a height-1 block the chain's
+    // own rules refuse to execute.
     if (contracts_to_deploy.size() > kStockMaxNewContractsPerTx) {
       return std::unexpected(GenesisCeremonyError::kTooManyDistinctContracts);
     }

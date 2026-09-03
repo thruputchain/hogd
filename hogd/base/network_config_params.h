@@ -13,16 +13,13 @@
 
 namespace hogd {
 
-// Values in force for parameters a configuration does not state (a v0 chain,
-// or a v1 list that ends before them). Consensus-critical: two node versions
-// disagreeing here disagree about a chain's rules while agreeing on its config
-// hash, so these are frozen once any chain has run under them.
+// Values in force for parameters a configuration does not state. Consensus-
+// critical, so frozen once any chain has run under them.
 inline constexpr uint32_t kDefaultMaxSHA256Buffers = 8;
 inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 
-// Matches this repository's stock value rather than being permissive: a chain
-// predating the parameter would otherwise attach contracts without bound,
-// which is the condition #2190 describes.
+// Not permissive: a chain predating the parameter would otherwise attach
+// contracts without bound, which is #2190.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
 
 // The highest parameter this build can name; extend it with every new
@@ -32,12 +29,8 @@ inline constexpr ConfigParamID kHighestConfigParam =
 
 namespace detail {
 
-// The value a v1 list states for `id`, or nullopt when the list ends before
-// it.
-//
-// The canonical list is the prefix 0..N, so a parameter sits at the index its
-// id names. A mismatch there is this node being wrong, not a configuration to
-// interpret, so it CHECKs rather than returning the default and hiding a bug.
+// The value a v1 list states for `id`, or nullopt past its end. Canonical form
+// puts it at its own index, so a mismatch is a bug: CHECK, don't hide it.
 inline std::optional<uint32_t>
 stated_param(NetworkConfigV1 const &config, ConfigParamID id)
 {
@@ -82,11 +75,8 @@ make_param(ConfigParamID id, uint32_t value)
 
 } // namespace detail
 
-// Whether a v1 list is canonical: ids run 0, 1, 2, ... with no gaps.
-//
-// The list is hashed as written, so one permitted form is what keeps a
-// configuration from having several hashes. It also makes "absent" mean only
-// "past the end".
+// Whether a v1 list is canonical: ids run 0, 1, 2, ... with no gaps. Hashed as
+// written, so one form per configuration is one hash per configuration.
 inline bool
 config_params_canonical(NetworkConfigV1 const &config)
 {
@@ -153,8 +143,7 @@ max_new_contracts_per_tx(NetworkConfig const &config)
 }
 
 // The parameters in force, flattened from whichever version states them.
-// Resolve once where a tip is pinned: the invoke-depth and hash-buffer bounds
-// are checked on paths hot enough that walking the v1 list per access shows.
+// Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
   uint32_t max_sha256_buffers;
   uint32_t max_cross_invoke_depth;
@@ -190,12 +179,8 @@ in_force(NetworkConfigParams const &params, ConfigParamID id)
 
 } // namespace detail
 
-// States `value` for `id`, leaving the list canonical.
-//
-// Rebuilds the list as the prefix 0..N carrying every other parameter's value
-// in force, so nothing a v0 arm stated is lost. N grows only to cover what the
-// configuration already stated, so a v1 chain does not gain parameters it
-// never named.
+// States `value` for `id`, rebuilding the list as a canonical prefix that
+// carries every other parameter's value in force.
 inline void
 set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
 {
@@ -209,9 +194,8 @@ set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
         std::max(highest, static_cast<int32_t>(config.v1().params.size()) - 1);
   }
   else {
-    // Promotion rewrites wholesale, so materialise every parameter this build
-    // knows: truncating at `id` would replace a stated v0 value with a
-    // default.
+    // Materialise every parameter: truncating at `id` would replace a stated
+    // v0 value with a default.
     highest = std::max(highest, std::to_underlying(kHighestConfigParam));
   }
 

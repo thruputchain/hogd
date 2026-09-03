@@ -26,12 +26,8 @@ inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
 inline constexpr size_t kMaxSerializedContractBytes =
     kMaxContractSizeBytes + 16;
 
-// The executor->HogDb RPC message cap: x23 bounds (record.size() - 4) against
-// max_message_size (see send_call in x23/rpc.h). The link itself is pinned to
-// kBulkRpcMaxMessageSize at both ends; this is the smaller budget the executor
-// holds itself to, kept at the value the transport used to impose because the
-// subtransaction-push gate turns an over-budget batch into a conflict, so
-// raising it would change which transactions abort.
+// The budget the executor holds itself to on the HogDb link (pinned to
+// kBulkRpcMaxMessageSize). Raising it changes which transactions abort.
 inline constexpr size_t kExecToDbMessageCap = 0x100'0000;
 
 } // namespace hogd

@@ -263,9 +263,8 @@ public:
       CHECK_EQ(auth_data_height(), -1);
       CHECK_EQ(scheduler_->transfer_finished_.load(), -1);
 
-      // This configuration arrives over the wire, and compute_config_hash
-      // CHECKs that it is canonical, so refuse a malformed one here rather
-      // than abort the node on it.
+      // Arrives over the wire, and compute_config_hash CHECKs it -- refuse a
+      // malformed one rather than abort on it.
       if (!config_hashable(genesis_configuration.network_config)) {
         co_return DbSchedResult::DbSchedResultError;
       }

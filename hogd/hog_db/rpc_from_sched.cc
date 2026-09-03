@@ -351,11 +351,8 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("invalid genesis height, network hash, or config hash");
     co_return DbSchedResult::DbSchedResultError;
   }
-  // A chain states max_new_contracts_per_tx itself, so a genesis can name a
-  // count whose worst-case commit batch the executor could not send to storage
-  // in one message. Reject it here rather than let every oversized transaction
-  // fail as unrecoverable at commit (#2190). A KiB covers the request's own
-  // header and arguments.
+  // A genesis can name a count whose commit batch this build could not send in
+  // one message; reject it here rather than at commit (#2190).
   constexpr size_t kBatchOverhead = 1_KiB;
   const size_t admissible =
       (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;

@@ -1387,12 +1387,8 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
   EXPECT_FALSE(lookup_contract_from_db(oversized_hash).has_value());
 }
 
-// More attached contracts than the chain's max_new_contracts_per_tx is
-// rejected deterministically during initial validation, before the body runs
-// and before any deployment is staged. Without this the transaction would
-// reach final commit and fail there, where an oversized contract batch is
-// indistinguishable from a transport failure and is reported as unrecoverable
-// (#2190).
+// Rejected during initial validation, before the body runs -- at final commit
+// the same failure reports as unrecoverable (#2190).
 TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 {
   const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
@@ -1453,10 +1449,8 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
   EXPECT_FALSE(lookup_contract_from_db(first_hash).has_value());
 }
 
-// The same contract attached twice is rejected during initial validation
-// rather than silently deduplicated: newly_created_contracts_ is keyed by
-// hash, so a repeat would otherwise vanish and two different transaction
-// encodings would have identical effect.
+// Rejected rather than deduplicated: two different transaction encodings would
+// otherwise have identical effect.
 TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 {
   Contract contract(ContractType::kRv32);

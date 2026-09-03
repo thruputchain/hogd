@@ -254,9 +254,8 @@ private:
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
-  // [db_max_message_size] caps this framework's executor->db client only, so a
-  // test can drive the oversized-send paths without lowering the process-wide
-  // x23::default_max_message_size that racing server threads read.
+  // [db_max_message_size] caps this framework's executor->db client; see
+  // DatabaseProxy.
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,

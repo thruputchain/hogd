@@ -302,9 +302,8 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  // Rejected rather than deduplicated: newly_created_contracts_ is keyed by
-  // hash, so a repeat would vanish and two different transaction encodings
-  // would have identical effect.
+  // Rejected rather than deduplicated: two different transaction encodings
+  // would otherwise have identical effect.
   if (has_duplicate_attachment_) {
     error("Transaction attaches the same contract more than once; {} are "
           "distinct",
@@ -314,11 +313,8 @@ SystemCallHandler::perform_initial_validation()
     co_return SystemStatus<void>{};
   }
 
-  // New contract bodies commit in one message at the end of the transaction,
-  // so without this gate an oversized attachment set fails only at commit --
-  // after the body ran -- where it is indistinguishable from a transport
-  // failure and reported as unrecoverable (#2190). A function of the
-  // transaction bytes alone, so proposal and validation agree.
+  // Without this gate an oversized attachment set fails only at commit, where
+  // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
       newly_created_contracts_.size() > permitted) {
     error("Transaction attaches {} contracts; chain permits {}",

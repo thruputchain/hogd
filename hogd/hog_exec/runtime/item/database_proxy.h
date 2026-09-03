@@ -48,11 +48,8 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 // that the executor can handle (or abort on).
 class DatabaseProxy {
 public:
-  // [max_message_size] caps the client-side RPC streams only. Production
-  // leaves it at the link's bound; tests lower it to provoke oversized-send
-  // failures without mutating the process-wide x23::default_max_message_size,
-  // which racing server threads also read (same reasoning as
-  // EventServerProxy).
+  // Caps the client streams only; tests lower it rather than the process-wide
+  // x23::default_max_message_size, which server threads also read.
   DatabaseProxy(DatabaseIdentifier identifier,
                 size_t max_message_size = kBulkRpcMaxMessageSize);
 

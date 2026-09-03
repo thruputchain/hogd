@@ -300,9 +300,7 @@ INSTANTIATE_TEST_SUITE_P(AllDBs, DirectStorageOrderingTest,
 // SystemErrorCode::Unrecoverable, which also lets the post-call clear run.
 TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 {
-  // Shrink the exec-side client's record cap so the push exceeds it. Scoped to
-  // this framework rather than set on x23::default_max_message_size, which
-  // racing server threads also read.
+  // Shrink the exec-side client's record cap so the push exceeds it.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
       TestDB::kHogDb, /*empty_genesis=*/false,
