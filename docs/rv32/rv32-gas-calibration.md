@@ -1035,57 +1035,68 @@ distinction the rows are built around, and it is the same one the EVM arrived at
 with warm and cold access lists.
 
 **Results.** Measured on the bench pool -- hog10, AMD EPYC 9554, the machine
-the committed opcode reference comes from -- in run 33650781996, engine
-`d4697729c27d6dbd`, at a gas unit of 1.6226 ns. Three repetitions, medians.
-These are post-#3771; see "What #3771 bought" below for what the frame-key
-change moved.
+the committed opcode reference comes from -- in run 33710090625, engine
+`d4697729c27d6dbd`, at a gas unit of 1.6219 ns. Five repetitions, means.
+These are post-#3771 and post-#3814; see "What #3771 bought" and "What #3814
+bought" below for what the two key changes moved, and the #3557 note for a
+frame cost that moved under them.
 
 Every row is an `entry/`-level measurement and the ratio is against the
-stateless `entry/GetBlockHeight` on the same run (55.3 ns), so the crossing is
+stateless `entry/GetBlockHeight` on the same run (55.0 ns), so the crossing is
 in both sides and cancels. The one `vm/` row is marked and takes the `vm/`
-baseline (73.0 ns) instead.
+baseline (74.3 ns) instead.
 
 | regime | ns | x a warm `GetBlockHeight` |
 |---|---:|---:|
-| `entry/NNIntGet`, warm | 146.5 | 2.6 |
-| `entry/NNIntGetNoLoad`, warm | 129.1 | 2.3 |
-| `entry/NNIntSetAdd`, warm | 145.9 | 2.6 |
-| `vm/NNIntGet`, warm, crossing included (vs `vm/`) | 163.2 | 2.2 |
-| one frame opened and discarded | 68.9 | 1.2 |
-| first touch, depth 1, 1 key in the frame | 250.9 | 4.5 |
-| first touch, depth 1, 4096 keys in the frame | 340.0 | 6.1 |
-| first touch, depth 16, 4096 keys | 337.9 | 6.1 |
-| first touch, no load, depth 1, 4096 keys | 190.7 | 3.4 |
-| first-touch write, depth 1, 4096 keys | 206.5 | 3.7 |
-| each parent frame, per first touch | 0.6 | 0.01 |
-| committing one staged item into a parent, 4096 items | 55.7 | 1.0 |
-| snapshot-cache miss, against the mock | 33879 | 613 |
+| `entry/NNIntGet`, warm | 157.3 | 2.9 |
+| `entry/NNIntGetNoLoad`, warm | 150.8 | 2.7 |
+| `entry/NNIntSetAdd`, warm | 166.3 | 3.0 |
+| `vm/NNIntGet`, warm, crossing included (vs `vm/`) | 181.3 | 2.4 |
+| one frame opened and discarded | 125.5 | 2.3 |
+| first touch, depth 1, 1 key in the frame | 264.6 | 4.8 |
+| first touch, depth 1, 4096 keys in the frame | 300.2 | 5.5 |
+| first touch, depth 16, 4096 keys | 585.0 | 10.6 |
+| first touch, no load, depth 1, 4096 keys | 217.6 | 4.0 |
+| first-touch write, depth 1, 4096 keys | 228.4 | 4.2 |
+| each parent frame, per first touch (depth 1 to 254) | 2.0 | 0.04 |
+| committing one staged item into a parent, 4096 items | 51.0 | 0.9 |
+| snapshot-cache miss, against the mock | 42378 | 771 |
 
 Four things follow.
 
-**A warm read is two and a half stateless reads, and the difference is the key
-hash.** `NNIntGet` at 146.5 ns against 55.3 ns, with `NNIntGetNoLoad` 17 ns
+**A warm read is about three stateless reads, and the difference is the key
+hash.** `NNIntGet` at 157.3 ns against 55.0 ns, with `NNIntGetNoLoad` 7 ns
 under it. What the extra buys is `get_item_view`'s lookup: hash the key, probe
 the frame's map, read the variant. A warm write costs the same to within
 1 ns, since it is the same lookup plus a variant assignment.
 
 **A first touch is not one cost; it depends on how many keys the frame already
-holds.** At depth 1 the first of 4096 first touches costs 251 ns and the
-4096th 340 -- a 1.37x spread the report marks `NOT FLAT`. The frame's
-`modified_items_` is an `unordered_map`: as it fills it rehashes, allocates a
-node per key, and stops fitting in cache. Subtracting the warm call leaves
-193.5 ns as the first touch proper, of which the snapshot-cache lookup is most
--- the no-load sweep's surcharge is 61.6 ns and the write's 60.6 ns, and both
-of those are flat in K (1.19x and 1.20x) because neither consults the cache.
+holds.** At depth 1 the first of 4096 first touches costs 265 ns and the
+4096th 300, and carrying the sweep out to 262144 keys reaches 1025 -- a 4.5x
+spread the report marks `NOT FLAT`. The frame's `modified_items_` is an
+`unordered_map`: as it fills it rehashes, allocates a node per key, and stops
+fitting in cache. Subtracting the warm call leaves 867 ns as the first touch
+proper at the top of the sweep, of which the snapshot-cache lookup is most --
+the no-load sweep's surcharge there is 226 ns and the write's 222 ns, and both
+climb far more gently in K (2.05x and 1.94x against the loaded sweep's 4.54x)
+because neither consults the cache.
 A fitted line does not describe the loaded sweep: an early draft of the report
 fitted one and got a negative intercept, which is why the report prints the
 per-key cost at every K and takes the dearest.
 
-**The parent walk is no longer the depth term it was.** Each open parent frame
-adds **0.6 ns** to a first touch, so depth 16 (337.9 ns) and depth 1 (340.0 ns)
-are indistinguishable, and even the repo's stock maximum of 254 frames adds
-about 145 ns -- less than the touch itself. That is what #3771 bought; before
-it, each frame cost ~50 ns and depth 16 was more than double depth 1. The walk
+**The parent walk is smaller than it was, but it is not linear and the step is
+early.** Averaged from depth 1 to 254 at K=4096 each open frame adds **2.0 ns**
+to a first touch, which is what the report prints -- but the average hides the
+shape. Depth 1 costs 300 ns, depth 8 578, depth 16 585, depth 254 817: almost
+the whole depth term is a single ~278 ns step between depth 1 and depth 8, and
+the 246 frames after that add about 1 ns each. Both runs either side of #3814
+show it, so it is not that change, and it is not the per-frame probe the walk
+was before #3771 -- a per-probe cost would keep climbing. What it is has not
+been established, and the earlier claim here that depth 16 and depth 1 were
+indistinguishable came from an older run whose row ordering has since been
+fixed; it does not hold. It matters because 8 and 16 are the depths a chain is
+expected to configure, so the step sits exactly where the price would be read.
+That is worth chasing before a depth term is priced. The walk
 is still linear and still paid whether or not any parent holds the key, so a
 chain that raises `max_cross_invoke_depth` far enough will see it again, but at
 8 or 16 it is now noise. It cannot be dropped outright, either: the reentrance
@@ -1093,31 +1104,36 @@ ban stops one contract being live twice on the stack at once, but a contract
 invoked twice in sequence by the same caller has its first frame's views merged
 into the caller's at commit and its second frame has to find them there, and
 the native-token and auth paths read keys under addresses other than the active
-frame's. The depth-254 row's K=1 cell (550 ns) is the one place
-this is not resolvable: isolating a single 250 ns touch by subtracting a
-15.5 µs frames-only baseline is below what three repetitions measure, and the
-K=4096 cell (485 ns) is the one to read.
+frame's. The depth-254 row's K=1 cell (520 ns) is the one place
+this is not resolvable: isolating a single 265 ns touch by subtracting a
+30 µs frames-only baseline is below what five repetitions measure, and the
+K=4096 cell (817 ns) is the one to read.
 
 **Writes are cheap to stage and paid for later.** A first-touch write costs
 what a no-load first touch costs; the syscall stages an item and stops.
 Committing that item from a successful child into a fresh parent costs another
-35-56 ns per item, and the root commit's delta batch to hog_db is not measured
+31-51 ns per item, and the root commit's delta batch to hog_db is not measured
 here at all. Any per-write price has to prepay both halves, because neither is
 a syscall the schedule sees.
 
-The cold row is what it says: 33.9 µs against the in-process mock, 231x a warm
+The cold row is what it says: 42.4 µs against the in-process mock, 269x a warm
 `NNIntGet`, most of it the coroutine round trip through the proxy rather than any
 lookup. It is on the record so the size of what the schedule declines to price
 is known, not as a candidate for the table.
 
-**What the run proposes.** Regenerated from this run's JSON with the corrected
-report (the run itself printed a first-touch cost that double-counted the warm
-call; see #3796):
+**What the run proposes.**
 
 ```
-kStorageFirstTouchCost = 120;  // surcharge over a warm NNIntGet (146.5 ns)
-kStorageCommitItemCost = 35;   // per staged item a child hands its parent
+kStorageFirstTouchCost = 535;  // surcharge over a warm NNIntGet (157.3 ns)
+kStorageCommitItemCost = 32;   // per staged item a child hands its parent
 ```
+
+The first-touch figure is the dearest point of the sweep -- 262144 keys in one
+frame -- because that is what the report takes and what a schedule has to cover
+if it covers the whole range. It is not a recommendation to charge it: at 4096
+keys the same measurement gives about 88 gas, so the two ends of the sweep
+differ sixfold and the choice between them is the policy call the scaling
+section below sets out, not something this run settles.
 
 These are charges *on top of* the syscall table, which prices `NNIntGet` at
 100 gas (the 50-gas shared crossing base plus 50 of its own). Nothing is
@@ -1131,12 +1147,16 @@ ns per first touch -- shape only, see the caveat below:
 
 | K | container, no-load | container, loaded | hog10, no-load | hog10, loaded |
 |---:|---:|---:|---:|---:|
-| 1 | 293 | 504 | 174 | 256 |
-| 256 | 342 | 486 | 172 | 262 |
-| 4096 | 378 | 667 | 187 | 330 |
-| 16384 | 449 | 1281 | 213 | 395 |
-| 65536 | 723 | 2226 | 243 | 629 |
-| 262144 | 1266 | 2783 | 341 | 1108 |
+| 1 | 293 | 504 | 220 | 265 |
+| 256 | 342 | 486 | 202 | 249 |
+| 4096 | 378 | 667 | 218 | 300 |
+| 16384 | 449 | 1281 | 244 | 360 |
+| 65536 | 723 | 2226 | 272 | 535 |
+| 262144 | 1266 | 2783 | 383 | 1025 |
+
+The hog10 columns are post-#3814 (run 33710090625); the container columns
+predate it and are kept for the shape of the knee, which #3814 does not move.
+
 
 The container bends early and hard: flat to about 4096, then roughly 1.6-1.75x
 per 4x keys. hog10 stays flat much further -- 174 ns at one key and 187 at
@@ -1147,17 +1167,17 @@ code. At 262144 keys the frame's map alone is ~50 MB.
 
 Read the *surcharge* rather than the total when judging how much this matters
 for a price, because the warm call is a fixed component that flattens the
-ratio. On hog10 the loaded first touch costs 183 ns over its warm call at
-4096 and 961 ns at 262144 -- 5.2x, where the totals differ by 3.4x.
+ratio. On hog10 the loaded first touch costs 143 ns over its warm call at
+4096 and 867 ns at 262144 -- 6.1x, where the totals differ by 3.9x.
 
 So pricing at the top of the sweep is not attractive: it would charge an
 ordinary transaction touching a handful of keys 3-4x what it costs. Pricing at
 the knee instead leaves a transaction touching hundreds of thousands of keys
 underpaying, and what bounds that is the gas budget it has to burn getting
-there -- at the ~220 gas a first touch would cost (the syscall's 100 plus the
-120 surcharge), 262144 of them is about 58M gas before the contract does
-anything else. Which point to price at is a policy call about that budget
-rather than something the measurement settles.
+there -- at the ~188 gas a first touch would cost priced at 4096 keys (the
+syscall's 100 plus an 88 surcharge), 262144 of them is about 49M gas before the
+contract does anything else. Which point to price at is a policy call about
+that budget rather than something the measurement settles.
 
 **Two caveats on the table above.** The knee's location is a property of the
 host's cache, which is why both hosts are shown rather than the pool alone:
@@ -1173,8 +1193,9 @@ seeded sweep too: they are a difference of two whole-iteration timings, and
 measured after it they read 37-255 ns per item against 35-56 for the same
 rows before the sweep existed.
 
-**The parent walk is measured and deliberately not priced.** At 0.57 ns per
-open frame it rounds to 1 gas, which is below what this benchmark resolves --
+**The parent walk is measured and deliberately not priced.** At 2.0 ns per
+open frame averaged over the sweep's depths it rounds to 1 gas, which is at the
+edge of what this benchmark resolves --
 and a constant in this table is not free, since every one is folded into
 `rv32::kGasScheduleDigest`, so adding one means a coordinated gas-schedule
 update for a term that is noise. What that leaves unpriced is bounded by what
@@ -1202,15 +1223,60 @@ container nanoseconds and the table above is hog10's:
 | committing one staged item, 256 items | 222 | 95 | -57% |
 
 The depth term went because the walk stopped re-hashing; what remains per frame
-is an integer compare and a bucket probe. hog10 puts that residue at 0.6 ns.
+is an integer compare and a bucket probe. hog10 puts that residue at about
+1 ns per frame beyond depth 8, though see the parent-walk paragraph above for
+the step below that depth, which this does not explain.
 What did not change is the shape in K, which is the map growing rather than
 anything about the key, and is the next thing to take out of the structure
 rather than price around.
 
-A note on pinning: `taskset -c <one core>` crashes this binary with SIGFPE in
-`x23::PerCpuSet::lookup` before the first row, because the per-CPU set sizes
-itself from the affinity mask and a single-core mask leaves it dividing by
-zero. A mask of several cores does not trip it.
+**What #3814 bought.** #3771 took the double hashing out of the *frame* maps
+but left it in the snapshot cache, which was still keyed by the XDR
+`AddressAndKey` and so serialized and SipHashed the same 68 bytes again on
+every loaded lookup. #3814 keys it by the pre-hashed `FrameItemKey` too, so a
+loaded first touch hashes its key once for the whole path.
+
+The way to read that is the gap between the loaded and no-load sweeps, since
+only the loaded path consults the cache. Depth 1 on hog10, ns per first touch,
+run 33659646711 against run 33710090625:
+
+| K | gap before | gap after | change |
+|---:|---:|---:|---:|
+| 1 | 82 | 44 | -46% |
+| 256 | 90 | 47 | -48% |
+| 4096 | 142 | 83 | -42% |
+| 16384 | 182 | 116 | -36% |
+| 65536 | 386 | 263 | -32% |
+| 262144 | 766 | 642 | -16% |
+
+Half the gap at small K was the second hash, which is what the change targeted
+and what it removed. The tail is a different matter: the gap still triples from
+4096 to 262144, and the loaded sweep is still 2.7x the no-load one at the top
+(it was 3.2x). So the steep tail is not the cache re-hashing serialized keys --
+it is cache pressure from two maps of hundreds of thousands of entries, and
+there is no key-layout change left that takes it out.
+
+**#3557 roughly doubled the cost of opening and closing a frame, and the sweeps
+carry it.** `finish_frame()` became a coroutine when the hogdb client went
+async, and a push/pop pair went from ~60 ns to ~118 ns per frame:
+
+| depth | before ns/frame | after ns/frame |
+|---:|---:|---:|
+| 1 | 69.3 | 125.5 |
+| 8 | 60.7 | 118.4 |
+| 16 | 59.5 | 117.1 |
+| 254 | 61.3 | 119.2 |
+
+Run-to-run CV is under 0.25% on both sides at every depth, so this is not
+noise. It is measured here rather than diagnosed: the coroutine frame
+`finish_frame_impl` allocates on every call is the obvious candidate, and
+whether that is avoidable on the arm that never suspends is a question for
+whoever owns that path. It matters for pricing because every cross-contract
+invoke pays it, and because it raises the `frame/Push/D` baseline the storage
+sweeps subtract -- the warm syscall rows moved with it too, 8-19% dearer,
+while `entry/GetBlockHeight`, which touches neither frames nor storage, did not
+move at all (56.1 -> 55.0 ns).
+
 A note on pinning: `taskset -c <one core>` crashes this binary with SIGFPE in
 `x23::PerCpuSet::lookup` before the first row, because the per-CPU set sizes
 itself from the affinity mask and a single-core mask leaves it dividing by
