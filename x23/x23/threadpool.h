@@ -259,12 +259,23 @@ public:
   {
     using R = std::invoke_result_t<F, Args...>;
     auto [async, cb] = make_async<R>();
+    // Count the helper before it exists and let it drop the count only
+    // once make_callback has returned, so ~ThreadPool can wait for it.
+    // The thread is detached and so is not in threads_, and make_callback
+    // hands the awaiting coroutine to a worker from inside go(), before
+    // go() has finished notifying the run queue it enqueued on.  Without
+    // the count, that coroutine can resume, the awaited work can finish,
+    // and the program can run all the way to destroying the pool while
+    // this thread is still touching runqueues_.
+    async_helpers_.fetch_add(1, std::memory_order_relaxed);
+    Defer undo_count{[this] { helper_finished(); }};
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
     std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
                   ... args = std::forward<Args>(args)] {
+      Defer done{[this] { helper_finished(); }};
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
         make_callback(cb);
@@ -272,6 +283,7 @@ public:
       else
         make_callback(cb, std::invoke(f, args...));
     }).detach();
+    undo_count.release(); // the thread owns the count now
     return std::move(async);
   }
 
@@ -481,6 +493,21 @@ private:
 
   std::vector<std::unique_ptr<Worker>> workers_;
   std::vector<std::jthread> threads_;
+
+  // Number of live detached helper threads spawned by async().  They
+  // are not in threads_, so joining threads_ says nothing about them;
+  // ~ThreadPool waits for this to reach zero instead.
+  std::atomic_size_t async_helpers_{0};
+  void helper_finished() noexcept
+  {
+    if (async_helpers_.fetch_sub(1, std::memory_order_release) == 1)
+      async_helpers_.notify_all();
+  }
+  void wait_for_async_helpers() noexcept
+  {
+    for (size_t n; (n = async_helpers_.load(std::memory_order_acquire));)
+      async_helpers_.wait(n, std::memory_order_relaxed);
+  }
 
   // https://en.wikipedia.org/wiki/Xorshift
   static uint64_t rnd(uint64_t &seed) noexcept

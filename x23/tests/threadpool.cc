@@ -97,6 +97,32 @@ TEST(ThreadPoolOnQuiesce, DestructionWakeupStress)
   }
 }
 
+// async() runs its task on a detached thread, so the pool's own bookkeeping
+// of its worker threads says nothing about when that thread is done.  The
+// helper hands the result back from inside go(), which resumes the awaiting
+// coroutine on a worker before it has finished notifying the run queue it
+// enqueued on.  So the awaiting coroutine can run to completion, and the
+// pool can be destroyed, while the helper is still touching a run queue --
+// ~ThreadPool has to wait for the helper, not just join its workers.  Under
+// TSAN the unfixed version reports ~ThreadPool's pthread_cond_destroy
+// racing with the helper's notify_all.
+TEST(ThreadPoolAsync, HelperOutlivesAwaitingCoroutine)
+{
+  for (unsigned i = 0; i < 500; ++i) {
+    ThreadPool pool(2);
+    std::atomic_bool awaited{false};
+
+    [](ThreadPool &pool, std::atomic_bool &awaited) -> Detached {
+      co_await pool.async([] {});
+      awaited.store(true, std::memory_order_release);
+      awaited.notify_all();
+    }(pool, awaited);
+
+    while (!awaited.load(std::memory_order_acquire))
+      awaited.wait(false, std::memory_order_relaxed);
+  }
+}
+
 TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
 {
   constexpr unsigned kCoroutines = 64;

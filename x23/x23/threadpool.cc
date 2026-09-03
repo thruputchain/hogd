@@ -45,6 +45,13 @@ ThreadPool::ThreadPool(size_t nthreads)
 
 ThreadPool::~ThreadPool()
 {
+  // async()'s helper threads are detached, so joining threads_ below does
+  // not cover them, and one of them can still be inside go() -- notifying
+  // a run queue it has already unlocked -- after the coroutine it woke has
+  // run to completion.  Let them finish before anything is torn down; in
+  // particular before request_stop(), which go() asserts against.
+  wait_for_async_helpers();
+
   ss_.request_stop();
   for (unsigned i = 0; i < nqueues_; ++i) {
     auto ptr = runqueues_[i].take();
