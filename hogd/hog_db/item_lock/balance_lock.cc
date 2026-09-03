@@ -148,8 +148,13 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
         .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
     };
     auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
+    // Persist only the trailing fields; the key already encodes the address, so
+    // storing it in the value too is redundant (issue #3812). address is
+    // HogAge's first XDR field, and read_address_average_hog_age reconstructs
+    // it from the key.
     auto age_buf = x23::serialize(age);
-    changes.put(hog_age_key, 0, age_buf);
+    changes.put(hog_age_key, 0,
+                std::as_bytes(std::span(age_buf)).subspan(kAddressSize));
   }
 
   auto encoded = int128_to_xdr_bytes(value);

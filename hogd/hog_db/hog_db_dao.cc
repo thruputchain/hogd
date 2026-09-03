@@ -157,24 +157,39 @@ HogDbDAO::read_address_average_hog_age(const Address &addr)
   if (!raw)
     return raw.error();
 
-  HogAge age;
-  try {
-    x23::deserialize(&age, x23::BufViewEnd(*raw));
-  } catch (x23::XdrException &e) {
-    return HogDbError(HogDbCode::kInternal);
+  // The key already identifies the address, so the value persists only the
+  // trailing fields (num_hogs || average_ages) and the address is
+  // reconstructed from the key -- see write_address_average_hog_age. Storing
+  // the address in the value too was redundant and could drift from the key on
+  // untrusted on-disk state (the RAMDB log CRC is unkeyed and kHogAge rows are
+  // excluded from the consensus db_hash), which crashed the scheduler's
+  // CHECK_EQ(age.address, account) (issue #3812).
+  //
+  // Accept both layouts by size: the legacy full encoding (address embedded)
+  // and the new address-less one. address is HogAge's first XDR field, so in
+  // either case the fields we want are the last kValueSize bytes; splice them
+  // after the key address and decode the whole struct. Taking the key as the
+  // authoritative address makes a stale or mismatched embedded address a
+  // no-op rather than something to propagate or crash on.
+  constexpr size_t kFullSize = x23::detail::size_of_fixed<HogAge>();
+  constexpr size_t kValueSize = kFullSize - kAddressSize;
+
+  std::span<const std::byte> stored = *raw;
+  if (stored.size() != kValueSize && stored.size() != kFullSize) {
+    return HogDbError(HogDbCode::kCorruption);
   }
 
-  // A HogAge row is keyed by address, and both readers -- startup
-  // reconciliation and the mempool scheduler -- rely on the embedded
-  // age.address matching the key the row was looked up under. On-disk state is
-  // an untrusted origin (the RAMDB log CRC is unkeyed, and kHogAge rows are
-  // excluded from the consensus db_hash), so a tampered row can carry a
-  // mismatched payload address while staying XDR-valid. Reject it here so
-  // reconciliation reports the corrupt key rather than propagating the payload
-  // under a second key, and the scheduler treats it as missing rather than
-  // failing its CHECK_EQ(age.address, account).
-  if (Address(age.address) != addr) {
-    return HogDbError(HogDbCode::kCorruption);
+  std::array<std::byte, kFullSize> full{};
+  auto out = std::as_writable_bytes(std::span(full));
+  std::ranges::copy(addr.as_bytes(), std::begin(out));
+  std::ranges::copy(stored.subspan(stored.size() - kValueSize),
+                    std::begin(out) + kAddressSize);
+
+  HogAge age;
+  try {
+    x23::deserialize(&age, x23::BufViewEnd(std::span(full)));
+  } catch (x23::XdrException &e) {
+    return HogDbError(HogDbCode::kInternal);
   }
   return age;
 }
@@ -347,9 +362,13 @@ HogDbDAO::write_address_average_hog_age(const HogAge &age)
 {
   auto key = make_address_key(age.address, Prefix::kHogAge);
   auto before_item = get_before_item(key);
+  // The key already encodes the address, so persist only the trailing fields
+  // (num_hogs || average_ages) and drop the redundant embedded copy that could
+  // otherwise drift from the key (issue #3812). address is HogAge's first XDR
+  // field; read_address_average_hog_age reconstructs it from the key.
   auto buf = x23::serialize(age);
-  auto ret =
-      db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(std::span(buf)));
+  auto value = std::span(buf).subspan(kAddressSize);
+  auto ret = db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(value));
   update_invariants_post(key, before_item);
   return ret;
 }
