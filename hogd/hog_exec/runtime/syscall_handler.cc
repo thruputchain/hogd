@@ -26,6 +26,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -168,6 +169,7 @@ SystemCallHandler::pin_db_tip() const
   // Owned by the snapshot cache and stable until the cache is recycled for a
   // new block, which cannot happen while this transaction is executing.
   db_tip_ = *tip;
+  config_params_ = resolve_config_params(db_tip_->network_config);
   co_return SystemStatus<void>{};
 }
 
@@ -322,11 +324,10 @@ SystemCallHandler::perform_initial_validation()
   //
   // Deterministic in both proposal and validation mode: it is a function of
   // the transaction bytes alone, so every node reaches the same verdict.
-  if (newly_created_contracts_.size() >
-      db_tip()->network_config.max_new_contracts_per_tx) {
+  if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
+      newly_created_contracts_.size() > permitted) {
     error("Transaction attaches {} contracts; chain permits {}",
-          newly_created_contracts_.size(),
-          db_tip()->network_config.max_new_contracts_per_tx);
+          newly_created_contracts_.size(), permitted);
     cumulative_invoke_result_.result_ =
         InvokeError{InvokeErrorCode::Deterministic};
     co_return SystemStatus<void>{};
@@ -884,7 +885,7 @@ SystemCallHandler::validate_new_invocation(
   // syscall_Invoke_inner(), and the test FFI wrapper, which are the only ways
   // in from below root_invoke(). db_tip() fails loudly on a missed pin.
   if (invocation_frame_stack_.size() >=
-      db_tip()->network_config.max_cross_invoke_depth) {
+      config_params().max_cross_invoke_depth) {
     return SyscallStatus<void>{std::unexpected(
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvokeDepthExceeded})};
   }

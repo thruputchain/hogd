@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -258,7 +259,8 @@ private:
   static NetworkConfig genesis_network_config()
   {
     NetworkConfig config = stock_network_config();
-    config.max_sha256_buffers = kConfiguredMaxBuffers;
+    set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers,
+                     kConfiguredMaxBuffers);
     return config;
   }
 };

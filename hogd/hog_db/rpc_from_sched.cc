@@ -17,6 +17,7 @@
 #include "genesis.hh"
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/limits.h"
@@ -335,6 +336,16 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Checked before the config hash, which may only be taken over a canonical
+  // configuration: a list that repeats or misorders a parameter would give one
+  // configuration several hashes, so hashing refuses it outright. This genesis
+  // is untrusted, so the refusal has to be a rejection here rather than the
+  // internal-inconsistency check compute_config_hash makes.
+  if (genesis_configuration.network_config.v() == 1 &&
+      !config_params_canonical(genesis_configuration.network_config.v1())) {
+    error("genesis network config parameters are not strictly ascending by id");
+    co_return DbSchedResult::DbSchedResultError;
+  }
   if (value.proposal_header.block_height != kGenesisBlockHeight ||
       value.proposal_header.network_hash !=
           genesis_configuration.network_hash ||
@@ -350,11 +361,11 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   // (#2190).
   if (const size_t admissible =
           max_new_contracts_for_message_cap(kExecToDbMessageCap);
-      genesis_configuration.network_config.max_new_contracts_per_tx >
+      max_new_contracts_per_tx(genesis_configuration.network_config) >
       admissible) {
     error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
           "commit in one message",
-          genesis_configuration.network_config.max_new_contracts_per_tx,
+          max_new_contracts_per_tx(genesis_configuration.network_config),
           admissible);
     co_return DbSchedResult::DbSchedResultError;
   }

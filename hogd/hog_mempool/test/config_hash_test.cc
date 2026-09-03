@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "hogd/base/network_config_params.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -16,9 +17,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   const StorageCostModel model = StorageCostModel::default_cost_model();
   const NetworkConfig network_config = stock_network_config();
   const ConfigHash expected{
-      0xb7, 0x55, 0xbb, 0x58, 0x61, 0x76, 0x2f, 0xce, 0x44, 0xb6, 0xcd,
-      0xa1, 0x58, 0x30, 0xce, 0xee, 0x96, 0x38, 0x03, 0x28, 0x40, 0x7b,
-      0x87, 0xaa, 0xf2, 0x16, 0x34, 0xb3, 0xbe, 0x70, 0x61, 0x6e,
+      0x91, 0x85, 0xc6, 0x9e, 0x6c, 0xd3, 0xfd, 0x4a, 0x58, 0xdb, 0xd2,
+      0x11, 0x41, 0xcd, 0xe9, 0x0b, 0x47, 0xd6, 0x2d, 0x54, 0xf9, 0xe0,
+      0xae, 0x6c, 0x0d, 0xa0, 0x6a, 0x9e, 0x77, 0x13, 0x95, 0x24,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config)),
@@ -55,13 +56,79 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
 
   std::array<NetworkConfig, 3> variants;
   variants.fill(stock_network_config());
-  variants[0].max_sha256_buffers++;
-  variants[1].max_cross_invoke_depth++;
-  variants[2].max_new_contracts_per_tx++;
+  set_config_param(variants[0], ConfigParamID::kConfigParamMaxSHA256Buffers,
+                   max_sha256_buffers(variants[0]) + 1);
+  set_config_param(variants[1], ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                   max_cross_invoke_depth(variants[1]) + 1);
+  set_config_param(variants[2], ConfigParamID::kConfigParamMaxNewContractsPerTx,
+                   max_new_contracts_per_tx(variants[2]) + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(make_config_hash_preimage(model, variant)),
               original);
   }
+}
+
+// The stock configuration is in the only form that may be hashed, and
+// set_config_param keeps it that way rather than appending out of order.
+TEST(ConfigHashTest, StockConfigIsCanonical)
+{
+  NetworkConfig config = stock_network_config();
+  ASSERT_EQ(config.v(), 1);
+  EXPECT_TRUE(config_params_canonical(config.v1()));
+  EXPECT_TRUE(config_hashable(config));
+
+  // Setting a parameter already stated replaces it in place; setting one out
+  // of id order still lands in order.
+  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 8);
+  set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 4);
+  EXPECT_TRUE(config_params_canonical(config.v1()));
+  EXPECT_EQ(config.v1().params.size(), 3u);
+  EXPECT_EQ(max_new_contracts_per_tx(config), 8u);
+  EXPECT_EQ(max_sha256_buffers(config), 4u);
+}
+
+// A repeated or misordered list is refused, because it would give one
+// configuration more than one hash.
+TEST(ConfigHashTest, RejectsNonCanonicalParamList)
+{
+  NetworkConfigV1 repeated;
+  repeated.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
+  repeated.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 9));
+  EXPECT_FALSE(config_params_canonical(repeated));
+
+  NetworkConfigV1 descending;
+  descending.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256));
+  descending.params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 8));
+  EXPECT_FALSE(config_params_canonical(descending));
+
+  NetworkConfigV1 empty;
+  EXPECT_TRUE(config_params_canonical(empty));
+}
+
+// A chain predating a parameter runs under the node's default for it rather
+// than under no bound at all.
+TEST(ConfigHashTest, LegacyConfigTakesDefaults)
+{
+  NetworkConfig legacy;
+  legacy.v(0);
+  legacy.v0().max_sha256_buffers = 16;
+  legacy.v0().max_cross_invoke_depth = 64;
+
+  EXPECT_EQ(max_sha256_buffers(legacy), 16u);
+  EXPECT_EQ(max_cross_invoke_depth(legacy), 64u);
+  EXPECT_EQ(max_new_contracts_per_tx(legacy), kDefaultMaxNewContractsPerTx);
+
+  // Promotion carries the values in force, including the one v0 never stated.
+  set_config_param(legacy, ConfigParamID::kConfigParamMaxSHA256Buffers, 2);
+  ASSERT_EQ(legacy.v(), 1);
+  EXPECT_TRUE(config_params_canonical(legacy.v1()));
+  EXPECT_EQ(max_sha256_buffers(legacy), 2u);
+  EXPECT_EQ(max_cross_invoke_depth(legacy), 64u);
+  EXPECT_EQ(max_new_contracts_per_tx(legacy), kDefaultMaxNewContractsPerTx);
 }
 
 } // namespace hogd

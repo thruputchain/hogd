@@ -22,6 +22,7 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -151,12 +152,18 @@ stock_network_config()
   // Values this repository's dev and test chains run under. They are a choice,
   // not a protocol default: nothing inherits them, and a real chain passes its
   // own to build().
-  return NetworkConfig{
-      .ext = ExtensionPoint(0),
-      .max_sha256_buffers = 8,
-      .max_cross_invoke_depth = 256,
-      .max_new_contracts_per_tx = kStockMaxNewContractsPerTx,
-  };
+  //
+  // Every parameter is stated outright rather than left to the value a node
+  // supplies for an omission, so a change to either is visible as a change to
+  // the config hash rather than silently absorbed by the other. Ascending by
+  // id, which is the form the protocol requires of the list.
+  NetworkConfig config;
+  config.v(1);
+  set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 8);
+  set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256);
+  set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx,
+                   kStockMaxNewContractsPerTx);
+  return config;
 }
 
 GenesisConfiguration

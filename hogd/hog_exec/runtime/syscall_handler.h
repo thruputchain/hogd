@@ -21,6 +21,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -528,6 +529,10 @@ private:
   // that run before any frame is pushed are what pin it.
   mutable DbTip const *db_tip_ = nullptr;
 
+  // The tip's parameters, flattened when the tip is pinned. Read on the invoke
+  // path, so it stays a field load rather than a walk of the config list.
+  mutable NetworkConfigParams config_params_{};
+
   inline static bool debug_force_commit_abort_{false};
 
   // The block's first tip fetch, split out so init_db_tip() can answer an
@@ -538,6 +543,14 @@ private:
   // The pinned tip. Every caller runs after an admission check that pinned it,
   // so a null here is a missed pin point on a new entry path, not a runtime
   // condition -- fail loudly rather than reading through null.
+  /// The parameters this transaction's chain puts in force. Valid only once
+  /// the tip is pinned, which db_tip() enforces.
+  NetworkConfigParams const &config_params() const
+  {
+    CHECK_PTR(db_tip_);
+    return config_params_;
+  }
+
   DbTip const *db_tip() const
   {
     CHECK_PTR(db_tip_);

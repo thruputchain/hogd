@@ -16,6 +16,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -1394,7 +1395,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 // (#2190).
 TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 {
-  const uint32_t limit = stock_network_config().max_new_contracts_per_tx;
+  const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
 
   // One more distinct contract than the chain admits. Each is tiny and
   // individually valid, so the count is the only thing being rejected.
@@ -1510,7 +1511,7 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 // the bound is inclusive, so a transaction at the limit still runs its body.
 TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 {
-  const uint32_t limit = stock_network_config().max_new_contracts_per_tx;
+  const uint32_t limit = max_new_contracts_per_tx(stock_network_config());
 
   decltype(Transaction{}.contracts_to_deploy) attached;
   for (uint32_t i = 0; i < limit; ++i) {

@@ -22,6 +22,7 @@
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
@@ -875,8 +876,11 @@ TEST(TestBindingsTest, CostModelRoundtrip)
 TEST(TestBindingsTest, NetworkConfigRoundtrip)
 {
   NetworkConfig custom_config = stock_network_config();
-  custom_config.max_sha256_buffers += 1;
-  custom_config.max_cross_invoke_depth += 1;
+  set_config_param(custom_config, ConfigParamID::kConfigParamMaxSHA256Buffers,
+                   max_sha256_buffers(custom_config) + 1);
+  set_config_param(custom_config,
+                   ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                   max_cross_invoke_depth(custom_config) + 1);
   ASSERT_NE(custom_config, stock_network_config());
 
   auto serialized_config = x23::serialize(custom_config);
