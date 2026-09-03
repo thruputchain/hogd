@@ -483,7 +483,16 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
 
   if (after->is_balance()) {
     CHECK(snapshot_type_ == kItemLockCacheDataBalance);
-    lock_contents_.emplace<BalanceLock>(balance_base_);
+    // balance_base_ encodes a missing snapshot balance as INT128_MIN (see
+    // set_snapshot_data). Decode it back to a real optional here so the
+    // sentinel does not reach BalanceLock through an implicit int128_t ->
+    // optional conversion, which would present a missing balance as a real
+    // INT128_MIN base and grant near-unlimited add capacity (#3809).
+    std::optional<int128_t> snapshot_balance;
+    if (balance_base_ >= 0) {
+      snapshot_balance = balance_base_;
+    }
+    lock_contents_.emplace<BalanceLock>(snapshot_balance);
     return;
   }
 

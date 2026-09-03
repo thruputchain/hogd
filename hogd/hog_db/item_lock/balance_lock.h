@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <limits>
 #include <optional>
 
@@ -46,13 +47,15 @@ public:
 
   BalanceLock(std::optional<int128_t> snapshot_value)
     : snapshot_balance_(snapshot_value),
-      // Derive the delta-bounds base from the same LazyBalance snapshot used by
-      // the admission checks, not from the raw optional. A missing balance is
-      // cached as a negative sentinel and can reach us as an engaged optional;
-      // LazyBalance reports that as absent, so a fresh balance must reserve
-      // against base 0 (add capacity INT128_MAX), not against the sentinel.
-      delta_bounds_(snapshot_balance_.snapshot_value().value_or(0))
-  {}
+      delta_bounds_(snapshot_value.has_value() ? *snapshot_value : 0)
+  {
+    // Balances are always nonnegative, so a present snapshot is a real balance,
+    // never the missing-balance sentinel. Callers must decode that sentinel to
+    // std::nullopt before constructing the lock (see
+    // ItemLock::prepare_lock_contents); otherwise the delta bounds would treat
+    // the sentinel as the base and grant near-unlimited add capacity (#3809).
+    assert(!snapshot_value.has_value() || *snapshot_value >= 0);
+  }
 
   HogDbStatus<int128_t> try_atomic_change_lock(const Balance *before,
                                                const Balance *after,

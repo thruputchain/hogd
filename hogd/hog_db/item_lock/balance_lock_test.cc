@@ -311,40 +311,27 @@ TEST(BalanceLockTest, OppositeSignDeltaOverflowReturnsConflict)
   }
 }
 
-// Regression test for #3809. A missing balance is cached as the INT128_MIN
-// sentinel and reaches BalanceLock as an *engaged* optional (item_lock.cc
-// constructs BalanceLock(balance_base_) from that scalar). The lock must treat
-// it as an absent snapshot with logical base 0 -- add capacity INT128_MAX --
-// exactly like BalanceLock(std::nullopt). Previously the delta bounds were
-// initialized from INT128_MIN, giving add capacity INT128_MAX - INT128_MIN
-// (nearly UINT128_MAX), so two individually valid credits could wrap the
-// aggregate delta and overflow when block close subtracts the row storage cost.
-TEST(BalanceLockTest, MissingBalanceSentinelMatchesNulloptBase)
+// A fresh balance (constructed from std::nullopt) reserves aggregate credit
+// capacity against a logical base of 0, so it can absorb at most INT128_MAX
+// before overflowing. This is the contract ItemLock relies on when it decodes a
+// missing snapshot balance; see ItemLockTest.MissingBalanceSnapshotIsFresh for
+// the boundary regression test for #3809.
+TEST(BalanceLockTest, FreshBalanceCapacityIsInt128Max)
 {
-  constexpr int128_t kMissingSentinel = std::numeric_limits<int128_t>::min();
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
 
-  BalanceLock sentinel_lock(kMissingSentinel);
-  BalanceLock nullopt_lock(std::nullopt);
-
-  // A fresh balance reserves against base 0, so its add capacity is INT128_MAX
-  // -- the same as an explicitly absent snapshot, not the near-UINT128_MAX
-  // capacity of an INT128_MIN base.
-  EXPECT_EQ(sentinel_lock.get_add_capacity(), kMax);
-  EXPECT_EQ(sentinel_lock.get_add_capacity(), nullopt_lock.get_add_capacity());
-  EXPECT_EQ(sentinel_lock.get_sub_capacity(), 0);
+  BalanceLock lock(std::nullopt);
+  EXPECT_EQ(lock.get_add_capacity(), kMax);
 
   // A first credit can fill the fresh balance to its true capacity...
   Balance first(kMax);
-  EXPECT_TRUE(sentinel_lock
-                  .try_atomic_change_lock(nullptr, &first, make_dummy_context())
+  EXPECT_TRUE(lock.try_atomic_change_lock(nullptr, &first, make_dummy_context())
                   .has_value());
-  // ...after which no further credit fits. The aggregate delta therefore cannot
-  // exceed INT128_MAX, so build_result cannot overflow.
+  // ...after which no further credit fits, so the aggregate delta cannot exceed
+  // INT128_MAX and build_result cannot overflow.
   Balance second(kTestCostModel.get_balance_cost());
   EXPECT_FALSE(
-      sentinel_lock
-          .try_atomic_change_lock(nullptr, &second, make_dummy_context())
+      lock.try_atomic_change_lock(nullptr, &second, make_dummy_context())
           .has_value());
 }
 
