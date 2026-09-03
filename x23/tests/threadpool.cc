@@ -123,6 +123,63 @@ TEST(ThreadPoolAsync, HelperOutlivesAwaitingCoroutine)
   }
 }
 
+namespace {
+
+// An async() argument whose destructor reaches back into the pool.  The
+// helper thread runs that destructor, so it has to still be counted when it
+// does -- destroying the captured arguments is part of the helper touching
+// the pool, not something that happens after it is done.  The sleep puts
+// the destructor squarely inside the window where the awaiting coroutine
+// has already resumed and the main thread is in ~ThreadPool.
+struct TouchesPoolWhenDestroyed {
+  ThreadPool *pool_;
+
+  explicit TouchesPoolWhenDestroyed(ThreadPool *pool) noexcept : pool_(pool) {}
+  TouchesPoolWhenDestroyed(const TouchesPoolWhenDestroyed &) = default;
+  ~TouchesPoolWhenDestroyed()
+  {
+    if (!pool_)
+      return;
+    std::this_thread::sleep_for(500us);
+    pool_->on_quiesce([]() noexcept {});
+  }
+};
+
+} // namespace
+
+// async() keeps the helper counted until the closure's captures have been
+// destroyed, not merely until its body returns: captures are destroyed
+// afterwards, in an unspecified order, and a destructor of f or of an
+// argument can reach the pool.
+//
+// This covers the other half of that contract -- that holding the count
+// across capture destruction does not deadlock.  ~ThreadPool now waits on
+// the count, so a capture destructor that re-enters the pool (here
+// on_quiesce, which takes a lock the destructor is about to destroy) is
+// running while the pool's own destructor is blocked waiting for it.
+//
+// It is not a discriminating regression test for the lifetime bug itself:
+// with the count dropped too early the late destructor lands on whatever
+// occupies the pool's storage next, which on this loop is the following
+// iteration's pool at the same address, so nothing observably breaks.
+TEST(ThreadPoolAsync, CaptureDestructorMayReenterPool)
+{
+  for (unsigned i = 0; i < 50; ++i) {
+    ThreadPool pool(2);
+    std::atomic_bool awaited{false};
+
+    [](ThreadPool &pool, std::atomic_bool &awaited) -> Detached {
+      co_await pool.async([](const TouchesPoolWhenDestroyed &) {},
+                          TouchesPoolWhenDestroyed{&pool});
+      awaited.store(true, std::memory_order_release);
+      awaited.notify_all();
+    }(pool, awaited);
+
+    while (!awaited.load(std::memory_order_acquire))
+      awaited.wait(false, std::memory_order_relaxed);
+  }
+}
+
 TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
 {
   constexpr unsigned kCoroutines = 64;

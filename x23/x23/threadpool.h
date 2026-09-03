@@ -110,9 +110,11 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -260,28 +262,42 @@ public:
     using R = std::invoke_result_t<F, Args...>;
     auto [async, cb] = make_async<R>();
     // Count the helper before it exists and let it drop the count only
-    // once make_callback has returned, so ~ThreadPool can wait for it.
-    // The thread is detached and so is not in threads_, and make_callback
-    // hands the awaiting coroutine to a worker from inside go(), before
-    // go() has finished notifying the run queue it enqueued on.  Without
-    // the count, that coroutine can resume, the awaited work can finish,
-    // and the program can run all the way to destroying the pool while
-    // this thread is still touching runqueues_.
+    // once it can no longer touch the pool, so ~ThreadPool can wait for
+    // it.  The thread is detached and so is not in threads_, and
+    // make_callback hands the awaiting coroutine to a worker from inside
+    // go(), before go() has finished notifying the run queue it enqueued
+    // on.  Without the count, that coroutine can resume, the awaited work
+    // can finish, and the program can run all the way to destroying the
+    // pool while this thread is still touching runqueues_.
     async_helpers_.fetch_add(1, std::memory_order_relaxed);
     Defer undo_count{[this] { helper_finished(); }};
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
-    std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
-                  ... args = std::forward<Args>(args)] {
+    //
+    // They ride in an optional so the thread can destroy them at a point
+    // it chooses, while it still holds the count.  A closure's captures
+    // are destroyed only after its body returns -- and in an unspecified
+    // order -- so a destructor of f or of an argument that reaches the
+    // pool would otherwise run after the count had already hit zero.
+    std::jthread([this, cb = CpuHinted(cb, cpuid()),
+                  work = std::optional(
+                      std::tuple(std::forward<F>(f),
+                                 std::forward<Args>(args)...))]() mutable {
       Defer done{[this] { helper_finished(); }};
+      auto call = [](auto &&...a) -> decltype(auto) {
+        return std::invoke(std::forward<decltype(a)>(a)...);
+      };
       if constexpr (std::is_void_v<R>) {
-        std::invoke(f, args...);
+        std::apply(call, *work);
+        work.reset();
         make_callback(cb);
       }
-      else
-        make_callback(cb, std::invoke(f, args...));
+      else {
+        make_callback(cb, std::apply(call, *work));
+        work.reset();
+      }
     }).detach();
     undo_count.release(); // the thread owns the count now
     return std::move(async);
