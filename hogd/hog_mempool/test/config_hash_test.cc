@@ -82,9 +82,9 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
   set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx, 8);
   set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 4);
   EXPECT_TRUE(config_params_canonical(config.v1()));
-  EXPECT_EQ(config.v1().params.size(), 3u);
-  EXPECT_EQ(max_new_contracts_per_tx(config), 8u);
-  EXPECT_EQ(max_sha256_buffers(config), 4u);
+  EXPECT_EQ(config.v1().params.size(), 3U);
+  EXPECT_EQ(max_new_contracts_per_tx(config), 8U);
+  EXPECT_EQ(max_sha256_buffers(config), 4U);
 }
 
 // A repeated or misordered list is refused, because it would give one
@@ -118,16 +118,16 @@ TEST(ConfigHashTest, LegacyConfigTakesDefaults)
   legacy.v0().max_sha256_buffers = 16;
   legacy.v0().max_cross_invoke_depth = 64;
 
-  EXPECT_EQ(max_sha256_buffers(legacy), 16u);
-  EXPECT_EQ(max_cross_invoke_depth(legacy), 64u);
+  EXPECT_EQ(max_sha256_buffers(legacy), 16U);
+  EXPECT_EQ(max_cross_invoke_depth(legacy), 64U);
   EXPECT_EQ(max_new_contracts_per_tx(legacy), kDefaultMaxNewContractsPerTx);
 
   // Promotion carries the values in force, including the one v0 never stated.
   set_config_param(legacy, ConfigParamID::kConfigParamMaxSHA256Buffers, 2);
   ASSERT_EQ(legacy.v(), 1);
   EXPECT_TRUE(config_params_canonical(legacy.v1()));
-  EXPECT_EQ(max_sha256_buffers(legacy), 2u);
-  EXPECT_EQ(max_cross_invoke_depth(legacy), 64u);
+  EXPECT_EQ(max_sha256_buffers(legacy), 2U);
+  EXPECT_EQ(max_cross_invoke_depth(legacy), 64U);
   EXPECT_EQ(max_new_contracts_per_tx(legacy), kDefaultMaxNewContractsPerTx);
 }
 
