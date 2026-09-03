@@ -1462,13 +1462,22 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
     // Durable tx_index rows are not authenticated during recovery, so a
-    // tampered value could bind a different transaction body and event log
-    // to this key. Re-check the write-time invariant (enforced by
-    // validate_indexer_committed_payload) that the stored record hashes to
-    // the requested key before serving it, and hide the row otherwise.
-    if (record.events.tx_hash != tx_hash ||
+    // tampered value could bind a different transaction to this key. Every
+    // row stores the event log for its own transaction, so its tx_hash must
+    // equal the requested key; hide the row otherwise.
+    if (record.events.tx_hash != tx_hash) {
+      error("tx_index row event log does not match its transaction-hash key");
+      return IndexerError(IndexerErrorCode::kDBNotFound);
+    }
+    // Strict ingestion additionally stores the transaction body and binds it
+    // to the key (sha256(body) == tx_hash, enforced by
+    // validate_indexer_committed_payload). The legacy event-log-only path
+    // stores a placeholder empty body instead, which carries no served
+    // transaction content, so only re-check the binding for rows that
+    // actually carry a body.
+    if (!xdr_equal(record.tx, ProposedTransaction{}) &&
         sha256(record.tx.signed_tx.tx) != tx_hash) {
-      error("tx_index row does not match its transaction-hash key");
+      error("tx_index row body does not match its transaction-hash key");
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
     return record;
