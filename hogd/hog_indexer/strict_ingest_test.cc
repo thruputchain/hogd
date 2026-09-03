@@ -814,9 +814,9 @@ TEST_F(StrictIndexerTest, TamperedTransactionRowIsHiddenUnderUnrelatedHash)
   TxEventLog substituted_log = make_log(substituted_body, 0x23);
   ASSERT_NE(sha256(substituted_body.signed_tx.tx), original_hash);
   const BlockHeight substituted_height = 1;
-  std::string substituted_value(
-      reinterpret_cast<const char *>(&substituted_height),
-      sizeof(substituted_height));
+  std::string substituted_value;
+  substituted_value.append(reinterpret_cast<const char *>(&substituted_height),
+                           sizeof(substituted_height));
   const x23::Buf body_bytes = x23::serialize(substituted_body);
   substituted_value.append(reinterpret_cast<const char *>(body_bytes.data()),
                            body_bytes.size());
