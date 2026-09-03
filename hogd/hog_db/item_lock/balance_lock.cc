@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <span>
 
 #include "db_conflict.hh"
 #include "db_sched.hh"
@@ -11,6 +12,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hog_db/change_set.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock/concepts.h"
 #include "hogd/hog_db/status.h"
