@@ -15,12 +15,15 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/status.h"
 #include "hogd/metrics/health.h"
+#include "integration.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -206,6 +209,20 @@ AuthServer::verify_transactions(BlockHeight height,
       auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
+    // Belt-and-suspenders (#3844): a wrapper larger than the executor cap can
+    // never be included in a block, and the mempool now drops it before
+    // retention. If one still reaches auth verification, treat it as a critical
+    // error rather than spending signature-verification work on attacker-sized
+    // input. Reporting it here means neither the proposer nor the validator can
+    // admit an over-cap wrapper, whichever local arrival order they saw.
+    if (const size_t wrapper_size = x23::xdr_size(tx);
+        wrapper_size > kMaxBytesSignedTransaction) {
+      error("auth: rejecting over-cap transaction wrapper ({} bytes) for "
+            "account {}",
+            wrapper_size, show_byte_array(tx.tx.invocation.invoked_address));
+      results[i] = AuthErrorCode::kAuthInternal;
+      continue;
+    }
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
       auto entry =
           co_await populate_auth_data(height, tx.tx.invocation.invoked_address);

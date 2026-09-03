@@ -22,7 +22,9 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "integration.hh"
 #include "rpc_types.hh"
+#include "x23/serialize.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -559,6 +561,39 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
 
   auto results = auth_server().verify_transactions(0, std::span(&stx, 1))();
   ASSERT_EQ(results.size(), 1);
+}
+
+// #3844 belt-and-suspenders: a wrapper larger than kMaxBytesSignedTransaction
+// can never be included in a block, so auth verification rejects it up front
+// (as a critical error) rather than spending signature-verification work on it.
+TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
+{
+  const ContractAddress address = make_test_address(51);
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  SignedTransaction over_cap{};
+  over_cap.tx.invocation.invoked_address = address;
+  over_cap.tx.invocation.calldata.resize(kMaxBytesSignedTransaction, 0);
+  ASSERT_GT(x23::xdr_size(over_cap), kMaxBytesSignedTransaction);
+
+  auto results =
+      auth_server().verify_transactions(0, std::span(&over_cap, 1))();
+  ASSERT_EQ(results.size(), 1);
+  EXPECT_EQ(results[0], AuthErrorCode::kAuthInternal);
+
+  // A below-cap wrapper is not rejected on size grounds (it fails only normal
+  // auth, never the over-cap path).
+  SignedTransaction under_cap{};
+  under_cap.tx.invocation.invoked_address = address;
+  ASSERT_LT(x23::xdr_size(under_cap), kMaxBytesSignedTransaction);
+  auto under_results =
+      auth_server().verify_transactions(0, std::span(&under_cap, 1))();
+  ASSERT_EQ(under_results.size(), 1);
+  EXPECT_NE(under_results[0], AuthErrorCode::kAuthInternal);
 }
 
 TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)
