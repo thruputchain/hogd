@@ -32,6 +32,7 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hog_devnode_node.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/hog_exec/shared.h"
@@ -135,9 +136,18 @@ hog_devnode_init(std::string listen_host,
 
   init_hog_exec_metrics();
 
+  // An unusable $TMPDIR or data dir is an operator environment problem, so it
+  // is reported here rather than raised out of the node's construction.
+  std::expected<HogDevnodeDirectories, std::string> directories =
+      HogDevnodeDirectories::create(data_dir);
+  if (!directories) {
+    error("hog-devnode failed before readiness: {}", directories.error());
+    return EXIT_FAILURE;
+  }
+
   HogDevnodeNode node(std::move(listen_host), requested_scheduler_port,
-                      bootstrap_config, data_dir, runtime_network_hash,
-                      ramdb_bytes);
+                      std::move(*directories), bootstrap_config, data_dir,
+                      runtime_network_hash, ramdb_bytes);
   emit_readiness(node, readiness_sink, runtime_network_hash);
   info("hog-devnode initialization complete.");
 
