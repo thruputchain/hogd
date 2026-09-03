@@ -13,10 +13,12 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "integration.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -972,6 +974,65 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
     // #1474).
     scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
   }
+}
+
+// #3844: TransactionHash commits only to [tx.tx], so two valid wrappers over
+// the same near-cap transaction can differ only in their signatures and
+// straddle [kMaxBytesSignedTransaction]. If a node retained the over-cap
+// wrapper, first-arrival order would let honest nodes split on the same
+// nominated hash. The scheduler must drop over-cap wrappers before retention,
+// so every node converges on the below-cap wrapper regardless of arrival order.
+TEST(Scheduler, DropsOverCapWrapperSoRetentionIsCanonical)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  // A below-cap wrapper: a near-cap transaction body with no signatures
+  // ([generate_unsigned_txs] leaves the signature vector empty).
+  SignedTransaction small = txs[0];
+  small.tx.invocation.calldata.resize(kMaxBytesSignedTransaction - 4096, 0);
+  ASSERT_LT(x23::xdr_size(small), kMaxBytesSignedTransaction);
+
+  // An over-cap wrapper over the *same* transaction body: identical [tx.tx]
+  // (hence identical TransactionHash), pushed past the cap by extra signatures.
+  SignedTransaction large = small;
+  DecoratedSignature filler;
+  filler.public_key_id = 0;
+  filler.signature = Signature(CryptographicScheme::Ed25519);
+  while (x23::xdr_size(large) <= kMaxBytesSignedTransaction) {
+    large.signatures.push_back(filler);
+  }
+  const TransactionHash tx_hash = sha256(small.tx);
+  ASSERT_EQ(sha256(large.tx), tx_hash);
+  ASSERT_GT(x23::xdr_size(large), kMaxBytesSignedTransaction);
+
+  // The dangerous ordering: a node that receives the over-cap wrapper first
+  // must not retain it, and must still admit the below-cap wrapper for the
+  // same hash afterwards.
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({large})();
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+  // The over-cap wrapper is rejected before retention: nothing is cached and
+  // nothing becomes schedulable, so an over-cap flood cannot grow mempool
+  // state.
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  {
+    x23::XdrVec<TransactionHash> scheduled_hashes;
+    x23::XdrVec<SignedTransaction> scheduled;
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+    EXPECT_TRUE(scheduled_hashes.empty());
+    EXPECT_TRUE(scheduled.empty());
+  }
+
+  scheduler->add_txs({small})();
+  EXPECT_EQ(scheduler->size(), 1UL);
+  const std::shared_ptr<const SignedTransaction> retained =
+      scheduler->find_tx(tx_hash);
+  ASSERT_NE(retained, nullptr);
+  EXPECT_EQ(x23::xdr_size(*retained), x23::xdr_size(small));
 }
 
 } // namespace hogd

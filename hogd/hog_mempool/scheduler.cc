@@ -26,11 +26,13 @@
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/shared.h"
+#include "integration.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23/async.h"
 
@@ -461,8 +463,40 @@ Scheduler::add_txs_helper(const SignedTransaction &tx)
 }
 
 x23::Async<void>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &input_txs)
 {
+  // A SignedTransaction wrapper larger than [kMaxBytesSignedTransaction] can
+  // never be included in a block: ExecutorContext rejects it in both propose
+  // and validate. But TransactionHash commits only to [tx.tx], not the
+  // signatures, so retaining an over-cap wrapper would let first-arrival order
+  // decide this node's copy of a nominated hash -- a proposer holding a
+  // below-cap wrapper could nominate a hash that a validator holding an
+  // above-cap wrapper then rejects, splitting honest nodes on the same proposal
+  // (#3844). Drop such wrappers up front, before the hog-age lookup and any
+  // account-cache mutation, so a flood of them cannot reach mempool state at
+  // all. The common all-compliant batch is used as-is, without copying.
+  bool has_over_cap = false;
+  for (const SignedTransaction &tx : input_txs) {
+    if (x23::xdr_size(tx) > kMaxBytesSignedTransaction) {
+      has_over_cap = true;
+      break;
+    }
+  }
+  x23::XdrVec<SignedTransaction> compliant_txs;
+  if (has_over_cap) {
+    compliant_txs.reserve(input_txs.size());
+    for (const SignedTransaction &tx : input_txs) {
+      if (x23::xdr_size(tx) > kMaxBytesSignedTransaction) {
+        info("scheduler: dropping over-cap tx wrapper for account {}",
+             show_byte_array(tx.tx.invocation.invoked_address));
+        continue;
+      }
+      compliant_txs.push_back(tx);
+    }
+  }
+  const x23::XdrVec<SignedTransaction> &txs =
+      has_over_cap ? compliant_txs : input_txs;
+
   // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
