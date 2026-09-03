@@ -74,6 +74,21 @@ constexpr static uint64_t kVerifySignatureBlockCost = 131;
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
+// Gas charged per element (modified storage item, event, deployment, or
+// returned auth token) merged from a successful child frame into its parent by
+// InvocationFrame::commit_successful_child_frame(). The merge does one map
+// insert or append per element -- work proportional to the child's write set,
+// redone at every successful ancestor -- so without a charge a leaf's write set
+// can be re-merged through each ancestor for free (hogd issue #3819).
+//
+// This is frame-completion accounting rather than a guest syscall, but it is a
+// per-element billing constant that changes a contract's bill, so it belongs in
+// the schedule the digest hashes: otherwise a change here would silently
+// re-meter deployed contracts, the exact failure the digest exists to prevent.
+// Priced at the syscall-crossing cost, a conservative upper bound on one map
+// operation pending a dedicated calibration.
+constexpr static uint64_t kFrameMergeElementCost = kSyscallBaseCost;
+
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
 // plus a length field: 9 bytes for SHA-256, 17 for SHA-512.
@@ -157,7 +172,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 8> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -165,6 +180,7 @@ constexpr std::array<SyscallGasCostEntry, 7> kSyscallGasCostSchedule = {{
     {.name = u8"VerifySignatureBlock", .cost = kVerifySignatureBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
+    {.name = u8"FrameMergeElement", .cost = kFrameMergeElementCost},
 }};
 
 } // namespace hogd

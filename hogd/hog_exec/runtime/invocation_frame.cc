@@ -168,21 +168,6 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
   return delta;
 }
 
-// Gas charged per element merged from a successful child frame into its parent.
-// commit_successful_child_frame() does one map insert or append per merged
-// element (modified item, event, deployment, or returned auth token), so
-// without a charge a leaf frame's attacker-shaped write set is re-merged
-// through every successful ancestor for free -- an amplification bounded only
-// by the cross-invoke depth (#3819).
-//
-// This is frame-completion accounting added to the child's dynamic runtime gas,
-// not a guest-issued syscall, so it is deliberately not part of the RV32
-// gas-schedule digest: an artifact commits to the instruction and syscall costs
-// it is metered with, never to this post-runtime host work. Priced at the
-// calibrated syscall-crossing cost, a conservative upper bound on one map
-// operation.
-constexpr uint64_t kFrameMergeElementCost = kSyscallBaseCost;
-
 } // namespace
 
 void

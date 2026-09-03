@@ -35,7 +35,9 @@ inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // into the header at kArtifactGasVersionOffset and validated at load.
 // v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
 // trap.
-inline constexpr uint32_t kGasTableVersion = 4;
+// v5 adds the FrameMergeElement host cost charged when a successful child frame
+// is merged into its parent (hogd issue #3819).
+inline constexpr uint32_t kGasTableVersion = 5;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -95,7 +97,7 @@ inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Relocating this computation from program.h must not change its value (it is
 // validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0x86dd48334941726cULL);
+static_assert(kGasScheduleDigest == 0xe324f6541eaa054eULL);
 
 // The gas schedules an artifact is allowed to declare. The first entry is what
 // this build meters with and what a current lowerer stamps; any further entry
@@ -124,7 +126,8 @@ struct AcceptedGasSchedule {
 
 inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // groundhog-cli <= 0.11.0. Remove once the lowerer stamps v4.
+    // groundhog-cli <= 0.11.0 still stamps v3. Remove once the lowerer stamps
+    // the current schedule.
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
 }};
 
@@ -287,7 +290,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x40d726f77ea60affULL);
+static_assert(kArtifactFormatFingerprint == 0x1c6bcf522ca172f2ULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
