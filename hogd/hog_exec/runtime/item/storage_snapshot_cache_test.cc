@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "hogd/base/types.h"
