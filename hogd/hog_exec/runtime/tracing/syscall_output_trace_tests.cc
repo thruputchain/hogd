@@ -331,7 +331,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     body.nonnegative_int_set_add().inputs.set_value = to_xdr(int128_t{5});
     body.nonnegative_int_set_add().inputs.add_value = to_xdr(int128_t{7});
     body.nonnegative_int_set_add().inputs.flags = 0;
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(
+        step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kNonnegativeIntGet);
@@ -341,7 +342,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     outputs.current_set = to_xdr(int128_t{5});
     outputs.current_add = to_xdr(int128_t{7});
     body.nonnegative_int_get().outputs = std::move(outputs);
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(
+        step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
   }
   {
     // The unset key's trace output must OMIT current_set entirely -- the
@@ -352,7 +354,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     SyscallNonnegativeIntGetOutputs outputs;
     outputs.current_add = to_xdr(int128_t{0});
     body.nonnegative_int_get().outputs = std::move(outputs);
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(
+        step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
