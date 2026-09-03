@@ -426,6 +426,16 @@ public:
   ItemView *get_item_view(AddressAndKey const &addrkey);
   ItemView *get_item_view(FrameItemKey const &key);
 
+  // The frame key for `data_key` under the active frame's address, laid out
+  // and hashed once. A syscall that may reach the snapshot cache builds this,
+  // probes the frames with it, and hands the same key to UnmodifiedItem::load,
+  // so the key is hashed once per syscall rather than once per structure.
+  FrameItemKey frame_item_key(StorageKeyContractData const &data_key) const
+  {
+    assert(!frame_stack_.empty());
+    return FrameItemKey::contract_data(frame_stack_.back().address(), data_key);
+  }
+
   AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
   {
     StorageKey key(StorageKeyType::ContractData);

@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "rpc_types.hh"
@@ -79,8 +80,19 @@ public:
   try_get_contract_entry(SHA256Hash const &hash);
   x23::MaybeAsync<SystemStatus<const DeployedContract *>>
   try_get_deployed_contract(ContractAddress const &addr);
+  // The snapshot item under `key`, probed with the hash the key already
+  // carries. The syscall path hands over the FrameItemKey it built for its
+  // frame probe, so a first touch lays out and hashes the key once for the
+  // frames and this cache together.
   x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
-  try_get_snapshot_item(AddressAndKey const &addrkey);
+  try_get_snapshot_item(FrameItemKey const &key);
+  // The XDR-keyed form, for a caller holding no frame key. Lays out and
+  // hashes the key here; nothing on the syscall path should take this.
+  x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
+  try_get_snapshot_item(AddressAndKey const &addrkey)
+  {
+    return try_get_snapshot_item(FrameItemKey::from(addrkey));
+  }
 
   x23::MaybeAsync<SystemStatus<const DbTip *>> try_get_db_tip();
 
@@ -139,7 +151,7 @@ private:
   x23::Async<SystemStatus<const DeployedContract *>>
   load_deployed_contract(ContractAddress addr);
   x23::Async<SystemStatus<const SnapshotStorageItem *>>
-  load_snapshot_item(AddressAndKey addrkey);
+  load_snapshot_item(FrameItemKey key);
   x23::Async<SystemStatus<const DbTip *>> load_db_tip();
   x23::Async<SystemStatus<uint32_t>> load_max_sha256_buffers();
 
@@ -159,10 +171,16 @@ private:
                   std::shared_mutex>
       deployment_cache_;
 
+  // Keyed by the frame key rather than the XDR AddressAndKey: the hasher
+  // returns the hash cached in the key, so a probe costs one shard index and
+  // one bucket index off a value already in hand, and a rehash as the cache
+  // grows moves keys instead of re-serializing and re-hashing every one.
+  // Same process-keyed SipHash24 as before; the key is contract-chosen and
+  // the map has to stay flood-resistant. The XDR form is rebuilt once, on a
+  // miss, for the database read and the item.
   SynchronizedMap<
-      AddressAndKey, SnapshotStorageItem, std::hash<AddressAndKey>,
-      std::equal_to<>,
-      std::allocator<std::pair<const AddressAndKey, SnapshotStorageItem>>,
+      FrameItemKey, SnapshotStorageItem, FrameItemKeyHash, std::equal_to<>,
+      std::allocator<std::pair<const FrameItemKey, SnapshotStorageItem>>,
       std::shared_mutex>
       snapshot_item_cache_;
 

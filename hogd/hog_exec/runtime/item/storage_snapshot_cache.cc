@@ -15,6 +15,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
@@ -140,21 +141,24 @@ StorageSnapshotCache::load_deployed_contract(ContractAddress addr)
 }
 
 x23::MaybeAsync<SystemStatus<const SnapshotStorageItem *>>
-StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
+StorageSnapshotCache::try_get_snapshot_item(FrameItemKey const &key)
 {
   {
     // Use shared lock for read-only cache lookup
-    auto [obj, sl] = snapshot_item_cache_.find_shared(addrkey);
+    auto [obj, sl] = snapshot_item_cache_.find_shared(key);
     if (obj) {
       return SystemStatus<const SnapshotStorageItem *>{obj};
     }
   }
-  return load_snapshot_item(addrkey);
+  return load_snapshot_item(key);
 }
 
 x23::Async<SystemStatus<const SnapshotStorageItem *>>
-StorageSnapshotCache::load_snapshot_item(AddressAndKey addrkey)
+StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
 {
+  // The one place the XDR form is needed: the database reads by it, and the
+  // item keeps it for the retrocausal-queue reads it may make later.
+  const AddressAndKey addrkey = key.to_address_and_key();
   auto db_res = co_await db_proxy_.get_snapshot_item(block_id_, addrkey);
   if (!db_res) {
     co_return db_res.error();
@@ -172,16 +176,15 @@ StorageSnapshotCache::load_snapshot_item(AddressAndKey addrkey)
     co_return entry.error();
   }
 
-  auto [out, ul] =
-      snapshot_item_cache_.insert(addrkey, std::move(entry).value(), addrkey,
-                                  block_id_, db_proxy_);
+  auto [out, ul] = snapshot_item_cache_.insert(key, std::move(entry).value(),
+                                               addrkey, block_id_, db_proxy_);
   if (out) {
     // insertion happened; return the result
     co_return out;
   }
   CHECK(ul.owns_lock());
 
-  auto *obj = snapshot_item_cache_.find(addrkey, ul);
+  auto *obj = snapshot_item_cache_.find(key, ul);
   // otherwise, lookup the item in the cache again
   CHECK_PTR(obj);
   co_return obj;

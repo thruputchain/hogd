@@ -16,6 +16,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
@@ -593,9 +594,9 @@ UnmodifiedItem::get_item_type() const
 
 x23::MaybeAsync<SystemStatus<void>>
 UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
-                     AddressAndKey const &addrkey) const
+                     FrameItemKey const &key) const
 {
-  auto r = snapshot_cache.try_get_snapshot_item(addrkey);
+  auto r = snapshot_cache.try_get_snapshot_item(key);
   // Cache hit: MaybeAsync's value arm.  operator() does not block here (and
   // could not suspend anyway) -- it just unwraps the value already in hand.
   if (r.has_value()) {
