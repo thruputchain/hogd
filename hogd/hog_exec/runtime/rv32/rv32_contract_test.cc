@@ -639,11 +639,11 @@ TEST_F(Rv32ProductionMappingTest, SuccessfulChildFrameMergesAreGasCharged)
   }
 
   auto deploy_leaf = [&](bool manual_revert, uint8_t seed) {
-    std::vector<uint8_t> memory(kEntryCount * kKeySize + 1);
+    std::vector<uint8_t> memory((kEntryCount * kKeySize) + 1);
     memory.back() = 0x7b;
     std::vector<uint32_t> program;
     for (size_t i = 0; i < kEntryCount; ++i) {
-      std::ranges::copy(keys[i], memory.begin() + i * kKeySize);
+      std::ranges::copy(keys[i], memory.begin() + (i * kKeySize));
       append_syscall(program,
                      {kBytestringSetSyscallNo,
                       static_cast<int32_t>(i * kKeySize),
