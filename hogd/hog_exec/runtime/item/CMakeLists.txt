@@ -2,6 +2,7 @@ add_library(item_objects OBJECT
   item_view.cc
   snapshot_storage_item.cc
   database_proxy.cc
+  db_connection_map.cc
   storage_snapshot_cache.cc
 )
 target_link_libraries(item_objects hogd_interface)

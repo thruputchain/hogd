@@ -66,7 +66,7 @@ TEST_F(ReturnFaultTestRv32Test, InvokeRunTest)
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = nonce_++}},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 } // namespace hogd

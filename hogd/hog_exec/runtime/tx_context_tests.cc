@@ -83,7 +83,7 @@ TEST_F(TxContextTests, GetSourceTxHashMatchesSubmittedTx)
   SHA256Hash expected = sha256(tx);
 
   auto handler = make_new_system_call_handler(tx, *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
@@ -106,7 +106,7 @@ TEST_F(TxContextTests, GetBlockHeightMatchesExecutingBlock)
                       client_.make_invocation<u8"get_block_height">(UINT64_MAX),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
@@ -128,7 +128,7 @@ TEST_F(TxContextTests, TxStatsGasRemainingValid)
                           UINT64_MAX),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // The source tx hash is a per-transaction constant: a child frame observes
@@ -143,7 +143,7 @@ TEST_F(TxContextTests, SourceTxHashConsistentInChildFrame)
                           UINT64_MAX, kTargetAddress),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

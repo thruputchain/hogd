@@ -152,7 +152,7 @@ public:
   {
     auto &proxy = get_db_proxy();
     auto res = proxy.get_concurrent_retrocausal_queue_entry(get_block_number(),
-                                                            addrkey, index);
+                                                            addrkey, index)();
     if (!res) {
       panic("Failed to load concurrent entry");
     }
@@ -168,11 +168,11 @@ TEST_F(DirectRCQTests, ValidationFailsThenPropose)
   handler.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                     make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                     std::to_underlying(StorageDeltaFlags::None));
-  auto r = handler.try_push_current_subtransaction();
+  auto r = handler.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
   // TX must be committed so the lock is finalized and
   // prepare_committed_changes runs the consumed_set check.
-  ASSERT_TRUE(handler.commit_transaction().has_value());
+  ASSERT_TRUE(handler.commit_transaction()().has_value());
 
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
@@ -186,18 +186,18 @@ TEST_F(DirectRCQTests, ConcurrentInsert)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, ConcurrentInsert2)
@@ -208,21 +208,21 @@ TEST_F(DirectRCQTests, ConcurrentInsert2)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto entry1 = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
   ASSERT_FALSE(entry1.has_value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   entry1 = load_concurrent_entry(make_contract_data_addrkey(kContractAddress,
                                                             "rcq0"),
@@ -234,7 +234,7 @@ TEST_F(DirectRCQTests, ConcurrentInsert2)
       make_contract_data_addrkey(kContractAddress, "rcq0"), 1);
   ASSERT_FALSE(entry2.has_value());
 
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   entry2 = load_concurrent_entry(make_contract_data_addrkey(kContractAddress,
                                                             "rcq0"),
@@ -250,19 +250,19 @@ TEST_F(DirectRCQTests, ConcurrentEmptyConsume)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   // second consume fails
   ASSERT_TRUE(r.has_value() && !r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, ConcurrentConsumeSelf)
@@ -280,10 +280,10 @@ TEST_F(DirectRCQTests, ConcurrentConsumeSelf)
                 make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({0})},
                                               {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -296,7 +296,7 @@ TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // This does not arise when proposing a new block but could arise when
@@ -305,18 +305,18 @@ TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed)
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value()); // double consume fails
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed2)
@@ -327,7 +327,7 @@ TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed2)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // This does not arise when proposing a new block but could arise when
@@ -336,29 +336,29 @@ TEST_F(DirectRCQTests, ConcurrentConsumesDisallowed2)
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value()); // double consume fails
-  ASSERT_TRUE(tx3.abort_transaction().has_value());
+  ASSERT_TRUE(tx3.abort_transaction()().has_value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   // second consume can be reserved if the first is aborted
   auto tx4 = make_new_per_tx_db_proxy();
   tx4.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx4.try_push_current_subtransaction();
+  r = tx4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx4.commit_transaction().has_value());
+  ASSERT_TRUE(tx4.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, ConsumeExclusiveLock)
@@ -369,14 +369,14 @@ TEST_F(DirectRCQTests, ConsumeExclusiveLock)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // then upgrade tx1 to exclusive lock by changing the delta type
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // another tx cannot concurrently insert
@@ -384,26 +384,26 @@ TEST_F(DirectRCQTests, ConsumeExclusiveLock)
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   // Another tx cannot concurrently make a bytestring write
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value());
-  ASSERT_TRUE(tx3.abort_transaction().has_value());
+  ASSERT_TRUE(tx3.abort_transaction()().has_value());
 
   // tx1 can revert back to treating the object as an rcq
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // Now we can retrieve the retrocausal entry
   auto entry = load_concurrent_entry(
@@ -424,14 +424,14 @@ TEST_F(DirectRCQTests, RevertFromExclusiveLock)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // then upgrade tx1 to exclusive lock by changing the delta type
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // concurrent tx cannot insert right now
@@ -439,26 +439,26 @@ TEST_F(DirectRCQTests, RevertFromExclusiveLock)
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   // tx1 can revert back to treating the object as an rcq
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // concurrent tx can insert right now
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 
   auto entry = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
@@ -474,20 +474,20 @@ TEST_F(DirectRCQTests, OverwrittenDeltasNotMadeVisible)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_delete_delta(),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto entry = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
   EXPECT_FALSE(entry.has_value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   entry = load_concurrent_entry(make_contract_data_addrkey(kContractAddress,
                                                            "rcq0"),
@@ -503,20 +503,20 @@ TEST_F(DirectRCQTests, ChangeTypeAndOverwriteInsert)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_bytestring_delta("value"),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto entry = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
   EXPECT_FALSE(entry.has_value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   entry = load_concurrent_entry(make_contract_data_addrkey(kContractAddress,
                                                            "rcq0"),
@@ -532,18 +532,18 @@ TEST_F(DirectRCQTests, InsertConflictsWithDelete)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_delete_delta(),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   auto entry = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
@@ -559,22 +559,22 @@ TEST_F(DirectRCQTests, InsertConflictsWithDelete2)
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx2.try_push_current_subtransaction();
+  auto r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_delete_delta(),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value());
 
   auto entry = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
   EXPECT_FALSE(entry.has_value());
 
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
 
   entry = load_concurrent_entry(make_contract_data_addrkey(kContractAddress,
                                                            "rcq0"),
@@ -593,7 +593,7 @@ TEST_F(DirectRCQTests, ConcurrentInsertAndConsume)
   tx1.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // tx2 consumes — takes the single consumer slot
@@ -601,7 +601,7 @@ TEST_F(DirectRCQTests, ConcurrentInsertAndConsume)
   tx2.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // tx3 inserts a different entry — should succeed despite active consumer
@@ -609,12 +609,12 @@ TEST_F(DirectRCQTests, ConcurrentInsertAndConsume)
   tx3.add_delta(make_contract_data_addrkey(kContractAddress, "rcq0"),
                 make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 // Consume/insert contention:
@@ -632,25 +632,25 @@ TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({10})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_insert_delta({make_rcq_entry({11})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Commit consume before inserts to stress reservation/release ordering.
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   auto queue = lookup_storage_item_from_db(key);
@@ -666,7 +666,7 @@ TEST_F(DirectRCQTests, ConcurrentInsertRetroconsumeInsert)
   ASSERT_EQ(queue->metadata().live_entries, 1);
 
   auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 1);
+                                                            key, 1)();
   ASSERT_TRUE(b1.has_value());
   ASSERT_TRUE(b1.value().has_value());
   ASSERT_EQ(b1.value()->block_number, 1);
@@ -692,9 +692,9 @@ TEST_F(DirectRCQTests, ReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(key, std::move(delta),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block();
   };
 
@@ -706,18 +706,18 @@ TEST_F(DirectRCQTests, ReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
   auto tx_consume = make_new_per_tx_db_proxy();
   tx_consume.add_delta(key, make_rcq_consume_delta(2, 0, {}),
                        std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_consume.try_push_current_subtransaction();
+  auto r = tx_consume.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx_insert = make_new_per_tx_db_proxy();
   tx_insert.add_delta(key, make_rcq_insert_delta({make_rcq_entry({9})}),
                       std::to_underlying(StorageDeltaFlags::None));
-  r = tx_insert.try_push_current_subtransaction();
+  r = tx_insert.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // If the invariant fails, one of these commits will abort the process.
-  ASSERT_TRUE(tx_consume.commit_transaction().has_value());
-  ASSERT_TRUE(tx_insert.commit_transaction().has_value());
+  ASSERT_TRUE(tx_consume.commit_transaction()().has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction()().has_value());
 }
 
 // Verifies that a single insert delta can contain multiple entries and that
@@ -732,7 +732,7 @@ TEST_F(DirectRCQTests, MultipleEntriesPerInsert)
                 make_rcq_insert_delta({make_rcq_entry({0}), make_rcq_entry({1}),
                                        make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // tx2 concurrently inserts two entries in a single delta
@@ -741,11 +741,11 @@ TEST_F(DirectRCQTests, MultipleEntriesPerInsert)
                 make_rcq_insert_delta(
                     {make_rcq_entry({3}), make_rcq_entry({4})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   auto entry = load_concurrent_entry(
       make_contract_data_addrkey(kContractAddress, "rcq0"), 0);
@@ -783,9 +783,9 @@ TEST_F(DirectRCQTests, ConsumeAndInsertNetZeroDoesNotPersistEmptyBlock)
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({7})},
                                              {make_rcq_entry({7})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
 
   advance_block();
 
@@ -794,7 +794,7 @@ TEST_F(DirectRCQTests, ConsumeAndInsertNetZeroDoesNotPersistEmptyBlock)
 
   auto next_block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(next_block.has_value());
   ASSERT_FALSE(next_block.value().has_value());
 }
@@ -807,26 +807,26 @@ TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key,
                 make_rcq_consume_insert_delta(1, 0, {}, {make_rcq_entry({3})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   auto queue = lookup_storage_item_from_db(key);
@@ -838,13 +838,13 @@ TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
   ASSERT_EQ(queue->metadata().live_entries, 2);
 
   auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 1);
+                                                            key, 1)();
   ASSERT_TRUE(b1.has_value());
   ASSERT_FALSE(b1.value().has_value());
 
   // RCQ block 1 is gone
   auto b2 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 2);
+                                                            key, 2)();
   ASSERT_TRUE(b2.has_value());
   ASSERT_TRUE(b2.value().has_value());
   ASSERT_EQ(b2.value()->block_number, 2);
@@ -852,7 +852,7 @@ TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
   ASSERT_EQ(b2.value()->entries[0], make_rcq_entry({2}));
 
   auto b3 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 3);
+                                                            key, 3)();
   ASSERT_TRUE(b3.has_value());
   ASSERT_TRUE(b3.value().has_value());
   ASSERT_EQ(b3.value()->block_number, 3);
@@ -860,7 +860,7 @@ TEST_F(DirectRCQTests, PersistedBlocksRemainContiguousAfterPruneAndInsert)
   ASSERT_EQ(b3.value()->entries[0], make_rcq_entry({3}));
 
   auto b4 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 4);
+                                                            key, 4)();
   ASSERT_TRUE(b4.has_value());
   ASSERT_FALSE(b4.value().has_value());
 }
@@ -876,9 +876,9 @@ TEST_F(DirectRCQTests, ConsumeSingleBlockOneByOneAcrossBlocks)
   auto tx_insert = make_new_per_tx_db_proxy();
   tx_insert.add_delta(key, make_rcq_insert_delta(inserted),
                       std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_insert.try_push_current_subtransaction();
+  auto r = tx_insert.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_insert.commit_transaction().has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction()().has_value());
   advance_block();
 
   auto queue = lookup_storage_item_from_db(key);
@@ -893,9 +893,9 @@ TEST_F(DirectRCQTests, ConsumeSingleBlockOneByOneAcrossBlocks)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(key, make_rcq_consume_delta(0, consumed, {}),
                  std::to_underlying(StorageDeltaFlags::None));
-    r = tx.try_push_current_subtransaction();
+    r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block();
 
     queue = lookup_storage_item_from_db(key);
@@ -910,7 +910,7 @@ TEST_F(DirectRCQTests, ConsumeSingleBlockOneByOneAcrossBlocks)
 
     auto block =
         get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                        1);
+                                                        1)();
     ASSERT_TRUE(block.has_value());
     ASSERT_TRUE(block.value().has_value());
     ASSERT_EQ(block.value()->block_number, 1);
@@ -921,9 +921,9 @@ TEST_F(DirectRCQTests, ConsumeSingleBlockOneByOneAcrossBlocks)
   auto tx_final = make_new_per_tx_db_proxy();
   tx_final.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                      std::to_underlying(StorageDeltaFlags::None));
-  r = tx_final.try_push_current_subtransaction();
+  r = tx_final.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_final.commit_transaction().has_value());
+  ASSERT_TRUE(tx_final.commit_transaction()().has_value());
   advance_block();
 
   auto final_queue = lookup_storage_item_from_db(key);
@@ -931,7 +931,7 @@ TEST_F(DirectRCQTests, ConsumeSingleBlockOneByOneAcrossBlocks)
 
   auto block_after_clear =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block_after_clear.has_value());
   ASSERT_FALSE(block_after_clear.value().has_value());
 }
@@ -954,7 +954,7 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithRCQInsert)
   // Subtransaction 1: insert one entry.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Subtransaction 2: insert two entries (cumulative, includes entry 0).
@@ -962,16 +962,16 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithRCQInsert)
                make_rcq_insert_delta(
                    {make_rcq_entry({0}), make_rcq_entry({1})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Pop the deeper subtransaction — this triggers rollback_to_savepoint
   // which calls modify_lock with (deep=2entries, shallow=1entry).
-  auto pop_r = tx.pop_subtransactions(1);
+  auto pop_r = tx.pop_subtransactions(1)();
   ASSERT_TRUE(pop_r.has_value()) << "pop_subtransactions returned error";
 
   // If we get here, commit and verify the earlier insert is intact.
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
 }
 
 // Stress_SameTxNonCumulativeRCQInserts
@@ -992,7 +992,7 @@ TEST_F(DirectRCQTests, StressSameTxNonCumulativeRCQInserts)
   // Subtransaction 1: insert entry {0}.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Subtransaction 2: insert entry {1} (NOT cumulative — omits {0}).
@@ -1003,7 +1003,7 @@ TEST_F(DirectRCQTests, StressSameTxNonCumulativeRCQInserts)
   // incompatible with front-pruning semantics.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 }
 
@@ -1018,7 +1018,7 @@ TEST_F(DirectRCQTests, RollbackInsertions)
   // Subtransaction 1: insert entry {0}.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Subtransaction 2: insert entries {1, 2}.
@@ -1026,20 +1026,20 @@ TEST_F(DirectRCQTests, RollbackInsertions)
                make_rcq_insert_delta(
                    {make_rcq_entry({0}), make_rcq_entry({1})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.pop_subtransactions(1).has_value());
+  ASSERT_TRUE(tx.pop_subtransactions(1)().has_value());
 
   // insert a different entry {3}
   tx.add_delta(key,
                make_rcq_insert_delta(
                    {make_rcq_entry({0}), make_rcq_entry({2})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 
   auto queue = lookup_storage_item_from_db(key);
@@ -1049,7 +1049,7 @@ TEST_F(DirectRCQTests, RollbackInsertions)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -1076,9 +1076,9 @@ TEST_F(DirectRCQTests, StressConsumeFromNonExistentBlock)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
 
   // Now try to consume blocks up to block 5 (which doesn't exist).
@@ -1086,7 +1086,7 @@ TEST_F(DirectRCQTests, StressConsumeFromNonExistentBlock)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(5, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   // This is invalid input from the executor
   ASSERT_FALSE(r.has_value());
 }
@@ -1111,18 +1111,18 @@ TEST_F(DirectRCQTests, StressBackwardFullBlockConsume)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert another entry so we have blocks 1 and 2.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Consume block 1 fully. After this block, the snapshot's
@@ -1130,9 +1130,9 @@ TEST_F(DirectRCQTests, StressBackwardFullBlockConsume)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   // Block 4: Attempt to consume with max_fully_consumed=0 (backward).
@@ -1140,7 +1140,7 @@ TEST_F(DirectRCQTests, StressBackwardFullBlockConsume)
   auto tx4 = make_new_per_tx_db_proxy();
   tx4.add_delta(key, make_rcq_consume_delta(0, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx4.try_push_current_subtransaction();
+  r = tx4.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
   ASSERT_EQ(r.error().code(), SystemErrorCode::Unrecoverable);
 }
@@ -1155,13 +1155,13 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
   // Step 1: Write a bytestring.
   tx.add_delta(key, make_bytestring_delta("hello"),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Step 2: Delete it.
   tx.add_delta(key, make_delete_delta(),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Step 3: Create an RCQ with some entries.
@@ -1169,7 +1169,7 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
                make_rcq_insert_delta(
                    {make_rcq_entry({10}), make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Step 4: Consume entries but drop Step 3's inserts from the cumulative
@@ -1180,7 +1180,7 @@ TEST_F(DirectRCQTests, StressTypeTransitionDeleteRCQDeleteSameTx)
                make_rcq_consume_insert_delta(
                    0, 0, {make_rcq_entry({10}), make_rcq_entry({20})}, {}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
 }
 
@@ -1202,9 +1202,9 @@ TEST_F(DirectRCQTests, FailedRCQExclusiveUpgradeDoesNotPoisonPendingDeletion)
   auto tx_setup = make_new_per_tx_db_proxy();
   tx_setup.add_delta(key, make_bytestring_delta("hello"),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   auto tx = make_new_per_tx_db_proxy();
@@ -1212,7 +1212,7 @@ TEST_F(DirectRCQTests, FailedRCQExclusiveUpgradeDoesNotPoisonPendingDeletion)
   // Delete the key: a non-exclusive DeletionLock.
   tx.add_delta(key, make_delete_delta(),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Recreate as an RCQ whose current-block consume references an entry that
@@ -1223,7 +1223,7 @@ TEST_F(DirectRCQTests, FailedRCQExclusiveUpgradeDoesNotPoisonPendingDeletion)
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({0x99})},
                                              {make_rcq_entry({0x22})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
 
   // Failure-atomicity: the pending deletion reservation must be intact, so
@@ -1231,7 +1231,7 @@ TEST_F(DirectRCQTests, FailedRCQExclusiveUpgradeDoesNotPoisonPendingDeletion)
   // ExclusiveLock left behind by the failed upgrade.
   tx.add_delta(key, make_delete_delta(),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 }
 
@@ -1259,22 +1259,22 @@ TEST_F(DirectRCQTests, StressValidationConsumeNonexistentCurrentEntry)
     auto tx1 = make_new_per_tx_db_proxy();
     tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                   std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx1.try_push_current_subtransaction();
+    auto r = tx1.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
 
     // TX2 consumes {99} from current block -- an entry that was never inserted
     auto tx2 = make_new_per_tx_db_proxy();
     tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-    r = tx2.try_push_current_subtransaction();
+    r = tx2.try_push_current_subtransaction()();
 
     // Consumed entry {99} doesn't match any insert, but lock-time validation
     // doesn't check current-block consumed entries. Push succeeds in both
     // modes.
     ASSERT_TRUE(r.has_value() && r.value());
 
-    ASSERT_TRUE(tx1.commit_transaction().has_value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
+    ASSERT_TRUE(tx1.commit_transaction()().has_value());
+    ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
     // prepare_committed_changes detects the consumed_set mismatch and
     // returns kInvalidExecutorBehavior. reject_block verifies no DAO mutation.
@@ -1295,7 +1295,7 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // TX2 consumes two entries from current block but only one was inserted
@@ -1305,13 +1305,13 @@ TEST_F(DirectRCQTests, StressConsumeMoreCurrentThanInserted)
                                        {make_rcq_entry({10}),
                                         make_rcq_entry({20})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   // Lock-time validation doesn't check current-block consumed entries.
   // Push succeeds; mismatch caught at prepare_committed_changes.
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   // consumed_set check at prepare detects the extra consumed entry.
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
 }
@@ -1330,7 +1330,7 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // TX2 consumes two entries from current block but only one was inserted
@@ -1340,11 +1340,11 @@ TEST_F(DirectRCQTests, StressValidationConsumeMoreCurrentThanInserted)
                                        {make_rcq_entry({10}),
                                         make_rcq_entry({20})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()); // accepted in validation mode
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   // consumed_set check at prepare detects the extra consumed entry.
   reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
 }
@@ -1367,7 +1367,7 @@ TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
                make_rcq_insert_delta(
                    {make_rcq_entry({10}), make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: consume_insert consuming {10, 30} (30 never inserted) and inserting
@@ -1378,11 +1378,11 @@ TEST_F(DirectRCQTests, StressSameTxConsumeInsertMismatch)
                    {make_rcq_entry({10}), make_rcq_entry({20}),
                     make_rcq_entry({40})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // Lock-time validation doesn't check current-block consumed entries.
   // Push succeeds; mismatch caught at prepare_committed_changes.
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   // consumed_set check at prepare detects the mismatched entry.
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
 }
@@ -1400,7 +1400,7 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
                make_rcq_insert_delta(
                    {make_rcq_entry({10}), make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: consume_insert consuming {10, 30} (30 never inserted) and inserting
@@ -1411,10 +1411,10 @@ TEST_F(DirectRCQTests, StressValidationSameTxConsumeInsertMismatch)
                    {make_rcq_entry({10}), make_rcq_entry({20}),
                     make_rcq_entry({40})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // this is valid in validation mode
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   // consumed_set check at prepare detects the mismatched entry.
   reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
 }
@@ -1437,9 +1437,9 @@ TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
     auto tx1 = make_new_per_tx_db_proxy();
     tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                   std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx1.try_push_current_subtransaction();
+    auto r = tx1.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx1.commit_transaction().has_value());
+    ASSERT_TRUE(tx1.commit_transaction()().has_value());
     advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
     // TX in new block: consume from current block even though nothing was
@@ -1448,11 +1448,11 @@ TEST_F(DirectRCQTests, StressValidationConsumeCurrentBlockZeroInserted)
     auto tx2 = make_new_per_tx_db_proxy();
     tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({1})}),
                   std::to_underlying(StorageDeltaFlags::None));
-    r = tx2.try_push_current_subtransaction();
+    r = tx2.try_push_current_subtransaction()();
     // Lock-time validation doesn't check current-block consumed entries.
     // Push succeeds; mismatch caught at prepare_committed_changes.
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
+    ASSERT_TRUE(tx2.commit_transaction()().has_value());
     // consumed_set check at prepare detects that consumed entry {1}
     // is not among the added_entries_ for this block.
     reject_block(mode);
@@ -1478,19 +1478,19 @@ TEST_F(DirectRCQTests, StressValidationConcurrentInsertAndConsumeCurrentBlock)
                 make_rcq_insert_delta(
                     {make_rcq_entry({10}), make_rcq_entry({20})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // TX2: consume one of those entries from current block
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({10})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
   // Commit consume FIRST, then insert -- stresses the ordering.
   // This is valid: TX2 consumes {10} from current-block added_entries.
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -1515,9 +1515,9 @@ TEST_F(DirectRCQTests, StressValidationConsumeMaxBlockWithPartial)
                 make_rcq_insert_delta(
                     {make_rcq_entry({1}), make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   // Consume block 1 fully AND claim partial_consumed=5 from the next block.
@@ -1528,7 +1528,7 @@ TEST_F(DirectRCQTests, StressValidationConsumeMaxBlockWithPartial)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(1, 5, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -1550,18 +1550,18 @@ TEST_F(DirectRCQTests, StressValidationPartialConsumeDecrement)
                                        make_rcq_entry({3}),
                                        make_rcq_entry({4})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   // Consume 3 entries
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 3, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block(BlockExecutionMode::kBlockExecutionModeValidation);
 
   // Now try to go backwards: partial_consumed=1 (less than the already-consumed
@@ -1570,7 +1570,7 @@ TEST_F(DirectRCQTests, StressValidationPartialConsumeDecrement)
   // This constitutes invalid input from the executor
   tx3.add_delta(key, make_rcq_consume_delta(0, 1, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -1592,7 +1592,7 @@ TEST_F(DirectRCQTests, StressConsumeInsertNoOpConsumeFollowedByInsertOnly)
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: insert-only delta (no consume). An honest executor never drops a
@@ -1602,7 +1602,7 @@ TEST_F(DirectRCQTests, StressConsumeInsertNoOpConsumeFollowedByInsertOnly)
                make_rcq_insert_delta(
                    {make_rcq_entry({10}), make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
 }
 
@@ -1625,16 +1625,16 @@ TEST_F(DirectRCQTests, StressConsumeForwardThenBackwardInSubtransactions)
                                             make_rcq_entry({2}),
                                             make_rcq_entry({3})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Sub1: consume partial=2
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(0, 2, {}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: consume partial=1 (backward!) -- violates monotonicity in narrow().
@@ -1643,7 +1643,7 @@ TEST_F(DirectRCQTests, StressConsumeForwardThenBackwardInSubtransactions)
   // transaction. An honest executor never produces this sequence.
   tx.add_delta(key, make_rcq_consume_delta(0, 1, {}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value());
 }
 
@@ -1667,9 +1667,9 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithConsumeDelta)
                                             make_rcq_entry({2}),
                                             make_rcq_entry({3})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Sub1: consume_insert with partial=1 and insert {10}
@@ -1677,7 +1677,7 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithConsumeDelta)
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 1, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: consume_insert with partial=2 (more consume) and more inserts
@@ -1686,15 +1686,15 @@ TEST_F(DirectRCQTests, StressPopSubtransactionWithConsumeDelta)
                                              {make_rcq_entry({10}),
                                               make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Pop sub2 -- rollback the deeper consume to the shallower one
-  auto pop_r = tx.pop_subtransactions(1);
+  auto pop_r = tx.pop_subtransactions(1)();
   ASSERT_TRUE(pop_r.has_value()) << "pop_subtransactions returned error";
 
   // Commit the remaining sub1
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -1714,7 +1714,7 @@ TEST_F(DirectRCQTests,
     auto tx1 = make_new_per_tx_db_proxy();
     tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                   std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx1.try_push_current_subtransaction();
+    auto r = tx1.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
 
     // TX2: consume_insert consuming {10, 10} from current block (2 copies)
@@ -1726,14 +1726,14 @@ TEST_F(DirectRCQTests,
                                                  make_rcq_entry({10})},
                                                 {make_rcq_entry({20})}),
                   std::to_underlying(StorageDeltaFlags::None));
-    r = tx2.try_push_current_subtransaction();
+    r = tx2.try_push_current_subtransaction()();
 
     // Lock-time validation doesn't check current-block consumed entries.
     // Push succeeds in both modes; mismatch caught at prepare.
     ASSERT_TRUE(r.has_value() && r.value());
 
-    ASSERT_TRUE(tx1.commit_transaction().has_value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
+    ASSERT_TRUE(tx1.commit_transaction()().has_value());
+    ASSERT_TRUE(tx2.commit_transaction()().has_value());
     // consumed_set check at prepare catches the duplicate consumption.
     reject_block(mode);
   }
@@ -1763,9 +1763,9 @@ TEST_F(DirectRCQTests,
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Same TX: delete, then recreate with inserts, then consume from
@@ -1775,7 +1775,7 @@ TEST_F(DirectRCQTests,
   // Sub1: delete the key
   tx.add_delta(key, make_delete_delta(),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: recreate as RCQ and insert entries
@@ -1783,7 +1783,7 @@ TEST_F(DirectRCQTests,
                make_rcq_insert_delta(
                    {make_rcq_entry({10}), make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
   // Sub3: consume from current block (entry {10} is in this sub's inserts)
   tx.add_delta(key,
@@ -1792,13 +1792,13 @@ TEST_F(DirectRCQTests,
                                               make_rcq_entry({20}),
                                               make_rcq_entry({30})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // The delete→recreate→consume_insert sequence promotes to exclusive mode.
   // Sub3's inserts {10, 20, 30} include the consumed entry {10}, so the
   // consumed_set check at finalization passes.
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -1815,9 +1815,9 @@ TEST_F(DirectRCQTests, StressSameBlockPartialOverconsume)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Consume with same max_fully_consumed=0, partial=5
@@ -1826,7 +1826,7 @@ TEST_F(DirectRCQTests, StressSameBlockPartialOverconsume)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(0, 5, {}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // Lock-time validation now catches partial overconsume (partial=5 > block
   // size=2) and returns kInvalidExecutorBehavior.
   ASSERT_FALSE(r.has_value());
@@ -1851,9 +1851,9 @@ TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
     auto tx_setup = make_new_per_tx_db_proxy();
     tx_setup.add_delta(key, make_nnint_set_add_delta(0, 100),
                        std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx_setup.try_push_current_subtransaction();
+    auto r = tx_setup.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+    ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
     advance_block(mode);
 
     // Now in a single TX: NNInt -> delete -> RCQ insert -> RCQ consume all
@@ -1862,7 +1862,7 @@ TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
     // Sub1: Delete the NNInt key
     tx.add_delta(key, make_delete_delta(),
                  std::to_underlying(StorageDeltaFlags::None));
-    r = tx.try_push_current_subtransaction();
+    r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
 
     // Sub2: RCQ insert two entries
@@ -1870,7 +1870,7 @@ TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
                  make_rcq_insert_delta(
                      {make_rcq_entry({10}), make_rcq_entry({20})}),
                  std::to_underlying(StorageDeltaFlags::None));
-    r = tx.try_push_current_subtransaction();
+    r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
 
     // Sub3: consume_insert consuming both entries. Cumulative delta preserves
@@ -1880,12 +1880,12 @@ TEST_F(DirectRCQTests, StressNNIntDeleteRCQConsumeAllSameTx)
                      0, 0, {make_rcq_entry({10}), make_rcq_entry({20})},
                      {make_rcq_entry({10}), make_rcq_entry({20})}),
                  std::to_underlying(StorageDeltaFlags::None));
-    r = tx.try_push_current_subtransaction();
+    r = tx.try_push_current_subtransaction()();
     // NNInt -> delete -> RCQ promotes to exclusive. ExclusiveLock sees
     // 2 inserts, 2 consumed on fresh key -> total = 0 -> cost 0.
     ASSERT_TRUE(r.has_value() && r.value());
 
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block(mode);
   }
 }
@@ -1916,9 +1916,9 @@ TEST_F(DirectRCQTests, StressExclusiveFlagConsumeOnlyPartialOnExistingRCQ)
                                             make_rcq_entry({2}),
                                             make_rcq_entry({3})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Consume-only (no inserts) with EXCLUSIVE flag.
@@ -1929,10 +1929,10 @@ TEST_F(DirectRCQTests, StressExclusiveFlagConsumeOnlyPartialOnExistingRCQ)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(0, 1, {}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -1965,9 +1965,9 @@ TEST_F(DirectRCQTests,
                           make_rcq_entry({3}), make_rcq_entry({4}),
                           make_rcq_entry({5})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: consume_insert with exclusive flag.
@@ -1981,9 +1981,9 @@ TEST_F(DirectRCQTests,
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -2022,9 +2022,9 @@ TEST_F(DirectRCQTests,
                           make_rcq_entry({3}), make_rcq_entry({4}),
                           make_rcq_entry({5})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert-only 1 entry with exclusive flag on existing RCQ key.
@@ -2033,10 +2033,10 @@ TEST_F(DirectRCQTests,
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -2053,7 +2053,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOnNewKeyCurrentBlockMismatch)
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({99})},
                                              {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   // ExclusiveLock validates consumed entry identity at lock time.
   // {99} not in added_entries {10} → rejected.
   ASSERT_FALSE(r.has_value());
@@ -2074,16 +2074,16 @@ TEST_F(DirectRCQTests,
                                             make_rcq_entry({2}),
                                             make_rcq_entry({3})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({77})},
                                              {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // ExclusiveLock validates consumed entry identity at lock time.
   // {77} not in added_entries {10} → rejected.
   ASSERT_FALSE(r.has_value());
@@ -2102,16 +2102,16 @@ TEST_F(DirectRCQTests,
                                             make_rcq_entry({2}),
                                             make_rcq_entry({3})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 0, {make_rcq_entry({77})},
                                              {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // ExclusiveLock validates consumed entry identity at lock time.
   // {77} not in added_entries {10} → rejected.
   ASSERT_FALSE(r.has_value());
@@ -2130,9 +2130,9 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOverconsumeCurrentBlock)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(
@@ -2143,7 +2143,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertOverconsumeCurrentBlock)
                                      make_rcq_entry({50})},
                                     {}),
       std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2159,9 +2159,9 @@ TEST_F(DirectRCQTests,
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(
@@ -2172,7 +2172,7 @@ TEST_F(DirectRCQTests,
                                      make_rcq_entry({50})},
                                     {}),
       std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   // ExclusiveLock detects overconsume (total < 0) and returns
   // kInvalidExecutorBehavior.
   ASSERT_FALSE(r.has_value());
@@ -2190,7 +2190,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertPastBlockOnFreshKey)
   tx.add_delta(key,
                make_rcq_consume_insert_delta(1, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2203,9 +2203,9 @@ TEST_F(DirectRCQTests,
   auto tx_setup = make_new_per_tx_db_proxy();
   tx_setup.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   auto tx = make_new_per_tx_db_proxy();
@@ -2213,10 +2213,10 @@ TEST_F(DirectRCQTests,
   tx.add_delta(key,
                make_rcq_consume_insert_delta(1, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -2233,24 +2233,24 @@ TEST_F(DirectRCQTests, StressPopSubtransactionExclusiveToNonExclusiveRCQ)
                           make_rcq_entry({3}), make_rcq_entry({4}),
                           make_rcq_entry({5})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key,
                make_rcq_consume_insert_delta(0, 5, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx.add_delta(key, make_bytestring_delta("hello, world!"),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.pop_subtransactions(1).has_value());
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.pop_subtransactions(1)().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -2266,7 +2266,7 @@ TEST_F(DirectRCQTests, StressExclusiveRCQConsumeOnlyOnFreshKey)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(0, 3, {}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2284,15 +2284,15 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertPastBlockOnExistingRCQ)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key,
                make_rcq_consume_insert_delta(3, 0, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2310,19 +2310,19 @@ TEST_F(DirectRCQTests, StressMultiKeyExclusiveAndNormalRCQSameTx)
                           make_rcq_entry({3}), make_rcq_entry({4}),
                           make_rcq_entry({5})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(keyA, make_rcq_insert_delta({make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::None));
   tx.add_delta(keyB, make_rcq_insert_delta({make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -2340,9 +2340,9 @@ TEST_F(DirectRCQTests, StressConsumeAfterFullConsumeAndReinsertSameBlock)
                 make_rcq_insert_delta(
                     {make_rcq_entry({1}), make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key,
@@ -2351,15 +2351,15 @@ TEST_F(DirectRCQTests, StressConsumeAfterFullConsumeAndReinsertSameBlock)
                                                make_rcq_entry({20}),
                                                make_rcq_entry({30})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
   auto tx3 = make_new_per_tx_db_proxy();
   // This is invalid input from the executor.
   tx3.add_delta(key, make_rcq_consume_delta(2, 5, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2377,14 +2377,14 @@ TEST_F(DirectRCQTests, StressExclusiveRCQWithVeryLargePartialConsume)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(0, UINT32_MAX, {}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2402,14 +2402,14 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeBlockBeyondMaxLiveOnExistingRCQ)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(5, 0, {}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
 
   // invalid input guard
   ASSERT_FALSE(r.has_value());
@@ -2431,9 +2431,9 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyPartialGreaterThanBlockSize)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert 5 + consume partial=3 on block with 2 entries.
@@ -2448,7 +2448,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyPartialGreaterThanBlockSize)
                                      make_rcq_entry({30}), make_rcq_entry({40}),
                                      make_rcq_entry({50})}),
       std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2468,9 +2468,9 @@ TEST_F(DirectRCQTests, StressExclusivePartialOverconsumeFollowedByFullConsume)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Exclusive consume_insert with partial=5 (overconsume by 3).
@@ -2483,7 +2483,7 @@ TEST_F(DirectRCQTests, StressExclusivePartialOverconsumeFollowedByFullConsume)
                      make_rcq_entry({50}), make_rcq_entry({60}),
                      make_rcq_entry({70}), make_rcq_entry({80})}),
                 std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2503,9 +2503,9 @@ TEST_F(DirectRCQTests,
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Exclusive partial overconsume + enough inserts to keep live >= 0
@@ -2519,7 +2519,7 @@ TEST_F(DirectRCQTests,
                      make_rcq_entry({50}), make_rcq_entry({60}),
                      make_rcq_entry({70}), make_rcq_entry({80})}),
                 std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2543,7 +2543,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyOnFreshKeyNoMetadata)
   auto tx = make_new_per_tx_db_proxy();
   tx.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2560,9 +2560,9 @@ TEST_F(DirectRCQTests, StressExclusiveRCQThenNormalModifySameBlockDowngrade)
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_setup.try_push_current_subtransaction();
+  auto r = tx_setup.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Sub 1 exclusive insert [A]. Sub 2 (same TX) non-exclusive
@@ -2573,7 +2573,7 @@ TEST_F(DirectRCQTests, StressExclusiveRCQThenNormalModifySameBlockDowngrade)
   // Sub 1: exclusive insert
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub 2: non-exclusive insert with more entries
@@ -2581,10 +2581,10 @@ TEST_F(DirectRCQTests, StressExclusiveRCQThenNormalModifySameBlockDowngrade)
                make_rcq_insert_delta(
                    {make_rcq_entry({10}), make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 }
 
@@ -2604,7 +2604,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeInsertMismatchedCurrentBlock)
                                              {make_rcq_entry({10}),
                                               make_rcq_entry({20})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   // ExclusiveLock validates consumed entry identity at lock time.
   // {99} not in added_entries {10, 20} → rejected.
   ASSERT_FALSE(r.has_value());
@@ -2621,7 +2621,7 @@ TEST_F(DirectRCQTests, StressExclusiveConsumeOnlyZeroBlockFreshKey)
                make_rcq_consume_insert_delta(0, 1, {}, {make_rcq_entry({10})}),
                std::to_underlying(StorageDeltaFlags::ExclusiveLock));
   // This constitutes invalid input from the executor
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value()); // invalid input guard
 }
 
@@ -2638,9 +2638,9 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
                 make_rcq_insert_delta(
                     {make_rcq_entry({1}), make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Exclusive overconsume partial=5 + 8 inserts.
@@ -2654,7 +2654,7 @@ TEST_F(DirectRCQTests, StressExclusiveOverconsumePartialThenInsertOnlyNextBlock)
                      make_rcq_entry({50}), make_rcq_entry({60}),
                      make_rcq_entry({70}), make_rcq_entry({80})}),
                 std::to_underlying(StorageDeltaFlags::ExclusiveLock));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   // ExclusiveLock detects partial overconsume (partial=5 > block size=2)
   // and returns kInvalidExecutorBehavior. The corrupted metadata never gets
   // persisted.
@@ -2680,9 +2680,9 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
                                          make_rcq_entry({2}),
                                          make_rcq_entry({3})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert 2 more entries (now two blocks of data).
@@ -2691,9 +2691,9 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
                   make_rcq_insert_delta(
                       {make_rcq_entry({4}), make_rcq_entry({5})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Partially consume — fully consume block 1, consume 1 entry from
@@ -2701,9 +2701,9 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_rcq_consume_delta(1, 1, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Sanity-check partially consumed state.
@@ -2718,23 +2718,23 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_bytestring_delta("overwritten"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Block 5: Delete bytestring, then recreate the RCQ with a single entry.
   auto tx_b5 = make_new_per_tx_db_proxy();
   tx_b5.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b5.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b5.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b5.commit_transaction()().has_value());
   advance_block();
 
   // Verify: only {99} is visible, no ghost entries from the old queue.
@@ -2751,7 +2751,7 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
   // Block 1 of the recreated queue should contain only {99}.
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -2762,7 +2762,7 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
   // max_live_block_num.
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 
@@ -2770,9 +2770,9 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQThenRecreate)
   auto tx_b6 = make_new_per_tx_db_proxy();
   tx_b6.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b6.try_push_current_subtransaction();
+  r = tx_b6.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b6.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b6.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -2793,9 +2793,9 @@ TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
                                          make_rcq_entry({2}),
                                          make_rcq_entry({3})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert 2 more entries.
@@ -2804,9 +2804,9 @@ TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
                   make_rcq_insert_delta(
                       {make_rcq_entry({4}), make_rcq_entry({5})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Single TX — sub1 partially consumes, sub2 overwrites with
@@ -2815,28 +2815,28 @@ TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
 
   tx_b3.add_delta(key, make_rcq_consume_delta(1, 1, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b3.add_delta(key, make_bytestring_delta("overwritten"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Block 4: Delete bytestring, recreate RCQ with {99}.
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Verify only {99} is visible.  Recreated queue starts at block 1.
@@ -2849,7 +2849,7 @@ TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -2858,7 +2858,7 @@ TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
 
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 
@@ -2866,9 +2866,9 @@ TEST_F(DirectRCQTests, ConsumeAndOverwriteRCQSameTxThenRecreate)
   auto tx_b5 = make_new_per_tx_db_proxy();
   tx_b5.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b5.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b5.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -2888,43 +2888,43 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
                   make_rcq_insert_delta(
                       {make_rcq_entry({1}), make_rcq_entry({2})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert {3}.
   auto tx_b2 = make_new_per_tx_db_proxy();
   tx_b2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({3})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Partially consume (1 entry from block 1).
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_rcq_consume_delta(0, 1, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Block 4: Overwrite with bytestring.
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_bytestring_delta("dead"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Block 5: Delete + recreate RCQ with 3 entries.
   auto tx_b5 = make_new_per_tx_db_proxy();
   tx_b5.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b5.add_delta(key,
@@ -2932,18 +2932,18 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
                                          make_rcq_entry({20}),
                                          make_rcq_entry({30})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b5.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b5.commit_transaction()().has_value());
   advance_block();
 
   // Block 6: Add another entry to the recreated queue in a second block.
   auto tx_b6 = make_new_per_tx_db_proxy();
   tx_b6.add_delta(key, make_rcq_insert_delta({make_rcq_entry({40})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b6.try_push_current_subtransaction();
+  r = tx_b6.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b6.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b6.commit_transaction()().has_value());
   advance_block();
 
   // Verify: 4 entries across RCQ blocks 1 and 2, nothing from the old queue.
@@ -2956,7 +2956,7 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
   ASSERT_EQ(queue->metadata().consume_state.max_fully_consumed_block_number, 0);
 
   auto b1 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 1);
+                                                            key, 1)();
   ASSERT_TRUE(b1.has_value());
   ASSERT_TRUE(b1.value().has_value());
   ASSERT_EQ(b1.value()->block_number, 1);
@@ -2966,7 +2966,7 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
   ASSERT_EQ(b1.value()->entries[2], make_rcq_entry({30}));
 
   auto b2 = get_db_proxy().get_next_retrocausal_queue_block(get_block_number(),
-                                                            key, 2);
+                                                            key, 2)();
   ASSERT_TRUE(b2.has_value());
   ASSERT_TRUE(b2.value().has_value());
   ASSERT_EQ(b2.value()->block_number, 2);
@@ -2975,7 +2975,7 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
 
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      3);
+                                                      3)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 
@@ -2983,9 +2983,9 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
   auto tx_b7 = make_new_per_tx_db_proxy();
   tx_b7.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b7.try_push_current_subtransaction();
+  r = tx_b7.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b7.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b7.commit_transaction()().has_value());
   advance_block();
 
   // Only RCQ block 2 entry {40} should remain.
@@ -2998,7 +2998,7 @@ TEST_F(DirectRCQTests, OverwritePartiallyConsumedRCQRecreateMultiEntry)
   // Block 1 was pruned; query from block 2 to find the remaining entry.
   auto remaining =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(remaining.has_value());
   ASSERT_TRUE(remaining.value().has_value());
   ASSERT_EQ(remaining.value()->block_number, 2);
@@ -3021,9 +3021,9 @@ TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
                                          make_rcq_entry({2}),
                                          make_rcq_entry({3})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert {4}, {5}.
@@ -3032,41 +3032,41 @@ TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
                   make_rcq_insert_delta(
                       {make_rcq_entry({4}), make_rcq_entry({5})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Partially consume — fully consume block 1, consume 1 from block 2.
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_rcq_consume_delta(1, 1, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Block 4: Overwrite with NNInt.
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_nnint_set_add_delta(0, 100),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Block 5: Delete NNInt, then recreate RCQ with {99}.
   auto tx_b5 = make_new_per_tx_db_proxy();
   tx_b5.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b5.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b5.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b5.commit_transaction()().has_value());
   advance_block();
 
   // Verify: only {99} visible, no ghost blocks from old queue.
@@ -3080,7 +3080,7 @@ TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -3089,7 +3089,7 @@ TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
 
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 
@@ -3097,9 +3097,9 @@ TEST_F(DirectRCQTests, OverwriteRCQWithNNIntThenRecreate)
   auto tx_b6 = make_new_per_tx_db_proxy();
   tx_b6.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b6.try_push_current_subtransaction();
+  r = tx_b6.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b6.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b6.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -3119,27 +3119,27 @@ TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
                   make_rcq_insert_delta(
                       {make_rcq_entry({1}), make_rcq_entry({2})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Overwrite with bytestring "dead".
   auto tx_b2 = make_new_per_tx_db_proxy();
   tx_b2.add_delta(key, make_bytestring_delta("dead"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Delete the bytestring (key is now empty).
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Key should be fully gone now.
@@ -3149,9 +3149,9 @@ TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Verify: only {99} visible — ghost blocks from block 1 should be gone.
@@ -3163,7 +3163,7 @@ TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -3172,7 +3172,7 @@ TEST_F(DirectRCQTests, OverwriteRCQWithBytestringDeleteDoesNotCleanGhostBlocks)
 
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 }
@@ -3192,36 +3192,36 @@ TEST_F(DirectRCQTests,
                   make_rcq_insert_delta(
                       {make_rcq_entry({1}), make_rcq_entry({2})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert {3} (RCQ block 2).
   auto tx_b2 = make_new_per_tx_db_proxy();
   tx_b2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({3})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Overwrite with bytestring (orphans RCQ blocks 1 and 2).
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_bytestring_delta("dead"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Block 4: Delete the bytestring.
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -3230,9 +3230,9 @@ TEST_F(DirectRCQTests,
   auto tx_b5 = make_new_per_tx_db_proxy();
   tx_b5.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b5.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b5.commit_transaction()().has_value());
   advance_block();
 
   // Verify: only {99} visible.
@@ -3244,7 +3244,7 @@ TEST_F(DirectRCQTests,
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -3254,7 +3254,7 @@ TEST_F(DirectRCQTests,
   // Ghost block 2 from the old queue should be gone.
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 }
@@ -3272,25 +3272,25 @@ TEST_F(DirectRCQTests, BytestringToRCQWithEntriesDoesNotCleanOldBytestring)
   auto tx_b1 = make_new_per_tx_db_proxy();
   tx_b1.add_delta(key, make_bytestring_delta("hello"),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Same TX — sub1: delete, sub2: RCQ insert {10}, {20}.
   auto tx_b2 = make_new_per_tx_db_proxy();
   tx_b2.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b2.add_delta(key,
                   make_rcq_insert_delta(
                       {make_rcq_entry({10}), make_rcq_entry({20})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Verify queue metadata is correct.
@@ -3302,7 +3302,7 @@ TEST_F(DirectRCQTests, BytestringToRCQWithEntriesDoesNotCleanOldBytestring)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->entries.size(), 2);
@@ -3313,9 +3313,9 @@ TEST_F(DirectRCQTests, BytestringToRCQWithEntriesDoesNotCleanOldBytestring)
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -3332,9 +3332,9 @@ TEST_F(DirectRCQTests, NNIntToRCQWithEntriesOverwritesCleanly)
   auto tx_b1 = make_new_per_tx_db_proxy();
   tx_b1.add_delta(key, make_nnint_set_add_delta(0, 42),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Verify NNInt is stored.
@@ -3346,16 +3346,16 @@ TEST_F(DirectRCQTests, NNIntToRCQWithEntriesOverwritesCleanly)
   auto tx_b2 = make_new_per_tx_db_proxy();
   tx_b2.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b2.add_delta(key,
                   make_rcq_insert_delta(
                       {make_rcq_entry({10}), make_rcq_entry({20})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Verify queue metadata — should be RCQ, not NNInt.
@@ -3367,7 +3367,7 @@ TEST_F(DirectRCQTests, NNIntToRCQWithEntriesOverwritesCleanly)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->entries.size(), 2);
@@ -3378,9 +3378,9 @@ TEST_F(DirectRCQTests, NNIntToRCQWithEntriesOverwritesCleanly)
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -3400,9 +3400,9 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
                                          make_rcq_entry({2}),
                                          make_rcq_entry({3})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Insert {4}, {5} (second block).
@@ -3411,18 +3411,18 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
                   make_rcq_insert_delta(
                       {make_rcq_entry({4}), make_rcq_entry({5})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Explicit delete.
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Key should be gone.
@@ -3431,13 +3431,13 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
   // Old RCQ blocks 1 and 2 should be cleaned up.
   auto ghost1 =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(ghost1.has_value());
   ASSERT_FALSE(ghost1.value().has_value());
 
   auto ghost2 =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(ghost2.has_value());
   ASSERT_FALSE(ghost2.value().has_value());
 
@@ -3445,9 +3445,9 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Verify only {99}.
@@ -3459,7 +3459,7 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -3468,7 +3468,7 @@ TEST_F(DirectRCQTests, ExplicitDeleteRCQWithBlocksCleansUpProperly)
 
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 }
@@ -3486,66 +3486,66 @@ TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
                   make_rcq_insert_delta(
                       {make_rcq_entry({1}), make_rcq_entry({2})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_b1.try_push_current_subtransaction();
+  auto r = tx_b1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b1.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: Overwrite with bytestring (orphans RCQ block 1).
   auto tx_b2 = make_new_per_tx_db_proxy();
   tx_b2.add_delta(key, make_bytestring_delta("cycle1"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b2.try_push_current_subtransaction();
+  r = tx_b2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b2.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: Delete + insert {10}, {20} into RCQ (RCQ block 1).
   auto tx_b3 = make_new_per_tx_db_proxy();
   tx_b3.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b3.add_delta(key,
                   make_rcq_insert_delta(
                       {make_rcq_entry({10}), make_rcq_entry({20})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b3.try_push_current_subtransaction();
+  r = tx_b3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b3.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b3.commit_transaction()().has_value());
   advance_block();
 
   // Block 4: Insert {30} into RCQ (RCQ block 2).
   auto tx_b4 = make_new_per_tx_db_proxy();
   tx_b4.add_delta(key, make_rcq_insert_delta({make_rcq_entry({30})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b4.try_push_current_subtransaction();
+  r = tx_b4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b4.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b4.commit_transaction()().has_value());
   advance_block();
 
   // Block 5: Overwrite with bytestring again (orphans RCQ blocks 1+2).
   auto tx_b5 = make_new_per_tx_db_proxy();
   tx_b5.add_delta(key, make_bytestring_delta("cycle2"),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b5.try_push_current_subtransaction();
+  r = tx_b5.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b5.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b5.commit_transaction()().has_value());
   advance_block();
 
   // Block 6: Delete + insert {99} into RCQ (RCQ block 1).
   auto tx_b6 = make_new_per_tx_db_proxy();
   tx_b6.add_delta(key, make_delete_delta(),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b6.try_push_current_subtransaction();
+  r = tx_b6.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   tx_b6.add_delta(key, make_rcq_insert_delta({make_rcq_entry({99})}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b6.try_push_current_subtransaction();
+  r = tx_b6.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b6.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b6.commit_transaction()().has_value());
   advance_block();
 
   // Verify: only {99} visible.
@@ -3557,7 +3557,7 @@ TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->block_number, 1);
@@ -3567,7 +3567,7 @@ TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
   // Ghost block 2 from second cycle should be gone.
   auto no_more =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(no_more.has_value());
   ASSERT_FALSE(no_more.value().has_value());
 
@@ -3575,9 +3575,9 @@ TEST_F(DirectRCQTests, DoubleOverwriteCycleRCQBytestringRCQ)
   auto tx_b7 = make_new_per_tx_db_proxy();
   tx_b7.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                   std::to_underlying(StorageDeltaFlags::None));
-  r = tx_b7.try_push_current_subtransaction();
+  r = tx_b7.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_b7.commit_transaction().has_value());
+  ASSERT_TRUE(tx_b7.commit_transaction()().has_value());
   advance_block();
 
   ASSERT_FALSE(lookup_storage_item_from_db(key).has_value());
@@ -3600,16 +3600,16 @@ TEST_F(DirectRCQTests, FullSubtransactionRollbackReleasesRCQLock)
   // Push a subtransaction that inserts into the RCQ.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0xAA})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Pop it — this is the ONLY subtransaction that touched this key,
   // so modify_lock is called with after=nullptr, fully releasing the lock.
-  auto pop_r = tx.pop_subtransactions(1);
+  auto pop_r = tx.pop_subtransactions(1)();
   ASSERT_TRUE(pop_r.has_value()) << "pop_subtransactions returned error";
 
   // Commit the (now empty) transaction.
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 
   // The RCQ should not exist — the insert was fully rolled back.
@@ -3632,27 +3632,27 @@ TEST_F(DirectRCQTests, ConsumeThreeBlocksInOneDelta)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: insert entry {2}.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta({make_rcq_entry({2})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
 
   // Block 3: insert entry {3}.
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_insert_delta({make_rcq_entry({3})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   // Now consume all 3 blocks at once: max_fully_consumed_block_number=3,
@@ -3664,9 +3664,9 @@ TEST_F(DirectRCQTests, ConsumeThreeBlocksInOneDelta)
   auto tx4 = make_new_per_tx_db_proxy();
   tx4.add_delta(key, make_rcq_consume_delta(3, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx4.try_push_current_subtransaction();
+  r = tx4.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx4.commit_transaction().has_value());
+  ASSERT_TRUE(tx4.commit_transaction()().has_value());
   advance_block();
 
   // The RCQ should be empty (all 3 entries consumed, 0 live).
@@ -3687,10 +3687,10 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta(full_block),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()) << "TX1 full-block insert should "
                                              "succeed";
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // TX2: consume + insert one more entry. Aggregate reservation cap + 1 > cap,
   // so push must fail with kConflict.
@@ -3699,21 +3699,21 @@ TEST_F(DirectRCQTests, OverfullConsumeInsertDoesNotPoisonConsumerBit)
   tx2.add_delta(key,
                 make_rcq_consume_insert_delta(0, 0, {full_block[0]}, one_more),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value())
       << "TX2 consume+insert one more should fail (aggregate > cap)";
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   // TX3: legitimate pure consume. TX2's failed reservation must not leak the
   // consumed_ bit, so TX3 must succeed.
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_consume_delta(0, 0, {full_block[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "TX3 pure consume must succeed after TX2's failed overfull "
          "reservation";
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 // Sibling leak: a consume that trips kInvalidExecutorBehavior after the
@@ -3729,9 +3729,9 @@ TEST_F(DirectRCQTests, InvalidExecutorConsumeDoesNotPoisonConsumerBit)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // TX2: consume with max_fully_consumed_block_number = 1 on a fresh RCQ
   // (max_live_block_num = 0). This trips
@@ -3740,22 +3740,22 @@ TEST_F(DirectRCQTests, InvalidExecutorConsumeDoesNotPoisonConsumerBit)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(1, 0, {}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   // kInvalidExecutorBehavior surfaces as !r.has_value(), distinct from
   // kConflict.
   ASSERT_FALSE(r.has_value())
       << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   // TX3: legitimate pure consume of the current-block entry. Should succeed
   // once consumed_ is rolled back by the guard.
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "TX3 pure consume must succeed after TX2's kInvalidExecutorBehavior";
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 // Sibling leak: a consume+insert that trips kInvalidExecutorBehavior after
@@ -3773,9 +3773,9 @@ TEST_F(DirectRCQTests,
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta(tx1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // TX2: consume_insert with cap/2 entries + invalid consume. Reservation
   // cap/2 + cap/2 = cap passes the cap (not > cap), then
@@ -3785,10 +3785,10 @@ TEST_F(DirectRCQTests,
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, tx2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value())
       << "TX2 should hit kInvalidExecutorBehavior (past block > max_live)";
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   // TX3: legitimate insert of cap/2 entries. Total cap/2 + cap/2 = cap <= cap,
   // must succeed. With the leak it becomes cap/2 + cap/2 + cap/2 > cap and
@@ -3797,11 +3797,11 @@ TEST_F(DirectRCQTests,
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_insert_delta(tx3_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "TX3 insert cap/2 must succeed after TX2's reservation is rolled "
          "back";
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 // Stacked sub: sub1 = insert-only, sub2 = consume_insert with invalid
@@ -3824,7 +3824,7 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   // Sub1: insert-only, cap/2 entries. reservation becomes cap/2.
   tx1.add_delta(key, make_rcq_insert_delta(sub1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 insert must succeed";
 
   // Sub2: consume_insert cumulative with invalid max_fully_consumed=1 on a
@@ -3833,23 +3833,23 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   // narrow's prefix check passes). Must fail at lock-time consume validation.
   tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, sub2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value())
       << "sub2 should fail with kInvalidExecutorBehavior (max_fully > "
          "max_live)";
 
   // Commit tx1. Sub2 never pushed, so only sub1's work persists.
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // A separate tx consumes one of sub1's current-block entries. Succeeds
   // iff sub2's CAS undo restored consumed_ to false.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 0, {sub1_entries[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "tx2 pure consume must succeed; sub2 must not leak consumed_";
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   // A separate tx inserts cap/2 more entries. Succeeds iff the per-block
   // reservation is cap/2 (sub1 only): cap/2 + cap/2 = cap <= cap. With a
@@ -3859,10 +3859,10 @@ TEST_F(DirectRCQTests, StackedInsertThenInvalidConsumeInsertDoesNotPoison)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_insert_delta(refill_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx3.try_push_current_subtransaction();
+  r = tx3.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "tx3 insert cap/2 must succeed; sub2 must not leak fetch_add";
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
 // Stacked sub: sub1 insert-only, sub2 consume_insert VALID but the
@@ -3882,9 +3882,9 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   auto tx_filler = make_new_per_tx_db_proxy();
   tx_filler.add_delta(key, make_rcq_insert_delta(filler_entries),
                       std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_filler.try_push_current_subtransaction();
+  auto r = tx_filler.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
-  ASSERT_TRUE(tx_filler.commit_transaction().has_value());
+  ASSERT_TRUE(tx_filler.commit_transaction()().has_value());
 
   auto sub1_entries = make_entries(cap / 2);
   auto sub2_entries = make_entries(cap);
@@ -3894,7 +3894,7 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   // Sub1: cap/2 inserts. reservation: cap/2 -> cap.
   tx1.add_delta(key, make_rcq_insert_delta(sub1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 insert must succeed";
 
   // Sub2: valid consume + cap cumulative inserts. additional = cap/2.
@@ -3902,21 +3902,21 @@ TEST_F(DirectRCQTests, StackedInsertThenOverfullConsumeInsertDoesNotPoison)
   // kConflict (r.has_value() && !r.value() pattern).
   tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, sub2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value())
       << "sub2 should fail with kConflict (cap/2+cap/2+cap/2 > cap)";
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // Verify consumed_ was restored: another tx can consume a current-block
   // entry from sub1. With a leaked CAS, this would return kConflict.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 0, {sub1_entries[0]}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "tx2 pure consume must succeed; sub2 must not leak consumed_";
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
 // Stacked sub: sub1 = valid consume_insert (sets consumed_ via CAS),
@@ -3941,7 +3941,7 @@ TEST_F(DirectRCQTests,
   // reservation=cap/2.
   tx1.add_delta(key, make_rcq_consume_insert_delta(0, 0, {}, sub1_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 consume_insert must succeed";
 
   // Sub2: invalid max_fully_consumed=1, cumulative cap inserts. narrow
@@ -3951,11 +3951,11 @@ TEST_F(DirectRCQTests,
   // Only the reservation undo fires.
   tx1.add_delta(key, make_rcq_consume_insert_delta(1, 0, {}, sub2_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_FALSE(r.has_value())
       << "sub2 should fail with kInvalidExecutorBehavior";
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // Reservation should be cap/2 (sub1 only) if fetch_add was undone; with a
   // leak it would be cap. Verify by inserting cap/2 more entries from a
@@ -3964,10 +3964,10 @@ TEST_F(DirectRCQTests,
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta(refill_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "tx2 insert cap/2 must succeed; sub2 must not leak fetch_add";
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
 // Pop of a consume-adding sub: sub1 = insert-only, sub2 = consume_insert
@@ -3986,7 +3986,7 @@ TEST_F(DirectRCQTests, PopConsumeAddingSubReleasesConsumerBit)
   // Sub1: insert-only, one entry A.
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub1 insert must succeed";
 
   // Sub2: consume_insert cumulative. Adds a consume + one more insert so
@@ -3998,27 +3998,27 @@ TEST_F(DirectRCQTests, PopConsumeAddingSubReleasesConsumerBit)
                                               {make_rcq_entry({0}),
                                                make_rcq_entry({1})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value()) << "sub2 consume_insert must succeed";
 
   // Pop sub2: lock call sees before.consume != null, after.consume null,
   // this_tx_already_consumed = true. else-if CLEAR stores consumed_ =
   // false. Shrink branch fetch_sub(1). Final success → undo disarm.
-  auto pop_r = tx1.pop_subtransactions(1);
+  auto pop_r = tx1.pop_subtransactions(1)();
   ASSERT_TRUE(pop_r.has_value()) << "pop_subtransactions must succeed";
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // A separate tx consumes entry A from current block. With the else-if
   // CLEAR working, consumed_ was released and the CAS here succeeds.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({0})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "tx2 pure consume must succeed; else-if CLEAR must have released "
          "consumed_";
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, SelfConsumeInsertShrinkAccepted)
@@ -4032,17 +4032,17 @@ TEST_F(DirectRCQTests, SelfConsumeInsertShrinkAccepted)
   // Sub1: insert one entry.
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0xA5})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: zero inserts (entry was self-consumed by executor).
   tx.add_delta(key, make_rcq_insert_delta({}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "self-consume shrink must not be rejected";
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, SelfConsumePartialShrinkWithNewInserts)
@@ -4059,7 +4059,7 @@ TEST_F(DirectRCQTests, SelfConsumePartialShrinkWithNewInserts)
                                       make_rcq_entry({0x0B}),
                                       make_rcq_entry({0x0C})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: [C, D] — consumed A and B, inserted D.
@@ -4067,11 +4067,11 @@ TEST_F(DirectRCQTests, SelfConsumePartialShrinkWithNewInserts)
                make_rcq_insert_delta(
                    {make_rcq_entry({0x0C}), make_rcq_entry({0x0D})}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "partial self-consume with new inserts must succeed";
 
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
 }
 
 TEST_F(DirectRCQTests, SelfConsumeShrinkThenRollbackRestoresReservation)
@@ -4085,20 +4085,20 @@ TEST_F(DirectRCQTests, SelfConsumeShrinkThenRollbackRestoresReservation)
   // Sub1: insert [A].
   tx.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
                std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx.try_push_current_subtransaction();
+  auto r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: zero inserts (self-consumed A).
   tx.add_delta(key, make_rcq_insert_delta({}),
                std::to_underlying(StorageDeltaFlags::None));
-  r = tx.try_push_current_subtransaction();
+  r = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Roll back sub2 — restores sub1's state.
-  ASSERT_TRUE(tx.pop_subtransactions(1).has_value());
+  ASSERT_TRUE(tx.pop_subtransactions(1)().has_value());
 
   // Commit — sub1's insert [A] should be intact.
-  ASSERT_TRUE(tx.commit_transaction().has_value());
+  ASSERT_TRUE(tx.commit_transaction()().has_value());
   advance_block();
 
   auto queue = lookup_storage_item_from_db(key);
@@ -4108,7 +4108,7 @@ TEST_F(DirectRCQTests, SelfConsumeShrinkThenRollbackRestoresReservation)
 
   auto block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block.has_value());
   ASSERT_TRUE(block.value().has_value());
   ASSERT_EQ(block.value()->entries.size(), 1);
@@ -4128,13 +4128,13 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
   auto peak_entries = make_entries(cap / 2);
   tx1.add_delta(key, make_rcq_insert_delta(peak_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: zero inserts (all self-consumed).
   tx1.add_delta(key, make_rcq_insert_delta({}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Concurrent tx2: try to insert cap/2 + 1 entries.
@@ -4144,7 +4144,7 @@ TEST_F(DirectRCQTests, SelfConsumeReservationPinnedAtPeak)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta(over_cap_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && !r.value())
       << "reservation must be pinned at peak cap/2; cap/2 + (cap/2 + 1) > cap "
          "should conflict";
@@ -4163,19 +4163,19 @@ TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
   auto peak_entries = make_entries(cap / 2);
   tx1.add_delta(key, make_rcq_insert_delta(peak_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx1.try_push_current_subtransaction();
+  auto r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Sub2: zero inserts (all self-consumed).
   tx1.add_delta(key, make_rcq_insert_delta({}),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx1.try_push_current_subtransaction();
+  r = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   // Commit tx1. The commit writes 0 actual entries but the reservation was
   // pinned at cap/2 during execution. commit_change must release the excess
   // so other transactions can use those slots.
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   // tx2: insert cap/2 + 1 entries. After tx1 commits and releases the excess
   // reservation, the block should have 0 reserved slots, so cap/2 + 1 fits.
@@ -4183,7 +4183,7 @@ TEST_F(DirectRCQTests, SelfConsumeCommitReleasesExcessReservation)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta(refill_entries),
                 std::to_underlying(StorageDeltaFlags::None));
-  r = tx2.try_push_current_subtransaction();
+  r = tx2.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value())
       << "after tx1 commits 0 actual entries, the cap/2-slot reservation must "
          "be released so tx2 can insert cap/2 + 1";
@@ -4197,15 +4197,15 @@ TEST_F(DirectRCQTests, ObservedEntryMatchesInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0x0A})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -4218,15 +4218,15 @@ TEST_F(DirectRCQTests, ObservedEntryNoMatchingInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0xFF})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
@@ -4244,21 +4244,21 @@ TEST_F(DirectRCQTests, ObservedAndConsumedSameEntry)
   auto tx1a = make_new_per_tx_db_proxy();
   tx1a.add_delta(key, make_rcq_insert_delta({entryA}),
                  std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1a.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1a.try_push_current_subtransaction()().value());
 
   auto tx1b = make_new_per_tx_db_proxy();
   tx1b.add_delta(key, make_rcq_insert_delta({entryA}),
                  std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1b.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1b.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_observed_delta(0, 0, {entryA}, {entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1a.commit_transaction().has_value());
-  ASSERT_TRUE(tx1b.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1a.commit_transaction()().has_value());
+  ASSERT_TRUE(tx1b.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -4273,15 +4273,15 @@ TEST_F(DirectRCQTests, ObservationCommitsBeforeInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -4294,17 +4294,17 @@ TEST_F(DirectRCQTests, MultipleObservedPartialMatch)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({make_rcq_entry({0x0A})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key,
                 make_rcq_observed_delta(
                     {make_rcq_entry({0x0A}), make_rcq_entry({0xFF})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
@@ -4318,8 +4318,8 @@ TEST_F(DirectRCQTests, TupleTrackingUnmatchedConsume)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_consume_delta(0, 0, {make_rcq_entry({0x0A})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
@@ -4335,21 +4335,21 @@ TEST_F(DirectRCQTests, TupleTrackingMultipleInsertsOneConsume)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_consume_delta(0, 0, {entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -4363,8 +4363,8 @@ TEST_F(DirectRCQTests, ObservedEntryZeroInserts)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0xBB})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
 
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
@@ -4381,18 +4381,18 @@ TEST_F(DirectRCQTests, ObservedEntryInserterAborted)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe A, reserve it
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   // TX1 aborted — insert never reaches commit_change
-  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx1.abort_transaction()().has_value());
   // TX2 commits — observation is committed
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   // Block close rejects: observed entry was never inserted (inserter aborted).
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
@@ -4410,17 +4410,17 @@ TEST_F(DirectRCQTests, ObservedEntryObserverAborted)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe forged entry — would fail validation
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({make_rcq_entry({0xFF})}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
   // TX2 aborted — forged observation never reaches commit_change
-  ASSERT_TRUE(tx2.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction()().has_value());
 
   // Block close succeeds: only the insert committed, no unmatched observations.
   advance_block();
@@ -4438,16 +4438,16 @@ TEST_F(DirectRCQTests, InsertAndObserveInSameDelta)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryB}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: insert A and observe B in a single delta
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_insert_observed_delta({entryA}, {entryB}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -4464,16 +4464,16 @@ TEST_F(DirectRCQTests, ObservationAcrossDifferentKeys)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key1, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe A on key2 (different key — insert on key1 doesn't help)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key2, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   // Block rejects: per-key isolation — insert on key1 doesn't validate
   // an observation on key2.
@@ -4492,17 +4492,17 @@ TEST_F(DirectRCQTests, RepeatedObservationExceedsInserts)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe A three times in one delta (e.g. three consumes in a
   // reverted frame). One insert cannot satisfy three observations.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA, entryA, entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
   advance_block();
@@ -4519,7 +4519,7 @@ TEST_F(DirectRCQTests, TwoTxsObserveSameEntryOneInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2 and TX3 each observe A once. Observation is an existence check —
   // different TXs see the same pool, so one insert satisfies both
@@ -4527,16 +4527,16 @@ TEST_F(DirectRCQTests, TwoTxsObserveSameEntryOneInsert)
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 
   advance_block();
 }
@@ -4552,23 +4552,23 @@ TEST_F(DirectRCQTests, ObserveCountUsesMaxNotSum)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA, entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe A once
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   // TX3: observe A twice — this is the max, so observe_count = 2
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_observed_delta({entryA, entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 
   // observe_count = max(1, 2) = 2, insert_count = 2. 2 <= 2 → passes.
   // With sum semantics (1+2=3 > 2) this would incorrectly reject.
@@ -4586,23 +4586,23 @@ TEST_F(DirectRCQTests, ObserveCountMaxExceedsSingleInsert)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe A once — fine on its own
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   // TX3: observe A twice — max(1, 2) = 2 > insert_count(1)
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_observed_delta({entryA, entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
 
   // observe_count = max(1, 2) = 2 > insert_count = 1 → rejected.
   reject_block(BlockExecutionMode::kBlockExecutionModeProposal);
@@ -4624,16 +4624,16 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCost)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: observe-only — should cost nothing.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
 
   advance_block();
 
@@ -4666,23 +4666,23 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostExistingRCQ)
                                             make_rcq_entry({2}),
                                             make_rcq_entry({3})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx_setup.try_push_current_subtransaction().value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.try_push_current_subtransaction()().value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   // Block 2: TX1 inserts one more entry, TX2 only observes it.
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
 
   // The actual cost of 4 entries is consumed.  The conservative reservation
@@ -4718,8 +4718,8 @@ TEST_F(DirectRCQTests,
                      make_rcq_insert_delta(
                          {make_rcq_entry({1}), make_rcq_entry({2})}),
                      std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx_setup.try_push_current_subtransaction().value());
-  ASSERT_TRUE(tx_setup.commit_transaction().has_value());
+  ASSERT_TRUE(tx_setup.try_push_current_subtransaction()().value());
+  ASSERT_TRUE(tx_setup.commit_transaction()().has_value());
   advance_block();
 
   auto bal_before = lookup_storage_item_from_db(
@@ -4733,15 +4733,15 @@ TEST_F(DirectRCQTests,
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_consume_insert_delta(0, 1, {}, {entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
   advance_block();
 
   // The RCQ still has 2 entries (consumed 1, inserted 1), so cost(2) is
@@ -4772,24 +4772,24 @@ TEST_F(DirectRCQTests,
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA, entryB}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: consume 1 current-block entry, insert 1 new entry (net zero).
   auto entryC = make_rcq_entry({0x0C});
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_insert_delta(0, 0, {entryA}, {entryC}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   // TX3: observe-only.
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_observed_delta({entryC}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   // 2 entries live (inserted 2+1, consumed 1 current-block).  cost(2) locked.
@@ -4816,23 +4816,23 @@ TEST_F(DirectRCQTests, ObserveOnlyDeltaDoesNotRequireStorageCostEmptyQueue)
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: consume 1 current-block entry, insert 1 new entry (net zero).
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_insert_delta(0, 0, {entryA}, {entryB}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   // TX3: observe-only.
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_observed_delta({entryB}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   // 1 entry live.  cost(1) = exact_cost locked.  The observe-only delta
@@ -4859,23 +4859,23 @@ TEST_F(DirectRCQTests,
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_rcq_insert_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx1.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx1.try_push_current_subtransaction()().value());
 
   // TX2: consume 1 current-block entry.
   auto tx2 = make_new_per_tx_db_proxy();
   tx2.add_delta(key, make_rcq_consume_delta(0, 0, {entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx2.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx2.try_push_current_subtransaction()().value());
 
   // TX3: observe-only.
   auto tx3 = make_new_per_tx_db_proxy();
   tx3.add_delta(key, make_rcq_observed_delta({entryA}),
                 std::to_underlying(StorageDeltaFlags::None));
-  ASSERT_TRUE(tx3.try_push_current_subtransaction().value());
+  ASSERT_TRUE(tx3.try_push_current_subtransaction()().value());
 
-  ASSERT_TRUE(tx1.commit_transaction().has_value());
-  ASSERT_TRUE(tx2.commit_transaction().has_value());
-  ASSERT_TRUE(tx3.commit_transaction().has_value());
+  ASSERT_TRUE(tx1.commit_transaction()().has_value());
+  ASSERT_TRUE(tx2.commit_transaction()().has_value());
+  ASSERT_TRUE(tx3.commit_transaction()().has_value());
   advance_block();
 
   // Queue is empty (inserted 1, consumed 1).  cost(0) = 0 locked.  The full
@@ -4937,9 +4937,9 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
     auto tx1 = make_new_per_tx_db_proxy();
     tx1.add_delta(key, make_rcq_insert_delta(full_block),
                   std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx1.try_push_current_subtransaction();
+    auto r = tx1.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value()) << "tx1 must fill the block";
-    ASSERT_TRUE(tx1.commit_transaction().has_value());
+    ASSERT_TRUE(tx1.commit_transaction()().has_value());
   }
 
   // tx2: consume all kMaxLen of tx1's current-block entries.  The generated
@@ -4948,10 +4948,10 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
     auto tx2 = make_new_per_tx_db_proxy();
     tx2.add_delta(key, make_rcq_consume_delta(0, 0, consume_all),
                   std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx2.try_push_current_subtransaction();
+    auto r = tx2.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value())
         << "tx2 must consume every current-block entry";
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
+    ASSERT_TRUE(tx2.commit_transaction()().has_value());
   }
 
   // tx3: insert one distinct entry.  True occupancy of the generated block
@@ -4962,11 +4962,11 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
     auto tx3 = make_new_per_tx_db_proxy();
     tx3.add_delta(key, make_rcq_insert_delta({extra_entry}),
                   std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx3.try_push_current_subtransaction();
+    auto r = tx3.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && !r.value())
         << "known conservative limit: consumed current-block entries are not "
            "credited against the per-block insertion cap (issue #1931)";
-    ASSERT_TRUE(tx3.commit_transaction().has_value());
+    ASSERT_TRUE(tx3.commit_transaction()().has_value());
   }
 
   // The rejection is purely a per-block accounting artifact.  The prior block
@@ -4977,10 +4977,10 @@ TEST_F(DirectRCQTests, ConsumedCurrentBlockEntriesDoNotReleaseReservation)
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(key, make_rcq_insert_delta({extra_entry}),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value())
         << "the limit resets per block; a fresh block admits the insert";
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
   advance_block();
 }
@@ -5016,10 +5016,10 @@ TEST_F(DirectRCQTests, RCQBlockEntryCapFitsRamdbItemLimit)
                  make_rcq_insert_delta(
                      make_entries(kRetrocausalQueueBlockEntriesMaxLen, 256)),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value())
         << "a full block (at the cap) is admitted";
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
   }
 
   // One past the cap is not constructable: added_entries is wire-bounded at

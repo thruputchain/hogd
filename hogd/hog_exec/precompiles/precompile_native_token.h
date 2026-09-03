@@ -5,6 +5,7 @@
 #include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -16,10 +17,10 @@ class SystemCallHandler;
 // this directly because its in-tx balance is transiently short by the
 // storage deposit that hog_db's exclusive-delete refund nets at commit.
 // `amount` must be nonnegative.
-InvokeStatus<void> native_token_unchecked_transfer(SystemCallHandler &handler,
-                                                   ContractAddress const &from,
-                                                   ContractAddress const &to,
-                                                   int128_t amount);
+x23::Async<InvokeStatus<void>>
+native_token_unchecked_transfer(SystemCallHandler &handler,
+                                ContractAddress const &from,
+                                ContractAddress const &to, int128_t amount);
 
 std::unique_ptr<NativeContract> make_native_token_contract();
 

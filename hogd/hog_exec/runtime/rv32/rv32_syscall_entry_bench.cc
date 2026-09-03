@@ -130,6 +130,9 @@ static_assert(kMessageAddress + kMaxMessageBytes <= kInputAddress,
 // low indices are enough and stay well inside the cap.
 constexpr uint32_t kHashSlot = 0;
 constexpr uint32_t kHashSlotCopy = 1;
+// The limit start_frame() fixes on the frame it admits: passed in rather than
+// read off the db tip, so this fixture needs no pinned tip.
+constexpr uint32_t kMaxSha256Buffers = 8;
 
 // A RuntimeContext that can build nothing.
 //
@@ -147,7 +150,7 @@ public:
     std::abort();
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*deployed_contract*/,
                    SystemCallHandler * /*syscall_handler*/) const override
   {
@@ -199,8 +202,12 @@ public:
 
   ~SyscallBenchFixture()
   {
-    (void)handler_->finish_frame(InvokeStatus<void>{}, std::move(inner_trace_));
-    (void)handler_->finish_frame(InvokeStatus<void>{}, std::move(outer_trace_));
+    // Completed, not discarded: finish_frame() returns a MaybeAsync, and
+    // dropping one on its Async arm abandons the coroutine unrun.
+    (void)handler_->finish_frame(InvokeStatus<void>{},
+                                 std::move(inner_trace_))();
+    (void)handler_->finish_frame(InvokeStatus<void>{},
+                                 std::move(outer_trace_))();
   }
 
   SyscallBenchFixture(const SyscallBenchFixture &) = delete;
@@ -228,7 +235,8 @@ private:
             .gas_limit = kPlentyOfGas,
             .calldata = Calldata{},
         },
-        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{});
+        std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
+        kMaxSha256Buffers);
     if (!stashed.has_value()) {
       std::abort();
     }

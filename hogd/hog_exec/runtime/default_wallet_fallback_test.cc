@@ -138,11 +138,11 @@ protected:
     stx.tx.uniquifier = make_new_uniquifier();
 
     auto handler = make_new_system_call_handler(stx, *ctx_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     CapturedRecord rec;
     rec.push_back(res.is_root_success() ? 1 : 0);
     auto frame_output = handler.get_most_recent_frame_output();
-    ExecResult commit = handler.try_commit_transaction();
+    ExecResult commit = handler.try_commit_transaction()();
     rec.push_back(static_cast<uint8_t>(commit));
     switch (frame_output.status_code()) {
     case InvocationFrameStatusCode::Return:
@@ -380,11 +380,11 @@ protected:
     stx.tx.uniquifier = make_new_uniquifier();
 
     auto handler = make_new_system_call_handler(stx, *ctx_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     CapturedRecord rec;
     rec.push_back(res.is_root_success() ? 1 : 0);
     auto frame_output = handler.get_most_recent_frame_output();
-    ExecResult commit = handler.try_commit_transaction();
+    ExecResult commit = handler.try_commit_transaction()();
     rec.push_back(static_cast<uint8_t>(commit));
     switch (frame_output.status_code()) {
     case InvocationFrameStatusCode::Return:
@@ -587,7 +587,7 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
   stx.tx.uniquifier = make_new_uniquifier();
 
   auto handler = make_new_system_call_handler(stx, ctx);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   EXPECT_TRUE(res.is_root_success());
 
   auto frame_output = handler.get_most_recent_frame_output();
@@ -629,11 +629,11 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
   stx.tx.uniquifier = make_new_uniquifier();
 
   auto handler = make_new_system_call_handler(stx, ctx);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
             InvocationFrameStatusCode::Fault);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultUnrecoverable);
 }
 

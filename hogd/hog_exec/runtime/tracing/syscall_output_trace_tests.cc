@@ -42,6 +42,7 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -148,11 +149,11 @@ public:
     return InvokeErrorCode::None;
   }
 
-  SystemStatus<std::unique_ptr<Runtime>>
+  x23::Async<SystemStatus<std::unique_ptr<Runtime>>>
   make_new_runtime(DeployedContract const & /*unused*/,
                    SystemCallHandler * /*unused*/) const override
   {
-    return nullptr;
+    co_return nullptr;
   }
 };
 
@@ -217,34 +218,34 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   const auto executing_height = static_cast<BlockHeight>(get_block_number());
 
   auto context = make_single_contract_context(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         BlockHeight height{};
-        auto h = ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+        auto h = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
         if (!h.has_value() ||
             h.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         uint64_t gas_out = 0;
-        auto s = ctx.syscall<SyscallNo::kGetTransactionStatistics>(
+        auto s = co_await ctx.syscall<SyscallNo::kGetTransactionStatistics>(
             TransactionStatistic::GasRemaining, gas_out);
         if (!s.has_value() ||
             s.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         ContractAddress sender{};
-        auto m = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+        auto m = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
         if (!m.has_value() ||
             m.value() != SyscallErrorCode::kSyscallErrorCodeIsRootTransaction) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
@@ -276,7 +277,7 @@ TEST_F(SyscallOutputTraceTest, BlockHeightStatsAndMsgSenderTracesAreExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
@@ -287,44 +288,40 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
 
   auto context = make_single_contract_context(
       [set_key,
-       unset_key](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+       unset_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const int128_t set_value = 5;
-        auto w = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+        auto w = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
             set_key, &set_value, int128_t{7},
             std::to_underlying(StorageDeltaFlags::None));
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         int128_t current_set = 0;
         bool current_set_opt = false;
         int128_t current_add = 0;
-        auto g1 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(set_key, false,
-                                                             current_set,
-                                                             current_set_opt,
-                                                             current_add);
+        auto g1 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+            set_key, false, current_set, current_set_opt, current_add);
         if (!g1.has_value() ||
             g1.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             !current_set_opt || current_set != 5 || current_add != 7) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto g2 = ctx.syscall<SyscallNo::kNonnegativeIntGet>(unset_key, false,
-                                                             current_set,
-                                                             current_set_opt,
-                                                             current_add);
+        auto g2 = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+            unset_key, false, current_set, current_set_opt, current_add);
         if (!g2.has_value() ||
             g2.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             current_set_opt || current_add != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
@@ -362,7 +359,7 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
@@ -374,32 +371,32 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
 
   auto context = make_single_contract_context(
       [part1, part2, expected_hash](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto u1 = ctx.syscall<SyscallNo::kSHA256Update>(
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto u1 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0U, std::as_bytes(std::span(part1)), true);
         if (!u1.has_value() ||
             u1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto u2 = ctx.syscall<SyscallNo::kSHA256Update>(
+        auto u2 = co_await ctx.syscall<SyscallNo::kSHA256Update>(
             0U, std::as_bytes(std::span(part2)), false);
         if (!u2.has_value() ||
             u2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         SHA256Hash out{};
-        auto f = ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out);
+        auto f = co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out);
         if (!f.has_value() ||
             f.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             out != expected_hash) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
@@ -432,7 +429,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalFinalizeTraceIsExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Pins every contract-observable behavior of the incremental-hash buffers in
@@ -455,8 +452,8 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   const SHA256Hash hash_fresh = sha256(std::span(fresh));
 
   auto context = make_single_contract_context(
-      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef,
-       hash_fresh](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [abc, wxyz, def, fresh, oversized, hash_wxyz, hash_abcdef, hash_fresh](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto expect = [](auto r, SyscallErrorCode code) {
           return r.has_value() && r.value() == code;
         };
@@ -464,60 +461,63 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
         constexpr auto kInvalid =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
 
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(abc)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         1U, std::as_bytes(std::span(wxyz)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Overflowing append: rejected, and index 0 keeps hashing as if the
         // call never happened.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(oversized)), false),
                     kInvalid)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(def)), false),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash out{};
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out),
+                    kOk) ||
             out != hash_wxyz) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+                    kOk) ||
             out != hash_abcdef) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Finalize consumed index 0.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
                     kInvalid)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // The index is reusable with a fresh reset.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(fresh)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+                    kOk) ||
             out != hash_fresh) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   auto update_entry = [&gas](uint32_t index, std::span<const uint8_t> buffer,
@@ -565,7 +565,7 @@ TEST_F(SyscallOutputTraceTest, Sha256IncrementalLifecycleTraceIsExact)
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 15U);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Pins the contract-observable behavior of SHA256Copy in one traced sequence:
@@ -584,8 +584,8 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
       sha256(std::vector<uint8_t>{'a', 'b', 'c', 'x', 'y', 'z'});
 
   auto context = make_single_contract_context(
-      [abc, def, xyz, hash_abcdef,
-       hash_abcxyz](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [abc, def, xyz, hash_abcdef, hash_abcxyz](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto expect = [](auto r, SyscallErrorCode code) {
           return r.has_value() && r.value() == code;
         };
@@ -593,46 +593,50 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
         constexpr auto kInvalid =
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
 
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(abc)), true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Fork the in-progress stream, then diverge the two copies.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Copy>(0U, 1U), kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Copy>(0U, 1U),
+                    kOk)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::as_bytes(std::span(def)), false),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         1U, std::as_bytes(std::span(xyz)), false),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         SHA256Hash out{};
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(0U, out),
+                    kOk) ||
             out != hash_abcdef) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out), kOk) ||
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(1U, out),
+                    kOk) ||
             out != hash_abcxyz) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Copying from a missing source is rejected.
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Copy>(5U, 3U), kInvalid)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Copy>(5U, 3U),
+                    kInvalid)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
   handler.enable_transaction_stats();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   auto update_entry = [&gas](uint32_t index, std::span<const uint8_t> buffer,
@@ -680,7 +684,7 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->sha256_total_bytes_processed, 12U);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // The one fixture in this suite that does not derive its costs from
@@ -706,39 +710,42 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
   const SHA256Hash hash_empty = sha256(std::span<const uint8_t>{});
 
   auto context = make_single_contract_context(
-      [hash_empty](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [hash_empty](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto expect = [](auto r, SyscallErrorCode code) {
           return r.has_value() && r.value() == code;
         };
         constexpr auto kOk = SyscallErrorCode::kSyscallErrorCodeNone;
 
         SHA256Hash one_shot{};
-        if (!expect(ctx.syscall<SyscallNo::kSHA256>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256>(
                         std::span<const std::byte>{}, one_shot),
                     kOk) ||
             one_shot != hash_empty) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Update>(
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Update>(
                         0U, std::span<const std::byte>{}, true),
                     kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Copy>(0U, 1U), kOk)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Copy>(0U, 1U),
+                    kOk)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         SHA256Hash finalized{};
-        if (!expect(ctx.syscall<SyscallNo::kSHA256Finalize>(1U, finalized),
+        if (!expect(co_await ctx.syscall<SyscallNo::kSHA256Finalize>(1U,
+                                                                     finalized),
                     kOk) ||
             finalized != hash_empty) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasAmount gas = kGasLimit;
   auto charge = [&gas](GasAmount total) {
@@ -781,7 +788,7 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // What the artifact digest cannot check.
@@ -864,16 +871,16 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 
   auto context = make_single_contract_context(
       [payload, serialized_node,
-       claim](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+       claim](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         generated::AuthClaim claim_out{};
-        auto c = ctx.syscall<SyscallNo::kGetAuthClaim>(claim_out);
+        auto c = co_await ctx.syscall<SyscallNo::kGetAuthClaim>(claim_out);
         if (!c.has_value() ||
             c.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         uint32_t token_id = 0;
-        auto m = ctx.syscall<SyscallNo::kMintAuthToken>(
+        auto m = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
             BlockHeight{ctx.handler().get_block_height() + 5},
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(
                                            serialized_node.data()),
@@ -881,7 +888,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
             token_id);
         if (!m.has_value() ||
             m.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // A 2-byte buffer for a 4-byte payload: written_len reports the FULL
@@ -892,19 +899,19 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
         RuntimeMemoryLength written_len = 0;
         uint32_t unwrapped_start = 0;
         uint32_t unwrapped_count = 0;
-        auto consume = ctx.syscall<SyscallNo::kConsumeAuthToken>(
+        auto consume = co_await ctx.syscall<SyscallNo::kConsumeAuthToken>(
             token_id, std::span<std::byte>(small_buffer), minter, written_len,
             unwrapped_start, unwrapped_count);
         if (!consume.has_value() ||
             consume.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != payload.size() ||
             small_buffer[0] != std::byte{payload[0]} ||
             small_buffer[1] != std::byte{payload[1]} || unwrapped_count != 0) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto tx = make_tx();
@@ -912,7 +919,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
 
   auto handler = make_new_system_call_handler(tx, *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
@@ -947,7 +954,7 @@ TEST_F(SyscallOutputTraceTest, AuthClaimAndAuthTokenTracesAreExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
@@ -956,21 +963,22 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   const std::array<uint8_t, 3> entry_bytes = {0xAA, 0xBB, 0xCC};
 
   auto context = make_single_contract_context(
-      [key,
-       entry_bytes](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto ins = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+      [key, entry_bytes](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto ins = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(entry_bytes)));
         if (!ins.has_value() ||
             ins.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         RuntimeMemoryLength len = 0;
-        auto peek = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(key, len);
+        auto peek =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(key, len);
         if (!peek.has_value() ||
             peek.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             len != entry_bytes.size()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // A 1-byte buffer for a 3-byte entry: written_len reports the full
@@ -978,22 +986,23 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
         // whole entry.
         std::array<std::byte, 1> small_buffer{};
         RuntimeMemoryLength written_len = 0;
-        auto consume = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-            key, false, std::span<std::byte>(small_buffer), written_len);
+        auto consume =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::span<std::byte>(small_buffer), written_len);
         if (!consume.has_value() ||
             consume.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != entry_bytes.size() ||
             small_buffer[0] != std::byte{entry_bytes[0]}) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   QueueEntry full_entry;
   full_entry.append_range(entry_bytes);
@@ -1027,7 +1036,7 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
@@ -1051,27 +1060,28 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
               [blob_hash, expected_addr](
-                  NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+                  NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
                 ContractAddress predicted{};
-                auto g = ctx.syscall<SyscallNo::kGetDeployAddress>(
+                auto g = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
                     static_cast<const ContractAddress *>(nullptr), kNonce,
                     blob_hash, predicted);
                 if (!g.has_value() ||
                     g.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                     predicted != expected_addr) {
-                  return InvokeError{InvokeErrorCode::Deterministic};
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
 
                 ContractAddress deployed{};
                 auto d =
-                    ctx.syscall<SyscallNo::kDeployContract>(kNonce, blob_hash,
-                                                            deployed);
+                    co_await ctx.syscall<SyscallNo::kDeployContract>(kNonce,
+                                                                     blob_hash,
+                                                                     deployed);
                 if (!d.has_value() ||
                     d.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
                     deployed != expected_addr) {
-                  return InvokeError{InvokeErrorCode::Deterministic};
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
                 }
-                return {};
+                co_return InvokeStatus<void>{};
               });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
@@ -1093,7 +1103,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 
   auto handler = make_new_system_call_handler(tx, context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
@@ -1120,7 +1130,7 @@ TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // BytestringGet follows the same truncation convention as ConsumeAuthToken
@@ -1133,34 +1143,35 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   const std::array<uint8_t, 8> value = {'1', '2', '3', '4', '5', '6', '7', '8'};
 
   auto context = make_single_contract_context(
-      [key, value](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto w = ctx.syscall<SyscallNo::kBytestringSet>(
+      [key,
+       value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto w = co_await ctx.syscall<SyscallNo::kBytestringSet>(
             key, std::as_bytes(std::span(value)),
             std::to_underlying(StorageDeltaFlags::None));
         if (!w.has_value() ||
             w.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         std::array<std::byte, 4> small_buffer{};
         RuntimeMemoryLength written_len = 0;
-        auto g = ctx.syscall<SyscallNo::kBytestringGet>(
+        auto g = co_await ctx.syscall<SyscallNo::kBytestringGet>(
             key, std::span<std::byte>(small_buffer), written_len);
         if (!g.has_value() ||
             g.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (written_len != value.size() ||
             small_buffer[0] != std::byte{value[0]} ||
             small_buffer[3] != std::byte{value[3]}) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto handler = make_new_system_call_handler(make_tx(), *context);
   handler.enable_tracing();
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
 
   GasCursor gas{kGasLimit};
   SyscallTraceVec expected;
@@ -1184,7 +1195,7 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
       << x23::show(handler.get_trace()->system_calls);
 
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // NOLINTEND(bugprone-exception-escape)

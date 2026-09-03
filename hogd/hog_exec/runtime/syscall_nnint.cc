@@ -17,7 +17,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 const StorageKeyContractData &input_key,
                                 bool input_force_load_from_snapshot,
@@ -26,12 +26,14 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 int128_t &output_current_add)
 {
   auto status =
-      syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
+      co_await syscall_handler.get_nnint(input_key,
+                                         input_force_load_from_snapshot);
   if (!status) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    return {(*status).error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
   }
   if ((*status)->first.has_value()) {
     output_current_set = *((*status)->first);
@@ -54,10 +56,11 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
     }
     trace_data->outputs->current_add = to_xdr(output_current_add);
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
@@ -68,16 +71,19 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   if (optional_input_set_value) {
     set_value = *optional_input_set_value;
   }
-  auto status = syscall_handler.set_nnint(input_key, set_value, input_add_value,
-                                          input_flags);
+  auto status =
+      co_await syscall_handler.set_nnint(input_key, set_value, input_add_value,
+                                         input_flags);
   if (!status.has_value()) {
-    return {status.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{status.error().to_host_fn_error(),
+                                 WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
-    return {(*status).error().code(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{(*status).error().code(), WrappedGasAmount{0}};
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{0}};
 }
 
 } // namespace hogd

@@ -14,7 +14,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/interface/dispatch_pool.h"
 #include "hogd/hog_exec/interface/executor_context.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -28,14 +27,10 @@ namespace hogd {
 class ExecutorStateManager {
 public:
   ExecutorStateManager(std::unique_ptr<DatabaseProxy> db_proxy,
-                       std::unique_ptr<EventServerProxy> event_server_proxy,
-                       size_t nthreads)
+                       std::unique_ptr<EventServerProxy> event_server_proxy)
     : db_proxy_(std::move(db_proxy)),
-      event_server_proxy_(std::move(event_server_proxy)),
-      worker_pool_(static_cast<int>(nthreads))
-  {
-    CHECK(nthreads <= std::numeric_limits<int>::max());
-  }
+      event_server_proxy_(std::move(event_server_proxy))
+  {}
 
   // This acquires a reference to the executor context, if the returned value is
   // not null. The caller must eventually release the reference and, if
@@ -85,9 +80,9 @@ private:
   struct ActiveBlock {
     ActiveBlock(ExecutionMode mode, BlockID block_id, DatabaseProxy &db_proxy,
                 std::unique_ptr<StorageSnapshotCache> snapshot_cache,
-                EventServerProxy &event_server_proxy, DispatchPool &worker_pool)
+                EventServerProxy &event_server_proxy)
       : context(mode, block_id, db_proxy, std::move(snapshot_cache),
-                event_server_proxy, worker_pool)
+                event_server_proxy)
     {}
     PerThreadARC<ExecutorContext> context;
     int open_block_count{1};
@@ -113,7 +108,6 @@ private:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<EventServerProxy> event_server_proxy_;
-  DispatchPool worker_pool_;
 };
 
 inline x23::MaybeAsync<PerThreadARC<ExecutorContext> *>

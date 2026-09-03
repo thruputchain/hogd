@@ -115,6 +115,52 @@ operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
   return !f;
 }
 
+// The const specialization that std::move_only_function has and this shim was
+// missing.  NativeContract::function_t needs it: its targets return x23::Async,
+// whose frame is allocated in the ramp function, so an allocation failure
+// escapes the call instead of reaching the promise -- and a noexcept target
+// would turn that into a terminate.
+template<typename Ret, typename... Args>
+class UniqueFunction<Ret(Args...) const> {
+public:
+  UniqueFunction() = default;
+  template<typename F> requires invocable_r<Ret, F, Args...>
+  UniqueFunction(F &&func)
+  {
+    using Invoker = detail::Invoker<std::decay_t<F>, Ret, Args...>;
+    invoker_ = std::make_unique<Invoker>(std::forward<F>(func));
+  }
+  ~UniqueFunction() = default;
+
+  UniqueFunction(UniqueFunction &&uf) noexcept
+    : invoker_(std::move(uf.invoker_))
+  {}
+  UniqueFunction &operator=(UniqueFunction &&uf) noexcept
+  {
+    invoker_ = std::move(uf.invoker_);
+    return *this;
+  }
+  UniqueFunction &operator=(std::nullptr_t) noexcept
+  {
+    invoker_.reset();
+    return *this;
+  }
+  UniqueFunction(const UniqueFunction &uf) = delete;
+  UniqueFunction &operator=(const UniqueFunction &uf) = delete;
+
+  void swap(UniqueFunction &other) noexcept { invoker_.swap(other.invoker_); }
+
+  explicit operator bool() const noexcept { return !!invoker_; }
+
+  Ret operator()(Args &&...args) const
+  {
+    return invoker_->operator()(std::forward<Args>(args)...);
+  }
+
+private:
+  std::unique_ptr<detail::InvokerBase<Ret, Args...>> invoker_;
+};
+
 template<typename Ret, typename... Args>
 class UniqueFunction<Ret(Args...) const noexcept> {
 public:
