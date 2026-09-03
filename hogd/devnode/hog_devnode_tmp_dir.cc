@@ -1,6 +1,5 @@
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
 
-#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -17,15 +16,6 @@ namespace hogd {
 
 namespace {
 
-// Where Directory::open_temporary() will place the directory, mirroring
-// get_tmp_dir() in hogd/base/io.cc. For the error message only.
-std::string
-temp_dir_location()
-{
-  const char *tmpdir = std::getenv("TMPDIR"); // NOLINT(concurrency-mt-unsafe)
-  return tmpdir != nullptr ? std::string(tmpdir) : std::string("/tmp/");
-}
-
 // Creates the process's scratch directory, or throws.
 //
 // This fails for ordinary reasons -- an unwritable or missing $TMPDIR, a full
@@ -38,9 +28,10 @@ open_temporary_dir()
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   if (!dir) {
-    throw std::runtime_error(
-        std::format("could not create a hog-devnode temp dir under '{}': {}",
-                    temp_dir_location(), dir.error()));
+    throw std::runtime_error(std::format(
+        "could not create a hog-devnode temp dir: {} (set TMPDIR to a "
+        "writable directory)",
+        dir.error()));
   }
   return std::filesystem::absolute((*dir).get_path()).string();
 }
