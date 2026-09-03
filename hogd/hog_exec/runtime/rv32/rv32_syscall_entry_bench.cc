@@ -315,8 +315,21 @@ public:
     // being priced. A contract called by another contract is also the ordinary
     // case, so the inner frame is both the measurable arrangement and the
     // representative one.
-    outer_trace_ = push_frame(inner_address_parent());
-    inner_trace_ = push_frame(inner_address());
+    auto outer = push_frame(inner_address_parent());
+    if (!outer.has_value()) {
+      setup_error_ = frame_push_error("outer", outer.error());
+      return;
+    }
+    outer_trace_ = std::move(outer).value();
+    auto inner = push_frame(inner_address());
+    if (!inner.has_value()) {
+      setup_error_ = frame_push_error("inner", inner.error());
+      // The outer frame is up and the dtor bails on a failed setup, so unwind
+      // it here rather than leaving it open on a dead fixture.
+      (void)pop_frame(std::move(outer_trace_), false);
+      return;
+    }
+    inner_trace_ = std::move(inner).value();
 
     // Snapshot state the storage rows read. The mock serves whatever it was
     // handed at setup; a key it does not hold reads as kStorageKeyNotExist,
@@ -327,7 +340,8 @@ public:
 
   ~SyscallBenchFixture()
   {
-    // Nothing to unwind when setup bailed before pushing the frames.
+    // Nothing to unwind when setup bailed: it pushed no frames, or unwound
+    // the ones it had pushed on its way out.
     if (!setup_error_.empty()) {
       return;
     }
@@ -351,6 +365,14 @@ public:
   // built fails all of them by name instead of aborting the process partway
   // through writing the JSON.
   [[nodiscard]] const std::string &setup_error() const { return setup_error_; }
+
+  // Why a frame could not be pushed, named so a failed row says which one.
+  static std::string frame_push_error(std::string_view which,
+                                      const SystemError &error)
+  {
+    return std::format("could not push the {} frame: system error {}", which,
+                       error.raw_code());
+  }
 
   // Distinct, deterministic addresses so caller and callee differ.
   static ContractAddress make_address(uint8_t seed)
@@ -384,9 +406,17 @@ public:
 
   // Push a frame at `address` on top of whatever is there. The trace handle
   // is what pop_frame needs back.
-  std::unique_ptr<InvocationFrameTrace> push_frame(ContractAddress address)
+  //
+  // Refused admission is returned, not aborted. Frame admission is a
+  // production check with production reasons to say no -- the depth bound and
+  // the reentrance ban both live there -- so a row that cannot build its stack
+  // is a row to fail by name, exactly like a syscall that will not run. This
+  // used to std::abort(), which took the process down mid-write and cost every
+  // row already measured.
+  [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
+  push_frame(ContractAddress address)
   {
-    auto stashed = handler_->start_frame(
+    return handler_->start_frame(
         Invocation{
             .invoked_address = address,
             .entrypoint = ContractEntrypointID{},
@@ -395,26 +425,30 @@ public:
         },
         std::to_underlying(InvokeFlag::None), std::span<const uint32_t>{},
         kMaxSha256Buffers);
-    if (!stashed.has_value()) {
-      std::abort();
-    }
-    return std::move(stashed).value();
   }
 
   // Finish the top frame. A successful child merges its modified items into
   // its parent (commit_successful_child_frame); a failed one is discarded
   // (commit_failed_child_frame), which is how a sweep row returns the stack to
   // exactly the state it found, however many keys it touched.
-  void pop_frame(std::unique_ptr<InvocationFrameTrace> trace, bool success)
+  // Returns why the frame could not be finished, or an empty string.
+  std::string pop_frame(std::unique_ptr<InvocationFrameTrace> trace,
+                        bool success)
   {
     InvokeStatus<void> result =
         success ? InvokeStatus<void>{}
                 : InvokeStatus<void>{std::unexpected(
                       InvokeError{InvokeErrorCode::Deterministic})};
-    auto finished = handler_->finish_frame(result, std::move(trace));
+    // Called, not just built. finish_frame() returns a MaybeAsync and the work
+    // happens when it is invoked; dropping one on its Async arm abandons the
+    // coroutine with the frame still open, and has_value() on the undriven
+    // MaybeAsync answers which arm it took rather than whether it succeeded.
+    auto finished = handler_->finish_frame(result, std::move(trace))();
     if (!finished.has_value()) {
-      std::abort();
+      return std::format("could not finish a frame: system error {}",
+                         finished.error().raw_code());
     }
+    return {};
   }
 
   // Put NNInt items under `address` in the mock snapshot, at the keys
@@ -1197,32 +1231,52 @@ using FrameTraces = std::vector<std::unique_ptr<InvocationFrameTrace>>;
 
 // Push `depth` frames: spacers, then the leaf every sweep's syscalls run in.
 // `traces` is reused across iterations so its allocation is not in the loop.
-void
+//
+// Returns why admission refused a frame, or an empty string. Frames pushed
+// before the refusal stay in `traces` for the caller to pop -- a partly built
+// stack still has to come down.
+std::string
 push_frames(SyscallBenchFixture &fixture, uint32_t depth, FrameTraces &traces)
 {
   for (uint32_t i = 0; i + 1 < depth; ++i) {
-    traces.push_back(
-        fixture.push_frame(SyscallBenchFixture::spacer_address(i)));
+    auto spacer = fixture.push_frame(SyscallBenchFixture::spacer_address(i));
+    if (!spacer.has_value()) {
+      return SyscallBenchFixture::frame_push_error(std::format("spacer {}", i),
+                                                   spacer.error());
+    }
+    traces.push_back(std::move(spacer).value());
   }
   if (depth > 0) {
-    traces.push_back(fixture.push_frame(SyscallBenchFixture::leaf_address()));
+    auto leaf = fixture.push_frame(SyscallBenchFixture::leaf_address());
+    if (!leaf.has_value()) {
+      return SyscallBenchFixture::frame_push_error("leaf", leaf.error());
+    }
+    traces.push_back(std::move(leaf).value());
   }
+  return {};
 }
 
 // Pop everything push_frames pushed, innermost first. Every frame is failed --
 // discarded, along with whatever it touched -- except the innermost when
 // `commit_innermost` is set, which commits into the frame below it. That
 // frame is then failed in turn, so nothing reaches the fixture's own frames.
-void
+// Returns the first failure, or an empty string. The whole stack comes down
+// either way: a frame left open would corrupt every row after this one.
+std::string
 pop_frames(SyscallBenchFixture &fixture, FrameTraces &traces,
            bool commit_innermost = false)
 {
+  std::string failure;
   bool success = commit_innermost;
   while (!traces.empty()) {
-    fixture.pop_frame(std::move(traces.back()), success);
+    std::string popped = fixture.pop_frame(std::move(traces.back()), success);
+    if (failure.empty()) {
+      failure = std::move(popped);
+    }
     traces.pop_back();
     success = false;
   }
+  return failure;
 }
 
 void
@@ -1238,8 +1292,12 @@ bm_frame_push(benchmark::State &state, uint32_t depth)
 
   int64_t frames = 0;
   for (auto _ : state) {
-    push_frames(fixture, depth, traces);
-    pop_frames(fixture, traces);
+    const std::string pushed = push_frames(fixture, depth, traces);
+    const std::string popped = pop_frames(fixture, traces);
+    if (!pushed.empty() || !popped.empty()) {
+      state.SkipWithError(pushed.empty() ? popped : pushed);
+      return;
+    }
     benchmark::ClobberMemory();
     frames += depth;
   }
@@ -1304,9 +1362,13 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
   // discard the timed iterations use, so the frame state it leaves is the
   // state they start from.
   uint64_t gas = 0;
-  push_frames(fixture, depth, traces);
-  auto failure = run_keys(&gas);
-  pop_frames(fixture, traces, commit_innermost);
+  std::string pushed = push_frames(fixture, depth, traces);
+  auto failure = pushed.empty() ? run_keys(&gas) : std::nullopt;
+  std::string popped = pop_frames(fixture, traces, commit_innermost);
+  if (!pushed.empty() || !popped.empty()) {
+    state.SkipWithError(pushed.empty() ? popped : pushed);
+    return;
+  }
   if (failure) {
     fail_row(state, failure->first, failure->second);
     return;
@@ -1314,9 +1376,13 @@ bm_frame_sweep(benchmark::State &state, uint32_t depth, uint64_t keys,
 
   int64_t touches = 0;
   for (auto _ : state) {
-    push_frames(fixture, depth, traces);
-    failure = run_keys(nullptr);
-    pop_frames(fixture, traces, commit_innermost);
+    pushed = push_frames(fixture, depth, traces);
+    failure = pushed.empty() ? run_keys(nullptr) : std::nullopt;
+    popped = pop_frames(fixture, traces, commit_innermost);
+    if (!pushed.empty() || !popped.empty()) {
+      state.SkipWithError(pushed.empty() ? popped : pushed);
+      return;
+    }
     if (failure) {
       fail_row(state, failure->first, failure->second);
       return;
@@ -1370,7 +1436,13 @@ bm_nnint_cold(benchmark::State &state)
   std::vector<uint8_t> memory = make_guest_memory();
   const std::span<uint8_t> memory_span(memory);
   const SyscallCall call = nnint_get_call(/*force_load_from_snapshot=*/true);
-  auto trace = fixture.push_frame(SyscallBenchFixture::cold_address());
+  auto pushed = fixture.push_frame(SyscallBenchFixture::cold_address());
+  if (!pushed.has_value()) {
+    state.SkipWithError(
+        SyscallBenchFixture::frame_push_error("cold", pushed.error()));
+    return;
+  }
+  auto trace = std::move(pushed).value();
 
   const auto next_call = [&]() -> std::optional<SyscallOutcome> {
     const std::optional<uint64_t> index = fixture.take_cold_key();
@@ -1387,12 +1459,12 @@ bm_nnint_cold(benchmark::State &state)
 
   const std::optional<SyscallOutcome> warm = next_call();
   if (!warm.has_value()) {
-    fixture.pop_frame(std::move(trace), false);
+    (void)fixture.pop_frame(std::move(trace), false);
     return;
   }
   if (!warm->ok) {
     fail_row(state, call, *warm);
-    fixture.pop_frame(std::move(trace), false);
+    (void)fixture.pop_frame(std::move(trace), false);
     return;
   }
 
@@ -1410,7 +1482,7 @@ bm_nnint_cold(benchmark::State &state)
     benchmark::ClobberMemory();
     ++calls;
   }
-  fixture.pop_frame(std::move(trace), false);
+  (void)fixture.pop_frame(std::move(trace), false);
 
   state.SetItemsProcessed(calls);
   state.counters["gas"] = benchmark::Counter(static_cast<double>(warm->gas));
