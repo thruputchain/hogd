@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
@@ -240,8 +241,10 @@ public:
 
   // Populates base_item_ from the snapshot cache.  Answers with no coroutine
   // frame on a cache hit; only a miss allocates and suspends on the database.
+  // Takes the frame key the caller already built and hashed for its frame
+  // probe, so the cache probe reuses that hash rather than computing another.
   x23::MaybeAsync<SystemStatus<void>> load(StorageSnapshotCache &snapshot_cache,
-                                           AddressAndKey const &addrkey) const;
+                                           FrameItemKey const &key) const;
 
 private:
   // Miss path for load(): awaits the pending cache fill, then stores it.
