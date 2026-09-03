@@ -485,11 +485,9 @@ private:
                            SipHash24Hasher>
       newly_created_contracts_;
 
-  // Whether the transaction attached the same contract more than once. The map
-  // above is keyed by hash, so a repeat collapses into it and leaves no trace
-  // there; noted at construction, where the attachment list is still in hand,
-  // and rejected by perform_initial_validation. False for the test-harness
-  // constructor, which attaches nothing.
+  // Noted at construction, where the attachment list is still in hand:
+  // newly_created_contracts_ is keyed by hash, so a repeat leaves no trace
+  // there. perform_initial_validation rejects it.
   const bool has_duplicate_attachment_ = false;
 
   // Images for this transaction's attachments, keyed by contract hash.
@@ -529,8 +527,7 @@ private:
   // that run before any frame is pushed are what pin it.
   mutable DbTip const *db_tip_ = nullptr;
 
-  // The tip's parameters, flattened when the tip is pinned. Read on the invoke
-  // path, so it stays a field load rather than a walk of the config list.
+  // Flattened when the tip is pinned: the invoke path reads these per frame.
   mutable NetworkConfigParams config_params_{};
 
   inline static bool debug_force_commit_abort_{false};
@@ -543,18 +540,17 @@ private:
   // The pinned tip. Every caller runs after an admission check that pinned it,
   // so a null here is a missed pin point on a new entry path, not a runtime
   // condition -- fail loudly rather than reading through null.
-  /// The parameters this transaction's chain puts in force. Valid only once
-  /// the tip is pinned, which db_tip() enforces.
-  NetworkConfigParams const &config_params() const
-  {
-    CHECK_PTR(db_tip_);
-    return config_params_;
-  }
-
   DbTip const *db_tip() const
   {
     CHECK_PTR(db_tip_);
     return db_tip_;
+  }
+
+  // The parameters this transaction's chain puts in force. Pinned with the tip.
+  NetworkConfigParams const &config_params() const
+  {
+    CHECK_PTR(db_tip_);
+    return config_params_;
   }
 
   // True if the given replay uniquifier has already expired at the executing

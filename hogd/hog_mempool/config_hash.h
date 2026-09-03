@@ -2,6 +2,7 @@
 
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -11,13 +12,10 @@
 
 namespace hogd {
 
-/// Whether `network_config` is in the only form that may be hashed.
-///
-/// A v1 configuration states its parameters as a list, and that list is hashed
-/// as written. Two orderings of one set of parameters, or a repeat, would give
-/// a configuration more than one hash -- so nodes agreeing on a chain's rules
-/// could still disagree on its config hash. Only a strictly ascending, and so
-/// duplicate-free, list is hashable.
+// Whether `network_config` may be hashed at all. A v1 list is hashed as
+// written, so a non-canonical one would give a single configuration more than
+// one hash. Every path taking a configuration from an untrusted peer must
+// check this before hashing: the hash functions CHECK it.
 inline bool
 config_hashable(const NetworkConfig &network_config)
 {
@@ -29,9 +27,8 @@ inline ConfigHashPreimage
 make_config_hash_preimage(const StorageCostModel &storage_cost_model,
                           const NetworkConfig &network_config)
 {
-  // A non-canonical configuration must be refused where it enters -- genesis
-  // load does that -- so reaching here with one is an internal inconsistency,
-  // not untrusted input.
+  // Callers refuse a non-canonical configuration at ingress, so one reaching
+  // here is this node being inconsistent rather than untrusted input.
   CHECK(config_hashable(network_config));
   return ConfigHashPreimage{
       .storage_cost_model = storage_cost_model.to_xdr(),

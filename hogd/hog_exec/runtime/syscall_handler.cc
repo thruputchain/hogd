@@ -302,11 +302,9 @@ SystemCallHandler::perform_initial_validation()
   // If we make the assumption that all wasms are validated by the time they get
   // to the executor, this check could be removed.
 
-  // Attaching the same contract twice is rejected rather than deduplicated.
-  // newly_created_contracts_ is keyed by hash, so a repeat would otherwise
-  // vanish silently and two different transaction encodings would have
-  // identical effect -- the duplicate bytes are carried, hashed into a
-  // different transaction, and then ignored. Nothing legitimate needs it.
+  // Rejected rather than deduplicated: newly_created_contracts_ is keyed by
+  // hash, so a repeat would vanish and two different transaction encodings
+  // would have identical effect.
   if (has_duplicate_attachment_) {
     error("Transaction attaches the same contract more than once; {} are "
           "distinct",
@@ -316,16 +314,11 @@ SystemCallHandler::perform_initial_validation()
     co_return SystemStatus<void>{};
   }
 
-  // A chain bounds how many contracts one transaction may attach. The bodies
-  // of the ones a contract goes on to deploy are committed as a single message
-  // at the end of the transaction, so without this an attached set large
-  // enough to overflow that message would only fail at commit -- after the
-  // body ran and the root lock was taken -- where an oversized request is
-  // indistinguishable from a transport failure and is reported as
-  // unrecoverable (#2190).
-  //
-  // Deterministic in both proposal and validation mode: it is a function of
-  // the transaction bytes alone, so every node reaches the same verdict.
+  // New contract bodies commit in one message at the end of the transaction,
+  // so without this gate an oversized attachment set fails only at commit --
+  // after the body ran -- where it is indistinguishable from a transport
+  // failure and reported as unrecoverable (#2190). A function of the
+  // transaction bytes alone, so proposal and validation agree.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
       newly_created_contracts_.size() > permitted) {
     error("Transaction attaches {} contracts; chain permits {}",
@@ -1004,12 +997,11 @@ SystemCallHandler::invoke(ContractAddress const &address,
   // protected body runs, so a copy could throw std::bad_alloc across that
   // noexcept boundary and terminate the executor. The move is allocation-free
   // and invocation is unused afterward (#3058).
-  auto max_buffers = co_await snapshot_cache_.try_get_max_sha256_buffers();
-  if (!max_buffers.has_value()) {
-    co_return invoke_result_t{max_buffers.error(), 0};
-  }
-  auto start_status = start_frame(std::move(invocation), flags,
-                                  owned_auth_token_ids, *max_buffers);
+  // The tip was pinned above, so this is a field load rather than another trip
+  // through the snapshot cache -- invoke() runs per frame.
+  auto start_status =
+      start_frame(std::move(invocation), flags, owned_auth_token_ids,
+                  config_params().max_sha256_buffers);
   if (!start_status.has_value()) {
     // Child frame admission failed under memory pressure. start_frame() rolled
     // back the invocation stack, so no child frame is present and

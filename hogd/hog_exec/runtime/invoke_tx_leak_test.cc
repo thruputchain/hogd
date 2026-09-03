@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <span>
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>

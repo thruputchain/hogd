@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "contract.hh"
-#include "hogd/base/network_config_params.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
@@ -175,11 +174,6 @@ private:
   DatabaseProxy &db_proxy_;
 
   std::atomic<DbTip *> db_tip_ = nullptr;
-
-  // The pinned tip's parameters, flattened when that tip is installed. Written
-  // before db_tip_ is published and read only after a non-null load of it, so
-  // a reader that sees the tip sees these too.
-  NetworkConfigParams config_params_{};
 };
 
 } // namespace hogd

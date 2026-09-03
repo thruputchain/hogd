@@ -13,51 +13,31 @@
 
 namespace hogd {
 
-// The value in force for a parameter the configuration does not state.
-//
-// A configuration names only the parameters its version knew about: a v0 chain
-// predates some of them outright, and a v1 list runs out before the ones added
-// after it was written. These are what a node runs under in that case, which
-// makes them consensus-critical in the same way the stated values are -- two
-// node versions disagreeing here would disagree about a chain's rules while
-// agreeing on its config hash.
-//
-// Once a chain has run under one of these, it cannot change: doing so would
-// silently rewrite the rules that chain has been executing under. A new value
-// needs a parameter the chain states outright, not an edit here.
+// Values in force for parameters a configuration does not state (a v0 chain,
+// or a v1 list that ends before them). Consensus-critical: two node versions
+// disagreeing here disagree about a chain's rules while agreeing on its config
+// hash, so these are frozen once any chain has run under them.
 inline constexpr uint32_t kDefaultMaxSHA256Buffers = 8;
 inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 
-// Chosen to match this repository's stock configuration rather than to be
-// permissive: a chain predating the parameter would otherwise attach contracts
-// without bound, which is the condition #2190 describes. Deliberately below
-// what the executor->storage message cap admits.
+// Matches this repository's stock value rather than being permissive: a chain
+// predating the parameter would otherwise attach contracts without bound,
+// which is the condition #2190 describes.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
 
-// The highest parameter this build can name. Adding one means extending this
-// alongside the ConfigParamID arm, so promoting a configuration still
-// materialises every parameter rather than silently truncating at the old
-// highest.
+// The highest parameter this build can name; extend it with every new
+// ConfigParamID or promotion silently truncates at the old highest.
 inline constexpr ConfigParamID kHighestConfigParam =
     ConfigParamID::kConfigParamMaxNewContractsPerTx;
 
 namespace detail {
 
-/// The value a v1 list states for `id`, or nullopt when the list is shorter
-/// than `id` and so does not state it.
-///
-/// A canonical list is the prefix 0..N of the parameter space, so a parameter
-/// sits at the index its id names and this is a lookup rather than a search.
-/// Running off the end is the one legitimate absence -- the configuration
-/// predates the parameter, or whatever created it declined to state one it
-/// knew about, which the encoding does not distinguish -- and the caller
-/// supplies the protocol default for it.
-///
-/// Everything else about the entry is an invariant of a list already checked
-/// for canonical form, so a parameter sitting anywhere but its own index is
-/// this node being wrong rather than a configuration to interpret. Fail
-/// loudly: quietly handing back a default would dress a bug up as a
-/// parameter the configuration merely does not state.
+// The value a v1 list states for `id`, or nullopt when the list ends before
+// it.
+//
+// The canonical list is the prefix 0..N, so a parameter sits at the index its
+// id names. A mismatch there is this node being wrong, not a configuration to
+// interpret, so it CHECKs rather than returning the default and hiding a bug.
 inline std::optional<uint32_t>
 stated_param(NetworkConfigV1 const &config, ConfigParamID id)
 {
@@ -82,7 +62,6 @@ stated_param(NetworkConfigV1 const &config, ConfigParamID id)
   panic("Unrecoverable; unknown ConfigParamID: {}", index);
 }
 
-/// A parameter carrying `value`.
 inline ConfigParam
 make_param(ConfigParamID id, uint32_t value)
 {
@@ -103,15 +82,11 @@ make_param(ConfigParamID id, uint32_t value)
 
 } // namespace detail
 
-/// Whether a v1 list is in the canonical form the protocol requires.
-///
-/// Ids must run 0, 1, 2, ... with no gaps, so the list is a prefix of the
-/// parameter space. That settles three things at once: the order is fixed, an
-/// id cannot repeat, and a parameter cannot be skipped over. The list is
-/// hashed as written, so without a single permitted form one configuration
-/// would have several hashes; and because the only way to be absent is to be
-/// past the end, an absent parameter always means one newer than this
-/// configuration rather than one it chose to omit.
+// Whether a v1 list is canonical: ids run 0, 1, 2, ... with no gaps.
+//
+// The list is hashed as written, so one permitted form is what keeps a
+// configuration from having several hashes. It also makes "absent" mean only
+// "past the end".
 inline bool
 config_params_canonical(NetworkConfigV1 const &config)
 {
@@ -125,8 +100,8 @@ config_params_canonical(NetworkConfigV1 const &config)
   return true;
 }
 
-/// Concurrently open incremental SHA-256 buffers permitted per invocation
-/// frame.
+// Concurrently open incremental SHA-256 buffers permitted per invocation
+// frame.
 inline uint32_t
 max_sha256_buffers(NetworkConfig const &config)
 {
@@ -144,7 +119,7 @@ max_sha256_buffers(NetworkConfig const &config)
   }
 }
 
-/// Invocation frames one transaction may have open at once.
+// Invocation frames one transaction may have open at once.
 inline uint32_t
 max_cross_invoke_depth(NetworkConfig const &config)
 {
@@ -160,7 +135,7 @@ max_cross_invoke_depth(NetworkConfig const &config)
   }
 }
 
-/// Contracts one transaction may attach in `contracts_to_deploy`.
+// Contracts one transaction may attach in `contracts_to_deploy`.
 inline uint32_t
 max_new_contracts_per_tx(NetworkConfig const &config)
 {
@@ -177,20 +152,16 @@ max_new_contracts_per_tx(NetworkConfig const &config)
   }
 }
 
-/// The parameters in force, resolved from whatever version a chain states them
-/// in.
-///
-/// Resolve once where a tip is pinned and read fields from this, rather than
-/// asking the configuration per access: a v1 chain states its parameters as a
-/// list, and the invoke-depth and hash-buffer bounds are checked on paths hot
-/// enough that walking one per check would show.
+// The parameters in force, flattened from whichever version states them.
+// Resolve once where a tip is pinned: the invoke-depth and hash-buffer bounds
+// are checked on paths hot enough that walking the v1 list per access shows.
 struct NetworkConfigParams {
   uint32_t max_sha256_buffers;
   uint32_t max_cross_invoke_depth;
   uint32_t max_new_contracts_per_tx;
 };
 
-/// The parameters `config` puts in force, flattened.
+// The parameters `config` puts in force, flattened.
 inline NetworkConfigParams
 resolve_config_params(NetworkConfig const &config)
 {
@@ -203,7 +174,6 @@ resolve_config_params(NetworkConfig const &config)
 
 namespace detail {
 
-/// The value in force for `id` among already-resolved parameters.
 inline uint32_t
 in_force(NetworkConfigParams const &params, ConfigParamID id)
 {
@@ -220,15 +190,12 @@ in_force(NetworkConfigParams const &params, ConfigParamID id)
 
 } // namespace detail
 
-/// States `value` for `id`, leaving the list canonical.
-///
-/// Rebuilds the list as the prefix 0..N, carrying every other parameter's
-/// value in force -- a v0 configuration's included, so promotion never drops
-/// what it was running under. N covers whatever the configuration already
-/// stated and the parameter being set, so a v1 chain stating only a prefix
-/// keeps its length rather than gaining parameters it never named. Promoting
-/// an older arm instead materialises every parameter, since that arm's values
-/// live in fields rather than in the list.
+// States `value` for `id`, leaving the list canonical.
+//
+// Rebuilds the list as the prefix 0..N carrying every other parameter's value
+// in force, so nothing a v0 arm stated is lost. N grows only to cover what the
+// configuration already stated, so a v1 chain does not gain parameters it
+// never named.
 inline void
 set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
 {
@@ -236,15 +203,15 @@ set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
 
   int32_t highest = std::to_underlying(id);
   if (config.v() == 1) {
-    for (auto const &param : config.v1().params) {
-      highest = std::max(highest, std::to_underlying(param.param()));
-    }
+    // resolve_config_params above CHECKs canonical form, so the ids are
+    // exactly 0..size-1 and the last one is the highest stated.
+    highest =
+        std::max(highest, static_cast<int32_t>(config.v1().params.size()) - 1);
   }
   else {
-    // Promotion rewrites the configuration wholesale, so materialise every
-    // parameter this build knows rather than a prefix ending at `id`: the
-    // older arm states values of its own, and truncating would silently
-    // replace one with a default.
+    // Promotion rewrites wholesale, so materialise every parameter this build
+    // knows: truncating at `id` would replace a stated v0 value with a
+    // default.
     highest = std::max(highest, std::to_underlying(kHighestConfigParam));
   }
 

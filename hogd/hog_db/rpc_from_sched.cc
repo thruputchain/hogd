@@ -336,13 +336,9 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
     error("Genesis block can only be loaded if the database has no blocks");
     co_return DbSchedResult::DbSchedResultError;
   }
-  // Checked before the config hash, which may only be taken over a canonical
-  // configuration: a list that repeats, misorders, or skips a parameter would
-  // give one configuration several hashes, so hashing refuses it outright.
-  // This genesis is untrusted, so the refusal has to be a rejection here
-  // rather than the internal-inconsistency check compute_config_hash makes.
-  if (genesis_configuration.network_config.v() == 1 &&
-      !config_params_canonical(genesis_configuration.network_config.v1())) {
+  // Before compute_config_hash, which CHECKs this: the genesis is untrusted,
+  // so a non-canonical list has to be a rejection rather than an abort.
+  if (!config_hashable(genesis_configuration.network_config)) {
     error("genesis network config parameters are not the gapless prefix 0, 1, "
           "2, ... of the parameter ids");
     co_return DbSchedResult::DbSchedResultError;
@@ -361,14 +357,14 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   // fail as unrecoverable at commit (#2190). A KiB covers the request's own
   // header and arguments.
   constexpr size_t kBatchOverhead = 1_KiB;
-  if (const size_t admissible =
-          (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
-      max_new_contracts_per_tx(genesis_configuration.network_config) >
-      admissible) {
+  const size_t admissible =
+      (kExecToDbMessageCap - kBatchOverhead) / kMaxSerializedContractBytes;
+  if (const uint32_t stated =
+          max_new_contracts_per_tx(genesis_configuration.network_config);
+      stated > admissible) {
     error("genesis max_new_contracts_per_tx {} exceeds the {} this build can "
           "commit in one message",
-          max_new_contracts_per_tx(genesis_configuration.network_config),
-          admissible);
+          stated, admissible);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

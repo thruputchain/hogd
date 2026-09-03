@@ -208,9 +208,6 @@ StorageSnapshotCache::load_db_tip()
 
   std::unique_ptr<DbTip> tip_unique = std::make_unique<DbTip>(db_res.value());
   DbTip *expected = nullptr;
-  // Flatten before publishing the tip: try_get_max_sha256_buffers reads these
-  // off a non-null db_tip_, so they must be in place by the time it is.
-  config_params_ = resolve_config_params(tip_unique->network_config);
   if (db_tip_.compare_exchange_strong(expected, tip_unique.get())) {
     co_return tip_unique.release();
   }
@@ -223,7 +220,7 @@ StorageSnapshotCache::try_get_max_sha256_buffers()
 {
   auto *tip = db_tip_.load();
   if (tip != nullptr) {
-    return SystemStatus<uint32_t>{config_params_.max_sha256_buffers};
+    return SystemStatus<uint32_t>{max_sha256_buffers(tip->network_config)};
   }
   return load_max_sha256_buffers();
 }
@@ -235,7 +232,7 @@ StorageSnapshotCache::load_max_sha256_buffers()
   if (!tip.has_value()) {
     co_return tip.error();
   }
-  co_return config_params_.max_sha256_buffers;
+  co_return max_sha256_buffers(tip.value()->network_config);
 }
 
 void

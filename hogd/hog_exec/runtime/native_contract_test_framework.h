@@ -728,12 +728,10 @@ private:
   void open_event_block(BlockID block_id);
   void close_event_block(BlockID block_id);
 
-  void initialize(
-      BlockExecutionMode mode, bool empty_genesis,
-      std::optional<StorageCostModelXdr> const &genesis_cost_model =
-          std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
-      size_t db_max_message_size = kBulkRpcMaxMessageSize)
+  void initialize(BlockExecutionMode mode, bool empty_genesis,
+                  std::optional<StorageCostModelXdr> const &genesis_cost_model,
+                  std::optional<NetworkConfig> const &genesis_network_config,
+                  size_t db_max_message_size)
   {
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
