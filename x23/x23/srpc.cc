@@ -67,10 +67,35 @@ SRpcFd::stop() noexcept
   if (ss_.request_stop()) {
     shutdown(fd_.get(), SHUT_RDWR);
     write_ready();
+
+    // Fail every outstanding client callback exactly once.  A callback
+    // is outstanding in one of two places: already registered in
+    // calls_->cbmap_ by write_worker, or still queued in write_queue_
+    // waiting for write_worker to register it.  Both must be drained
+    // here -- dropping a queued callback leaves the synchronous
+    // send_call() that queued it blocked forever on its stack
+    // semaphore, which strands the calling thread (an executor worker,
+    // for contract-originated database RPCs).
+    Vec<WriteItem> q;
+    q.swap(*write_queue_.take());
+
     decltype(PendingCalls::cbmap_) pcs;
-    pcs.swap(calls_->cbmap_);
+    {
+      auto cs = calls_.take();
+      // Tell write_worker this one-shot drain has happened, so that
+      // callbacks it already took out of write_queue_ get failed by it
+      // rather than registered in a cbmap_ nobody will drain again.
+      cs->stopped_ = true;
+      pcs.swap(cs->cbmap_);
+    }
+
+    // Invoke the callbacks with no lock held: they run arbitrary
+    // caller code, and send_call()'s callback wakes another thread.
     for (auto &pc : pcs)
       pc.second(nullptr, {});
+    for (auto &it : q)
+      if (it.replycb_)
+        it.replycb_(nullptr, {});
   }
 }
 
@@ -227,6 +252,17 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
     }
 
     auto calls = calls_.take();
+    if (calls->stopped_) {
+      // stop() has already run its one-shot failure drain, so anything
+      // registered now would never be completed.  These callbacks were
+      // taken out of write_queue_ before that drain, so stop() did not
+      // see them either: fail them here, once the lock is dropped.
+      calls.reset();
+      for (auto &it : q)
+        if (it.replycb_)
+          it.replycb_(nullptr, {});
+      return;
+    }
     for (auto &it : q) {
       if (it.replycb_) {
         x23assert(it.data_.size() >= 36 &&
