@@ -1,5 +1,5 @@
 // network_config_params.h - reading the parameters a chain's configuration
-// states, whichever version it states them in.
+// states.
 
 #pragma once
 
@@ -22,17 +22,12 @@ inline constexpr uint32_t kDefaultMaxCrossInvokeDepth = 256;
 // contracts without bound, which is #2190.
 inline constexpr uint32_t kDefaultMaxNewContractsPerTx = 4;
 
-// The highest parameter this build can name; extend it with every new
-// ConfigParamID or promotion silently truncates at the old highest.
-inline constexpr ConfigParamID kHighestConfigParam =
-    ConfigParamID::kConfigParamMaxNewContractsPerTx;
-
 namespace detail {
 
-// The value a v1 list states for `id`, or nullopt past its end. Canonical form
+// The value the list states for `id`, or nullopt past its end. Canonical form
 // puts it at its own index, so a mismatch is a bug: CHECK, don't hide it.
 inline std::optional<uint32_t>
-stated_param(NetworkConfigV1 const &config, ConfigParamID id)
+stated_param(NetworkConfigV0 const &config, ConfigParamID id)
 {
   const int32_t index = std::to_underlying(id);
   CHECK_GE(index, 0);
@@ -75,10 +70,10 @@ make_param(ConfigParamID id, uint32_t value)
 
 } // namespace detail
 
-// Whether a v1 list is canonical: ids run 0, 1, 2, ... with no gaps. Hashed as
+// Whether the list is canonical: ids run 0, 1, 2, ... with no gaps. Hashed as
 // written, so one form per configuration is one hash per configuration.
 inline bool
-config_params_canonical(NetworkConfigV1 const &config)
+config_params_canonical(NetworkConfigV0 const &config)
 {
   int32_t expected = 0;
   for (auto const &param : config.params) {
@@ -95,54 +90,30 @@ config_params_canonical(NetworkConfigV1 const &config)
 inline uint32_t
 max_sha256_buffers(NetworkConfig const &config)
 {
-  switch (config.v()) {
-  case 0:
-    return config.v0().max_sha256_buffers;
-  case 1:
-    return detail::stated_param(config.v1(),
-                                ConfigParamID::kConfigParamMaxSHA256Buffers)
-        .value_or(kDefaultMaxSHA256Buffers);
-  default:
-    // The union declares no other arm, so an unknown version fails to decode
-    // rather than reaching here.
-    panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
-  }
+  return detail::stated_param(config.v0(),
+                              ConfigParamID::kConfigParamMaxSHA256Buffers)
+      .value_or(kDefaultMaxSHA256Buffers);
 }
 
 // Invocation frames one transaction may have open at once.
 inline uint32_t
 max_cross_invoke_depth(NetworkConfig const &config)
 {
-  switch (config.v()) {
-  case 0:
-    return config.v0().max_cross_invoke_depth;
-  case 1:
-    return detail::stated_param(config.v1(),
-                                ConfigParamID::kConfigParamMaxCrossInvokeDepth)
-        .value_or(kDefaultMaxCrossInvokeDepth);
-  default:
-    panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
-  }
+  return detail::stated_param(config.v0(),
+                              ConfigParamID::kConfigParamMaxCrossInvokeDepth)
+      .value_or(kDefaultMaxCrossInvokeDepth);
 }
 
 // Contracts one transaction may attach in `contracts_to_deploy`.
 inline uint32_t
 max_new_contracts_per_tx(NetworkConfig const &config)
 {
-  switch (config.v()) {
-  case 0:
-    // v0 predates the parameter, so such a chain runs under the default.
-    return kDefaultMaxNewContractsPerTx;
-  case 1:
-    return detail::stated_param(config.v1(),
-                                ConfigParamID::kConfigParamMaxNewContractsPerTx)
-        .value_or(kDefaultMaxNewContractsPerTx);
-  default:
-    panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
-  }
+  return detail::stated_param(config.v0(),
+                              ConfigParamID::kConfigParamMaxNewContractsPerTx)
+      .value_or(kDefaultMaxNewContractsPerTx);
 }
 
-// The parameters in force, flattened from whichever version states them.
+// The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
   uint32_t max_sha256_buffers;
@@ -186,24 +157,17 @@ set_config_param(NetworkConfig &config, ConfigParamID id, uint32_t value)
 {
   const NetworkConfigParams params = resolve_config_params(config);
 
-  int32_t highest = std::to_underlying(id);
-  if (config.v() == 1) {
-    // resolve_config_params above CHECKs canonical form, so the ids are
-    // exactly 0..size-1 and the last one is the highest stated.
-    highest =
-        std::max(highest, static_cast<int32_t>(config.v1().params.size()) - 1);
-  }
-  else {
-    // Materialise every parameter: truncating at `id` would replace a stated
-    // v0 value with a default.
-    highest = std::max(highest, std::to_underlying(kHighestConfigParam));
-  }
+  // resolve_config_params above CHECKs canonical form, so the ids are exactly
+  // 0..size-1 and the last one is the highest stated.
+  const int32_t highest =
+      std::max(std::to_underlying(id),
+               static_cast<int32_t>(config.v0().params.size()) - 1);
 
   NetworkConfig rebuilt;
-  rebuilt.v(1);
+  rebuilt.v(0);
   for (int32_t i = 0; i <= highest; ++i) {
     const auto param_id = static_cast<ConfigParamID>(i);
-    rebuilt.v1().params.push_back(detail::make_param(
+    rebuilt.v0().params.push_back(detail::make_param(
         param_id, param_id == id ? value : detail::in_force(params, param_id)));
   }
   config = std::move(rebuilt);

@@ -132,7 +132,7 @@ stock_network_config()
   // own to build(). Every parameter is stated outright rather than left to a
   // node's default, so changing either is visible in the config hash.
   NetworkConfig config;
-  config.v(1);
+  config.v(0);
   set_config_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers, 8);
   set_config_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth, 256);
   set_config_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx,

@@ -17,8 +17,7 @@ namespace hogd {
 inline bool
 config_hashable(const NetworkConfig &network_config)
 {
-  return network_config.v() != 1 ||
-         config_params_canonical(network_config.v1());
+  return config_params_canonical(network_config.v0());
 }
 
 inline ConfigHashPreimage
