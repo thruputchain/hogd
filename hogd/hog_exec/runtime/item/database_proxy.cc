@@ -185,14 +185,15 @@ to_system_error_code(auto err, auto &&f)
 
 } // namespace
 
-DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
+DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier,
+                             size_t max_message_size)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
         return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
             x23::HostPort{"localhost",
                           x23::uformat("{}", mock_db.read_port_number_)},
-            false, *x23::single_bucket_map);
+            false, *x23::single_bucket_map, max_message_size);
         // Uses just one client for local mock testing.
         // This avoids fd ulimit issues in sdk tests
       }
@@ -213,9 +214,8 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
              "{})",
              conn_map.nbuckets(), x23::llc_map->nbuckets(),
              x23::core_map->nbuckets());
-        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(hostport,
-                                                                   false,
-                                                                   conn_map);
+        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+            hostport, false, conn_map, max_message_size);
       }
       panic("unimplemented");
     }())

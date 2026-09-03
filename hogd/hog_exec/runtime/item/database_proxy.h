@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -12,6 +13,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
@@ -46,7 +48,13 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 // that the executor can handle (or abort on).
 class DatabaseProxy {
 public:
-  DatabaseProxy(DatabaseIdentifier identifier);
+  // [max_message_size] caps the client-side RPC streams only. Production
+  // leaves it at the link's bound; tests lower it to provoke oversized-send
+  // failures without mutating the process-wide x23::default_max_message_size,
+  // which racing server threads also read (same reasoning as
+  // EventServerProxy).
+  DatabaseProxy(DatabaseIdentifier identifier,
+                size_t max_message_size = kExecToDbTransportCap);
 
   DatabaseProxy(DatabaseProxy const &) = delete;
   DatabaseProxy &operator=(DatabaseProxy const &) = delete;

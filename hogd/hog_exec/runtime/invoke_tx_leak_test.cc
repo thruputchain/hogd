@@ -31,8 +31,6 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/rpc_common.h"
 
 namespace hogd {
 
@@ -78,14 +76,13 @@ public:
 
 TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
 {
-  const std::size_t saved_max = x23::default_max_message_size;
-  x23::default_max_message_size = 4096;
-  x23::Defer restore_max{
-      [saved_max] { x23::default_max_message_size = saved_max; }};
-
+  // Scoped to this framework's exec-side client rather than set on
+  // x23::default_max_message_size, which racing server threads also read.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false);
+      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*genesis_cost_model=*/std::nullopt,
+      /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/4096);
   fw.run_genesis_initialization(
       NativeContractTestFramework::make_compact_test_genesis_configuration());
 

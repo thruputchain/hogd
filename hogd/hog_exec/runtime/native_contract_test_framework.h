@@ -253,13 +253,17 @@ private:
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
+  // [db_max_message_size] caps this framework's executor->db client only, so a
+  // test can drive the oversized-send paths without lowering the process-wide
+  // x23::default_max_message_size that racing server threads read.
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true,
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
+      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
+      size_t db_max_message_size = kExecToDbTransportCap)
     : db_wrapper_(make_db_wrapper(test_db))
   {
     bool logging_enabled = log || do_logging_env();
@@ -267,7 +271,8 @@ public:
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
-    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config);
+    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config,
+               db_max_message_size);
     if (logging_enabled) {
       HogexecMetrics::launch_log_worker();
     }
@@ -726,7 +731,8 @@ private:
       BlockExecutionMode mode, bool empty_genesis,
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
+      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
+      size_t db_max_message_size = kExecToDbTransportCap)
   {
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
@@ -735,8 +741,8 @@ private:
         std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
                    db_wrapper_);
 
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = exec_port});
+    const LocalMockDB mock_db{.read_port_number_ = exec_port};
+    db_proxy_ = std::make_unique<DatabaseProxy>(mock_db, db_max_message_size);
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
     event_sched_wrapper_ =
         std::make_unique<EventSchedWrapper>(event_server_wrapper_.sched_port());

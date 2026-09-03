@@ -4,6 +4,7 @@
 
 #include <cstddef>
 
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -26,13 +27,32 @@ inline constexpr size_t kMaxContractSizeBytes = 256_KiB;
 inline constexpr size_t kMaxSerializedContractBytes =
     kMaxContractSizeBytes + 16;
 
-// The executor->HogDb RPC message cap. x23 bounds (record.size() - 4) -- the
-// rpc_msg header plus the call args -- against max_message_size (see send_call
-// in x23/rpc.h). exec_server runs at x23's default_max_message_size, which is a
-// runtime-mutable extern (tests lower it) with no constexpr to bind to; this
-// mirrors its compile-time default.
-// TODO(rstutsman): bind to an x23 constexpr default once x23 exposes one.
+// What the executor->HogDb link will carry in one message. x23 bounds
+// (record.size() - 4) -- the rpc_msg header plus the call args -- against
+// max_message_size (see send_call in x23/rpc.h).
+//
+// This link carries a transaction's whole final commit batch in one message,
+// so it is a bulk path and takes the same bound as the others (mempool, auth,
+// coordinator, indexer). Both ends bind here: the client in database_proxy.cc
+// and the servers in rpc_from_exec.h and db_executor_server.h. It previously
+// mirrored x23's default_max_message_size, a runtime-mutable extern that no
+// production code set, leaving this the one bulk hop still at 16 MiB while
+// admission ran three orders of magnitude higher.
+inline constexpr size_t kExecToDbTransportCap = kBulkRpcMaxMessageSize;
+
+// What the executor holds itself to on that link, which is well below what the
+// link would carry.
+//
+// Kept at the value the transport used to impose rather than raised with it.
+// The subtransaction-push gate turns an over-budget batch into a conflict, so
+// this decides which transactions abort -- raising it would make nodes accept
+// batches their peers on an older build reject, which is a consensus-visible
+// change and belongs in its own change with its own argument. Widening the
+// transport, by contrast, only stops a message the executor already meant to
+// send from failing at the wire.
 inline constexpr size_t kExecToDbMessageCap = 0x100'0000;
+static_assert(kExecToDbMessageCap <= kExecToDbTransportCap,
+              "the executor's own budget must fit what the link will carry");
 
 // Bytes of the commit_transaction request that share the message with the
 // contract batch but are not part of it: the rpc_msg header, the BlockID and

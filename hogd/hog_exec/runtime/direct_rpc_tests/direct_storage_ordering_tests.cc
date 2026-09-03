@@ -20,8 +20,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/cleanup.h"
-#include "x23/rpc_common.h"
 
 namespace hogd {
 
@@ -301,16 +299,14 @@ INSTANTIATE_TEST_SUITE_P(AllDBs, DirectStorageOrderingTest,
 // SystemErrorCode::Unrecoverable, which also lets the post-call clear run.
 TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 {
-  // Shrink the SRPC record cap before constructing the framework so both the
-  // exec-side client and the DB-side server adopt it.
-  const std::size_t saved_max = x23::default_max_message_size;
-  x23::default_max_message_size = 1024;
-  x23::Defer restore{
-      [saved_max] { x23::default_max_message_size = saved_max; }};
-
+  // Shrink the exec-side client's record cap so the push exceeds it. Scoped to
+  // this framework rather than set on x23::default_max_message_size, which
+  // racing server threads also read.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false);
+      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*genesis_cost_model=*/std::nullopt,
+      /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/1024);
   fw.run_genesis_initialization(
       NativeContractTestFramework::make_compact_test_genesis_configuration());
 
@@ -337,14 +333,11 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
 TEST(DirectStorageOversizedFinalCommitBatchTest,
      OversizedNewContractBatchYieldsUnrecoverable)
 {
-  const std::size_t saved_max = x23::default_max_message_size;
-  x23::default_max_message_size = 1024;
-  x23::Defer restore{
-      [saved_max] { x23::default_max_message_size = saved_max; }};
-
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false);
+      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*genesis_cost_model=*/std::nullopt,
+      /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/1024);
   fw.run_genesis_initialization(
       NativeContractTestFramework::make_compact_test_genesis_configuration());
 
