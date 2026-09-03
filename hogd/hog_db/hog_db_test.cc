@@ -1033,6 +1033,41 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
+TEST_F(HogDbTest, HogAgeKeyPayloadAddressMismatchIsCorruption)
+{
+  const Address key_addr = make_address(kAddress);
+  const Address payload_addr = make_address(kAddress + 1);
+
+  // A tampered row keyed under [key_addr] whose XDR payload embeds a different
+  // address. write_address_average_hog_age() keys by the payload address, so
+  // it cannot produce this state; write the raw row directly, mirroring what
+  // RAMDB recovery would apply.
+  const HogAge mismatched = make_hog_age(payload_addr, /*to_schedule=*/1,
+                                         /*already_scheduled=*/0,
+                                         /*received=*/0,
+                                         /*to_schedule_age=*/7,
+                                         /*already_scheduled_age=*/0,
+                                         /*received_age=*/0);
+  const auto key = make_address_key(key_addr, Prefix::kHogAge);
+  const auto encoded = x23::serialize(mismatched);
+  ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0,
+                                  std::as_bytes(std::span(encoded))));
+
+  // The read rejects the mismatch instead of returning a payload keyed under a
+  // different address, so the scheduler never crashes on it and reconciliation
+  // never copies it to a second key.
+  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+  ASSERT_FALSE(age);
+  EXPECT_EQ(age.error(), HogDbCode::kCorruption);
+
+  // Startup reconciliation surfaces the corrupt row (reported against the key
+  // address) rather than propagating the mismatched payload.
+  ASSERT_TRUE(db_.write_address_balance(key_addr, 5));
+  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kCorruption);
+}
+
 TEST_F(HogDbTest, TwoTransfersToSameAddressCostOnce)
 {
   Address sender_addr = make_address(kAddress);

@@ -163,6 +163,19 @@ HogDbDAO::read_address_average_hog_age(const Address &addr)
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
   }
+
+  // A HogAge row is keyed by address, and both readers -- startup
+  // reconciliation and the mempool scheduler -- rely on the embedded
+  // age.address matching the key the row was looked up under. On-disk state is
+  // an untrusted origin (the RAMDB log CRC is unkeyed, and kHogAge rows are
+  // excluded from the consensus db_hash), so a tampered row can carry a
+  // mismatched payload address while staying XDR-valid. Reject it here so
+  // reconciliation reports the corrupt key rather than propagating the payload
+  // under a second key, and the scheduler treats it as missing rather than
+  // failing its CHECK_EQ(age.address, account).
+  if (Address(age.address) != addr) {
+    return HogDbError(HogDbCode::kCorruption);
+  }
   return age;
 }
 
