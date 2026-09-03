@@ -132,6 +132,42 @@ TEST(ConfigHashTest, RejectsNonCanonicalParamList)
   EXPECT_EQ(fresh.v1().params.size(), 3U);
 }
 
+// The canonical form puts a parameter at the index its id names, so reading
+// one is a lookup rather than a search. This pins that the lookup lands on the
+// right entry, using values that are not the defaults so a misindexed read
+// would show.
+TEST(ConfigHashTest, ReadsEachParamFromItsOwnIndex)
+{
+  NetworkConfig prefix;
+  prefix.v(1);
+  prefix.v1().params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxSHA256Buffers, 3));
+  prefix.v1().params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 7));
+  ASSERT_TRUE(config_params_canonical(prefix.v1()));
+  EXPECT_EQ(max_sha256_buffers(prefix), 3U);
+  EXPECT_EQ(max_cross_invoke_depth(prefix), 7U);
+  // Past the end of a shorter list, so the default stands.
+  EXPECT_EQ(max_new_contracts_per_tx(prefix), kDefaultMaxNewContractsPerTx);
+
+  NetworkConfig full = prefix;
+  full.v1().params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxNewContractsPerTx, 9));
+  ASSERT_TRUE(config_params_canonical(full.v1()));
+  EXPECT_EQ(max_new_contracts_per_tx(full), 9U);
+
+  // A non-canonical list is refused before it can reach a tip. Were one to,
+  // the discriminant check must leave the parameter on its default rather than
+  // read another parameter's union arm at that index.
+  NetworkConfig offset;
+  offset.v(1);
+  offset.v1().params.push_back(
+      detail::make_param(ConfigParamID::kConfigParamMaxCrossInvokeDepth, 7));
+  ASSERT_FALSE(config_params_canonical(offset.v1()));
+  EXPECT_EQ(max_sha256_buffers(offset), kDefaultMaxSHA256Buffers);
+  EXPECT_EQ(max_cross_invoke_depth(offset), kDefaultMaxCrossInvokeDepth);
+}
+
 // A chain predating a parameter runs under the node's default for it rather
 // than under no bound at all.
 TEST(ConfigHashTest, LegacyConfigTakesDefaults)

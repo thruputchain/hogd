@@ -479,18 +479,18 @@ private:
   const std::optional<Uniquifier> tx_uniquifier_;
   const std::optional<ContractAddress> root_invoked_address_;
 
-  // Contracts the transaction attached, before deduplication by hash. Kept so
-  // perform_initial_validation can tell an attachment list that collapsed from
-  // one that did not: newly_created_contracts_ is keyed by hash, so a repeated
-  // contract silently vanishes into it. Zero for the test-harness constructor,
-  // which attaches nothing.
-  const size_t attached_contract_count_ = 0;
-
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
   const std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                            SipHash24Hasher>
       newly_created_contracts_;
+
+  // Whether the transaction attached the same contract more than once. The map
+  // above is keyed by hash, so a repeat collapses into it and leaves no trace
+  // there; noted at construction, where the attachment list is still in hand,
+  // and rejected by perform_initial_validation. False for the test-harness
+  // constructor, which attaches nothing.
+  const bool has_duplicate_attachment_ = false;
 
   // Images for this transaction's attachments, keyed by contract hash.
   // perform_initial_validation keeps what it built to verify each one rather

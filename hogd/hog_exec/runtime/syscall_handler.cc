@@ -190,7 +190,6 @@ SystemCallHandler::SystemCallHandler(
     source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
-    attached_contract_count_(tx.contracts_to_deploy.size()),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
                          SipHash24Hasher>
@@ -203,6 +202,8 @@ SystemCallHandler::SystemCallHandler(
       }
       return contracts;
     }()),
+    has_duplicate_attachment_(newly_created_contracts_.size() !=
+                              tx.contracts_to_deploy.size()),
     execution_mode_data_(
         [](ExecutionModeCtor execution_mode_ctor) -> ExecutionModeData {
           if (std::holds_alternative<ProposalModeCtor>(execution_mode_ctor)) {
@@ -306,9 +307,10 @@ SystemCallHandler::perform_initial_validation()
   // vanish silently and two different transaction encodings would have
   // identical effect -- the duplicate bytes are carried, hashed into a
   // different transaction, and then ignored. Nothing legitimate needs it.
-  if (newly_created_contracts_.size() != attached_contract_count_) {
-    error("Transaction attaches {} contracts but only {} are distinct",
-          attached_contract_count_, newly_created_contracts_.size());
+  if (has_duplicate_attachment_) {
+    error("Transaction attaches the same contract more than once; {} are "
+          "distinct",
+          newly_created_contracts_.size());
     cumulative_invoke_result_.result_ =
         InvokeError{InvokeErrorCode::Deterministic};
     co_return SystemStatus<void>{};

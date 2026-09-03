@@ -44,13 +44,24 @@ inline constexpr ConfigParamID kHighestConfigParam =
 namespace detail {
 
 /// The value a v1 list states for `id`, or nullopt when the list omits it.
+///
+/// A canonical list is the prefix 0..N of the parameter space, so a parameter
+/// sits at the index its id names and this is a lookup rather than a search.
+/// The discriminant is checked anyway: every list reaching here has been
+/// checked for canonical form, but reading the wrong arm of a union is worth
+/// one comparison to rule out. A list that fails it is treated as one that ran
+/// out early, which is the reading that leaves the caller on defaults rather
+/// than on another parameter's value.
 inline std::optional<uint32_t>
 stated_param(NetworkConfigV1 const &config, ConfigParamID id)
 {
-  for (auto const &param : config.params) {
-    if (param.param() != id) {
-      continue;
-    }
+  const int32_t index = std::to_underlying(id);
+  if (index < 0 || static_cast<size_t>(index) >= config.params.size()) {
+    return std::nullopt;
+  }
+
+  ConfigParam const &param = config.params[static_cast<size_t>(index)];
+  if (param.param() == id) {
     switch (id) {
     case ConfigParamID::kConfigParamMaxSHA256Buffers:
       return param.max_sha256_buffers();
