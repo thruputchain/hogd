@@ -130,8 +130,11 @@ max_sha256_buffers(NetworkConfig const &config)
     return detail::stated_param(config.v1(),
                                 ConfigParamID::kConfigParamMaxSHA256Buffers)
         .value_or(kDefaultMaxSHA256Buffers);
+  default:
+    // The union declares no other arm, so an unknown version fails to decode
+    // rather than reaching here.
+    panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
   }
-  panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
 }
 
 /// Invocation frames one transaction may have open at once.
@@ -145,8 +148,11 @@ max_cross_invoke_depth(NetworkConfig const &config)
     return detail::stated_param(config.v1(),
                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth)
         .value_or(kDefaultMaxCrossInvokeDepth);
+  default:
+    // The union declares no other arm, so an unknown version fails to decode
+    // rather than reaching here.
+    panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
   }
-  panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
 }
 
 /// Contracts one transaction may attach in `contracts_to_deploy`.
@@ -161,8 +167,11 @@ max_new_contracts_per_tx(NetworkConfig const &config)
     return detail::stated_param(config.v1(),
                                 ConfigParamID::kConfigParamMaxNewContractsPerTx)
         .value_or(kDefaultMaxNewContractsPerTx);
+  default:
+    // The union declares no other arm, so an unknown version fails to decode
+    // rather than reaching here.
+    panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
   }
-  panic("Unrecoverable; unknown NetworkConfig version: {}", config.v());
 }
 
 /// States `value` for `id`, leaving the list canonical.
