@@ -249,16 +249,17 @@ TEST(RpcRegression, InFlightDisconnectIsTransportException)
 namespace {
 
 // Metadata for a synthetic void call, used only to build a well-formed
-// client call record.  The record is never written to the socket.
+// client call record.  The record is never written to the socket.  Only
+// the fields call_msg() reads are declared: the version_name/proc_name
+// strings the logging and error paths use are unreferenced here, and
+// -Wunused-const-variable rejects them at internal linkage.
 struct queued_callback_proc {
   struct version_meta {
     static constexpr std::uint32_t program = 0x5a23'2284;
     static constexpr std::uint32_t version = 1;
-    static constexpr const char *version_name = "poc_srpc_v1";
   };
 
   static constexpr std::uint32_t proc = 1;
-  static constexpr const char *proc_name = "queued_callback";
   using return_type = void;
 };
 
